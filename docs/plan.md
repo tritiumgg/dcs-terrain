@@ -57,8 +57,8 @@ component are in build order.
 
 | Id | Deliverable | Done | Depends on |
 |---|---|---|---|
-| P1 | Repository layout: `dcsterrain/` Cargo workspace, `extractor/` for the Lua hook and its harness tests with `extractor/test/StubHarness.lua` vendored from the `dcs-scripting` skill, `kotlin/` for the client, `tools/validate/`, `docs/` holding these documents; `.gitignore` excludes `*.sqlite`, `extracts/`, `*.bin` | Tree exists; README states "no terrain data is committed" | — |
-| P2 | CI: Rust build and test on Windows, macOS, Linux; Lua 5.1 harness tests; Kotlin build | Green on an empty synthetic run | P1, C1, X1, K1 |
+| P1 | Repository layout: `dcsterrain/` Cargo workspace, `extractor/` for the Lua hook and its offline Lua tests (ADR-0005: no stub harness is vendored), `kotlin/` for the client, `tools/validate/`, `docs/` holding these documents; `.gitignore` excludes `*.sqlite`, `extracts/`, `*.bin` | Tree exists; README states "no terrain data is committed" | — |
+| P2 | CI: Rust build and test on Windows, macOS, Linux; Lua 5.1 offline tests; Kotlin build | Green on an empty synthetic run | P1, C1, X1, K1 |
 | P3 | Release build: static `dcsterrain` binaries for the three platforms, each built on its own CI runner with `cargo build --release`, attached to tags | The tagged Windows binary packs a synthetic extract on the Windows machine and the tagged macOS binary does the same on macOS, without a toolchain on either | P2, C13 |
 | P4 | Licensing note in README: extracts and packed files are derived from ED terrain data and stay on the user's machine; publishing them is the user's call against the ED EULA | Text reviewed | P1 |
 
@@ -66,26 +66,26 @@ component are in build order.
 
 | Id | Deliverable | Done | Depends on |
 |---|---|---|---|
-| F1 | Freeze `extract-format.md` v1: confirm every field against the probe log, decide `water` codes and `nodata` values, write the manifest example by hand | X and C authors both sign off; any later change bumps `format_version` | — |
+| F1 | Freeze `extract-format.md` v1: confirm every field against the probe log, decide `water` codes and `nodata` values, write the manifest example by hand | X and C authors both sign off, having walked every field C5c, C7, C8, C9 and C10 read back to a field the format emits; any later change bumps `format_version` | — |
 | F2 | Reference constants for the synthetic theatre, one file per language (`synth_constants.lua`, `synth.rs`), same numbers | Both files exist and a comment in each names the other | F1 |
 
 ### X: extractor hook
 
 | Id | Deliverable | Done | Depends on |
 |---|---|---|---|
-| X1 | Encoders `i16le`, `u8`, `json`; stub-harness tests on boundary values and on nested tables, strings with quotes, unicode, empty arrays and objects | Tests pass in `StubHarness.lua` | F1, P1 |
+| X1 | Encoders `i16le`, `u8`, `json`; offline tests on boundary values and on nested tables, strings with quotes, unicode, empty arrays and objects | Offline Lua tests pass | F1, P1 |
 | X2a | Config load and validation, progress log, `dcs.log` lines | Every bad config field produces one log line and a disabled run | X1 |
 | X2b | `dcs_build` from `autoupdate.cfg`; `terrain_fingerprint` with a pure Lua SHA-256 as a sliced step, tested against a known vector | The fingerprint of a known file matches `sha256sum` of its first 1 MiB | X2a |
-| X3 | Grid computation from crop, authored bounds, or the pre-sweep; tile addressing; `tiles.jsonl` journal, manifest write and resume | Harness tests for each bounds source and for resume with half the tiles journalled | F1, X1 |
-| X4 | State machine and frame budget: idle → prepare → hook pass → mission pass → done; `onSimulationFrame` slicing with `os.clock()` | Harness drives 10 000 fake frames and the manifest advances monotonically | X3 |
-| X5 | Config and tables sweep: `config.json` with the fill triple, `airdromes.json`, `runways.json`, `stands.json`, `beacons.json`, `radio.json`, `towns.json`, `nodes.json`, including the sandboxed table reader | Harness output matches the synthetic reference tables | X2a, X4 |
-| X6 | Pre-sweep (post density or road proximity), `water` and `height` sweeps with the fill and sea skip set, the fill test and per-tile min/max | Harness extract tiles identical to the Rust synthetic tiles, fill margin omitted from both | X4, F2 |
-| X7 | Roads and railroads sweep: seed lattice, snaps (nil accepted), seed merging at 100 m, neighbour pairing, path lines, path calls under the frame budget | Harness output has every pair once and the synthetic road's path | X6, X7a |
+| X3 | Grid computation from crop, authored bounds, or the pre-sweep; tile addressing; `tiles.jsonl` journal, manifest write and resume | Offline tests for each bounds source and for resume with half the tiles journalled | F1, X1 |
+| X4 | State machine and frame budget: idle → prepare → hook pass → mission pass → done; `onSimulationFrame` slicing with `os.clock()` | An offline fake driver runs 10 000 frames and the manifest advances monotonically | X3 |
+| X5 | Config and tables sweep: `config.json` with the fill triple, `airdromes.json`, `runways.json`, `stands.json`, `beacons.json`, `radio.json`, `towns.json`, `nodes.json`, including the sandboxed table reader | Every swept table matches the same table read back through the bridge | X2a, X4 |
+| X6 | Pre-sweep (post density or road proximity), `water` and `height` sweeps with the fill and sea skip set, the fill test and per-tile min/max | Tile cells match heights and water re-read through the bridge on a small crop; the fill margin is omitted | X4, F2 |
+| X7 | Roads and railroads sweep: seed lattice, snaps (nil accepted), seed merging at 100 m, neighbour pairing, path lines, path calls under the frame budget | Every pair appears once, and a sampled path matches the same path re-read through the bridge | X6, X7a |
 | X7a | Short-path cost | Done; measured, probe log "Plan measurements X7a and C8a": 0.61 ms per 1 km path, `road_seed_spacing` 1000, merge radius 100 m | — |
-| X8a | Mission-pass transport: `net.dostring_in("server", ...)` with `%q` escaping, length verification, `(string, boolean)` return handling; `surface` quarter-tile chunks | Harness fake `dostring_in` round-trips a tile; a truncated payload is rejected | X4 |
-| X8b | Scenery sweep: 15 km spheres on a 20 km lattice, de-dup by id (`tostring` join), `getObjectsAtMapPoint` footprint attach, helipad check | Harness scenery lines match the synthetic object list with footprints attached | X8a |
-| X8c | `scenery_models.json` catalogue: counts, `getDesc` fields, `type_bits`, OBB and radius medians | Catalogue medians match the synthetic object list | X8b |
-| X9 | Failure handling: `pcall` everywhere, `notes` entries, terrain change mid-run | Harness injects failures and the run completes with `nodata` cells and notes | X4 |
+| X8a | Mission-pass transport: `net.dostring_in("server", ...)` with `%q` escaping, length verification, `(string, boolean)` return handling; `surface` quarter-tile chunks | A tile round-trips through the live bridge; a truncated payload is rejected | X4 |
+| X8b | Scenery sweep: 15 km spheres on a 20 km lattice, de-dup by id (`tostring` join), `getObjectsAtMapPoint` footprint attach, helipad check | Scenery lines match the same sphere re-read through the bridge, with footprints attached | X8a |
+| X8c | `scenery_models.json` catalogue: counts, `getDesc` fields, `type_bits`, OBB and radius medians | Catalogue counts and medians match the swept scenery lines | X8b |
+| X9 | Failure handling: `pcall` everywhere, `notes` entries, terrain change mid-run | Offline tests inject failures and the run completes with `nodata` cells and notes | X4 |
 | X10 | Live run, cropped: 10 × 10 km around Kutaisi, both passes, ten cells spot-checked through the bridge | Acceptance 2 and 3 in the spec; `check-extract` passes | X5, X6, X7, X8c, X9, C3 |
 | X11 | Live run, full Caucasus, both passes; timings recorded in the probe log | Acceptance 4 | X10 |
 
@@ -176,10 +176,28 @@ criteria last takes it off. The `Depends on` column is the graph: a
 task may start when every task it names is done, and tasks that share
 no chain run in parallel.
 
+The work is also staged by machine. Component X is developed on the
+Windows machine, because ADR-0005 verifies the sweeps against a running
+theatre through the `dcs-api-bridge` MCP rather than against a stub of
+one; only the offline tests in X1 to X4 and X9 would run anywhere. The
+Rust, Kotlin and MCP work is developed on macOS, and the Windows
+machine carries no toolchain, so `check-extract` runs on macOS after an
+extract is copied across rather than on Windows before it.
+
+X11, the full Caucasus sweep, waits until C4 onward have read the X10
+crop. A field missing from F1 then costs a re-run of a 10 x 10 km crop
+rather than of a whole theatre. V1 returns to the Windows machine at
+MS5, because the validation sortie compares the packed file against
+live DCS.
+
+The milestones below are proof points, not a schedule. MS2 already
+depends on C11, which MS3 contains, so deferring X11 past the C tasks
+changes nothing about them.
+
 | Milestone | Contains | Proof |
 |---|---|---|
-| MS0 Contract | P1, P2, F1, F2, C1, C2, C3, X1, X3 | Lua harness extract and Rust synthetic extract are byte-identical and `check-extract` accepts both |
-| MS1 Packed file | C4, C5a–C5c, C6–C10, C8a, C8b, C12a–C12c, X2a, X2b, X4–X9 | `pack` and `check` pass on the synthetic extract; the hook completes a harness run |
+| MS0 Contract | P1, P2, F1, F2, C1, C2, C3, X1, X3 | `check-extract` accepts the Rust synthetic extract, and the hook's encoders and grid computation reproduce the F2 constants byte for byte on the same inputs (ADR-0005: the full-format contract is proven at X10) |
+| MS1 Packed file | C4, C5a–C5c, C6–C10, C8a, C8b, C12a–C12c, X2a, X2b, X4–X9 | `pack` and `check` pass on the synthetic extract; the hook completes a live cropped sweep |
 | MS2 Real extract | X10, X11, C13, C14 | A full Caucasus extract exists, packs, and `check` passes |
 | MS3 Queries | Q1–Q5, Q6a–Q6c, Q7, Q8, C11 | Every operation tested on the synthetic theatre; benchmarks within target |
 | MS4 Server and client | M1–M4, K1, K2, K3a–K3c, Q9 | Assistant and campaign both answer the FARP example from the same file |

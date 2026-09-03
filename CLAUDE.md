@@ -167,9 +167,13 @@ optional; the phase-`sim` rule exists because that call crashed DCS.
 - **Never write into the DCS install.** It is read-only.
 - **Know which build you are on before trusting any measurement.** The core
   build is `version` in `autoupdate.cfg` at the install root, with `timestamp`
-  beside it. Never state a build from memory — read the file. The specs are
-  written against one build, and `docs/spec/` names it; if the install reports
-  a different one, the measurements are unverified on it and that is an ADR.
+  beside it. Never state a build from memory — read the file. The install is
+  normally ahead of the build `docs/spec/` names, and that gap is the usual
+  state of the project, not a decision and not an ADR. What it means is that
+  the probe log's figures are unverified on the build in front of you: carry
+  the build string with any measurement you take, and confirm a figure through
+  the bridge at the point of use rather than trusting the log for it. Only a
+  measurement that actually differs is an ADR.
 - **Verify every DCS symbol against ED's own code before calling it**, anchored
   on the full dotted path, and read ED's call site when the spec cites one. Do
   not write a call from memory.
@@ -179,10 +183,23 @@ optional; the phase-`sim` rule exists because that call crashed DCS.
   `dcs_bridge_status` reports phase `sim`.** A `land.getHeight` reaching the
   `server` state at the main menu crashes DCS with an access violation. Hook-side
   `terrain.*` calls are safe at the menu; they return nil.
-- Before writing DCS Lua, read the design and facts document's "Sources you
-  have" and "Facts that shape the design": environment choice, the
-  `net.dostring_in` bridge, coordinates and the airdrome table are all settled
-  there against measurement.
+- **Never load or use the `dcs-scripting` skill.** Symbol authority is the
+  `dcs-api-lookup` skill for signatures and existence checks, the
+  `dcs-api-bridge` MCP tools for anything a running DCS can answer, and the
+  read-only install for ED's own call sites. Prefer the bridge over the index
+  where both can answer, and the index over memory always.
+- **`docs/spec/` still names `dcs-scripting`, and cannot be edited.** It
+  appears in `design-and-facts.md` "Sources you have" and in
+  `extractor-hook.md` at the header, the mission-pass sweeps and the encoders.
+  Ignore those four citations. Nothing is lost by ignoring them: the
+  cross-state rules and the `json()` output format are both stated inline
+  beside their citation, and the stub harness the testing section names is not
+  vendored.
+- Before writing DCS Lua, read the design and facts document's "Facts that
+  shape the design", and everything in "Sources you have" except the
+  `dcs-scripting` entry: environment choice, the `net.dostring_in` bridge,
+  coordinates and the airdrome table are all settled there against
+  measurement.
 
 ### Data
 
@@ -200,6 +217,12 @@ optional; the phase-`sim` rule exists because that call crashed DCS.
 - Real data is touched only in the opt-in local test group (gated on
   `DCSTERRAIN_EXTRACT`, skipped in CI) and the live acceptance steps
   (X10, X11, Q9, V1).
+- **The extractor is verified live, not against a vendored harness.** X1 to X4
+  and X9 keep offline Lua tests, because encoders, grid arithmetic, the
+  frame-budget driver and injected failures cannot be exercised against a real
+  DCS on demand. The sweeps X5 to X8c are checked through the bridge against a
+  running theatre. Nothing named `StubHarness.lua` is vendored into this
+  repository.
 
 ### Keeping the record true
 
@@ -208,8 +231,10 @@ optional; the phase-`sim` rule exists because that call crashed DCS.
   conversation is lost.
 - A change to the plan is an edit, not an ADR. Write an ADR alongside it only
   when the reasoning binds later work — as ADR-0003 does for task D1.
-- A new DCS build or theatre gets a new `docs/spec/probe-log-<build>.md` and an
-  ADR saying which probe log now applies. The existing one is not appended to.
+- A new DCS build or theatre gets a new `docs/spec/probe-log-<build>.md` when
+  someone re-measures it, and the existing one is never appended to. The ADR
+  comes with a measurement that differs, not with the new file and not with
+  the version bump that prompted it.
 - Design decisions in `design-and-facts.md` are decided unless a probe
   contradicts them. Do not relitigate them from first principles — and if a
   probe does contradict one, that is an ADR, not an edit.
@@ -225,6 +250,12 @@ optional; the phase-`sim` rule exists because that call crashed DCS.
 
 Cited so they can be checked, not so they replace reading the spec.
 
+- **Paths are discovered, never recorded.** `lfs.currentdir()` in the hook
+  state returns the DCS install root and `lfs.writedir()` returns the Saved
+  Games directory, both readable through the bridge at the menu. No install
+  path belongs in this repository: the shipped tool takes one from the user
+  as `dcsterrain check --install <dir>`, and a session that needs one asks
+  the running sim.
 - **Coordinates.** DCS x is north, z is east, metres. The terrain module takes
   `(x, z)` scalars; `land.*` takes `{x, y}` where `y` is DCS z, or `{x, y, z}`
   where `y` is altitude. Convert once at the bridge boundary and never pass a
@@ -258,7 +289,7 @@ dcsterrain/          Cargo workspace
   crates/dcsterrain-cli/     binary `dcsterrain`
   crates/dcsterrain-mcp/     MCP tool definitions over core
   tests/                     workspace integration tests (synthetic only)
-extractor/           the Lua hook and its stub-harness tests
+extractor/           the Lua hook and its offline Lua tests
 kotlin/              the campaign client module
 tools/validate/      the validation sortie
 tools/probe-theatre/ the per-map measurement, packaged
