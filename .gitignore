@@ -1,5 +1,5 @@
 # No terrain data is committed. Extracts and packed files are derived from
-# ED terrain data and stay on the user's machine (docs/00-project-plan.md, P4).
+# ED terrain data and stay on the user's machine.
 *.sqlite
 *.sqlite-*
 extracts/
