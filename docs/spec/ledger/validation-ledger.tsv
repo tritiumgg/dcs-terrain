@@ -1,0 +1,45 @@
+# spec: validation.md
+# sha256: fa63dba27d3177a3ff2466212dae979393ee7b421538b6db0459e029bab91ae5
+# generated: 2026-09-03 (re-stamped after rename; rows from the 2026-09-02 review)
+subject	kind	status	claim	section	anchor
+validation scope	definition		The spec covers everything touching a running DCS other than the extractor: open probes and the validation sortie.	Spec: probes and validation	Everything that touches a running DCS other than the extractor itself:
+validation sortie	definition		The validation sortie stamps a packed file.	Spec: probes and validation	the probes still open, and the validation sortie that stamps a packed
+dcs-api-bridge	dependency		Everything runs on the Windows machine through the dcs-api-bridge tools.	Spec: probes and validation	file. Runs on the Windows machine through the `dcs-api-bridge` tools.
+probe log	dependency		Measured results so far live in probe-log-2.9.29.27278.md.	Spec: probes and validation	Measured results so far: `probe-log-2.9.29.27278.md`. The safety
+safety rules	constraint		The safety rules in design-and-facts.md ("Sources you have") apply to every call here.	Spec: probes and validation	rules in `design-and-facts.md` ("Sources you have") apply to every
+safety rules	constraint		Check dcs_bridge_status shows phase sim before any server-state call.	Spec: probes and validation	call here; in particular, check `dcs_bridge_status` shows phase `sim`
+safety rules	constraint		Clear the bridge transport directory before restarting DCS.	Spec: probes and validation	before any `server`-state call, and clear the bridge transport
+open probes	definition		No probe is open.	Measuring a new theatre or build	and fill sentinel are answered in the probe log; no probe is open. A new
+open probes	dependency		Scenery clearing and every installed theatre's projection, bounds and fill sentinel are answered in the probe log.	Measuring a new theatre or build	Scenery clearing and every installed theatre's projection, bounds
+new theatre procedure	behavior		A new theatre (Kola, Nevada) or a new DCS build repeats the per-map chunk recorded in the probe log.	Measuring a new theatre or build	theatre (Kola, Nevada) or a new DCS build repeats the per-map chunk
+new theatre procedure	behavior		The chunk is one dcs_eval_in in the hook state with the Mission Editor open on the map.	Measuring a new theatre or build	one `dcs_eval_in` in the hook state with the Mission Editor open on the
+fit.py	dependency		projection-samples/fit.py runs on the 20 samples.	Measuring a new theatre or build	map, then `projection-samples/fit.py` on the 20 samples. Results are
+new theatre procedure	constraint		Results are appended to the probe log with the build string.	Measuring a new theatre or build	appended to the probe log with the build string, and the design doc is
+new theatre procedure	constraint		The design doc is updated in the same change.	Measuring a new theatre or build	updated in the same change. `tools/probe-theatre/` packages that chunk
+probe-theatre tool	interface		tools/probe-theatre/ packages the per-map chunk and fit.py so the measurement is one step.	Measuring a new theatre or build	and `fit.py` so the measurement is one step.
+validation sortie	constraint		The sortie runs once per packed file, after pack, before a campaign uses the file.	Validation sortie	Run once per packed file, after `pack`, before the file is used by a
+validation sortie	definition		Inputs are the packed file, the same theatre loaded in a running mission, and the bridge.	Validation sortie	campaign. Inputs: the packed file, the same theatre loaded in a running
+sample step	behavior		Step 1 runs dcsterrain query sample with points set to 200 random valid cells across the grid.	Validation sortie	1. `dcsterrain query <file> sample` with `points` set to 200 random
+sample step	definition		The sampled layers are height, water and surface.	Validation sortie	the grid, layers `height`, `water`, `surface`.
+live sample step	behavior		Step 2 reads the same cells live through the bridge, in one chunk each.	Validation sortie	2. For the same cells, live `terrain.GetHeight`, `terrain.GetSurfaceType`
+dcs terrain api	dependency		The sortie uses terrain.GetHeight, terrain.GetSurfaceType and land.getSurfaceType.	Validation sortie	and `land.getSurfaceType` through the bridge, in one chunk each.
+height rmse	constraint		Expected height RMSE is under 0.5 m from i16 rounding.	Validation sortie	3. Compute height RMSE and max error (expected: RMSE under 0.5 m from
+height max error	constraint		Expected max height error is under 1 m; anything larger means a grid offset bug.	Validation sortie	`i16` rounding, max under 1 m; anything larger means a grid offset
+water agreement	constraint		Expected water class agreement is 100 %.	Validation sortie	bug), water class agreement (expected 100 %), surface enum agreement
+surface agreement	constraint		Expected surface enum agreement is 100 %.	Validation sortie	(expected 100 %).
+los step	behavior		Step 4 tests 300 random point pairs 0.5 to 15 km apart at 2 m AGL among valid cells.	Validation sortie	4. 300 random point pairs 0.5 to 15 km apart at 2 m AGL among the
+los step	behavior		dcsterrain query visible is compared against live terrain.isVisible.	Validation sortie	`valid` cells: `dcsterrain query visible` versus live
+los agreement	constraint		Expected LOS agreement is at least 99 %.	Validation sortie	`terrain.isVisible`. Expected agreement ≥ 99 %; record the
+los disagreements	behavior		Disagreement cases are recorded with their clearance values since they measure the half-cell sampling rule.	Validation sortie	disagreement cases with their clearance values, since they measure
+route step	behavior		Step 5 runs 20 road routes between random airdrome pairs with dcsterrain query route.	Validation sortie	5. 20 road routes between random airdrome pairs: `dcsterrain query route`
+route step	behavior		Route length is compared to the live terrain.findPathOnRoads polyline length.	Validation sortie	length versus live `terrain.findPathOnRoads` polyline length. The
+route ratio	definition		The route ratio is file length divided by live length per route.	Validation sortie	route ratio is file length divided by live length per route;
+validation_route_ratio	definition		validation_route_ratio is the largest |ratio - 1| over the 20 routes.	Validation sortie	`validation_route_ratio` is the largest `|ratio − 1|` over the 20.
+route ratio	constraint		Expected route length agreement is within 5 %; larger gaps point at graph merge errors.	Validation sortie	Expected within 5 %; larger gaps point at graph merge errors.
+stamp step	interface		Step 6 runs dcsterrain stamp with validation_height_rmse, validation_los_agreement, validation_route_ratio and validation_at.	Validation sortie	6. `dcsterrain stamp <file> validation_height_rmse=... validation_los_
+validate.lua	definition		The whole sortie is one script, validate.lua, run through dcs_eval_in in chunks.	Validation sortie	The whole sortie is one script, `validate.lua`, run through
+driver script	definition		One shell script drives the dcsterrain side and the comparison.	Validation sortie	`dcs_eval_in` in chunks, plus one shell script that drives the
+tools/validate	constraint		Both scripts live in the repository under tools/validate/.	Validation sortie	`dcsterrain` side and the comparison; both live in the repository under
+tools/validate	constraint		The sortie reads no data file from the repository.	Validation sortie	It reads no data file from the repository.
+acceptance 1	behavior		A Caucasus file at 50 m stamps with height RMSE under 0.5 m, LOS agreement at least 99 %, route ratio within 5 %.	Acceptance	1. A Caucasus file at 50 m stamps with height RMSE under 0.5 m, LOS
+acceptance 2	behavior		tools/probe-theatre reproduces the Caucasus projection row.	Acceptance	2. `tools/probe-theatre` reproduces the Caucasus projection row.

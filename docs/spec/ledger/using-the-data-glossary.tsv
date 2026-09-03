@@ -1,0 +1,114 @@
+# spec: using-the-data.md
+# sha256: 8075a18763dd227f42bb438806ab3d1c114f32cb71e1fccc519f36128a5ac595
+# generated: 2026-09-03 (re-stamped after rename; rows from the 2026-09-02 review)
+term	subject	defined_in	note
+query-operations.md	query-operations.md	Using the data	holds the operations' request and response fields
+design-and-facts.md	design-and-facts.md	Using the data	the design doc
+design doc	design-and-facts.md	UNDEFINED	holds the live FARP and SAM examples
+alt	alt	Using the data	absolute altitude
+alt_agl	alt	Using the data	altitude above ground
+AGL	alt	UNDEFINED	above ground level
+terrain only	terrain only	Using the data	no buildings, no trees
+find_sites	find_sites	UNDEFINED	operation returning ranked candidates
+weighted score	weighted score	One rule	sorting convenience only
+terms	terms	One rule	the real product beside the score
+span	span	Geometry of the site itself	
+span_max	span	Geometry of the site itself	term
+slope	slope	Geometry of the site itself	
+slope_max	slope	Geometry of the site itself	term
+tpi_300	tpi	Geometry of the site itself	local topographic position
+tpi_2000	tpi	Geometry of the site itself	regional topographic position
+tpi_class_in	tpi	Geometry of the site itself	term
+topographic position	tpi	Geometry of the site itself	
+knoll	tpi	Geometry of the site itself	tpi_2000 < 0 and tpi_300 > 0
+enclosure	enclosure	Geometry of the site itself	
+enclosure_min	enclosure	Geometry of the site itself	term
+horizon	horizon bins	Geometry of the site itself	per-azimuth elevation
+masked_from	horizon bins	Geometry of the site itself	term
+dist_road	dist grids	Geometry of the site itself	
+dist_rail	dist grids	Geometry of the site itself	
+dist_water	dist grids	Geometry of the site itself	
+dist_builtup	dist grids	Geometry of the site itself	
+scenery	scenery counts	Geometry of the site itself	counts by class
+scenery_max	scenery counts	Geometry of the site itself	term
+scenery_in_footprint_max	scenery counts	Geometry of the site itself	term
+scenery_in	scenery counts	Geometry of the site itself	term
+clearing	clearing	Geometry of the site itself	objects DCS deletes inside 150 m of a FARP
+clearing_max	clearing	Geometry of the site itself	term
+visible	visible	Visibility between points	operation and result
+clearance_m	clearance_m	Visibility between points	
+blocking	blocking	Visibility between points	
+visible_fraction	visible_fraction	Visibility between points	
+viewshed	visible_fraction	UNDEFINED	operation producing visible_fraction
+covered_fraction	covered_fraction	Visibility between points	
+coverage	covered_fraction	UNDEFINED	operation producing covered_fraction and dead_zones
+dead_zones	dead_zones	Visibility between points	
+asset_covered_fraction	asset_covered_fraction	Visibility between points	
+asset	asset_covered_fraction	UNDEFINED	the thing being defended
+blind_approach_exists	blind_approach_exists	Visibility between points	
+min_masked_range	blind_approach_exists	UNDEFINED	inner range a radial must stay masked to
+radials	radials	Visibility between points	
+unmask_dist	radials	Visibility between points	per-bearing first-seen range
+blind	radials	Visibility between points	per-bearing masked flag
+approach_spectrum	free approach	UNDEFINED	operation producing radials and blind arcs
+blind_arc_fraction	blind_arc_fraction	Visibility between points	
+widest_blind_arc_deg	blind_arc_fraction	Visibility between points	
+blind_arcs	blind_arcs	Visibility between points	list of masked arcs
+blind arc	blind_arcs	UNDEFINED	
+unmask_dist_min	unmask_dist summary	Visibility between points	
+_median	unmask_dist summary	Visibility between points	unmask_dist_median
+_max	unmask_dist summary	Visibility between points	unmask_dist_max
+sector_summary	sector_summary	Visibility between points	
+sector	sector	UNDEFINED	arc of bearings from the player's origin
+first_seen	first_seen	Visibility between points	
+first_seen_dist_from_site	first_seen	Visibility between points	
+unmask_profile	prescribed route	UNDEFINED	operation for a given route
+masked_segments	masked_segments	Visibility between points	
+route	route length	UNDEFINED	operation for a single road route
+length	route length	Visibility between points	
+straight_line	route length	Visibility between points	
+detour	detour	Visibility between points	length / straight_line
+ascent	ascent	Visibility between points	
+descent	ascent	Visibility between points	
+max_grade_pct	ascent	Visibility between points	steepest 100 m
+route_alternatives	route_alternatives	A recurring convoy that should not be predictable	
+stretch	stretch	Visibility between points	
+overlap_with	stretch	Visibility between points	
+shared_edges_with_all	shared_edges_with_all	Visibility between points	
+max_stretch	max_stretch	UNDEFINED	route_alternatives parameter
+max_overlap	route_alternatives	UNDEFINED	route_alternatives parameter
+k	route_alternatives	UNDEFINED	number of alternatives
+exposure	exposure	Visibility between points	per leg
+betweenness	betweenness	Network metrics	
+chokepoints	betweenness	UNDEFINED	operation producing betweenness
+road_edge	betweenness	UNDEFINED	
+crosses_water	betweenness	Network metrics	flags bridges
+reachable	reachable	Network metrics	
+trafficability	reachable	UNDEFINED	operation producing reachable and blocking
+difficulty	difficulty	Turning metrics into difficulty	
+band	difficulty	UNDEFINED	easy, medium, hard or unfair
+player rating	player rating	Turning metrics into difficulty	
+metric vector	metric vector	UNDEFINED	the placed object's recorded metrics
+campaign overlay	metric vector	UNDEFINED	
+SEAD	sam fixed-wing band	UNDEFINED	
+alt_bands_agl	masked approach arcs	SAM or AAA against a helicopter attack	
+pop-up	pop-up positions	SAM or AAA against a helicopter attack	
+not_visible_from	pop-up positions	UNDEFINED	find_sites term
+visible_to	pop-up positions	UNDEFINED	find_sites term
+own_alt_agl	pop-up positions	UNDEFINED	altitude of the candidate cell
+free shot	free shots	SAM or AAA against a helicopter attack	
+duel	pop-up margin	SAM or AAA against a helicopter attack	
+egress	egress	SAM or AAA against a helicopter attack	
+target_alt_agl	egress	UNDEFINED	viewshed parameter
+LZ	lz quality	UNDEFINED	landing zone
+Rioni plain	rioni plain	UNDEFINED	
+ground exposure	ground exposure	Hidden target for a search	
+air exposure	air exposure	Hidden target for a search	
+LOS	ground exposure	UNDEFINED	line of sight
+MANPADS	air exposure	UNDEFINED	
+dist_airdrome_band	friendly farp	UNDEFINED	term
+FARP	friendly farp	UNDEFINED	
+quantile	quantiles	Filtering patterns	
+difficulty dial	difficulty dial	Filtering patterns	
+airdrome_id	friendly farp	UNDEFINED	dist_airdrome_band parameter
+initial values	band tables	Turning metrics into difficulty	status of the band tables: reasoned from Caucasus examples, untested

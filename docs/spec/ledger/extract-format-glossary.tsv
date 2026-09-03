@@ -1,0 +1,194 @@
+# spec: extract-format.md
+# sha256: 1a7c7365e8b2366cb668aaea435afa12f8c9ecc1aaa33fe5807dd10788737daa
+# generated: 2026-09-03 (re-stamped after rename; rows from the 2026-09-02 review)
+term	subject	defined_in	note
+extract	extract directory	Directory layout	root placeholder `<extract>/`
+extraction	extract directory	UNDEFINED	
+extractor	extractor	Spec: extract format	the Lua side
+Lua side	extractor	Spec: extract format	
+hook	extractor	UNDEFINED	the extractor hook
+pack	pack validation	Spec: extract format	`dcsterrain pack`
+dcsterrain pack	pack validation	Spec: extract format	
+Rust side	pack validation	Spec: extract format	
+dcsterrain	pack validation	UNDEFINED	the Rust CLI
+design-and-facts.md	design doc	Spec: extract format	
+manifest.json	manifest.json	manifest.json	
+manifest	manifest.json	UNDEFINED	
+config.json	config.json	Tables	
+airdromes.json	airdromes.json	Tables	
+runways.json	runways.json	Tables	
+stands.json	stands.json	Tables	
+beacons.json	beacons.json	Tables	
+radio.json	radio.json	Tables	
+towns.json	towns.json	Tables	
+nodes.json	nodes.json	Tables	
+roads.jsonl	roads.jsonl	Tables	
+railroads.jsonl	roads.jsonl	Tables	
+scenery.jsonl	scenery.jsonl	Tables	
+scenery_models.json	scenery_models.json	Tables	
+catalogue	scenery_models.json	Tables	model catalogue
+tile files	tile binary	Tile binary layout	
+forward-slash	path conventions	Directory layout	
+.tmp	tmp file	Directory layout	
+x	coordinate axes	Coordinate conventions	north
+z	coordinate axes	Coordinate conventions	east
+Vec2	vec2 convention	Coordinate conventions	DCS `y` means z
+zero plane	height unit	Coordinate conventions	
+_deg	angle unit	Coordinate conventions	degrees suffix
+origin_x	grid extent	Grid geometry	
+origin_z	grid extent	Grid geometry	
+cell_size	cell centre	Grid geometry	
+centred	cell centre	Grid geometry	cell centre
+row	grid axes	Grid geometry	north
+col	grid axes	Grid geometry	east
+Sampling	sampling	Grid geometry	
+tile	tile size	Grid geometry	
+tile_size	tile size	Grid geometry	
+tx	tile indexing	Grid geometry	
+tz	tile indexing	Grid geometry	
+sample index	sample index	Grid geometry	
+local_row	sample index	Grid geometry	
+local_col	sample index	Grid geometry	
+row-major	sample index	Grid geometry	
+full tile	edge tile	Grid geometry	
+nodata	nodata	Tile binary layout	per-layer sentinel
+manifest.tiles	manifest.tiles	Grid geometry	
+tiles	manifest.tiles	manifest.json	manifest key
+omit_sea_tiles	sea tile omission	Grid geometry	
+bytes_per_sample	tile file size	Tile binary layout	
+dtype	tile binary	Tile binary layout	
+height	height layer	Tile binary layout	
+terrain.GetHeight	height layer	Tile binary layout	
+water	water layer	Tile binary layout	
+terrain.GetSurfaceType	water layer	Tile binary layout	
+unknown string	unknown water string	Tile binary layout	
+seabed	fill	Tables	third component of the fill triple; read for the fill test only, no layer stores it
+surface	surface layer	Tile binary layout	
+land.SurfaceType	surface layer	Tile binary layout	
+land.getSurfaceType	surface layer	Tile binary layout	
+clamped	i16 clamp	Tile binary layout	
+i16	i16 encoding	Tile binary layout	
+u8	u8 encoding	Tile binary layout	
+string.char	u8 encoding	Tile binary layout	
+string.pack	lua 5.1	Tile binary layout	absent in DCS Lua
+i16::from_le_bytes	i16 decoding	Tile binary layout	
+format_version	format_version	manifest.json	
+extractor_version	extractor_version	manifest.json	
+theatre	theatre	manifest.json	
+dcs_build	dcs_build	manifest.json	
+dcs_build_timestamp	dcs_build	manifest.json	
+autoupdate.cfg	autoupdate.cfg	manifest.json	
+lfs.currentdir	autoupdate.cfg	manifest.json	
+terrain_fingerprint	terrain_fingerprint	manifest.json	
+head_sha256	terrain_fingerprint	manifest.json	
+payload_size	terrain_fingerprint	manifest.json	
+surface5	terrain files	manifest.json	
+rn4	terrain files	manifest.json	
+scn5	terrain files	manifest.json	
+digest	digest	manifest.json	
+SHA-256	sha-256	manifest.json	
+extracted_at	extracted_at	manifest.json	
+bounds_km	bounds_km	manifest.json	
+SW_bound	bounds_km	UNDEFINED	
+NE_bound	bounds_km	UNDEFINED	
+authored_bounds_m	authored_bounds_m	manifest.json	
+nodesMapBorders	authored_bounds_m	manifest.json	
+entry.lua	authored_bounds_m	UNDEFINED	
+crop_m	crop_m	manifest.json	
+grid	grid	manifest.json	
+grid.origin_*	grid origin	manifest.json	
+layers	layers	manifest.json	
+passes	passes	manifest.json	
+complete	pass completion	manifest.json	
+hook pass	pass completion	UNDEFINED	
+mission pass	mission pass	UNDEFINED	
+--allow-partial	allow-partial	manifest.json	
+min	tile min max	manifest.json	
+max	tile min max	manifest.json	
+resume	tiles.jsonl	manifest.json	reads the journal
+tables	tables	manifest.json	
+timing_ms	timing_ms	manifest.json	
+notes	notes	manifest.json	
+UTF-8	json encoding	Tables	
+%.17g	number precision	Tables	
+default_bullseye	config.json	Tables	
+latlon_samples	latlon_samples	Tables	
+convertMetersToLatLon	latlon_samples	Tables	
+default_camera_km	default_camera_km	Tables	
+shape	shape	Tables	
+getTerrainShpare	shape	Tables	
+crs	crs	Tables	
+proj4	crs	Tables	
+reference_point	airdromes.json	Tables	
+roadnet	airdromes.json	UNDEFINED	
+abandoned	abandoned airdrome	Tables	
+getRunwayList	runways.json	Tables	
+course	runways.json	Tables	radians
+getStandList	stands.json	Tables	
+getBeacons	beacons.json	Tables	
+channel	beacons.json	Tables	
+getRadio	radio.json	Tables	
+frequencies_hz	radio.json	Tables	
+towns.lua	towns.lua	Tables	
+dofile	towns.lua	Tables	
+convertLatLonToMeters	towns.json	Tables	
+nodes.lua	nodes.json	Tables	
+seed	seed line	Tables	
+snap_dist	seed line	Tables	
+getClosestPointOnRoads	seed line	Tables	
+path	path line	Tables	
+findPathOnRoads	path line	Tables	
+nopath	nopath line	Tables	
+road_seed_spacing	road seeds	Tables	
+lattice	road seeds	Tables	
+road_seed_neighbours	road_seed_neighbours	Tables	
+Graph building	road graph	Tables	
+obb	obb	Tables	
+radius	obb	Tables	
+world.searchObjects	scenery.jsonl	Tables	
+Object.Category.SCENERY	scenery.jsonl	Tables	
+getObjectsAtMapPoint	obb	Tables	
+de-duplicates	scenery dedup	Tables	
+type_bits	scenery_models.json	Tables	
+getDesc	scenery_models.json	Tables	
+getLife	scenery_models.json	Tables	
+Scenery classification	scenery classification	UNDEFINED	in core.md
+check-extract	check-extract	Versioning and validation	
+synthetic theatre generator	synthetic theatre generator	UNDEFINED	
+core.md	synthetic theatre generator	UNDEFINED	
+stub-harness	stub harness	UNDEFINED	
+extractor-hook.md	stub harness	UNDEFINED	
+closed-form terrain	stub harness	UNDEFINED	
+cross-language contract	contract test	Test contract	the contract test
+sample-for-sample	contract test	Test contract	
+terrain_dir	terrain files	manifest.json	`<terrain_dir>` directory under `Mods/terrains/`
+lfs.attributes	terrain_fingerprint	manifest.json	file size source
+fill	fill	Tables	`config.json.fill`
+fill triple	fill	Tables	{height, water, seabed} the theatre returns outside its terrain
+`valid` grid	fill	UNDEFINED	computed by `pack` from `fill`
+name_id	name_id	Tables	airdrome entry's own `id` string
+externalId	airdromes.json	Tables	`"externalId:NNN"` strings
+shelters	airdromes.json	Tables	
+Airbase:getID	airdromes.json	Tables	mission-state equivalent of airdrome `id`
+positionGeo	beacons.json	Tables	
+callsigns	callsigns	Tables	`radio.json` field
+getName	scenery.jsonl	Tables	numeric scenery id as a Lua number; the hook `id` is the same digits as a string
+sizeOBB	obb	Tables	positional array
+center	obb	Tables	positional array
+payload-size field	payload_size	manifest.json	the `u64` at bytes 8–15
+type bits	type_bits	Tables	distinct `type` values seen
+fill cell	fill cell	Tile binary layout	cell whose unrounded hook returns equal the fill triple
+fill test	fill cell	Tile binary layout	per-cell fill test
+fill-tile omission	fill tile omission	Grid geometry	an all-fill tile is omitted from every layer
+authored_bounds_source	authored_bounds_source	manifest.json	"config" or "presweep"
+pre-sweep	pre-sweep	manifest.json	5 km sweep over the bounds rectangle that bounds the authored cells
+presweep	pre-sweep	manifest.json	`timing_ms` key and `authored_bounds_source` value
+sea tile omission	sea tile omission	Grid geometry	all-sea tile omitted from `height` and `surface` under `omit_sea_tiles`
+tiles.jsonl	tiles.jsonl	Directory layout	append-only tile journal
+tile journal	tiles.jsonl	Directory layout	
+journal	tiles.jsonl	manifest.json	
+authored cell	authored cell	manifest.json	pre-sweep cell with height breakpoints or a road snap
+config.json.presweep	config.json.presweep	manifest.json	
+cell_km	config.json.presweep	manifest.json	
+breakpoint_min	config.json.presweep	manifest.json	
+road_max_m	config.json.presweep	manifest.json	

@@ -1,0 +1,68 @@
+# spec: validation.md
+# sha256: fa63dba27d3177a3ff2466212dae979393ee7b421538b6db0459e029bab91ae5
+# generated: 2026-09-03 (re-stamped after rename; rows from the 2026-09-02 review)
+term	subject	defined_in	note
+probes	open probes	Measuring a new theatre or build	
+validation sortie	validation sortie	Validation sortie	
+sortie	validation sortie	Validation sortie	
+extractor	validation scope	UNDEFINED	extractor-hook.md
+dcs-api-bridge	dcs-api-bridge	UNDEFINED	MCP tool set
+bridge	dcs-api-bridge	UNDEFINED	
+probe log	probe log	Spec: probes and validation	
+probe-log-2.9.29.27278.md	probe log	Spec: probes and validation	
+Sources you have	safety rules	UNDEFINED	section of design-and-facts.md
+dcs_bridge_status	safety rules	UNDEFINED	bridge tool
+sim	safety rules	UNDEFINED	bridge phase
+server	safety rules	UNDEFINED	Lua state name
+bridge transport directory	safety rules	UNDEFINED	
+fill sentinel	open probes	UNDEFINED	
+per-map chunk	new theatre procedure	Measuring a new theatre or build	
+dcs_eval_in	new theatre procedure	UNDEFINED	bridge tool
+hook state	new theatre procedure	UNDEFINED	GameGUI Lua state
+Mission Editor	new theatre procedure	UNDEFINED	
+fit.py	fit.py	UNDEFINED	projection-samples/fit.py
+projection-samples	fit.py	UNDEFINED	
+build string	new theatre procedure	UNDEFINED	
+design doc	new theatre procedure	UNDEFINED	design-and-facts.md
+pack	validation sortie	UNDEFINED	dcsterrain subcommand
+packed file	validation sortie	UNDEFINED	
+dcsterrain query	sample step	UNDEFINED	CLI subcommand
+sample	sample step	UNDEFINED	query operation
+valid	sample step	UNDEFINED	derived layer
+height	sample step	UNDEFINED	layer
+water	sample step	UNDEFINED	layer
+surface	sample step	UNDEFINED	layer
+terrain.GetHeight	dcs terrain api	UNDEFINED	DCS API
+terrain.GetSurfaceType	dcs terrain api	UNDEFINED	DCS API
+land.getSurfaceType	dcs terrain api	UNDEFINED	DCS API
+RMSE	height rmse	Validation sortie	
+i16	height rmse	UNDEFINED	height encoding
+max error	height max error	Validation sortie	
+grid offset bug	height max error	Validation sortie	
+water class agreement	water agreement	Validation sortie	
+surface enum agreement	surface agreement	Validation sortie	
+AGL	los step	UNDEFINED	above ground level
+visible	los step	UNDEFINED	query operation
+terrain.isVisible	los step	UNDEFINED	DCS API
+LOS	los agreement	UNDEFINED	line of sight
+clearance	los disagreements	UNDEFINED	
+half-cell sampling rule	los disagreements	UNDEFINED	
+route	route step	UNDEFINED	query operation
+terrain.findPathOnRoads	route step	UNDEFINED	DCS API
+route ratio	route ratio	Acceptance	
+graph merge errors	route ratio	Validation sortie	
+dcsterrain stamp	stamp step	Validation sortie	
+validation_height_rmse	stamp step	Validation sortie	
+validation_los_agreement	stamp step	Validation sortie	split across lines in the spec
+validation_route_ratio	validation_route_ratio	Validation sortie	stamp key
+validation_at	stamp step	Validation sortie	
+validate.lua	validate.lua	Validation sortie	
+shell script	driver script	Validation sortie	
+tools/validate/	tools/validate	Validation sortie	
+tools/probe-theatre	acceptance 2	Acceptance	
+Caucasus	acceptance 1	UNDEFINED	theatre
+projection row	acceptance 2	Acceptance	
+live sample step	live sample step	Validation sortie	
+tools/probe-theatre/	probe-theatre tool	Measuring a new theatre or build	
+probe-theatre	probe-theatre tool	Measuring a new theatre or build	
+points	sample step	Validation sortie	sample request field

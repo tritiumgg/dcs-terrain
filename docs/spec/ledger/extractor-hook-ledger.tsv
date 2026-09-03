@@ -1,0 +1,201 @@
+# spec: extractor-hook.md
+# sha256: 2a39c9894c3d9fca31658f38566b6f742b1e65f720888ec0028bbd044be4a15a
+# generated: 2026-09-03 (re-stamped after rename; rows from the 2026-09-02 review)
+subject	kind	status	claim	section	anchor
+hook	definition		The hook is a GameGUI hook that sweeps a loaded DCS theatre and writes an extract directory.	Spec: extractor hook	A GameGUI hook that sweeps a loaded DCS theatre and writes an extract
+extract format	dependency		The output directory follows `extract-format.md`.	Spec: extractor hook	directory in the format of `extract-format.md`. Lua 5.1, one file,
+hook	constraint		The hook is Lua 5.1, one file, and runs on the Windows machine with DCS.	Spec: extractor hook	runs on the Windows machine with DCS. Background and every measured
+design doc	dependency		Background and every measured figure live in `design-and-facts.md` and `probe-log-2.9.29.27278.md`.	Spec: extractor hook	figure: `design-and-facts.md`, `probe-log-2.9.29.27278.md`. Write
+dcs-scripting skill	constraint		Write the hook with the `dcs-scripting` skill loaded.	Spec: extractor hook	it with the `dcs-scripting` skill loaded and check every symbol against
+dcs-api-lookup	constraint		Check every symbol against `dcs-api-lookup` before calling it.	Spec: extractor hook	`dcs-api-lookup` before calling it.
+hook file	definition		The hook is `Scripts/Hooks/DcsTerrainExtract.lua` in Saved Games.	Files	- `Scripts/Hooks/DcsTerrainExtract.lua` in Saved Games: the hook. Loads
+hook file	behavior		The hook loads on every DCS start and does nothing unless enabled.	Files	on every DCS start, does nothing unless enabled.
+config file	definition		`Config/DcsTerrainExtract.lua` in Saved Games is a Lua table the hook `dofile`s at load.	Files	- `Config/DcsTerrainExtract.lua` in Saved Games: a Lua table the hook
+config file	behavior		The config is re-read on every start and an absent file means disabled.	Files	`dofile`s at load and re-reads on every start. Absent file means
+progress log	definition		The progress log is `Logs/DcsTerrainExtract.log` in Saved Games with one line per tile and per phase change.	Files	- Progress log: `Logs/DcsTerrainExtract.log` in Saved Games, one line per
+dcs.log	behavior		`dcs.log` gets `INFO` lines at phase changes only.	Files	tile and per phase change, plus `dcs.log` `INFO` lines at phase changes
+dcs install	constraint		Nothing is ever written into the DCS install.	Files	Nothing is ever written into the DCS install.
+enabled	definition		`enabled` switches the hook on.	Config table	enabled = true,
+output_dir	definition		`output_dir` is the extract directory and is created if absent.	Config table	output_dir = "C:/extracts/caucasus-50m",   -- created if absent
+cell_size	definition		`cell_size` is the grid cell size in metres and is always 50.	Config table	cell_size = 50,                             -- metres; always 50, coarser bases are pack's choice
+cell_size	nongoal		Coarser bases are `pack`'s choice, not the hook's.	Config table	cell_size = 50,                             -- metres; always 50, coarser bases are pack's choice
+tile_size	definition		`tile_size` is the tile edge in cells, 256 in the example.	Config table	tile_size = 256,
+frame_budget_ms	definition		`frame_budget_ms` is the work allowed per `onSimulationFrame`, 5 in the example.	Config table	frame_budget_ms = 5,                        -- work per onSimulationFrame
+crop_m	definition		`crop_m` is nil or a `{min_x, min_z, max_x, max_z}` box.	Config table	crop_m = nil,                               -- or {min_x=, min_z=, max_x=, max_z=}
+authored_bounds_m	definition		`authored_bounds_m` is `nodesMapBorders` if known, else nil.	Config table	authored_bounds_m = nil,                    -- nodesMapBorders, if known
+omit_sea_tiles	definition		`omit_sea_tiles` defaults to true in the example config.	Config table	omit_sea_tiles = true,
+road_seed_spacing	definition		`road_seed_spacing` is 1000 in the example config.	Config table	road_seed_spacing = 1000,
+road_seed_neighbours	definition		`road_seed_neighbours` is 4 in the example config.	Config table	road_seed_neighbours = 4,
+passes	definition		`passes` has boolean `hook` and `mission` switches.	Config table	passes = { hook = true, mission = true },
+allow_helipads	definition		`allow_helipads` defaults to false in the example config and runs the scenery sweep with helipads present.	Config table	allow_helipads = false,                     -- run the scenery sweep with helipads present
+towns_lua	definition		`towns_lua` is the absolute path to the theatre's `Map/towns.lua`.	Config table	towns_lua = "C:/Program Files/Eagle Dynamics/DCS World/Mods/terrains/Caucasus/Map/towns.lua",
+nodes_lua	definition		`nodes_lua` is the absolute path to the theatre's `MissionGenerator/nodes.lua`.	Config table	nodes_lua = "C:/Program Files/Eagle Dynamics/DCS World/Mods/terrains/Caucasus/MissionGenerator/nodes.lua",
+crs	definition		`crs` is optional and holds `proj4`, `lon_0` and other projection parameters.	Config table	crs = nil,                                  -- optional {proj4=..., lon_0=..., ...}
+terrain_dir	definition		`terrain_dir` names the theatre directory under `Mods/terrains/`.	Config table	terrain_dir = "Caucasus",                   -- directory under Mods/terrains/
+config validation	behavior		The hook validates every config field at load and logs one line per problem.	Config table	The hook validates every field at load and logs one line per problem;
+config validation	behavior		Any config problem disables the run.	Config table	any problem disables the run.
+callbacks	dependency		The hook registers with `DCS.setUserCallbacks`.	Lifecycle	Register with `DCS.setUserCallbacks`. The hook is a state machine driven
+state machine	definition		The hook is a state machine driven by `onSimulationFrame`.	Lifecycle	by `onSimulationFrame`, and `onMissionLoadEnd`, `onSimulationStop` and
+state machine	behavior		`onMissionLoadEnd`, `onSimulationStop` and `onSimulationStart` move the hook between states.	Lifecycle	`onSimulationStart` move it between states:
+idle state	definition		The idle state waits for a terrain.	Lifecycle	1. **idle**: waiting for a terrain. Every 60 frames, `require("terrain")`
+idle state	behavior		Every 60 frames idle does `require("terrain")` then `GetTerrainConfig("id")`; nil means no terrain yet.	Lifecycle	then `GetTerrainConfig("id")`; nil means no terrain yet. Non-nil
+idle state	behavior		A non-nil terrain id means the editor has a map open or a mission is running.	Lifecycle	means the editor has a map open or a mission is running.
+callbacks	dependency		On 2.9.29.27278 `onSimulationFrame` fires at the main menu and in the Mission Editor, and no callback fires during a mission load.	Lifecycle	Mission Editor, and no callback fires during a mission load; which
+callbacks	constraint		Which callbacks fire where is a per-build measurement.	Lifecycle	callbacks fire where is a per-build measurement, so the hook logs the
+idle state	behavior		The hook logs the frame count reached in idle.	Lifecycle	frame count reached in idle.
+prepare state	behavior		Prepare reads config.	Lifecycle	2. **prepare**: read config; when `crop_m` and `authored_bounds_m` are
+pre-sweep	behavior		When `crop_m` and `authored_bounds_m` are both nil, prepare runs the pre-sweep.	Lifecycle	both nil, run the pre-sweep: a 5 km lattice over the bounds
+pre-sweep	definition		The pre-sweep is a 5 km lattice over the bounds rectangle with, per cell, the post-density line and one `getClosestPointOnRoads` snap, sliced under the frame budget.	Lifecycle	rectangle, and per cell the post-density line (201 `GetHeight` calls
+pre-sweep	constraint		The pre-sweep is about 88 000 cells on Afghanistan; the editor streams terrain on first touch, so budget on the order of a minute.	Lifecycle	the frame budget (about 88 000 cells on Afghanistan; the editor
+pre-sweep	behavior		The pre-sweep's authored-cell bounding rectangle plus 10 km becomes `authored_bounds_m`.	Lifecycle	minute), whose authored-cell bounding rectangle plus 10 km becomes
+prepare state	behavior		Prepare computes the grid per the `extract-format.md` manifest rules.	Lifecycle	   compute the grid (`extract-format.md`,
+prepare state	behavior		Prepare creates directories and writes `config.json`.	Lifecycle	"manifest.json" rules), create directories, write `config.json`, and
+resume	behavior		Prepare loads an existing `manifest.json` from `output_dir` to resume, or writes a fresh one.	Lifecycle	either load an existing `manifest.json` from `output_dir` to resume
+resume	constraint		Resume requires the same theatre, build and grid; otherwise the hook refuses and logs.	Lifecycle	(same theatre, build, grid, else refuse and log) or write a fresh
+hook pass	definition		The hook pass runs, in order, the sweeps that need only the `terrain` module.	Lifecycle	3. **hook pass**: the sweeps listed below that need only the `terrain`
+hook pass	behavior		The hook pass runs whether the terrain came from the editor or a mission.	Lifecycle	module, in order. Runs whether the terrain came from the editor or a
+mission pass	definition		The mission pass runs the sweeps that need the mission-scripting state.	Lifecycle	4. **mission pass**: the sweeps that need the mission-scripting state,
+mission pass	dependency		Mission-pass sweeps run through `net.dostring_in("server", ...)`.	Lifecycle	through `net.dostring_in("server", ...)`. Enters only when
+mission pass	constraint		The mission pass enters only when `DCS.getModelTime()` advances and `passes.mission` is true.	Lifecycle	`DCS.getModelTime()` advances (a mission is running) and
+mission pass	behavior		Otherwise the hook writes `passes.mission.complete = false` and finishes.	Lifecycle	`passes.mission.complete = false` and finishes.
+done state	behavior		Done logs totals, writes the final manifest and stops registering work.	Lifecycle	5. **done**: log totals, write the final manifest, stop registering work.
+done state	behavior		The hook stays done until DCS restarts.	Lifecycle	Stays done until DCS restarts.
+sweep iterator	definition		Every sweep is a resumable iterator over tiles.	Lifecycle	Every sweep is a resumable iterator over tiles. The frame callback runs
+frame budget	behavior		The frame callback runs iterator steps until `frame_budget_ms` is spent, measured with `os.clock()`, then yields.	Lifecycle	iterator steps until `frame_budget_ms` is spent, measured with
+tile write	behavior		A tile is written whole: samples accumulate in a table of strings, concatenated once, written to `<path>.tmp`, renamed.	Lifecycle	a table of strings, concatenated once, written to `<path>.tmp`, renamed,
+tile write	behavior		After the rename one line is appended to `tiles.jsonl`.	Lifecycle	then one line appended to `tiles.jsonl` (`extract-format.md`,
+resume	behavior		On resume, tiles in the journal are skipped.	Lifecycle	journal are skipped.
+sweep order	constraint		Hook-pass sweeps run in the listed order and each completion is recorded in the manifest before the next starts.	Hook-pass sweeps	In this order; each one's completion is recorded in the manifest before
+config sweep	behavior		The config sweep calls `GetTerrainConfig` for every key listed in the design doc.	Hook-pass sweeps	**config**: `GetTerrainConfig` for every key listed in the design doc,
+latlon samples	definition		The config sweep takes 20 `convertMetersToLatLon` samples on a 4 × 5 lattice inside the grid, plus `getTerrainShpare`.	Hook-pass sweeps	`getTerrainShpare`, 20 `convertMetersToLatLon` samples on a 4 × 5
+fill sweep	behavior		The config sweep measures the `fill` triple with `GetHeight`, `GetSurfaceType` and `GetSurfaceHeightWithSeabed` at three points 500 km outside the bounds rectangle.	Hook-pass sweeps	lattice inside the grid, and the `fill` triple: `GetHeight`,
+config sweep	behavior		The config sweep writes `config.json`.	Hook-pass sweeps	500 km outside the bounds rectangle. Write `config.json`. In
+dcs_build	behavior		In prepare the hook reads `autoupdate.cfg` at `lfs.currentdir()` for `dcs_build` and `dcs_build_timestamp`.	Hook-pass sweeps	**prepare**, before this, read `autoupdate.cfg` at `lfs.currentdir()`
+terrain fingerprint	behavior		Prepare computes `terrain_fingerprint` per `extract-format.md` from the theatre directory under `Mods/terrains/`.	Hook-pass sweeps	`terrain_fingerprint` per `extract-format.md` from the theatre
+terrain_dir	definition		The theatre directory name comes from config `terrain_dir` and is not always the `id`; `SinaiMap` lives in `Sinai`.	Hook-pass sweeps	`terrain_dir`; it is not always the `id`, e.g. `SinaiMap` lives in
+terrain fingerprint	behavior		The fingerprint takes file size from `lfs.attributes` and header and head from one `read` of 1 MiB, which costs 9 ms.	Hook-pass sweeps	`Sinai`): file size from `lfs.attributes`, header and head from one
+sha-256	constraint		SHA-256 runs in pure Lua as a sliced iterator under the frame budget.	Hook-pass sweeps	`read` of 1 MiB (9 ms), then SHA-256 in pure Lua as a sliced iterator
+hook state speed	constraint		The hook state runs about 17 million simple Lua operations per second and the three hashes take several seconds in total.	Hook-pass sweeps	under the frame budget, because the hook state runs about 17 million
+resume	constraint		A resume refuses when `dcs_build` or `terrain_fingerprint` differs from the existing manifest.	Hook-pass sweeps	seconds in total. Both go into the manifest; a resume refuses when
+airdromes sweep	behavior		The airdromes sweep iterates `GetTerrainConfig("Airdromes")` with `pairs` and writes `airdromes.json`.	Hook-pass sweeps	**airdromes**: iterate `GetTerrainConfig("Airdromes")` with `pairs`;
+airdromes sweep	definition		The `Airdromes` table key is the numeric `id` and the entry's `id` field is `name_id`.	Hook-pass sweeps	the table key is the numeric `id` and the entry's `id` field is
+airdromes sweep	dependency		For each entry with a `roadnet` the sweep calls `getRunwayList(roadnet)` and `getStandList`.	Hook-pass sweeps	`getRunwayList(roadnet)` and
+stand params	interface		`getStandList` is called with SHELTER, FOR_HELICOPTERS, FOR_AIRPLANES, WIDTH, LENGTH and HEIGHT.	Hook-pass sweeps	`getStandList(roadnet, {"SHELTER","FOR_HELICOPTERS","FOR_AIRPLANES",
+airdromes sweep	behavior		The airdromes sweep writes `runways.json` and `stands.json`.	Hook-pass sweeps	"WIDTH","LENGTH","HEIGHT"})`; write `runways.json` and `stands.json`
+getRunwayHeading	nongoal		`getRunwayHeading(roadnet)` returns the first runway's `course` and is not called.	Hook-pass sweeps	(`getRunwayHeading(roadnet)` returns the first runway's `course` and is
+airdromes sweep	dependency		`getBeacons()` and `getRadio()` go to `beacons.json` and `radio.json`.	Hook-pass sweeps	Then `getBeacons()` and `getRadio()` to `beacons.json` and `radio.json`.
+sandboxed dofile	behavior		`towns_lua` and `nodes_lua` are read through a sandbox into `towns.json` and `nodes.json`.	Hook-pass sweeps	Then `towns_lua` and `nodes_lua` through a sandbox: `loadfile` the
+sandboxed dofile	behavior		The sandbox `loadfile`s the file and `setfenv`s the chunk to a fresh table.	Hook-pass sweeps	file, `setfenv` the chunk to a fresh table whose `require` returns
+sandboxed dofile	definition		The sandbox's `require` returns `{translate = function(s) return s end}` and its `_` is the identity.	Hook-pass sweeps	`{translate = function(s) return s end}` (the files call
+sandboxed dofile	dependency		The town and node files call `require("i_18n")` and then `gettext.translate`.	Hook-pass sweeps	`require("i_18n")` and then `gettext.translate`) and whose `_` is the
+sandboxed dofile	behavior		The hook runs the chunk and reads the globals it sets (`towns`, `missionNodes`) from the sandbox table.	Hook-pass sweeps	identity, run it, and read the globals it sets (`towns`,
+airdromes sweep	constraint		One frame per table is fine because the tables are small.	Hook-pass sweeps	and `nodes.json`. One frame per table is fine; these are small.
+layer sweeps	definition		`water` and `height` are two separate sweeps over the tile grid.	Hook-pass sweeps	**water, height**: two separate sweeps over the tile grid in
+layer sweeps	constraint		Tile order is `tx` outer, `tz` inner, and row-major within a tile.	Hook-pass sweeps	tile order `tx` outer, `tz` inner, and within a tile row-major. Sequential
+sequential access	constraint		Sequential access makes `GetSurfaceType` cheap: 0.00065 ms versus 0.113 ms scattered.	Hook-pass sweeps	access is what makes `GetSurfaceType` cheap (0.00065 ms versus 0.113 ms
+sequential access	constraint		Never interleave layers within a tile.	Hook-pass sweeps	scattered), so never interleave layers within a tile. `water` calls
+height sweep	dependency		`height` calls `GetHeight(x, z)`.	Hook-pass sweeps	`GetHeight(x, z)`. Encode per `extract-format.md`. Each sweep applies
+water sweep	dependency		`water` calls `GetSurfaceType(x, z)` and maps the returned string.	Hook-pass sweeps	`GetSurfaceType(x, z)` and maps the string; `height` calls
+skip set	behavior		With `omit_sea_tiles` set, a tile that is entirely `2` is still written for `water` and joins the skip set.	Hook-pass sweeps	`omit_sea_tiles` is set, a tile that is entirely `2` is still written
+skip set	behavior		The `water` sweep runs first and builds the skip set.	Hook-pass sweeps	`nodata`. The `water` sweep runs first and builds the skip set: a tile
+skip set	behavior		A tile whose every cell is fill is not written and joins the skip set.	Hook-pass sweeps	whose every cell is fill is not written and joins the set; when
+skip set	behavior		The `height` and `surface` sweeps skip the skip set.	Hook-pass sweeps	for `water` and joins the set. The `height` and `surface` sweeps skip
+skip set	behavior		The roads sweep places no seeds in the skip set.	Hook-pass sweeps	the set, and the roads sweep places no seeds in it. Order: `water`,
+sweep order	constraint		The layer sweep order is `water`, then `height`.	Hook-pass sweeps	the set, and the roads sweep places no seeds in it. Order: `water`,
+road seeds	definition		Road seeds are a lattice at `road_seed_spacing` over the grid plus airdrome reference points and towns.	Hook-pass sweeps	**roads, railroads**: seeds = lattice at `road_seed_spacing` over the
+roads sweep	behavior		For each seed the sweep calls `getClosestPointOnRoads(kind, x, z)` and writes the `seed` line.	Hook-pass sweeps	`getClosestPointOnRoads(kind, x, z)` and write the `seed` line. Then for
+neighbour lookup	behavior		Each seed's `road_seed_neighbours` nearest seeds by snap point are found with a simple grid bucket lookup.	Hook-pass sweeps	(a simple grid bucket lookup), and for each unordered pair not yet
+roads sweep	behavior		For each unrequested unordered pair the sweep calls `findPathOnRoads(kind, x1, z1, x2, z2)` with the snap points.	Hook-pass sweeps	requested call `findPathOnRoads(kind, x1, z1, x2, z2)` with the snap
+roads sweep	behavior		Each path request writes a `path` or `nopath` line.	Hook-pass sweeps	points and write the `path` or `nopath` line. `findPathOnRoads` costs
+path cost	constraint		`findPathOnRoads` costs about 16 ms per 23 km path, so path calls are made under the frame budget like every other step.	Hook-pass sweeps	about 16 ms per 23 km path, so make path calls under the frame budget
+path cost	constraint		One path call is a step, and a step may exceed the budget by one call.	Hook-pass sweeps	like every other step: one call is a step, and a step may exceed the
+roads sweep	constraint		Caucasus at 1 km seeds is roughly 370 000 seeds and 700 000 paths before merging.	Hook-pass sweeps	is roughly 370 000 seeds and 700 000 paths before merging: about
+roads sweep	constraint		The Caucasus roads sweep is about 7 minutes of call time, about 25 minutes at 60 frames per second.	Hook-pass sweeps	7 minutes of call time, about 25 minutes at 60 frames per second.
+path cost	constraint		A path between snaps about 1 km apart costs 0.61 ms mean, so about eight calls fit a 5 ms budget.	Hook-pass sweeps	budget by one call. A path between snaps about 1 km apart costs 0.61 ms
+seed merge	behavior		Seeds whose snap points lie within 100 m of another seed's are merged before pairing.	Hook-pass sweeps	Seeds whose snap points lie within 100 m of another seed's are merged
+net.dostring_in	dependency		Both mission-pass sweeps run in the `server` state through `net.dostring_in`.	Mission-pass sweeps	Both run in the `server` state through `net.dostring_in`. Follow the
+states rules	dependency		Mission-pass chunks follow the `dcs-scripting` `references/states.md` rules.	Mission-pass sweeps	`dcs-scripting` `references/states.md` rules: escape injected source with
+chunk injection	constraint		Injected source is escaped with `%q` and every return is treated as an untrusted string.	Mission-pass sweeps	`%q`, treat every return as an untrusted string, namespace any global the
+chunk injection	constraint		Any global a chunk leaves behind is namespaced under `DcsTerrainExtract_`.	Mission-pass sweeps	chunk leaves behind under `DcsTerrainExtract_`, and declare and verify
+payload length check	constraint		The length of every returned payload is declared and verified.	Mission-pass sweeps	the length of every returned payload. The chunk does the work and
+chunk injection	behavior		The chunk does the work and returns one string that the hook decodes.	Mission-pass sweeps	returns one string; the hook decodes it. `net.dostring_in` returns two
+net.dostring_in	interface		`net.dostring_in` returns two values, the chunk's string and a boolean.	Mission-pass sweeps	values, the chunk's string and a boolean; on a Lua error the string is
+net.dostring_in	behavior		On a Lua error the returned string is the error message and the boolean is false.	Mission-pass sweeps	the error message and the boolean is false. A 3 MB return costs 18 ms.
+net.dostring_in	constraint		A 3 MB `net.dostring_in` return costs 18 ms.	Mission-pass sweeps	the error message and the boolean is false. A 3 MB return costs 18 ms.
+chunk injection	constraint		Never send a chunk before `DCS.getModelTime()` has advanced.	Mission-pass sweeps	Never send a chunk before `DCS.getModelTime()` has advanced. A
+frame budget	constraint		A mission-pass step is one chunk and exceeds `frame_budget_ms` by design; the budget applies between steps.	Mission-pass sweeps	mission-pass step is one chunk and exceeds `frame_budget_ms` by design;
+surface sweep	behavior		Per tile, one chunk loops the tile's cells calling `land.getSurfaceType({x = x, y = z})`.	Mission-pass sweeps	**surface**: per tile, one chunk that loops the tile's cells calling
+surface sweep	behavior		The surface chunk returns the `tile_size²` bytes as a string.	Mission-pass sweeps	`land.getSurfaceType({x = x, y = z})` and returns the `tile_size²` bytes
+surface sweep	constraint		A full 256 × 256 surface tile costs 147 ms measured.	Mission-pass sweeps	as a string. A full 256 × 256 tile costs 147 ms measured; use
+surface sweep	behavior		The surface sweep uses quarter-tiles (64 rows) so a step is about 40 ms.	Mission-pass sweeps	quarter-tiles (64 rows) so a step is about 40 ms. Tiles in the
+surface sweep	behavior		Tiles in the skip set are not swept for `surface`.	Mission-pass sweeps	skip set are not swept. Caucasus is about 2 250 tiles, about
+surface sweep	constraint		Caucasus is about 2 250 tiles, about six minutes of surface call time.	Mission-pass sweeps	six minutes of call time.
+scenery sweep	behavior		The scenery sweep sends one chunk per sphere of radius 15 km centred on a 20 km lattice covering the grid.	Mission-pass sweeps	**scenery**: one chunk per sphere of radius 15 km centred on a 20 km
+scenery sweep	constraint		A lattice of spacing `s` needs sphere radius ≥ `s/√2` for full coverage.	Mission-pass sweeps	lattice covering the grid (a lattice of spacing `s` needs radius
+scenery sweep	dependency		Each returned line carries `getName()` (the numeric id, a Lua number), `getTypeName()` and `getPoint()`.	Mission-pass sweeps	`getName()` (the numeric id, a Lua number; the hook's `id` for the
+scenery sweep	constraint		The hook's `id` for the same object is a string, so the join is on `tostring`.	Mission-pass sweeps	same object is a string, so join on `tostring`), `getTypeName()`,
+scenery sweep	dependency		For the first instance of each type name the line also carries `getDesc().displayName`, `getDesc().category` and `getLife()`.	Mission-pass sweeps	for the first instance of each type name also `getDesc().displayName`,
+scenery sweep	constraint		A 20 km sphere at Kutaisi returns 3.2 MB in 525 ms.	Mission-pass sweeps	`getDesc().category` and `getLife()`. A 20 km sphere at Kutaisi
+scenery dedup	behavior		The hook de-duplicates scenery by `id` across spheres.	Mission-pass sweeps	hook de-duplicates by `id` across spheres, accumulates the per-model
+model catalogue	behavior		The hook accumulates the per-model catalogue for `scenery_models.json`: counts, OBB and radius medians, `type` bits.	Mission-pass sweeps	catalogue for `scenery_models.json` (counts, OBB and radius medians from
+footprint call	behavior		For each new object the hook calls `terrain.getObjectsAtMapPoint(x, z)` in its own state.	Mission-pass sweeps	calls `terrain.getObjectsAtMapPoint(x, z)` in its own state and attaches
+footprint call	behavior		The hook attaches `obb` and `radius` when an entry with the same `id` comes back.	Mission-pass sweeps	the `obb` and `radius` when an entry with the same `id` comes back.
+scenery sweep	constraint		Whole-theatre counts are around a million objects on Caucasus.	Mission-pass sweeps	Whole-theatre counts are around a million objects on Caucasus; write
+scenery.jsonl	behavior		`scenery.jsonl` is written in append mode as spheres complete.	Mission-pass sweeps	`scenery.jsonl` in append mode as spheres complete. The mission must
+heliport	constraint		The mission must contain no heliport statics or FARPs.	Mission-pass sweeps	contain no heliport statics or FARPs: a placed heliport removes every
+heliport	dependency		A placed heliport removes every scenery object within about 150 m at spawn, per the probe log.	Mission-pass sweeps	scenery object within about 150 m at spawn (probe log), and the extract
+heliport	behavior		An extract taken with a heliport placed would carry the hole.	Mission-pass sweeps	would carry the hole. The hook checks `world.getAirbases()` for
+helipad check	behavior		The hook checks `world.getAirbases()` for `Airbase.Category.HELIPAD` entries whose `getID()` is not an `id` in `airdromes.json`.	Mission-pass sweeps	`Airbase.Category.HELIPAD` entries whose `getID()` is not an `id` in
+helipad check	behavior		The hook logs a warning naming such helipads and skips the scenery sweep.	Mission-pass sweeps	logs a warning naming them and skips the scenery sweep unless
+allow_helipads	definition		`allow_helipads = true` in config lets the scenery sweep run despite helipads.	Mission-pass sweeps	`allow_helipads = true` is set in config (map-shipped helipads on some
+allow_helipads	definition		`allow_helipads` is a switch because map-shipped helipads on some theatres may appear too.	Mission-pass sweeps	theatres may appear here too, which is why it is a switch).
+encoders	constraint		Two small encoders live in the hook and are unit-tested in the stub harness before anything else is written.	Encoders	Two small encoders live in the hook and are unit-tested in the stub
+i16le	interface		`i16le(v)` and `u8(v)` encode per `extract-format.md`, with clamping.	Encoders	- `i16le(v)`, `u8(v)`: per `extract-format.md`, with clamping.
+json encoder	interface		`json(value)` escapes strings per RFC 8259: quotes, backslash, control characters as `\u00XX`.	Encoders	- `json(value)`: strings escaped per RFC 8259 (quotes, backslash,
+json encoder	constraint		`json` writes numbers as `%.17g` and refuses `inf` and `nan`.	Encoders	control characters as `\u00XX`), numbers as `%.17g` with `inf`/`nan`
+json encoder	behavior		`json` emits arrays for tables with consecutive integer keys from 1, else objects with keys sorted.	Encoders	refused, arrays for tables with consecutive integer keys from 1, objects
+json_null	definition		`json` emits `null` for the sentinel `JSON_NULL` value.	Encoders	otherwise with keys sorted, `null` for a sentinel `JSON_NULL` value.
+literal.lua	dependency		Adapt the traversal of `dcs-scripting/assets/Literal.lua` but do not reuse its output syntax.	Encoders	Adapt `dcs-scripting/assets/Literal.lua`'s traversal; do not reuse its
+pcall	constraint		Every DCS call is wrapped in `pcall`.	Failure handling	Every DCS call is wrapped in `pcall`. A failure logs the call, arguments
+failure	behavior		A failure logs the call, arguments and message, marks the current tile `failed` in manifest `notes`, and moves on.	Failure handling	and message, marks the current tile `failed` in the manifest `notes`, and
+failure	behavior		The run does not stop on a failure.	Failure handling	moves on; the run does not stop. A tile with any failed sample is
+failed tile	behavior		A tile with any failed sample is written with `nodata` in those cells and listed in `notes`.	Failure handling	written with `nodata` in those cells and listed in `notes`. If the
+terrain change	behavior		If the terrain id changes mid-run the hook logs, writes the manifest and returns to idle.	Failure handling	terrain id changes mid-run (the user opened another map), the hook logs,
+performance	goal		On the measured machine, Caucasus authored area at 50 m: config and tables under a minute.	Performance targets	Caucasus authored area at 50 m, on the measured machine: config and
+performance	goal		The pre-sweep takes about a minute.	Performance targets	tables under a minute; the pre-sweep about a minute; `water` and `height`
+performance	goal		`water` and `height` take about two minutes each.	Performance targets	about two minutes each; roads about 25 minutes at 1 km seeds (see the
+performance	goal		Roads take about 25 minutes at 1 km seeds.	Performance targets	about two minutes each; roads about 25 minutes at 1 km seeds (see the
+performance	goal		`surface` takes about six minutes and `scenery` a few minutes (about 1 000 spheres).	Performance targets	roads sweep); `surface` about six minutes; `scenery` a few minutes
+performance	dependency		A dense 15 km scenery sphere is 225 to 355 ms and an empty one 4 ms, about 7 µs per object serialised.	Performance targets	(about 1 000 spheres; a dense 15 km sphere is 225 to 355 ms, an empty
+responsiveness	goal		The hook must keep the editor or the sim responsive throughout; `frame_budget_ms` exists for this.	Performance targets	one 4 ms, about 7 µs per object serialised). The hook must keep the editor or the sim responsive
+responsiveness	nongoal		Raw speed is not the target; the extraction should finish while the user does something else.	Performance targets	extraction finishing while the user does something else, not raw speed.
+stub harness	dependency		Tests run under `extractor/test/StubHarness.lua` with a fake `terrain` module and a fake `net.dostring_in`.	Testing	Run under `extractor/test/StubHarness.lua`, a copy of
+stub harness	constraint		`extractor/test/StubHarness.lua` is a copy of `dcs-scripting/scripts/StubHarness.lua` vendored into the repository so CI does not depend on a skill directory.	Testing	so CI does not depend on a skill directory, with a fake `terrain`
+closed-form terrain	dependency		The fakes are backed by the same closed-form terrain the Rust synthetic generator uses ("Synthetic theatre").	Testing	terrain the Rust synthetic generator uses (`core.md`,
+harness test	constraint		The harness run must produce an extract directory that `dcsterrain check-extract` accepts.	Testing	that `dcsterrain check-extract` accepts and that is sample-for-sample
+harness test	constraint		The harness extract must be sample-for-sample identical to the Rust generator's output for the same parameters.	Testing	identical to the Rust generator's output for the same parameters. Unit
+unit tests	constraint		Unit tests cover the two encoders on boundary values and grid computation from each bounds source.	Testing	tests: the two encoders on boundary values; grid computation from each
+unit tests	constraint		Unit tests cover grid computation from the pre-sweep and resume from a manifest with half the tiles.	Testing	bounds source and from the pre-sweep; resume from a manifest with half
+unit tests	constraint		Unit tests cover the fill and sea skip set.	Testing	the tiles; the fill and sea skip set; the road pair de-duplication; the mission-pass length check
+unit tests	constraint		Unit tests cover road pair de-duplication and the mission-pass length check rejecting a truncated payload.	Testing	skip set; the road pair de-duplication; the mission-pass length check
+acceptance	constraint		Acceptance 1: the harness run produces a valid extract identical to the synthetic reference.	Acceptance	1. Harness run produces a valid extract identical to the synthetic
+acceptance	constraint		Acceptance 2: real Caucasus with a 10 × 10 km `crop_m` around Kutaisi completes both passes under two minutes.	Acceptance	2. On the real Caucasus with a `crop_m` of 10 × 10 km around Kutaisi,
+acceptance	constraint		Acceptance 2 also requires `dcsterrain check-extract` to pass on that extract.	Acceptance	both passes complete in under two minutes and `dcsterrain check-extract`
+acceptance	constraint		Acceptance 3: ten cells' `height` samples equal `floor(GetHeight + 0.5)` read live through the bridge.	Acceptance	3. Spot check: ten cells' `height` samples equal `floor(GetHeight + 0.5)`
+acceptance	constraint		The Kutaisi reference point (−284887, 683859) reads 45.010 m live and 45 in the extract.	Acceptance	(−284887, 683859) reads 45.010 m live and 45 in the extract.
+acceptance	constraint		Acceptance 4: a full Caucasus run completes both passes with the sim responsive.	Acceptance	4. Full Caucasus run completes both passes with the sim responsive, and
+acceptance	constraint		The full-run manifest `timing_ms` is recorded in the probe log.	Acceptance	the manifest `timing_ms` is recorded in the probe log.
+fill test	behavior		Each layer sweep compares its own unrounded return with the fill triple first and makes the other two calls only on a match.	Hook-pass sweeps	the unrounded value: it compares its own call's return with the fill
+fill test	dependency		The other two fill-test calls are `GetHeight` or `GetSurfaceType`, and `GetSurfaceHeightWithSeabed`.	Hook-pass sweeps	`GetSurfaceType`, and `GetSurfaceHeightWithSeabed`) only on a match, so
+fill test	constraint		The extra fill-test cost falls on fill cells alone.	Hook-pass sweeps	the extra cost falls on fill cells alone; a fill cell is encoded
+fill test	behavior		A fill cell is encoded `nodata`.	Hook-pass sweeps	the extra cost falls on fill cells alone; a fill cell is encoded
+fill test	dependency		Each layer sweep applies the fill test of `extract-format.md` ("Tile binary layout") on the unrounded value.	Hook-pass sweeps	the fill test of `extract-format.md` ("Tile binary layout") on
+pre-sweep	definition		The post-density line is 201 `GetHeight` calls at 10 m along x.	Lifecycle	at 10 m along x) and one `getClosestPointOnRoads` snap (nil where no
+pre-sweep	behavior		The pre-sweep's `getClosestPointOnRoads` snap is nil where no road is reachable, and a nil snap counts as "no road".	Lifecycle	road is reachable; a nil snap is "no road"), sliced under
+pre-sweep	dependency		The pre-sweep bounds rule is given in `extract-format.md`, "manifest.json".	Lifecycle	`authored_bounds_m` (`extract-format.md`, "manifest.json");
+manifest rewrite	behavior		The manifest is rewritten at the end of each sweep and at every phase change, never per tile.	Lifecycle	"manifest.json"). The manifest is rewritten at the end of each sweep
+path cost	dependency		In 200 calls near Kutaisi, 166 were under 1 ms, 8 above 5 ms, maximum 18 ms.	Hook-pass sweeps	mean (200 calls near Kutaisi: 166 under 1 ms, 8 above 5 ms, maximum
+seed merge	dependency		Near Kutaisi 126 of 441 seeds merged, where 309 of 441 snapped more than 500 m.	Hook-pass sweeps	before pairing (126 of 441 near Kutaisi, where 309 of 441 snapped more
+skip set	constraint		No seed is placed in a skip-set tile.	Hook-pass sweeps	than 500 m), and no seed is placed in a skip-set tile.
+stub harness	dependency		`dcs-scripting/scripts/StubHarness.lua` is 1 197 lines.	Testing	`dcs-scripting/scripts/StubHarness.lua` (1 197 lines; it stubs
+stub harness	behavior		The harness stubs `net.dostring_in` and passes `require` through, so the fake `terrain` module installs through `package.loaded`.	Testing	`net.dostring_in` and passes `require` through, so the fake `terrain`

@@ -1,0 +1,88 @@
+# spec: mcp-server.md
+# sha256: 4c89082627e1ef4100f52fdd9323ea31a346fa639e5b732e3cb1d20ba775c90b
+# generated: 2026-09-03 (re-stamped after rename; rows from the 2026-09-02 review)
+term	subject	defined_in	note
+dcsterrain serve	dcsterrain serve	Spec: MCP server	the server subcommand
+serve	dcsterrain serve	Spec: MCP server	
+MCP server	dcsterrain serve	Spec: MCP server	title
+dcsterrain-core::ops	dcsterrain serve	UNDEFINED	core operations module
+mcp-builder	mcp-builder skill	UNDEFINED	skill name
+rmcp	rmcp	Spec: MCP server	official Rust MCP SDK
+Rust MCP SDK	rmcp	Spec: MCP server	
+--file	serve command line	Process	
+--log	logging	Process	
+--max-rows	max-rows	Response discipline	
+theatre	theatre parameter	Process	
+stdio	transport	Process	
+JSON-RPC	transport	Process	
+packed file	packed file	UNDEFINED	defined in core.md
+meta	startup	UNDEFINED	packed file meta table
+check	startup	UNDEFINED	dcsterrain check levels
+serde	input schema	UNDEFINED	Rust crate
+schemars	input schema	UNDEFINED	Rust crate
+input schema	input schema	Tools	
+tool descriptions	tool descriptions	Tools	
+region-bound forms	tool descriptions	UNDEFINED	defined in query-operations.md
+terrain_describe	terrain_describe	Tools	
+describe	terrain_describe	Tools	operation name
+terrain_sample	terrain_sample	Tools	
+sample	terrain_sample	Tools	operation name
+terrain_score_site	terrain_score_site	Tools	
+score_site	terrain_score_site	Tools	operation name
+terrain_find_sites	terrain_find_sites	Tools	
+find_sites	terrain_find_sites	Tools	operation name
+terrain_visible	terrain_visible	Tools	
+visible	terrain_visible	Tools	operation name
+terrain_viewshed	terrain_viewshed	Tools	
+viewshed	terrain_viewshed	Tools	operation name
+terrain_coverage	terrain_coverage	Tools	
+coverage	terrain_coverage	Tools	operation name
+terrain_approach_spectrum	terrain_approach_spectrum	Tools	
+approach_spectrum	terrain_approach_spectrum	Tools	operation name
+terrain_unmask_profile	terrain_unmask_profile	Tools	
+unmask_profile	terrain_unmask_profile	Tools	operation name
+terrain_route	terrain_route	Tools	
+route	terrain_route	Tools	operation name
+terrain_route_alternatives	terrain_route_alternatives	Tools	
+route_alternatives	terrain_route_alternatives	Tools	operation name
+terrain_nearest	terrain_nearest	Tools	
+nearest	terrain_nearest	Tools	operation name
+terrain_scenery_in	terrain_scenery_in	Tools	
+scenery_in	terrain_scenery_in	Tools	operation name
+terrain_chokepoints	terrain_chokepoints	Tools	
+chokepoints	terrain_chokepoints	Tools	operation name
+terrain_trafficability	terrain_trafficability	Tools	
+trafficability	terrain_trafficability	Tools	operation name
+conveniences	conveniences	Tools	
+terrain_geo	terrain_geo	Tools	
+terrain_criteria_help	terrain_criteria_help	Tools	
+criteria table	terrain_criteria_help	UNDEFINED	in query-operations.md
+terrain_metrics_help	terrain_metrics_help	Tools	
+difficulty tables	terrain_metrics_help	Tools	not carried; campaign business
+bitmask	viewshed output	Response discipline	
+polygons	viewshed output	Response discipline	
+Issue	error mapping	UNDEFINED	error list type from core
+MCP tool errors	error mapping	Response discipline	
+dcs_build	provenance fields	UNDEFINED	
+terrain_digest	provenance fields	UNDEFINED	
+cell_size	provenance fields	UNDEFINED	
+resource	describe resource	Resources	
+dcsterrain://	describe resource	Resources	resource URI scheme
+synthetic packed file	synthetic packed file	UNDEFINED	produced by the Rust test suite
+test client	integration test	Testing	
+worked tasks	description evaluation	UNDEFINED	in the design doc
+FARP	acceptance 2	UNDEFINED	design doc example
+stock MCP client	acceptance 1	Acceptance	
+Response discipline	result payload	Response discipline	
+large outputs	large outputs	Response discipline	
+Unit	unit tests	Testing	
+Integration	integration test	Testing	
+Startup	startup	Process	
+Logging	logging	Process	
+Transport	transport	Process	
+tool mapping	tool mapping	Tools	
+command line	serve command line	Process	
+evaluation	description evaluation	Testing	
+Acceptance	acceptance 3	Acceptance	
+geo	terrain_geo	Tools	operation name
+tokio::io::duplex	integration test	Testing	in-process transport pair for the SDK test client

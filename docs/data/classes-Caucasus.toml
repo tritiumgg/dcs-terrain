@@ -1,0 +1,112 @@
+# classes/Caucasus.toml — hand overrides for the scenery classifier
+# (spec-dcsterrain-core.md, "Scenery classification"). Model → class, with
+# the reason. Drafted from the live catalogue of 2026-09-02
+# (caucasus-scenery-catalogue.tsv: 888 859 objects, 263 models).
+#
+# Classes: building | industrial | wall | misc. `misc` objects still veto a
+# footprint through `scenery_in_footprint_max`; they are kept out of the
+# built-up density only.
+
+# --- Bridges, tunnels and crossings: long footprints over rivers and roads,
+# not built-up area. Density from them would mark a river as a town.
+"MOST(ROAD)BIG" = { class = "misc", reason = "road bridge 15 x 141 m" }
+"MOST(ROAD)BIG_END" = { class = "misc", reason = "bridge end segment, no footprint returned" }
+"MOST(ROAD)SMALL" = { class = "misc", reason = "road bridge 17 x 70 m" }
+"MOST(ROAD)SMALL-A" = { class = "misc", reason = "road bridge" }
+"MST(ROAD)SMALL" = { class = "misc", reason = "road bridge" }
+"MOST-FERMA" = { class = "misc", reason = "truss bridge 14 x 100 m" }
+"MOST-FERMA-A" = { class = "misc", reason = "truss bridge" }
+"MOSTIK" = { class = "misc", reason = "small bridge 14 x 56 m" }
+"MOSTIK-A" = { class = "misc", reason = "small bridge" }
+"MSTIK" = { class = "misc", reason = "small bridge" }
+"ONE_PIECE_BRIDGE" = { class = "misc", reason = "bridge 21 x 560 m" }
+"ONE_PIECE_BRIDGE02" = { class = "misc", reason = "bridge 21 x 1360 m" }
+"PEREHOD" = { class = "misc", reason = "footbridge 5 x 60 m" }
+"TUNNEL_ENTRANCE_CAUC_01" = { class = "misc", reason = "tunnel portal" }
+"ROKITUNNELENTRANCE01" = { class = "misc", reason = "tunnel portal" }
+
+# --- Harbour and offshore works
+"VOLNOREZ" = { class = "misc", reason = "breakwater 60 x 5 m" }
+"PRICHAL" = { class = "misc", reason = "pier 66 x 10 m" }
+"MBY_13" = { class = "misc", reason = "offshore platform" }
+"MBY_15" = { class = "misc", reason = "offshore platform" }
+"MBY_PLATFORM_02" = { class = "misc", reason = "offshore platform part" }
+"MBY_CRANE_02" = { class = "misc", reason = "platform crane" }
+"MBY_DERRICK_02" = { class = "misc", reason = "platform derrick" }
+"MBY15_HELIPAD" = { class = "misc", reason = "platform helipad" }
+"MBY13_HELIPAD" = { class = "misc", reason = "platform helipad" }
+
+# --- Open ground that is not a building: a FARP on a football pitch is a
+# good site, and these must not count as built-up.
+"TENNIS" = { class = "misc", reason = "tennis court 49 x 23 m, flat" }
+"FOOTBALL" = { class = "misc", reason = "football pitch 193 x 80 m, flat" }
+"BASCETBALL" = { class = "misc", reason = "basketball court, flat" }
+"PLATFORMA_AKACYA" = { class = "misc", reason = "railway platform 3.6 x 20 m" }
+
+# --- Small structures the size rule leaves as buildings
+"OHR-VYSHKA" = { class = "misc", reason = "guard tower 3 x 3 m" }
+"AIRBASE_VOR" = { class = "misc", reason = "VOR antenna ring, no walls" }
+"LOKATOR" = { class = "misc", reason = "radar antenna" }
+"MIG19-MONUMENT" = { class = "misc", reason = "monument" }
+
+# --- Parked vehicles and radars placed as scenery at airbases. They return
+# no footprint from getObjectsAtMapPoint and have vehicle-like life values.
+"KAMAZ-FIRE" = { class = "misc", reason = "fire truck, no footprint" }
+"KAMAZ-TENT" = { class = "misc", reason = "truck, no footprint" }
+"GAZ-66" = { class = "misc", reason = "truck, category 2" }
+"GAZ-66_SEARCHLIGHT" = { class = "misc", reason = "searchlight truck" }
+"URAL_4320_B" = { class = "misc", reason = "truck" }
+"URAL_4320_K" = { class = "misc", reason = "truck" }
+"URAL_4320_T" = { class = "misc", reason = "truck" }
+"URAL_4320-31" = { class = "misc", reason = "truck" }
+"URAL_ATMZ-5" = { class = "misc", reason = "fuel truck" }
+"URAL_ATZ-10" = { class = "misc", reason = "fuel truck" }
+"URAL-APA" = { class = "misc", reason = "ground power truck" }
+"ATZ-60" = { class = "misc", reason = "fuel truck" }
+"BTR-80" = { class = "misc", reason = "APC, category 2" }
+"RSP-7" = { class = "misc", reason = "radar trailer" }
+"PRW-11" = { class = "misc", reason = "radar" }
+"RLS-37" = { class = "misc", reason = "radar" }
+"RSP_DRL-7" = { class = "misc", reason = "radar" }
+"RSP_PELENG" = { class = "misc", reason = "direction finder" }
+"RSP_RADIO" = { class = "misc", reason = "radio trailer" }
+"RSP_ESD-20" = { class = "misc", reason = "generator" }
+"RSBN" = { class = "misc", reason = "nav beacon" }
+"RSBN_GENER" = { class = "misc", reason = "beacon generator" }
+"RSBN_GSM" = { class = "misc", reason = "beacon fuel" }
+
+# --- Industrial structures the name regex does not catch
+"BAK_NEW" = { class = "industrial", reason = "storage tank 18 x 18 m" }
+"TOPLIVO-BAK_NEW" = { class = "industrial", reason = "fuel tank" }
+"GRADIR" = { class = "industrial", reason = "cooling tower" }
+"TEC_A_NEW" = { class = "industrial", reason = "power station 80 x 66 m" }
+"STANCIJA3" = { class = "industrial", reason = "substation" }
+"NASOS" = { class = "industrial", reason = "pump house, no footprint" }
+"PAR_GSM" = { class = "industrial", reason = "fuel store" }
+"PAR_AGREGATNAYA" = { class = "industrial", reason = "plant room" }
+"PAR_APPARATNAYA" = { class = "industrial", reason = "plant room" }
+"PAR_APPARATNAYA_20" = { class = "industrial", reason = "plant room" }
+"GARAGE_A_NEW" = { class = "industrial", reason = "garage block 30 x 32 m, 23 787 instances" }
+"GARAGE_B_NEW" = { class = "industrial", reason = "garage block 19 x 40 m" }
+"FERMA_A_NEW" = { class = "industrial", reason = "farm barn 24 x 56 m" }
+"FERMA_B_NEW" = { class = "industrial", reason = "farm barn 23 x 120 m" }
+"TECH_NEW" = { class = "industrial", reason = "works 68 x 56 m" }
+"TR_BUDKA_NEW" = { class = "industrial", reason = "transformer booth, 22 298 instances" }
+"WODOKACHKA_A_NEW" = { class = "industrial", reason = "water tower" }
+"WODOKACHKA_B" = { class = "industrial", reason = "water tower" }
+"WODOKACHKA_C" = { class = "industrial", reason = "water tower" }
+"DOK_S_NEW" = { class = "industrial", reason = "dock shed 35 x 94 m" }
+"TUAPSE_TOWERA" = { class = "industrial", reason = "refinery tower" }
+"TUAPSE_TOWERB" = { class = "industrial", reason = "refinery tower" }
+"TUAPSE_TOWERC" = { class = "industrial", reason = "refinery tower" }
+"TUAPSE_DEOILER" = { class = "industrial", reason = "refinery plant" }
+"AIRBASE_BARRELS_01" = { class = "industrial", reason = "fuel barrels" }
+"AIRBASE_BARRELS_02" = { class = "industrial", reason = "fuel barrels" }
+"KORPUS_ATOM" = { class = "industrial", reason = "reactor hall 65 x 120 m" }
+"TELE_BASH_NEW" = { class = "industrial", reason = "TV tower" }
+"TELE_BASH_M_NEW" = { class = "industrial", reason = "TV tower 98 x 98 m footprint" }
+"MAJAK" = { class = "industrial", reason = "lighthouse" }
+"MAJAK-1" = { class = "industrial", reason = "lighthouse" }
+
+# --- Walls
+"BASHNJA-STENA" = { class = "wall", reason = "fortress wall tower 5.5 x 5.4 m, 3 097 instances in a line" }

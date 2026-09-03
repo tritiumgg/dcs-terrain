@@ -1,0 +1,258 @@
+# spec: core.md
+# sha256: 1e4e06add9150804e88f1ae9017191976598e1d0e90118e21ff404a06bcb5629
+# generated: 2026-09-03 (re-stamped after rename; rows from the 2026-09-02 review)
+subject	kind	status	claim	section	anchor
+spec scope	definition		This spec covers the Rust workspace, the packed SQLite file, the derived layers, and the pack and check subcommands.	Spec: `dcsterrain` core and `pack`	The Rust workspace, the packed SQLite file, the derived layers, and the
+query-operations.md	dependency		Query operations are specified in query-operations.md.	Spec: `dcsterrain` core and `pack`	`query-operations.md`; the MCP server is `mcp-server.md`. Both
+mcp-server.md	dependency		The MCP server is specified in mcp-server.md as a thin layer over the core crate.	Spec: `dcsterrain` core and `pack`	are thin layers over the core crate defined here. Background:
+design doc	dependency		Background for this spec is design-and-facts.md.	Spec: `dcsterrain` core and `pack`	`design-and-facts.md`.
+workspace layout	definition		The workspace root dcsterrain/ holds Cargo.toml, crates/ and tests/.	Workspace	Cargo.toml                 (workspace)
+dcsterrain-core	definition		dcsterrain-core is a library crate holding the extract reader, packer, file reader and operations.	Workspace	dcsterrain-core/         library: extract reader, packer, file reader, operations
+dcsterrain-cli	definition		dcsterrain-cli is the dcsterrain binary with pack, check-extract, check, query and serve subcommands.	Workspace	binary `dcsterrain`: pack, check-extract, check, query, serve
+dcsterrain-mcp	definition		dcsterrain-mcp is a library of MCP tool definitions over core.	Workspace	library: MCP tool definitions over core (see mcp-server.md)
+integration tests	constraint		Workspace integration tests under tests/ use synthetic data only.	Workspace	workspace integration tests (synthetic only)
+rusqlite	dependency		rusqlite is built with the bundled feature and an rtree-capable build.	Workspace	Dependencies: `rusqlite` with `bundled` and `rtree`-capable build (the
+rusqlite	dependency		The bundled SQLite has R-tree enabled.	Workspace	bundled SQLite has R-tree on); `serde`, `serde_json`; `rayon`; `clap`
+serde	dependency		The workspace depends on serde and serde_json.	Workspace	`serde`, `serde_json`; `rayon`
+rayon	dependency		The workspace depends on rayon.	Workspace	`serde_json`; `rayon`; `clap`
+clap	dependency		The CLI uses clap.	Workspace	for the CLI; `thiserror`; `memmap2` optional for tile reads. No native
+thiserror	dependency		The workspace depends on thiserror.	Workspace	`thiserror`; `memmap2` optional
+memmap2	dependency		memmap2 is an optional dependency for tile reads.	Workspace	`memmap2` optional for tile reads
+native libraries	constraint		No native libraries are used beyond the bundled SQLite.	Workspace	libraries beyond the bundled SQLite. Builds on Windows, macOS and Linux
+build platforms	constraint		The workspace builds on Windows, macOS and Linux with stable Rust.	Workspace	with stable Rust; CI builds all three.
+ci	constraint		CI builds all three platforms.	Workspace	CI builds all three
+public surface	definition		dcsterrain-core exposes the modules extract, pack, file, grid, derive, graph, los, ops, synth and types.	Workspace	Public surface of `dcsterrain-core`:
+extract module	interface		The extract module reads and validates an extract directory per extract-format.md.	Workspace	pub mod extract;   // read + validate an extract directory
+pack module	interface		The pack module builds a packed file from an extract.	Workspace	pub mod pack;      // build a packed file from an extract
+file module	interface		The file module opens a packed file and serves tile and table reads.	Workspace	pub mod file;      // open a packed file; tile reads; table reads
+grid module	interface		The grid module provides tile addressing, windows and bilinear sampling.	Workspace	pub mod grid;      // tile addressing, windows, bilinear sample
+derive module	interface		The derive module computes slope, aspect, tpi, roughness, distance transforms, SAT and horizon.	Workspace	pub mod derive;    // slope, aspect, tpi, roughness, distance transforms, SAT, horizon
+graph module	interface		The graph module builds the road graph and runs A* and betweenness.	Workspace	pub mod graph;     // road graph build, A*, betweenness
+los module	interface		The los module provides line of sight, viewshed and coverage.	Workspace	pub mod los;       // line of sight, viewshed, coverage
+ops module	interface		The ops module implements the operations of query-operations.md as functions.	Workspace	pub mod ops;       // the operations of query-operations.md, as functions
+synth module	interface		The synth module is the synthetic theatre generator, compiled under cfg(any(test, feature = "synth")).	Workspace	pub mod synth;     // synthetic theatre generator
+types module	interface		The types module holds serde types shared by ops, CLI and MCP.	Workspace	pub mod types;     // serde types shared by ops, CLI and MCP
+packed file	definition		The packed file is one SQLite file.	Packed file	One SQLite file. Opened by the reader with `query_only=1`,
+reader pragmas	behavior		The reader opens the file with query_only=1, mmap_size=1 GiB and no journal.	Packed file	`mmap_size=1 GiB`, no journal. Written by `pack` with `page_size=8192`,
+pack pragmas	behavior		pack writes with page_size=8192, journal_mode=OFF and synchronous=OFF.	Packed file	`journal_mode=OFF`, `synchronous=OFF`, one transaction per grid, then
+pack transactions	behavior		pack uses one transaction per grid and then runs VACUUM.	Packed file	`VACUUM`.
+meta table	interface		The meta table has key TEXT PRIMARY KEY and value TEXT.	Packed file	CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
+meta keys	interface		meta holds format_version, theatre_id, dcs_build and dcs_build_timestamp.	Packed file	-- format_version, theatre_id, dcs_build, dcs_build_timestamp,
+terrain fingerprint	definition		meta.terrain_fingerprint is the manifest object as JSON, stored alongside terrain_digest.	Packed file	-- terrain_fingerprint (the manifest object as JSON), terrain_digest,
+meta keys	interface		meta holds extracted_at, packed_at, dcsterrain_version, crs_proj4 and the bounds keys.	Packed file	-- extracted_at, packed_at, dcsterrain_version, crs_proj4, bounds_sw_x, bounds_sw_z, bounds_ne_x,
+meta keys	interface		meta holds grid_origin_x, grid_origin_z, grid_width and grid_height.	Packed file	-- bounds_ne_z, grid_origin_x, grid_origin_z, grid_width, grid_height,
+meta keys	interface		meta holds cell_size, tile_size, sea_enabled and the bullseye_blue coordinates.	Packed file	-- cell_size, tile_size, sea_enabled, bullseye_blue_x, bullseye_blue_z,
+meta keys	interface		meta holds the bullseye_red coordinates, has_mission_pass and layers_dropped.	Packed file	-- bullseye_red_x, bullseye_red_z, has_mission_pass, layers_dropped,
+validation figures	interface		meta holds validation_height_rmse, validation_los_agreement, validation_route_ratio and validation_at.	Packed file	-- validation_route_ratio, validation_at
+meta keys	interface		meta holds omit_sea_tiles, fill_height, fill_water and fill_seabed.	Packed file	-- omit_sea_tiles, fill_height, fill_water, fill_seabed,
+grid table	interface		The grid table keys on name with cell_size, origin_x, origin_z, width, height, dtype and tile_size.	Packed file	CREATE TABLE grid(name TEXT PRIMARY KEY, cell_size REAL, origin_x REAL,
+grid table	interface		The grid table also stores nodata, unit, derived_from and params as TEXT.	Packed file	nodata TEXT, unit TEXT, derived_from TEXT, params TEXT);
+grid_tile table	interface		grid_tile stores data BLOB, min_val and max_val keyed by (name, tx, tz) WITHOUT ROWID.	Packed file	CREATE TABLE grid_tile(name TEXT, tx INT, tz INT, data BLOB,
+scenery table	interface		scenery stores id, model, class, x, z, alt, rotation, obb_w, obb_d and radius.	Packed file	CREATE TABLE scenery(id INTEGER PRIMARY KEY, model TEXT, class TEXT,
+scenery_idx	interface		scenery_idx is an R-tree over id, minx, maxx, minz, maxz.	Packed file	CREATE VIRTUAL TABLE scenery_idx USING rtree(id, minx, maxx, minz, maxz);
+scenery_class table	interface		scenery_class maps model to class and source.	Packed file	CREATE TABLE scenery_class(model TEXT PRIMARY KEY, class TEXT, source TEXT);
+road_node table	interface		road_node stores id, x, z and network.	Packed file	CREATE TABLE road_node(id INTEGER PRIMARY KEY, x REAL, z REAL, network TEXT);
+road_edge table	interface		road_edge stores a, b, network, length, geometry, betweenness and crosses_water.	Packed file	CREATE TABLE road_edge(id INTEGER PRIMARY KEY, a INT, b INT, network TEXT,
+road_edge_idx	interface		road_edge_idx is an R-tree over edge bounding boxes.	Packed file	CREATE VIRTUAL TABLE road_edge_idx USING rtree(id, minx, maxx, minz, maxz);
+road_edge indexes	interface		Indexes road_edge_a and road_edge_b cover road_edge(a) and road_edge(b).	Packed file	CREATE INDEX road_edge_a ON road_edge(a); CREATE INDEX road_edge_b ON road_edge(b);
+airdrome table	interface		airdrome stores id, name_id, code, name, x, z, lat, lon, civilian, abandoned and class.	Packed file	CREATE TABLE airdrome(id INT PRIMARY KEY, name_id TEXT, code TEXT, name TEXT,
+runway table	interface		runway stores airdrome, name, endpoints x1, z1, x2, z2, course and length.	Packed file	CREATE TABLE runway(airdrome INT, name TEXT, x1 REAL, z1 REAL, x2 REAL,
+stand table	interface		stand stores airdrome, name, x, z, crossroad_index, helicopter and airplane flags, shelter and dimensions.	Packed file	CREATE TABLE stand(airdrome INT, name TEXT, x REAL, z REAL, crossroad_index INT,
+beacon table	interface		beacon stores id, type, callsign, name, frequency_hz, channel, x, z, alt, lat and lon.	Packed file	CREATE TABLE beacon(id TEXT PRIMARY KEY, type INT, callsign TEXT, name TEXT,
+radio table	interface		radio stores id, callsign, roles and the hf, fm, vhf and uhf flags.	Packed file	CREATE TABLE radio(id TEXT PRIMARY KEY, callsign TEXT, roles TEXT,
+poi table	interface		poi stores id, kind, name, x and z.	Packed file	CREATE TABLE poi(id INTEGER PRIMARY KEY, kind TEXT, name TEXT, x REAL, z REAL);
+poi_idx	interface		poi_idx is an R-tree over poi bounding boxes.	Packed file	CREATE VIRTUAL TABLE poi_idx USING rtree(id, minx, maxx, minz, maxz);
+poi table	behavior		poi holds towns.json as kind = 'town'.	Packed file	`poi` holds `towns.json` as `kind = 'town'` and `nodes.json` as two
+poi table	behavior		poi holds nodes.json as two rows per node, kind = 'node_red' and kind = 'node_blue', with the node's name.	Packed file	rows per node, `kind = 'node_red'` and `kind = 'node_blue'`, with the
+edge geometry	definition		road_edge.geometry is the edge polyline as little-endian f32 (x, z) pairs.	Packed file	`geometry` is the edge polyline as little-endian `f32` pairs `(x, z)`.
+layers_dropped	definition		meta.layers_dropped lists the grids omitted by pack config.	Packed file	`meta.layers_dropped` lists grids omitted by pack config. Every grid's
+grid params	definition		Every grid's params is a JSON string of the parameters that produced it.	Packed file	`params` is a JSON string of the parameters that produced it (window
+grid params	goal		params lets a reader tell what it is looking at.	Packed file	sizes, bin count, classes), so a reader can tell what it is looking at.
+packed file	constraint		A packed file describes one theatre at one terrain data version under one DCS core build.	Versioning	A packed file describes one theatre at one terrain data version under
+version keys	interface		meta records dcs_build, dcs_build_timestamp, terrain_fingerprint and terrain_digest, all copied from the manifest.	Versioning	one DCS core build, and says so in `meta`: `dcs_build`,
+output filename	behavior		pack names the output <theatre>-<dcs_build>-<terrain_digest>-<cell_size>m.sqlite when no name is given.	Versioning	`<theatre>-<dcs_build>-<terrain_digest>-<cell_size>m.sqlite` when no
+overwrite refusal	behavior		pack refuses to overwrite a file whose meta differs unless --force is given.	Versioning	name is given, and refuses to overwrite a file whose `meta` differs
+describe	interface		describe returns all four version keys.	Versioning	unless `--force`. `describe` returns all four keys, every operation's
+response version keys	interface		Every operation's response carries dcs_build and terrain_digest.	Versioning	response carries `dcs_build` and `terrain_digest`, and the reader
+matches_install	interface		Theatre::matches_install(install_dir) recomputes the fingerprint from a local DCS install.	Versioning	exposes `Theatre::matches_install(install_dir)` which recomputes the
+matches_install	behavior		matches_install reports which of the three fingerprint files differ.	Versioning	fingerprint from a local DCS install and reports which of the three
+terrain digest	behavior		A texture-only terrain patch leaves the digest unchanged and the file valid.	Versioning	texture-only update) leaves the digest unchanged and the file valid.
+base resolution	definition		Base resolution is the pack config cell_size: 50 (the extract's) or 100, produced by resampling.	Grids	Base resolution is the pack config `cell_size`: 50 (the extract's) or
+cell_size config	behavior		The default cell_size is 50 when the authored rectangle is under 500 000 km² and 100 above.	Grids	rectangle is under 500 000 km² and 100 above. Coarser grids are integer
+coarser grids	constraint		Coarser grids are integer multiples of the base and share the origin.	Grids	multiples of the base and share the origin. All tiles use the file's `tile_size`,
+tile size	constraint		All tiles use the file's tile_size, which is the pack config tile_size (default 64) and not the extract's.	Grids	which is the pack config `tile_size` (default 64) and not the extract's:
+tile size	behavior		pack re-tiles every grid to the pack tile_size.	Grids	`pack` re-tiles every grid. The tile is the unit a window read fetches,
+nodata	definition		nodata is defined per grid.	Grids	`nodata` is per grid. Tile blobs are the same raw layout as the extract
+tile blob layout	constraint		Tile blobs use the extract's raw layout, row-major and little-endian.	Grids	(row-major, little-endian). Absent tiles follow the extract's rule
+water grid	constraint		water tiles are stored wherever the extract has them.	Grids	tiles are stored wherever the extract has them.
+absent tile	behavior		Absent tiles follow the extract's rule in extract-format.md Grid geometry: a tile with no water tile is fill.	Grids	(`extract-format.md`, "Grid geometry"): a tile with no `water`
+absent tile	behavior		For a fill tile the reader returns nodata for every grid and 0 for valid.	Grids	tile is fill, and the reader returns `nodata` for every grid and 0 for
+absent tile	behavior		A tile whose water tile is entirely 2 and that has no height tile is sea.	Grids	`valid`; a tile whose `water` tile is entirely 2 and that has no
+absent tile	behavior		For a sea tile the reader returns 0 for height, 3 for surface, 0 for valid, and nodata for every other grid.	Grids	`height` tile is sea, and the reader returns 0 for `height`, 3 for
+height grid	definition		height is i16 at base resolution in metres, taken from the extract.	Grids	| `height` | i16 | base | m | from extract |
+water grid	definition		water is a u8 class at base resolution, taken from the extract.	Grids	| `water` | u8 | base | class | from extract |
+surface grid	definition		surface is a u8 enum at base resolution from the extract, mission pass only.	Grids	| `surface` | u8 | base | enum | from extract, mission pass only |
+valid grid	definition		valid is 1 where height is not nodata, water is not 2, and the cell is inside authored_bounds_m if known; 0 elsewhere.	Grids	1 where `height` is not nodata, `water` is not 2, and the cell is inside `authored_bounds_m` if known; 0 elsewhere
+fill cell	definition		Fill cells arrive from the extractor as nodata in every hook layer.	Grids	Fill cells arrive from the extractor as nodata in every hook layer
+fill triple	definition		pack applies no fill test of its own.	Grids	so `pack` applies no fill test of its own
+valid grid	constraint		meta.fill_* records the fill triple for provenance.	Grids	`meta.fill_*` records the triple for provenance |
+tpi_2000 grid	definition		tpi_2000 is i8 at 4 × base, height minus mean height in a 2 km radius, clamped ±127.	Grids	| `tpi_2000` | i8 | 4 × base | m | height − mean height in 2 km radius, clamped ±127 |
+dist_road grid	definition		dist_road is u16 metres at 2 × base, Euclidean distance transform to rasterised roads edges, clamped 65535.	Grids	Euclidean distance transform to rasterised `roads` edges, clamped 65535
+dist_rail grid	definition		dist_rail is the same transform computed for railroads.	Grids	| `dist_rail` | u16 | 2 × base | m | same for `railroads` |
+dist_water grid	definition		dist_water is u16 at 2 × base, distance to any water ≠ 0 cell.	Grids	| m | to any `water ≠ 0` cell |
+dist_builtup grid	definition		dist_builtup is distance to any 2 × base cell whose sat_building window of 100 m radius holds at least 3 objects.	Grids	to any 2 × base cell whose `sat_building` window of 100 m radius holds ≥ 3 objects
+sat grids	definition		sat_building and sat_industrial are i32 at 2 × base, summed-area tables over the count of objects of the class centred in each 2 × base cell, row-major inclusive prefix sums.	Grids	summed-area table over the count of objects of the class whose centre lies in each 2 × base cell
+horizon grid	definition		horizon is u8 × bins at 4 × base, the max elevation angle to terrain in each azimuth bin.	Grids	max elevation angle to the terrain in each azimuth bin, encoded
+horizon encoding	definition		horizon encodes (angle_deg + 10) × 4 clamped 0..255, covering −10° to 53.75° at 0.25°.	Grids	encoded `(angle_deg + 10) × 4` clamped 0..255 (−10° to 53.75° at 0.25°)
+horizon bins	constraint		horizon has 32 bins by default and params records the count.	Grids	bins = 32 by default, `params` records it
+horizon observer	constraint		The horizon observer is 2 m AGL with a 40 km search radius.	Grids	observer 2 m AGL; search radius 40 km
+enclosure grid	definition		enclosure is u8 deg × 4 at 4 × base, the mean over horizon bins with the same encoding.	Grids	| `enclosure` | u8 | 4 × base | deg × 4 | mean over `horizon` bins, same encoding |
+distance transform	behavior		Distance transforms use the exact, linear Felzenszwalb–Huttenlocher algorithm.	Grids	Distance transforms use Felzenszwalb–Huttenlocher (exact, linear). The
+horizon sweep	behavior		The horizon uses a per-cell azimuth sweep over the height tiles with a half-cell step.	Grids	horizon uses a per-cell azimuth sweep over the height tiles with a step
+horizon sweep	behavior		The sweep exits early when the remaining range cannot raise the angle.	Grids	of half a cell and early exit when the remaining range cannot raise the
+horizon cost	behavior		At 32 bins and 40 km horizon is the slowest derived layer, so it runs last with tiles in parallel.	Grids	angle; at 32 bins and 40 km this is the slowest derived layer, so it
+drop horizon	interface		horizon is skippable with --drop horizon.	Grids	runs last, tiles in parallel, and is skippable with `--drop horizon`.
+pack config	interface		Pack config comes from --config pack.toml or flags.	Grids	Pack config (`--config pack.toml` or flags): `cell_size` (50 or 100;
+cell_size config	interface		Pack config cell_size is 50 or 100, defaults by the 500 000 km² rule, and is recorded in meta.cell_size.	Grids	default by the 500 000 km² rule above; recorded in `meta.cell_size`),
+drop config	interface		drop = [...] lists the grids to omit.	Grids	`drop = [...]` grids to omit
+horizon config	interface		Pack config includes tile_size (default 64), horizon_bins, horizon_range_m and builtup_threshold.	Grids	`tile_size` (default 64), `horizon_bins`, `horizon_range_m`,
+tile size	interface		Pack config tile_size defaults to 64.	Grids	`tile_size` (default 64), `horizon_bins`, `horizon_range_m`,
+sea tile omission	behavior		omit_sea_tiles defaults true; a tile whose water is entirely sea is not stored for any grid except water.	Grids	(default true: a tile whose `water` is entirely sea is not stored for any
+cell_size config	behavior		A cell_size of 100 resamples the extract.	Grids	grid except `water`). A `cell_size` of 100 resamples the extract by
+cell_size config	behavior		Resampling uses nearest-neighbour for water and surface and mean for height.	Grids	nearest-neighbour for `water`/`surface` and mean for `height`. The
+cell_size config	constraint		The extract is always 50 m, so the cell_size choice is remade at pack time without another DCS run.	Grids	extract is always 50 m, so the choice is remade at pack time without
+model names	constraint		Model names are per theatre; the Caucasus set is Soviet-era Russian.	Scenery classification	Model names are per theatre: the Caucasus set is Soviet-era Russian
+caucasus models	definition		Caucasus examples include SKLAD_NEW warehouse, KOTELNAYA_A_NEW boiler house and TR_BUDKA_NEW transformer booth.	Scenery classification	(`SKLAD_NEW` warehouse, `KOTELNAYA_A_NEW` boiler house, `TR_BUDKA_NEW`
+caucasus models	definition		Further examples are HOME1UG_A apartment block, HIM_BAK_A_NEW chemical tank, BLK_LIGHT_POLE and concrete_wall_01.	Scenery classification	transformer booth, `HOME1UG_A` apartment block, `HIM_BAK_A_NEW` chemical
+model names	constraint		Syria, Sinai and Germany ship their own model sets.	Scenery classification	tank, `BLK_LIGHT_POLE`, `concrete_wall_01`), and Syria, Sinai or Germany
+classification	goal		Classification is data-driven with a hand table as an override because no hand table can be complete across theatres.	Scenery classification	ship their own sets. No hand table can be complete across theatres, so
+scenery_models.json	dependency		The extract's scenery_models.json, per extract-format.md, is the per-theatre catalogue.	Scenery classification	1. The extract's `scenery_models.json` (see `extract-format.md`) is
+scenery catalogue	definition		The catalogue holds each distinct model's count, displayName and category from getDesc(), and life.	Scenery classification	the per-theatre catalogue: for each distinct model, its count,
+scenery catalogue	definition		The catalogue holds the type bits from getObjectsAtMapPoint and the median footprint w × d.	Scenery classification	bits from `getObjectsAtMapPoint`, and the median footprint `w × d`
+scenery catalogue	definition		The catalogue holds radius; the footprint call returns no box height.	Scenery classification	and `radius` (the footprint call returns no box height).
+class override	behavior		pack applies a hand override from classes/<theatre>.toml or classes/common.toml before any rule.	Scenery classification	a hand override in `classes/<theatre>.toml` or `classes/common.toml`
+class override	definition		Override files ship in the crate, map model to class with a `reason`, and are optional.	Scenery classification	(shipped in the crate, model → class with a `reason`, optional); else
+wall rule	behavior		A model is wall when min(w, d) < 1 m and max(w, d) ≥ 4 m.	Scenery classification	`min(w, d) < 1 m` and `max(w, d) ≥ 4 m`; else `misc` when
+misc rule	behavior		A model is misc when w × d < 4 m², covering poles, wire, signs and pipes.	Scenery classification	`w × d < 4 m²` (poles, wire, signs, pipes); else `industrial` when
+industrial rule	behavior		A model is industrial when its name or displayName matches a small regex list.	Scenery classification	the model name or `displayName` matches a small regex list
+industrial regex	definition		The industrial regex is SKLAD, ANGAR, HIM_BAK, BAK, CEH, KOTELNAYA, TANK, SILO, HANGAR, WAREHOUSE, FACTORY, PLANT, DEPOT, REFINERY.	Scenery classification	(`SKLAD|ANGAR|HIM_BAK|BAK|CEH|KOTELNAYA|TANK|SILO|HANGAR|WAREHOUSE|
+industrial regex	constraint		The industrial regex is extended per theatre.	Scenery classification	FACTORY|PLANT|DEPOT|REFINERY`, extended per theatre); else
+building rule	behavior		Any model not matched by an earlier rule is building.	Scenery classification	`building`. `scenery_class.source` records `override`,
+scenery_class.source	definition		scenery_class.source records override, rule:nofootprint, rule:wall, rule:misc, rule:industrial or rule:building.	Scenery classification	`rule:nofootprint`, `rule:wall`, `rule:misc`, `rule:industrial` or
+pack report	behavior		The pack report prints the catalogue with assigned class and source, sorted by count.	Scenery classification	3. The pack report prints the catalogue with the assigned class and
+pack report	goal		A person can review the top hundred models of a new theatre in a minute and add overrides.	Scenery classification	source, sorted by count, so a person can review the top hundred
+classification	constraint		Nothing is silently misc; every assignment has a stated reason.	Scenery classification	silently `misc` any more; every assignment has a stated reason.
+scenery classes	definition		The four classes everywhere are building, industrial, wall and misc.	Scenery classification	Classes stay the same four everywhere: `building`, `industrial`, `wall`,
+scenery alt	definition		scenery.alt is the object's own y.	Scenery classification	`misc`. `alt` is the object's own `y`.
+wall rule	dependency		On Caucasus no model reaches the wall rule, because the objects it is for (concrete_wall_01, wire, hook type 131072) never arrive from world.searchObjects.	Scenery classification	`wire`, hook `type` 131072) never arrive from `world.searchObjects`;
+wall rule	constraint		The wall rule stays for theatres that may expose wall-type objects.	Scenery classification	the rule stays for theatres that may expose them.
+road graph	definition		The road graph is built from roads.jsonl and railroads.jsonl.	Road graph	From `roads.jsonl` and `railroads.jsonl`:
+vertex snapping	behavior		Every path polyline vertex snaps to a 1 m lattice and identical snapped vertices become one node.	Road graph	1. Collect every path polyline. Snap vertices to a 1 m lattice; identical
+edge merge	behavior		Consecutive vertices form edges and identical edges are merged.	Road graph	2. Consecutive vertices form edges; identical edges are merged.
+edge split	behavior		An edge is split where another path's vertex lies on it within 1 m.	Road graph	3. Split an edge where another path's vertex lies on it within 1 m.
+node contraction	behavior		Degree-2 nodes whose two edges are collinear within 1° are contracted, concatenating geometry.	Road graph	4. Nodes with degree 2 whose two edges are collinear within 1° are
+node contraction	goal		After contraction, intersections and bends are the nodes.	Road graph	contracted, concatenating geometry, so intersections and bends are
+edge length	definition		road_edge.length is the polyline length.	Road graph	5. `length` is the polyline length; `crosses_water` is 1 when any 25 m
+crosses_water	definition		crosses_water is 1 when any 25 m sample along the geometry has water ≠ 0.	Road graph	sample along the geometry has `water ≠ 0`.
+betweenness	behavior		Betweenness centrality is computed by Brandes on the largest component.	Road graph	6. Betweenness centrality by Brandes on the largest component, with
+betweenness samples	interface		--betweenness-samples N defaults to 2000 source nodes for large graphs.	Road graph	`--betweenness-samples N` (default 2000 source nodes) for large
+betweenness	constraint		Betweenness is stored per edge, normalised to 0..1.	Road graph	graphs; stored per edge, normalised to 0..1.
+seeds	constraint		Seeds and nopath lines are not stored.	Road graph	Seeds and `nopath` lines are not stored; the pack report gives their
+road coverage	definition		The pack report gives seed and nopath counts and the fraction of seeds whose snap point lies on the final graph.	Road graph	counts and the fraction of seeds whose snap point lies on the final
+road coverage	definition		The seed snap fraction is the coverage check.	Road graph	graph, which is the coverage check.
+latlon_samples	dependency		config.json carries latlon_samples.	Projection	`config.json` carries `latlon_samples`. `pack` fits a transverse
+crs fit	behavior		pack fits a transverse Mercator with k_0 = 0.9996 on WGS84 by least squares over lon_0 and two offsets.	Projection	Mercator (`k_0 = 0.9996`, WGS84) from them by least squares over
+crs fit	behavior		pack compares the fit to the design doc table when the theatre is listed.	Projection	`lon_0` and the two offsets, compares to the table in the design doc when
+crs_proj4	behavior		pack stores the fitted crs_proj4 in meta together with the residual.	Projection	the theatre is listed, and stores the fitted `crs_proj4` in `meta` with
+crs residual	constraint		A residual over 2 m fails the pack unless --allow-crs-residual is given.	Projection	the residual. A residual over 2 m fails the pack unless `--allow-crs-residual`.
+theatre open	interface		file::Theatre::open(path) reads meta and grid once.	Reader	`file::Theatre::open(path)` reads `meta` and `grid` once, then serves
+tile lru	behavior		Tile blobs are served on demand through a small LRU of 64 tiles by default.	Reader	tile blobs on demand through a small LRU (default 64 tiles) so a
+tile lru	goal		A regional query touches its tiles once and nothing stays resident after the call.	Reader	regional query touches its tiles once and nothing stays resident after
+grid window	interface		grid::Window reads an arbitrary rectangle across tiles into a contiguous buffer.	Reader	the call. `grid::Window` reads an arbitrary rectangle across tiles into
+grid sample	interface		grid::sample(x, z) is bilinear on height and nearest on everything else.	Reader	a contiguous buffer; `grid::sample(x, z)` is bilinear on `height` and
+rtree queries	behavior		The R-tree tables are queried with plain SQL.	Reader	nearest on everything else. The R-tree tables are queried with plain
+sql functions	constraint		No application-defined SQL functions are registered.	Reader	SQL. No application-defined SQL functions are registered.
+los visible	interface		los::visible(a, b) samples the height along the segment every half cell with bilinear interpolation.	Line of sight	`los::visible(a, b)` samples the height along the segment every half
+los visible	behavior		visible compares the samples to the straight line between the two altitudes.	Line of sight	cell with bilinear interpolation and compares to the straight line
+flat world	dependency		The world is flat, per the design doc.	Line of sight	between the two altitudes; the world is flat (design doc). It returns
+los visible	behavior		visible returns the first blocking sample.	Line of sight	the first blocking sample. `los::viewshed` runs radials at an angular
+los viewshed	behavior		viewshed runs radials at an angular step giving one radial per cell on the outer ring.	Line of sight	step that gives one radial per cell on the outer ring; `los::coverage`
+los coverage	definition		los::coverage is viewshed at several target altitudes.	Line of sight	is viewshed at several target altitudes; `los::spectrum` keeps the
+los spectrum	definition		los::spectrum keeps the per-radial unmask distance instead of integrating it.	Line of sight	per-radial unmask distance instead of integrating it, and is what
+los spectrum	interface		los::spectrum is what approach_spectrum returns.	Line of sight	`approach_spectrum` returns. The design doc records 300 of
+los validation	dependency		The design doc records 300 of 300 agreement with terrain.isVisible for this method at 10 m sampling.	Line of sight	300 agreement with `terrain.isVisible` for this method at 10 m sampling;
+half-cell sampling	constraint		The half-cell rule at 50 m is 25 m and is the parameter the validation sortie measures.	Line of sight	the half-cell rule at 50 m is 25 m and is the parameter the validation
+synth theatre	interface		synth::Theatre::new(seed, size_km, cell_size) returns closed-form functions and can write a complete extract directory.	Synthetic theatre	`synth::Theatre::new(seed, size_km, cell_size)` returns closed-form
+synth terrain	definition		The synthetic terrain is a plane rising 1 % to the north.	Synthetic theatre	functions and can write a complete extract directory. Terrain: a plane
+synth hills	definition		Two Gaussian hills of 600 m and 250 m with sigma 1.5 km sit at fixed positions.	Synthetic theatre	rising 1 % to the north, two Gaussian hills (600 m and 250 m, sigma 1.5
+synth lake	definition		A circular lake of 2 km radius at a fixed centre has water = 1 and flat height 100 m.	Synthetic theatre	km) at fixed positions, a circular lake of 2 km radius at a fixed centre
+synth river	definition		A straight river 60 m wide has water = 3.	Synthetic theatre	(`water = 1`, height 100 m flat), a straight river 60 m wide (`water =
+synth sea	definition		Sea has water = 2 and height 0 in the south-west corner beyond a straight coastline.	Synthetic theatre	3`), sea (`water = 2`, height 0) in the south-west corner
+synth roads	definition		One road runs west to east along the plane, crossing the river on a 200 m bridge.	Synthetic theatre	beyond a straight coastline. One road along the plane from west to east
+synth roads	definition		A second road runs north over the col between the hills.	Synthetic theatre	crossing the river on a 200 m bridge, a second road north over the col
+synth railway	definition		A railway runs parallel to the first road 3 km south.	Synthetic theatre	between the hills, a railway parallel to the first road 3 km south; a
+synth runway	definition		The synthetic runway is 2.5 km long.	Synthetic theatre	runway 2.5 km long; 40 scenery objects with footprints in two clusters
+synth scenery	definition		40 scenery objects form a town of building, an industrial pair, and a line of misc poles along the road.	Synthetic theatre	(a "town" of `building` and an "industrial" pair) plus a line of `misc`
+synth fill margin	definition		A 2 km margin inside the grid edge is fill so valid has a closed-form region.	Synthetic theatre	poles along the road; a 2 km margin inside the grid edge that is fill:
+closed-form expectations	constraint		Every quantity the derived layers compute has a closed-form expectation.	Synthetic theatre	region. Every quantity the derived layers compute has a
+closed-form expectations	definition		Expectations include plane slope, horizon angle from a hill, distance to the road, bridge betweenness and the FARP scan region.	Synthetic theatre	closed-form expectation: slope of the plane, horizon angle at a point at
+lua harness fake	dependency		The Lua harness fake implements the same functions from the same constants.	Synthetic theatre	The Lua harness fake implements the same functions from the same
+synth constants	constraint		The constants live in one place per language and a test compares the two extract directories byte for byte.	Synthetic theatre	constants; the constants live in one place in each language and a test
+check-extract	interface		dcsterrain check-extract <dir> runs the validation of extract-format.md.	Subcommands in this spec	- `dcsterrain check-extract <dir>`: the validation in
+check-extract	behavior		check-extract exits 0 on pass and 1 with a report on failure.	Subcommands in this spec	`extract-format.md`; exit 0 on pass, 1 with a report on failure.
+pack subcommand	interface		dcsterrain pack <dir> <out.sqlite> accepts --config pack.toml and --drop g,...	Subcommands in this spec	- `dcsterrain pack <dir> <out.sqlite> [--config pack.toml] [--drop g,...]
+pack flags	interface		pack accepts --cell-size N, --allow-partial and --allow-crs-residual.	Subcommands in this spec	[--cell-size N] [--allow-partial] [--allow-crs-residual]
+pack flags	interface		pack accepts --betweenness-samples N and --threads N.	Subcommands in this spec	[--betweenness-samples N] [--threads N]`: builds the file, prints a
+pack report	interface		The pack report covers grids, sizes, timings, unknown scenery models, road coverage and CRS residual.	Subcommands in this spec	report (grids, sizes, timings, unknown scenery models, road coverage,
+pack report	interface		The pack report prints as text or as JSON with --json.	Subcommands in this spec	CRS residual) as text or `--json`.
+check subcommand	interface		dcsterrain check <file> [--install <dir>] verifies invariants on a packed file.	Subcommands in this spec	- `dcsterrain check <file> [--install <dir>]`: invariants on a packed file: `meta`
+check invariants	constraint		check requires meta complete and every grid row to have tiles or be listed in layers_dropped.	Subcommands in this spec	complete; every `grid` row has tiles or is listed in `layers_dropped`;
+check invariants	constraint		check requires tile blob sizes to match and min_val/max_val to match on a sampled 5 % of tiles.	Subcommands in this spec	tile blob sizes match; `min_val`/`max_val` match a sampled 5 % of
+check invariants	constraint		check requires every road_edge to reference existing nodes.	Subcommands in this spec	tiles; every `road_edge` references existing nodes; R-tree entries
+check invariants	constraint		check requires R-tree entries to equal row counts and poi, airdrome and beacon to lie inside bounds.	Subcommands in this spec	equal row counts; `poi`, `airdrome`, `beacon` inside bounds. With
+check install	behavior		With --install <dir>, check also runs Theatre::matches_install and reports which of the three fingerprint files differ.	Subcommands in this spec	`--install <dir>` it also runs `Theatre::matches_install` and reports
+check subcommand	behavior		check exits 0 or 1 with a report.	Subcommands in this spec	1 with a report.
+stamp subcommand	interface		dcsterrain stamp <file> key=value ... writes meta keys.	Subcommands in this spec	- `dcsterrain stamp <file> key=value ...`: writes `meta` keys, used by
+stamp subcommand	goal		The validation sortie uses stamp to record agreement figures.	Subcommands in this spec	the validation sortie to record agreement figures.
+schema subcommand	interface		dcsterrain schema [--op name] prints the JSON schema of every operation's request and response structs via schemars.	Subcommands in this spec	- `dcsterrain schema [--op name]`: prints the JSON schema of every
+schema subcommand	dependency		The Kotlin client's code generation consumes the schema output.	Subcommands in this spec	the Kotlin client's code generation.
+synth subcommand	interface		dcsterrain synth <dir> [--seed N] [--size-km N] [--cell N] writes the synthetic theatre as an extract directory.	Subcommands in this spec	- `dcsterrain synth <dir> [--seed N] [--size-km N] [--cell N]`: writes
+synth feature	constraint		The synth feature is on by default in the CLI.	Subcommands in this spec	the synthetic theatre as an extract directory (feature `synth`, on by
+synth subcommand	goal		Users and the Kotlin build can produce a test file without DCS.	Subcommands in this spec	default in the CLI), so users and the Kotlin build can produce a test
+unit tests	constraint		Unit tests per module run against the synthetic theatre and closed-form expectations.	Testing	Unit tests per module against the synthetic theatre and closed-form
+boundary tests	constraint		Boundary tests cover window reads straddling tile edges and the grid edge.	Testing	expectations, plus boundary tests: window reads straddling tile edges
+nodata propagation test	constraint		Tests check nodata propagation through every derived layer.	Testing	and the grid edge; nodata propagation through every derived layer;
+distance transform test	constraint		The distance transform is tested against brute force on a 64 × 64 grid.	Testing	distance transform against brute force on a 64 × 64 grid; SAT window
+sat test	constraint		SAT window sums are tested against brute force.	Testing	sums against brute force; horizon against a brute-force ray march on a
+horizon test	constraint		horizon is tested against a brute-force ray march on a small grid.	Testing	small grid; graph build on hand-drawn polylines with a T-junction, a
+graph build test	constraint		Graph build is tested on hand-drawn polylines with a T-junction, a loop and a duplicated segment.	Testing	loop and a duplicated segment; betweenness on a known small graph; A*
+betweenness test	constraint		Betweenness is tested on a known small graph and A* against Dijkstra.	Testing	against Dijkstra. Integration tests in `tests/` run `pack` and `check`
+integration tests	constraint		Integration tests run pack and check on the synthetic extract in a temp dir and assert the report.	Testing	on the synthetic extract in a temp dir and assert the report. The
+DCSTERRAIN_EXTRACT	constraint		The opt-in group under DCSTERRAIN_EXTRACT packs a real extract and checks only invariants, never values.	Testing	opt-in group under `DCSTERRAIN_EXTRACT` packs a real extract and checks
+committed data	constraint		No test reads a committed data file larger than a few kilobytes.	Testing	larger than a few kilobytes.
+acceptance	goal		pack on the synthetic extract produces a file that check accepts.	Acceptance	1. `pack` on the synthetic extract produces a file `check` accepts, and
+tolerance	constraint		Every derived layer matches its closed-form expectation within slope 0.1°, distances one cell, horizon 0.25°.	Acceptance	stated tolerance (slope 0.1°, distances one cell, horizon 0.25°).
+pack time	goal		pack on a real Caucasus extract at 50 m completes on a desktop under 30 minutes with horizon and under 10 without.	Acceptance	under 30 minutes with `horizon`, under 10 without, and `check`
+acceptance	goal		check passes on the real Caucasus packed file.	Acceptance	passes.
+acceptance	goal		The Lua-harness extract and the Rust synthetic extract are identical.	Acceptance	3. The Lua-harness extract and the Rust synthetic extract are identical.
+tile size	dependency		A blob never fits in one page: grid_tile is a WITHOUT ROWID index b-tree with an in-page payload limit of about 2 030 bytes at page_size 8192.	Grids	b-tree whose in-page payload limit at `page_size = 8192` is about
+tile size	constraint		Tile size 64 keeps a 10 km sightline to a handful of 8 KiB blobs.	Grids	and 64 keeps a 10 km sightline to a handful of 8 KiB blobs. A blob
+synth fill margin	behavior		The Lua fake returns the exact fill triple in the margin so the hook writes nodata; the Rust generator writes nodata directly.	Synthetic theatre	the Lua fake returns the exact triple (`GetHeight` 5.000005, `land`,
+query-time layers	definition		slope, aspect, roughness and tpi_300 are not stored and are computed from the height window at query time.	Grids	Four layers are not stored and are computed from the `height` window
+query-time layers	interface		The query-time layers are addressed by the same names in sample, chokepoints and the criteria.	Grids	at query time, addressed by the same names in `sample`, `chokepoints`
+slope layer	definition		slope is a Horn 3 × 3 gradient on height in degrees, computed at query time.	Grids	and the criteria: `slope` (Horn 3 × 3 gradient, degrees), `aspect`
+aspect layer	definition		aspect is the downslope azimuth from north, clockwise, undefined where slope < 0.5°.	Grids	(downslope azimuth from north, clockwise; undefined where slope <
+roughness layer	definition		roughness is max−min of height in a 3 × 3 window, computed at query time.	Grids	0.5°), `roughness` (max−min of `height` in 3 × 3), `tpi_300` (height −
+tpi_300 layer	definition		tpi_300 is height minus mean height in a 300 m radius, computed at query time.	Grids	mean height in a 300 m radius). The `grid` table lists them with
+query-time layers	interface		The grid table lists the query-time layers with derived_from = 'height', no tiles, and params holding the window.	Grids	`derived_from = 'height'`, no tiles, and `params` holding the window;
+query-time layers	constraint	UNVERIFIED	The query-time layers cost a few cells of height per sample, which is not measurable beside the tile read.	Grids	their cost is a few cells of `height` per sample and is not measurable
+tile size	behavior		Every tile spills to overflow pages, which VACUUM lays out contiguously.	Grids	Cell"), so every tile spills to overflow pages, which `VACUUM` lays
+nofootprint rule	behavior		After the override, a model is misc when no instance returned a footprint.	Scenery classification	`misc` when no instance returned a footprint (parked vehicles and
+nofootprint rule	dependency		Parked vehicles and radars placed as scenery return no footprint: 26 of 263 Caucasus models.	Scenery classification	radars placed as scenery do this: 26 of 263 Caucasus models); else
+classification	dependency		On the live Caucasus catalogue the rules alone give misc 34.8 %, building 57.8 % and industrial 7.4 % of objects.	Scenery classification	misc 34.8 %, building 57.8 %, industrial 7.4 % of objects;
+classes/Caucasus.toml	definition		classes/Caucasus.toml is drafted as classes-Caucasus.toml beside these documents.	Scenery classification	`classes/Caucasus.toml` (drafted as `classes-Caucasus.toml` beside
+classes/Caucasus.toml	behavior		The Caucasus override moves bridges, harbour works, sports fields and vehicles to misc.	Scenery classification	these documents) moves bridges, harbour works, sports fields and
+classes/Caucasus.toml	behavior		The Caucasus override moves tanks, garages, barns, towers and plant to industrial, and the fortress wall towers to wall.	Scenery classification	`industrial`, and the fortress wall towers to `wall`.
+logging	behavior		Every subcommand writes warnings and progress to stderr, more with --verbose.	Subcommands in this spec	- Logging: every subcommand writes warnings and progress to stderr,
+logging	constraint		stdout carries only the report or the --json document.	Subcommands in this spec	more with `--verbose`; stdout carries only the report or the `--json`
+logging	interface		Only serve takes --log <path>, because it is the one long-running process.	Subcommands in this spec	document. Only `serve` takes `--log <path>`, because it is the one

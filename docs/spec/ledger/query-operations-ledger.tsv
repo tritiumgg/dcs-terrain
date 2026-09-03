@@ -1,0 +1,184 @@
+# spec: query-operations.md
+# sha256: d970d4a842bf50e28c2cf8d0a1416c32551e6b94c6fa4170ac147847b989e2e3
+# generated: 2026-09-03 (re-stamped after rename; rows from the 2026-09-02 review)
+subject	kind	status	claim	section	anchor
+ops module	definition		dcsterrain-core::ops implements the operations over a packed file.	Spec: query operations	The operations `dcsterrain-core::ops` implements over a packed file.
+operation surfaces	interface		Each operation is one Rust function taking a serde request struct and returning a serde response struct.	Spec: query operations	Each is one Rust function taking a `serde` request struct and returning
+query subcommand	interface		Each operation is one dcsterrain query <file> <op> <json> subcommand.	Spec: query operations	a `serde` response struct, one `dcsterrain query <file> <op> <json>`
+mcp tool	interface		Each operation is one MCP tool per mcp-server.md.	Spec: query operations	subcommand, and one MCP tool (`mcp-server.md`). The three surfaces
+operation surfaces	goal		The three surfaces share the structs so their schemas cannot drift.	Spec: query operations	share the structs, so their schemas cannot drift. Worked campaign
+design doc	dependency		Worked campaign examples with live numbers are in design-and-facts.md under "Worked tasks" and "Choosing a site that is not the best".	Spec: query operations	`design-and-facts.md` under "Worked tasks" and "Choosing a site that
+box type	definition		Box is {min_x, min_z, max_x, max_z} as f64.	Common types	struct Box { min_x: f64, min_z: f64, max_x: f64, max_z: f64 }
+region type	definition		Region is an enum of Box, Circle {x, z, radius}, Polygon {points} or AirdromeBand.	Common types	enum Region { Box(Box), Circle { x, z, radius }, Polygon { points: Vec<[f64; 2]> },
+airdrome band	definition		AirdromeBand is {airdrome_id, min_dist, max_dist}.	Common types	AirdromeBand { airdrome_id, min_dist, max_dist } }
+point type	definition		Point is {x, z} as f64.	Common types	struct Point { x: f64, z: f64 }
+point3 type	definition		Point3 is {x, z, alt: Option<f64>, alt_agl: Option<f64>}.	Common types	struct Point3 { x: f64, z: f64, alt: Option<f64>, alt_agl: Option<f64> }
+point3 type	constraint		Exactly one of alt (absolute) or alt_agl (above ground) is set on a Point3; both or neither is an error.	Common types	exactly one of alt (absolute) or alt_agl (above ground) is set; both or neither is an error
+observer type	definition		Observer is {x, z, alt_agl}.	Common types	struct Observer { x: f64, z: f64, alt_agl: f64 }
+footprint type	definition		Footprint is {width, depth, orientations_deg} with orientations defaulting to [0, 90].	Common types	struct Footprint { width: f64, depth: f64, orientations_deg: Vec<f64> }
+region type	behavior		Every Region converts to its bounding Box plus a membership predicate before any grid work.	Common types	Every `Region` is converted to its bounding `Box` plus a membership
+region type	behavior		Cells outside the membership predicate are skipped.	Common types	predicate before any grid work; cells outside the predicate are
+units	constraint		All lengths are metres and all angles degrees in request and response structs.	Common types	skipped. All lengths are metres, angles degrees in the request and
+units	constraint		Radians never cross the API boundary.	Common types	response structs (radians never cross the API boundary).
+response envelope	interface		Every response carries theatre, dcs_build, terrain_digest, cell_size and elapsed_ms.	Common types	Every response carries `theatre`, `dcs_build`, `terrain_digest`,
+response envelope	goal		The envelope lets a consumer always tell what answered.	Common types	`cell_size` and `elapsed_ms` so a consumer can always tell what answered.
+errors	definition		Errors are a Vec<Issue {code, message, path}>.	Common types	Errors are a `Vec<Issue { code, message, path }>`; an operation either
+errors	constraint		An operation returns either a full result or an error, never a partial.	Common types	returns a full result or an error, never a partial.
+describe	interface		describe takes no request.	`describe`	Request: none. Response: every `meta` key, the `grid` table, row counts
+describe	interface		describe returns every meta key, the grid table, vector table row counts, layers_dropped and stamped validation figures.	`describe`	of every vector table, `layers_dropped`, and the validation figures if
+sample	interface		sample takes either region with step in metres at least cell_size, or points: Vec<Point>, plus layers: Vec<String>.	`sample`	Request: either `region` with `step: f64` (metres, ≥ cell_size), or
+sample	interface		sample returns rows {x, z, values: {layer: number|null}} at lattice points inside the region, or one row per given point in order.	`sample`	values: {layer: number|null}}` at lattice points inside the region, or
+max_rows	constraint		sample caps at max_rows, default 10 000, and errors when exceeded rather than truncating.	`sample`	one row per given point in order, capped at `max_rows` (default 10 000,
+sample	behavior		sample interpolates height bilinearly and every other layer nearest.	`sample`	error when exceeded rather than truncation). `height` is bilinear;
+geo	interface		geo takes to_latlon: Vec<Point> and/or to_xz: Vec<{lat, lon}>.	`geo`	Request: `to_latlon: Vec<Point>` and/or `to_xz: Vec<{lat, lon}>`.
+geo	interface		geo returns the converted lists in the same order using the file's crs_proj4.	`geo`	Response: the converted lists in the same order, using the file's
+geo	constraint		geo is a pure function over meta with no grid reads.	`geo`	`crs_proj4`. A pure function over `meta`; no grid reads.
+score_site	interface		score_site takes x, z, footprint and criteria: Vec<Criterion>.	`score_site`	Request: `x, z`, `footprint`, `criteria: Vec<Criterion>`. Response: for
+score_site	interface		score_site returns {orientation_deg, terms, hard_fail} for the best orientation.	`score_site`	the best orientation, `{orientation_deg, terms: [{name, value, pass,
+term	definition		Each criterion contributes one term with name, value, pass and score.	`score_site`	score}], hard_fail: bool}`. Each criterion contributes one term;
+term	definition		pass is the hard test and score is a 0..1 soft value with 1 best.	`score_site`	`pass` is the hard test, `score` is a 0..1 soft value (1 best). See
+find_sites	interface		find_sites takes region, footprint, criteria, step, spacing, limit and weights.	`find_sites`	Request: `region`, `footprint`, `criteria`, `step` (candidate lattice,
+find_sites step	constraint		The find_sites candidate lattice step defaults to 2 × cell_size.	`find_sites`	default 2 × cell_size), `spacing` (non-maximum suppression radius),
+spacing	definition		spacing is the non-maximum suppression radius.	`find_sites`	`spacing` (non-maximum suppression radius)
+find_sites limit	constraint		limit defaults to 20 with a maximum of 200.	`find_sites`	`limit` (default 20, max 200), `weights: {name: f64}` (default 1 each).
+weights	constraint		weights maps criterion name to f64, defaulting to 1 each.	`find_sites`	`weights: {name: f64}` (default 1 each)
+find_sites	interface		find_sites returns candidates {x, z, orientation_deg, score, terms}.	`find_sites`	Response: candidates `{x, z, orientation_deg, score, terms}` ranked by
+find_sites	behavior		Candidates rank by weighted sum of term scores after every hard test passes, suppressed at spacing.	`find_sites`	weighted sum of term scores after every hard test passes, suppressed at
+find_sites stats	interface		find_sites returns stats {cells_considered, cells_passed, tiles_skipped}.	`find_sites`	`spacing`, plus `stats {cells_considered, cells_passed, tiles_skipped}`.
+tile skipping	behavior		Tile min/max on height, dist_* and valid skip whole tiles a hard criterion cannot pass.	`find_sites`	Tile min/max on `height`, `dist_*` and `valid` are used to skip whole
+tile skipping	constraint		A tile whose height range is under span_max cannot fail span_max or slope_max.	`find_sites`	tiles a hard criterion cannot pass (a tile whose height range is under
+visible	interface		visible takes a: Point3 and b: Point3, each with alt or alt_agl.	`visible`	Request: `a: Point3, b: Point3`, each with `alt` or `alt_agl`.
+visible	interface		visible returns {visible: bool, blocking: Point3 | null, clearance_m: f64}.	`visible`	Response: `{visible: bool, blocking: Point3 | null,
+visible	constraint		blocking carries an absolute alt.	`visible`	the sightline and the terrain (negative when blocked); `blocking`
+clearance_m	definition		clearance_m is the minimum vertical gap between the sightline and the terrain, negative when blocked.	`visible`	clearance_m: f64}` where clearance is the minimum vertical gap between
+viewshed	interface		viewshed takes observer, radius, target_alt_agl and resolution.	`viewshed`	Request: `observer`, `radius`, `target_alt_agl`, `resolution` (default
+viewshed resolution	constraint		viewshed resolution defaults to cell_size and may be coarser.	`viewshed`	cell_size, may be coarser). Response: `{origin_x, origin_z, cell,
+viewshed	interface		viewshed returns {origin_x, origin_z, cell, width, height, bits: base64} bitmask plus visible_fraction.	`viewshed`	width, height, bits: base64}` bitmask, plus `visible_fraction`, and
+as_polygons	interface		When as_polygons is true, viewshed also returns rings: Vec<Polygon>.	`viewshed`	optionally `rings: Vec<Polygon>` when `as_polygons` is true (marching
+as_polygons	behavior		Rings come from marching squares over the mask, simplified to 0.5 cell.	`viewshed`	squares over the mask, simplified to 0.5 cell).
+coverage	interface		coverage takes site: Observer, envelope {radius, alt_bands_agl: Vec<f64>} and asset: Region | null.	`coverage`	Request: `site: Observer`, `envelope {radius, alt_bands_agl: Vec<f64>}`,
+coverage	interface		coverage takes asset: Region | null and min_masked_range (default 8 km).	`coverage`	`asset: Region | null`, `min_masked_range` (default 8 km). Response: per
+coverage	interface		coverage returns per band {alt_agl, covered_fraction, dead_zones: Vec<Polygon>}.	`coverage`	band `{alt_agl, covered_fraction,
+asset_covered_fraction	interface		When asset is given, coverage returns asset_covered_fraction per band.	`coverage`	dead_zones: Vec<Polygon>}` and, when `asset` is given, `asset_covered_
+blind_approach_exists	definition		blind_approach_exists per band is true when some radial stays masked from radius to inside min_masked_range.	`coverage`	fraction` per band, plus `blind_approach_exists: bool` per band (some
+min_masked_range	constraint		min_masked_range defaults to 8 km in coverage.	`coverage`	`asset: Region | null`, `min_masked_range` (default 8 km). Response: per
+approach_spectrum	interface		approach_spectrum takes site: Observer and radius, the engagement or search radius.	`approach_spectrum`	Request: `site: Observer`, `radius` (engagement or search radius),
+azimuth_step_deg	constraint		approach_spectrum takes alt_bands_agl: Vec<f64> and azimuth_step_deg defaulting to 5.	`approach_spectrum`	`alt_bands_agl: Vec<f64>`, `azimuth_step_deg` (default 5),
+approach_spectrum	interface		approach_spectrum takes min_masked_range (default 8 km) and sector: {from_deg, to_deg} | null.	`approach_spectrum`	`min_masked_range` (default 8 km), `sector: {from_deg, to_deg} | null`.
+approach_spectrum	behavior		For every azimuth and band the radial marches inward from radius at half-cell steps.	`approach_spectrum`	For every azimuth and band, march the radial from `radius` inward at
+approach_spectrum	behavior		The march records where the site first has line of sight to a target at that altitude.	`approach_spectrum`	half-cell steps and record where the site first has line of sight to a
+radials	interface		Response per band is radials: Vec<{bearing_deg, unmask_dist, masked_fraction, blind}>.	`approach_spectrum`	target at that altitude. Response per band: `radials: Vec<{bearing_deg,
+unmask_dist	definition		unmask_dist is the range of the first visible step, null when the radial is masked over its whole length.	`approach_spectrum`	unmask_dist, masked_fraction, blind}>` where `unmask_dist` is the range
+masked_fraction	definition		masked_fraction is the fraction of the radial's steps from radius to the site that are masked.	`approach_spectrum`	length), `masked_fraction` is the fraction of the radial's steps from
+blind radial	definition		blind is true when the radial stays masked from radius in to min_masked_range.	`approach_spectrum`	`radius` to the site that are masked, and `blind` is true when the
+spectrum summaries	interface		Summaries are blind_arc_fraction, widest_blind_arc_deg and blind_arcs: Vec<{from_deg, to_deg}>.	`approach_spectrum`	summaries `blind_arc_fraction`, `widest_blind_arc_deg`, `blind_arcs:
+spectrum summaries	interface		Summaries also include unmask_dist_min, unmask_dist_median and unmask_dist_max.	`approach_spectrum`	Vec<{from_deg, to_deg}>`, `unmask_dist_min`, `unmask_dist_median`,
+sector_summary	interface		When sector is given, the summaries restricted to it are also returned as sector_summary.	`approach_spectrum`	`unmask_dist_max`. When `sector` is given the summaries are also
+coverage	definition		coverage is approach_spectrum integrated over area.	`approach_spectrum`	returned restricted to it as `sector_summary`. `coverage` is this
+unmask_profile	definition		unmask_profile is approach_spectrum along one chosen route.	`approach_spectrum`	operation integrated over area; `unmask_profile` is it along one chosen
+approach_spectrum	goal		approach_spectrum serves a player who may come from any direction.	`approach_spectrum`	route. This one is for a player who may come from any direction.
+unmask_profile	interface		unmask_profile takes site: Observer, route: Vec<Point3> each with alt or alt_agl, and step defaulting to 100 m.	`unmask_profile`	Request: `site: Observer`, `route: Vec<Point3>` (each with `alt` or
+unmask_profile	interface		unmask_profile returns first_seen, first_seen_dist_from_site, first_seen_dist_along_route, masked_segments and visible_fraction.	`unmask_profile`	`alt_agl`), `step` (default 100 m). Response: `{first_seen: Point3 | null,
+route	interface		route takes network: "roads" | "railroads", from: Point and to: Point.	`route`	Request: `network: "roads" | "railroads"`, `from: Point`, `to: Point`,
+route	interface		route takes avoid: Vec<Region> and exposure_observers: Vec<Observer>.	`route`	`avoid: Vec<Region>`, `exposure_observers: Vec<Observer>`,
+route defaults	constraint		exposure_weight defaults to 1 and max_detour_factor defaults to 3.	`route`	`exposure_weight` (default 1), `max_detour_factor` (default 3).
+route	interface		route returns waypoints, length, ascent, descent, max_grade_pct, legs, snapped_from, snapped_to and straight_line.	`route`	Response: `{waypoints: Vec<Point>, length, ascent, descent, max_grade_pct,
+route legs	interface		Each leg has from, to, length, ascent, descent, max_grade_pct and exposure.	`route`	legs: Vec<{from, to, length, ascent, descent, max_grade_pct, exposure}>,
+route length	definition		length is the planar road geometry length between snapped endpoints, summed over road_edge.length values.	`route`	of the road geometry between the snapped endpoints, summed over edges
+ascent descent	definition		ascent and descent are cumulative from height sampled every 25 m along the geometry.	`route`	(the `road_edge.length` values); `ascent` and `descent` are cumulative
+max_grade_pct	definition		max_grade_pct is the steepest 100 m window.	`route`	is the steepest 100 m window; `straight_line` is the endpoint distance,
+detour factor	definition		straight_line is the endpoint distance, so length / straight_line is the detour factor.	`route`	so `length / straight_line` is the detour factor. Loads the subgraph in the
+subgraph loading	behavior		route loads the subgraph in the endpoints' box expanded 25 %, grown until connected or max_detour_factor is exceeded.	`route`	expanded box of the endpoints (25 %, grown until connected or
+avoid	behavior		route removes edges intersecting avoid.	`route`	`max_detour_factor` exceeded), removes edges intersecting `avoid`,
+edge weight	definition		Edge weight is length × (1 + exposure_weight × exposure).	`route`	weights `length × (1 + exposure_weight × exposure)` where exposure is
+exposure	definition		exposure is the fraction of 25 m samples visible to any observer.	`route`	the fraction of 25 m samples visible to any observer, runs A* with
+a star	behavior		route runs A* with a Euclidean heuristic.	`route`	Euclidean heuristic, and simplifies the polyline to ≤ 1 point per
+polyline simplification	behavior		route simplifies the polyline to at most 1 point per 500 m, preserving every graph node.	`route`	500 m preserving every graph node.
+route_alternatives	interface		route_alternatives takes everything route takes plus k, defaulting to 3 with a maximum of 10.	`route_alternatives`	Request: everything `route` takes, plus `k` (default 3, max 10),
+max_stretch	constraint		max_stretch defaults to 1.5, so no alternative is longer than 1.5 × the shortest.	`route_alternatives`	`max_stretch` (default 1.5: no alternative longer than 1.5 × the
+max_overlap	constraint		max_overlap defaults to 0.5, so no two alternatives share more than half their length.	`route_alternatives`	shortest), `max_overlap` (default 0.5: no two alternatives share more
+penalty	constraint		penalty defaults to 1.6.	`route_alternatives`	than half their length), `penalty` (default 1.6). Response:
+route_alternatives	interface		The response is routes: Vec<Route>, each a full route response plus stretch.	`route_alternatives`	`routes: Vec<Route>` where each is a full `route` response plus
+overlap_with	definition		overlap_with: Vec<f64> is the shared length fraction against each other returned route.	`route_alternatives`	`stretch`, `overlap_with: Vec<f64>` (shared length fraction against
+shared_edges_with_all	definition		shared_edges_with_all lists the edges every alternative uses, the true chokepoints of the endpoint pair.	`route_alternatives`	each other returned route), `shared_edges_with_all: Vec<edge id>` (the
+route chokepoints	definition		chokepoints: Vec<edge id> lists edges on this route with betweenness in the top decile.	`route_alternatives`	pair of endpoints), and `chokepoints: Vec<edge id>` (edges on this
+penalty method	behavior		The algorithm runs route for the shortest, then repeats up to 4 × k times.	`route_alternatives`	Algorithm: run `route` for the shortest; then repeat up to 4 × `k`
+penalty method	behavior		Each iteration multiplies the weight of every edge on routes found so far by penalty and reruns A*.	`route_alternatives`	times: multiply the weight of every edge on the routes found so far by
+penalty method	behavior		A candidate is accepted when its stretch and its overlap against every accepted route are within the limits.	`route_alternatives`	`penalty`, run A* again, accept the result if its stretch and its
+penalty method	behavior		Iteration stops when k routes are accepted or the candidates repeat.	`route_alternatives`	`k` are accepted or the candidates repeat. This is the penalty method;
+penalty method	goal		The penalty method produces routes that differ where the network allows and coincide only where it does not.	`route_alternatives`	it produces routes that differ where the network allows and coincide
+shared_edges_with_all	behavior		Forced coincidences such as a single bridge are reported as shared_edges_with_all.	`route_alternatives`	only where it does not (a single bridge), and it reports those forced
+yen k-shortest	nongoal		Yen's k-shortest is not used because its alternatives differ by one edge and look identical to a player.	`route_alternatives`	coincidences as `shared_edges_with_all`. Yen's k-shortest is not used
+nearest	interface		nearest takes kind as one of road, rail, airdrome, town, node, beacon or scenery.	`nearest`	Request: `kind: "road" | "rail" | "airdrome" | "town" | "node" |
+nearest	interface		nearest takes x, z, n (default 1, max 50) and a class filter for scenery.	`nearest`	"beacon" | "scenery"`, `x, z`, `n` (default 1, max 50), `class` filter
+nearest	behavior		town and node read poi by kind.	`nearest`	for scenery (`town` and `node` read `poi` by `kind`; `node` matches both
+nearest	behavior		node matches both node_red and node_blue and returns the poi.kind.	`nearest`	`node_red` and `node_blue` and returns the `poi.kind`). Response: `Vec<{kind, id, name, x, z, distance}>`. Road and
+nearest	interface		nearest returns Vec<{kind, id, name, x, z, distance}>.	`nearest`	Response: `Vec<{kind, id, name, x, z, distance}>`. Road and
+nearest	behavior		Road and rail kinds return the closest point on the nearest edge and its edge id.	`nearest`	rail return the closest point on the nearest edge and its edge id.
+scenery_in	interface		scenery_in takes region or footprint_at {x, z, footprint, orientation_deg}.	`scenery_in`	Request: `region` or `footprint_at {x, z, footprint, orientation_deg}`.
+scenery_in	interface		scenery_in returns objects {id, model, class, x, z, rotation_deg, obb_w, obb_d} and counts_by_class.	`scenery_in`	Response: `{objects: Vec<{id, model, class, x, z, rotation_deg, obb_w,
+obb overlap	behavior		The footprint form of scenery_in uses exact OBB overlap.	`scenery_in`	obb_d}>, counts_by_class}` with exact OBB overlap for the footprint
+scenery_in cap	constraint		scenery_in caps at 5 000 objects and errors above that.	`scenery_in`	form; capped at 5 000 objects, error above.
+chokepoints	interface		chokepoints takes region, network and limit.	`chokepoints`	Request: `region`, `network`, `limit`. Response: edges ranked by
+chokepoints	interface		chokepoints returns edges ranked by betweenness with crosses_water, mean tpi_300 along the geometry, and midpoint.	`chokepoints`	`betweenness`, with `crosses_water` and the mean `tpi_300` along the
+trafficability	interface		trafficability takes x, z, max_slope_deg and network.	`trafficability`	Request: `x, z`, `max_slope_deg`, `network`. Response: `{reachable:
+trafficability	interface		trafficability returns {reachable, nearest_road: Point, distance, blocking: Point | null, reason}.	`trafficability`	bool, nearest_road: Point, distance, blocking: Point | null, reason}`
+trafficability	behavior		trafficability samples the straight line to the nearest road every 25 m for slope and water.	`trafficability`	by sampling the straight line to the nearest road at 25 m for slope and
+criterion	definition		A Criterion is {name, params} from a closed set.	Criteria	A `Criterion` is `{name, params}` from this closed set. Each has a hard
+criterion	definition		Each criterion has a hard test and a soft score.	Criteria	test and a soft score.
+slope_max	definition		slope_max(deg) requires max slope over the footprint ≤ deg and scores 1 − max/deg.	Criteria	| `slope_max` | `deg` | max slope over footprint ≤ deg | 1 − max/deg |
+span_max	definition		span_max(m) requires max−min height over footprint corners and centre ≤ m and scores 1 − span/m.	Criteria	| `span_max` | `m` |
+surface_in	definition		surface_in(classes: ["land"]) requires every footprint cell's water in the set and scores 1.	Criteria	| `surface_in` | `classes: ["land"]` |
+surface_enum_in	definition		surface_enum_in(values: [1]) applies the same test on surface from the mission pass and scores 1.	Criteria	| `surface_enum_in` | `values: [1]` |
+dist_road_band	definition		dist_road_band(min, max) requires dist_road in the band and scores 1 at min, 0 at max.	Criteria	| `dist_road_band` | `min, max` |
+dist_rail_band	definition		dist_rail_band(min, max) is the same as dist_road_band for rail.	Criteria	| `dist_rail_band` | `min, max` | same | same |
+dist_water_min	definition		dist_water_min(m) requires dist_water ≥ m and scores min(1, dist_water / (2 × m)).	Criteria	| `dist_water_min` | `m` | `dist_water` ≥ m | `min(1, dist_water / (2 × m))` |
+dist_airdrome_band	definition		dist_airdrome_band(min, max, optional airdrome_id) requires distance to the nearest airdrome, or to airdrome_id when given, in the band and scores 1 at min, 0 at max.	Criteria	| `dist_airdrome_band` | `min, max, airdrome_id` (optional) |
+scenery_max	definition		scenery_max(class, radius, max) requires count in radius ≤ max, via SAT for building/industrial and R-tree otherwise.	Criteria	| `scenery_max` | `class, radius, max` |
+scenery_max	definition		scenery_max scores 1 − count/max.	Criteria	(SAT for building/industrial, R-tree otherwise) | 1 − count/max |
+scenery_in_footprint_max	definition		scenery_in_footprint_max(max) requires OBB overlap count ≤ max and scores 1 − count/max.	Criteria	| `scenery_in_footprint_max` | `max` |
+clearing_max	definition		clearing_max(radius default 150, max) requires objects within radius ≤ max and scores 1 − count/max.	Criteria	| `clearing_max` | `radius` (default 150), `max` |
+clearing_max	dependency		The clearing count is the count a heliport static would remove at spawn, per the probe log.	Criteria	the count a heliport static would remove at spawn (probe log)
+enclosure_min	definition		enclosure_min(deg) requires enclosure ≥ deg with a saturating score.	Criteria	| `enclosure_min` | `deg` |
+masked_from	definition		masked_from(bearing_deg, half_width_deg, min_elev_deg) requires every horizon bin in the sector to have elevation ≥ min_elev.	Criteria	| `masked_from` | `bearing_deg, half_width_deg, min_elev_deg` |
+masked_from	definition		masked_from scores the mean margin.	Criteria	(a ridge that way) | mean margin |
+not_visible_from	definition		not_visible_from(observers, max_fraction, own_alt_agl default 2) requires the fraction of observers with LOS ≤ max and scores 1 − fraction.	Criteria	| `not_visible_from` | `observers, max_fraction, own_alt_agl` (default 2) |
+visible_to	definition		visible_to(targets, min_fraction, own_alt_agl default 2) requires the fraction of targets with LOS ≥ min and scores that fraction.	Criteria	| `visible_to` | `targets, min_fraction, own_alt_agl` (default 2) |
+tpi_class_in	definition		tpi_class_in(classes, threshold_m default 10) requires the class from tpi_300 (local, l), tpi_2000 (regional, r) and slope with t = threshold_m to be in classes.	Criteria	| `tpi_class_in` | `classes`, `threshold_m` (default 10) |
+tpi class	definition		The class is ridge when l > t, valley when l < −t, else upper when r > t, lower when r < −t, else mid when slope > 5°, else flat.	Criteria	`ridge` when `l > t`; `valley` when `l < −t`; else `upper` when `r > t`; `lower` when `r < −t`; else `mid` when slope > 5°; else `flat`
+valid criterion	definition		valid has no params, requires valid == 1 and scores 1.	Criteria	| `valid` | none | `valid == 1` | 1 |
+valid criterion	constraint		valid is always applied.	Criteria	`valid` is always applied. `clearing_max` is `scenery_max` over every
+los criteria	behavior		LOS criteria are evaluated last because they are expensive; the others prune first.	Criteria	are the expensive ones; the others prune first.
+performance targets	constraint		Targets are measured on a packed Caucasus at 50 m, on a desktop, with a cold cache.	Performance targets	On a packed Caucasus at 50 m, desktop, cold cache: `describe` under
+describe	constraint		describe runs under 10 ms.	Performance targets	10 ms; `sample` of 10 000 rows under 100 ms; `visible` under 1 ms;
+sample	constraint		sample of 10 000 rows runs under 100 ms.	Performance targets	`sample` of 10 000 rows under 100 ms
+visible	constraint		visible runs under 1 ms.	Performance targets	`visible` under 1 ms;
+viewshed	constraint		viewshed at 20 km radius runs under 300 ms.	Performance targets	`viewshed` 20 km radius under 300 ms; `find_sites` over a 20 × 20 km
+find_sites	constraint		find_sites over a 20 × 20 km region with geometric criteria only runs under 500 ms.	Performance targets	region with geometric criteria only under 500 ms, with one LOS
+find_sites	constraint		find_sites with one LOS criterion of 36 observers runs under 10 s.	Performance targets	criterion of 36 observers under 10 s; `route` 50 km under 500 ms. Each
+route	constraint		route over 50 km runs under 500 ms.	Performance targets	`route` 50 km under 500 ms
+benchmarks	constraint		Each target is a benchmark on the synthetic theatre scaled to a 100 × 100 km grid.	Performance targets	is a benchmark on the synthetic theatre scaled to a 100 × 100 km grid,
+benchmarks	constraint		CI asserts each benchmark as an upper bound at 3× the target to allow for slow runners.	Performance targets	asserted as an upper bound in CI at 3× the target to allow for slow
+synthetic tests	constraint		Every operation has tests on the synthetic theatre with closed-form expectations.	Testing	Every operation has tests on the synthetic theatre with closed-form
+synthetic theatre	dependency		Closed-form expectations come from the design doc and core.md "Synthetic theatre".	Testing	expectations (design doc, `core.md` "Synthetic
+visible	constraint		visible is tested across the hill and around it.	Testing	theatre"): `visible` across the hill and around it; `viewshed` fraction
+viewshed	constraint		The viewshed fraction is tested against brute force.	Testing	against brute force; `coverage` dead zone behind the hill;
+coverage	constraint		coverage is tested for the dead zone behind the hill.	Testing	`coverage` dead zone behind the hill
+unmask_profile	constraint		The unmask_profile first-seen distance is tested from the hill geometry.	Testing	`unmask_profile` first-seen distance from the hill geometry; `route`
+route	constraint		route is tested choosing the bridge and avoiding a box.	Testing	choosing the bridge and avoiding a box; `find_sites` accepting only the
+find_sites	constraint		find_sites is tested accepting only the plane and rejecting the lake.	Testing	plane and rejecting the lake; `masked_from` true east of the big hill
+masked_from	constraint		masked_from is tested true east of the big hill and false west of it.	Testing	and false west of it; `chokepoints` ranking the bridge first;
+chokepoints	constraint		chokepoints is tested ranking the bridge first.	Testing	`chokepoints` ranking the bridge first
+scenery_in	constraint		scenery_in counts are tested against the generator's object list.	Testing	`scenery_in` counts against the generator's object list. Serialisation
+serialisation tests	constraint		Serialisation round-trip tests cover every request and response struct.	Testing	round-trip tests on every request and response struct. No real data.
+real data	nongoal		Tests use no real data.	Testing	No real data.
+acceptance	goal		All operations pass their synthetic tests.	Acceptance	1. All operations pass their synthetic tests.
+live examples	goal		find_sites and coverage reproduce the live FARP and SAM examples from the design doc on a real Caucasus extract.	Acceptance	2. `find_sites` and `coverage` reproduce the live FARP and SAM examples
+live examples	constraint		The live-example test is developer-local and opt-in.	Acceptance	in the design doc on a real Caucasus extract (developer-local, opt-in
+live examples	constraint		The same eight FARP candidates appear within one cell.	Acceptance	test): the same eight FARP candidates within one cell, and site 1 of
+live examples	constraint		Site 1 of the SAM example is masked from all seven western points.	Acceptance	the SAM example masked from all seven western points.
+acceptance	goal		Benchmarks are within target.	Acceptance	3. Benchmarks within target.
+clearing_max	definition		clearing_max is scenery_max over every class with radius 150 by default.	Criteria	class with radius 150 by default, kept as a named criterion because
+clearing_max	goal		clearing_max is kept as a named criterion because clearing is the word the metrics document and the campaign use.	Criteria	`clearing` is the word the metrics document and the campaign use. LOS criteria are evaluated last because they
+benchmarks	constraint		The targets are benchmarks, not correctness rules.	Performance targets	runners. The targets are benchmarks, not correctness rules; a miss is
+benchmarks	behavior		A missed target is a decision about the target or the LOS step, not a failing operation.	Performance targets	a decision about the target or the LOS step, not a failing operation.

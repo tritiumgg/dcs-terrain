@@ -1,0 +1,407 @@
+# spec: design-and-facts.md
+# sha256: da506cfeefcc9d8cf3fdf284ea86de7eb4dd3b7f60dbebeb339fd7186babccc7
+# generated: 2026-09-03 (re-stamped after rename; rows from the 2026-09-02 review)
+subject	kind	status	claim	section	anchor
+project plan	dependency		The project plan lives in `plan.md`.	Design and facts	The project plan is `plan.md`
+probe log	dependency		The raw measurements live in `probe-log-2.9.29.27278.md`.	Design and facts	measurements are `probe-log-2.9.29.27278.md`
+design and facts	goal		Specs cite this file for background rather than restating it.	Design and facts	Specs cite this file rather
+terrain file	goal		Build one portable SQLite file per theatre per DCS build.	Goal	Build one portable SQLite file per theatre per DCS build
+terrain file	goal		The file answers terrain siting and routing questions for an external campaign process.	Goal	siting and routing questions for an external campaign process
+campaign runtime	constraint		DCS does no terrain work at campaign runtime.	Goal	no terrain work at campaign runtime
+layer provenance	constraint		Every layer in the file comes from DCS's own API or DCS's own data files.	Goal	own API or from DCS's own data files
+terrain file	constraint		The file is immutable.	Goal	The file is immutable, self-describing
+meta table	definition		The file describes itself through a `meta` table.	Goal	through a `meta` table, and readable by
+terrain file	constraint		Any stock SQLite client can read the file.	Goal	readable by any stock SQLite client
+consumers	definition		The consumers are a Kotlin campaign process and an MCP server.	Goal	The consumers are a Kotlin campaign process and an MCP server
+query engine	constraint		Both consumers go through one query engine.	Goal	through one query engine, so the query surface
+query surface	definition		The query surface is a small set of named, parameterised operations with structured results.	Goal	parameterised operations with structured results
+repository	nongoal		The repository ships tools only, never extracted terrain.	Goal	tools only, never extracted terrain
+repository	constraint		Users extract their own theatres.	Goal	users extract their own theatres
+dcs-api-lookup skill	dependency		The `dcs-api-lookup` skill holds index and defs for DCS 2.9.29.27278.	Sources you have	The `dcs-api-lookup` skill: index and defs for DCS 2.9.29.27278
+dcs-api-lookup skill	constraint		Look up every symbol in the skill before calling it.	Sources you have	every symbol before you call it
+dcs-api-lookup skill	constraint		Anchor lookups on the full dotted path.	Sources you have	Anchor lookups on the full dotted path
+dcs-api-lookup skill	dependency		The skill's `me_mission.lua` line numbers sit three lines above the install's.	Sources you have	Its `ED's own use` line numbers for `me_mission.lua` sit three lines above
+dcs-scripting skill	dependency		The `dcs-scripting` skill provides environment selection and `net.dostring_in` bridge rules.	Sources you have	The `dcs-scripting` skill: environment selection, `net.dostring_in` bridge
+dcs-scripting skill	dependency		`assets/Literal.lua` serves cross-state payloads and `assets/probes/` gives probe shape.	Sources you have	`assets/Literal.lua` for cross-state payloads, `assets/probes/` for
+dcs-scripting skill	dependency		`references/coordinates.md` covers projections and `references/terrain-and-airbases.md` the airdrome table.	Sources you have	`references/terrain-and-airbases.md` for the airdrome table
+dcs install	dependency		The DCS install is read-only build 2.9.29.27278 per `autoupdate.cfg`.	Sources you have	The DCS install, read-only, build 2.9.29.27278 (`autoupdate.cfg`)
+installed terrains	dependency		Installed terrains are Caucasus, Marianas, Marianas WWII, Cold War Germany, Persian Gulf, Syria, Afghanistan and Sinai.	Sources you have	terrains: Caucasus, Marianas, Marianas WWII, Cold War Germany, Persian Gulf,
+installed terrains	dependency		Kola and Nevada directories exist but hold only `radio.lua`.	Sources you have	Kola and Nevada directories exist but hold only
+dcs-api-bridge	dependency		The `dcs-api-bridge` MCP tools are `dcs_eval_in`, `dcs_reflect`, `dcs_ping` and `dcs_bridge_status`.	Sources you have	The `dcs-api-bridge` MCP tools (`dcs_eval_in`, `dcs_reflect`, `dcs_ping`,
+bridge state	definition		`state: "hook"` is the bridge's own state.	Sources you have	`state: "hook"` is the bridge's
+bridge state	definition		`state: "server"` is the mission-scripting state.	Sources you have	`state: "server"` is the mission-scripting state
+bridge state	definition		`state: "gui"` is the Mission Editor.	Sources you have	is the Mission Editor.
+dcs install	constraint		Never write into the DCS install.	Sources you have	Never write into the DCS install
+terrain lifetime calls	constraint		Never call `terrain.Init`, `terrain.Create`, `terrain.Release`, `terrain.InitLight` or `terrain.getCrossParam` from a probe.	Sources you have	`terrain.Release`, `terrain.InitLight` or `terrain.getCrossParam` from a probe
+terrain lifetime calls	dependency		The first four manage terrain lifetime and `getCrossParam` logs an error on a bare call.	Sources you have	the first four manage terrain lifetime and the last logs an error
+call site reading	constraint		Read ED's call site for a function before calling it.	Sources you have	Read ED's call site for a function before calling it
+phase sim rule	constraint		Make mission-state `land` and `world` calls only while `dcs_bridge_status` reports phase `sim`.	Sources you have	reports phase `sim`.**
+menu crash	dependency		A `land.getHeight` in the `server` state at the main menu forces `Terrain.dll createGlobalLand` and crashes DCS.	Sources you have	main menu forces `Terrain.dll createGlobalLand` with no terrain
+menu crash	dependency		The crash log is dated 2026-09-02 16:49:11 on this build.	Sources you have	crash log 2026-09-02 16:49:11
+in-flight request	dependency		A request left in flight when DCS exits runs in the next DCS process at its first tick.	Sources you have	is executed by the next DCS process at its first tick
+in-flight request	constraint		Clear `%LOCALAPPDATA%\Temp\DCS\dcs-api-eval` before every DCS restart.	Sources you have	`%LOCALAPPDATA%\Temp\DCS\dcs-api-eval` before every DCS restart
+phase sim rule	constraint		Check phase before every `state: "server"` call.	Sources you have	phase before every `state: "server"` call
+hook terrain at menu	dependency		Hook-side `terrain.*` calls at the menu are safe and return nil.	Sources you have	Hook-side `terrain.*` calls are
+hook state	dependency		The hook state is Lua 5.1 with no `string.pack`, no `bit` library and no LuaJIT.	Sources you have	Hook-state facts **[measured]** on 2.9.29.27278: Lua 5.1 with no
+hook state	dependency		`io.open` works but file handles expose only `read`, `write`, `lines`, `flush` and `close` (no `seek`).	Sources you have	handles expose only `read`, `write`, `lines`, `flush` and `close` (no
+hook state	dependency		File sizes come from `lfs.attributes(path, "size")`, which returns 64-bit sizes.	Sources you have	`seek`), so file sizes come from `lfs.attributes(path, "size")`, which
+hook state	dependency		A 1 MiB `read` takes 9 ms.	Sources you have	returns 64-bit sizes; a 1 MiB `read` takes 9 ms; a plain Lua loop runs
+hook state	dependency		A plain Lua loop runs about 17 million simple iterations per second.	Sources you have	about 17 million simple iterations per second; `net.dostring_in(state,
+net.dostring_in	dependency		`net.dostring_in(state, src)` returns the chunk's string and a boolean, with the error message and `false` on a Lua error.	Sources you have	src)` returns the chunk's string and a boolean, with the error message
+net.dostring_in	dependency		`net.dostring_in` carries a 3 MB return in 18 ms.	Sources you have	and `false` on a Lua error, and carries a 3 MB return in 18 ms;
+hook callbacks	dependency		`onSimulationFrame` fires at the main menu and in the Mission Editor.	Sources you have	`onSimulationFrame` fires at the main menu and in the Mission Editor,
+hook callbacks	dependency		No callback fires during a mission load (`DcsApiEval.lua`, D36).	Sources you have	and no callback fires during a mission load (`DcsApiEval.lua`, D36).
+terrain module	dependency		`require("terrain")` in the hook state returns the same C module the Mission Editor uses.	The hook-side `terrain` module is the primary extraction API	`require("terrain")` in the hook state returns the same C module
+terrain module	dependency		At the main menu the module loads and `GetTerrainConfig("id")` returns nil.	The hook-side `terrain` module is the primary extraction API	`GetTerrainConfig("id")` returns nil
+terrain module	dependency		With the Mission Editor open on a map every call answers, so the editor suffices for hook-side extraction.	The hook-side `terrain` module is the primary extraction API	enough for hook-side extraction
+probe log	dependency		The probe log holds every measurement cited in the terrain-module section.	The hook-side `terrain` module is the primary extraction API	every measurement cited in this section
+terrain module	interface		Terrain-module calls take flat scalars in DCS metres, `x` north and `y` meaning DCS z (east).	The hook-side `terrain` module is the primary extraction API	all taking flat scalars in
+terrain.getheight	interface		`Terrain.GetHeight(x, z)` returns height in metres.	The hook-side `terrain` module is the primary extraction API	| `Terrain.GetHeight(x, z)` |
+terrain.getheight	dependency		ED calls `GetHeight` at `me_utilities.lua:1288-1290`.	The hook-side `terrain` module is the primary extraction API	me_utilities.lua:1288-1290
+terrain.isvisible	interface		`Terrain.isVisible(x1, alt1, z1, x2, alt2, z2)` returns a boolean LOS.	The hook-side `terrain` module is the primary extraction API	| boolean LOS |
+terrain.isvisible	dependency		ED calls `isVisible` at `me_utilities.lua:1292-1294`.	The hook-side `terrain` module is the primary extraction API	me_utilities.lua:1292-1294
+terrain.getclosestpointonroads	interface		`Terrain.getClosestPointOnRoads(typeRoad, x, z)` returns `x, z`.	The hook-side `terrain` module is the primary extraction API	`Terrain.getClosestPointOnRoads(typeRoad, x, z)`
+terrain.getclosestpointonroads	dependency		ED calls `getClosestPointOnRoads` at `me_mission.lua:6488`.	The hook-side `terrain` module is the primary extraction API	me_mission.lua:6488
+terrain.findpathonroads	interface		`Terrain.findPathOnRoads(typeRoad, x1, z1, x2, z2)` returns an array of `{x=, y=}` polyline points, or nil.	The hook-side `terrain` module is the primary extraction API	array of `{x=, y=}` polyline points, or nil
+terrain.findpathonroads	dependency		ED calls `findPathOnRoads` at `me_mission.lua:6467` and consumes it at `me_exportToMiz.lua:1560-1567`.	The hook-side `terrain` module is the primary extraction API	me_exportToMiz.lua:1560-1567
+terrain.findnearestpoint	interface		`Terrain.FindNearestPoint(x, z, 40000.0)` returns `x, z` as a legacy road-only fallback.	The hook-side `terrain` module is the primary extraction API	legacy road-only fallback
+terrain.findnearestpoint	dependency		ED calls `FindNearestPoint` at `me_mission.lua:6490`.	The hook-side `terrain` module is the primary extraction API	me_mission.lua:6490
+terrain.getobjectsatmappoint	interface		`Terrain.getObjectsAtMapPoint(x, z)` returns an array of scenery objects.	The hook-side `terrain` module is the primary extraction API	| array of scenery objects |
+terrain.getobjectsatmappoint	dependency		ED calls `getObjectsAtMapPoint` at `me_contextMenu.lua:118`.	The hook-side `terrain` module is the primary extraction API	me_contextMenu.lua:118
+terrain.getterrainconfig	interface		`Terrain.GetTerrainConfig(key)` returns a per-key value.	The hook-side `terrain` module is the primary extraction API	| `Terrain.GetTerrainConfig(key)` |
+terrain.getterrainconfig	dependency		ED calls `GetTerrainConfig` at `me_terrainDATA.lua:19-34`.	The hook-side `terrain` module is the primary extraction API	me_terrainDATA.lua:19-34
+typeroad	definition		`typeRoad` is `'roads'` or `'railroads'`.	The hook-side `terrain` module is the primary extraction API	`typeRoad` is `'roads'` or `'railroads'`
+typeroad	dependency		The `typeRoad` values come from `me_exportToMiz.lua:1556-1558`.	The hook-side `terrain` module is the primary extraction API	`me_exportToMiz.lua:1556-1558`
+terrain.getheight	dependency		`GetHeight` costs 0.0018 ms/call random and 0.00045 ms/call sequential on Caucasus.	The hook-side `terrain` module is the primary extraction API	0.0018 ms/call random, 0.00045 ms/call sequential
+height sweep	behavior		A 50 m sweep of the Caucasus authored area (148 M cells) takes about two minutes.	The hook-side `terrain` module is the primary extraction API	50 m sweep of the Caucasus authored area (148 M cells)
+terrain.getheight	dependency		Older 0.03 ms/call figures come from scattered mission-state `land.getHeight` calls.	The hook-side `terrain` module is the primary extraction API	Older measurements of 0.03 ms/call
+height sweep	constraint		Plan on the sequential figure because the sweep accesses sequentially.	The hook-side `terrain` module is the primary extraction API	sequential access is what the sweep does
+terrain.getsurfacetype	dependency		`GetSurfaceType(x, z)` returns a string: `land`, `sea`, `lake` or `river`.	The hook-side `terrain` module is the primary extraction API	`GetSurfaceType(x, z)` returns a **string**
+terrain.getsurfacetype	dependency		The hook surface string has no road or runway class.	The hook-side `terrain` module is the primary extraction API	No road or runway class
+terrain.getsurfacetype	dependency		`GetSurfaceType` costs 0.113 ms random and 0.00065 ms sequential.	The hook-side `terrain` module is the primary extraction API	0.113 ms random, 0.00065 ms sequential
+surface sweep	constraint		Sweep surface row-major or it costs 170× more.	The hook-side `terrain` module is the primary extraction API	row-major or it costs 170× more
+terrain.getsurfaceheightwithseabed	dependency		`GetSurfaceHeightWithSeabed(x, z)` returns `(height, 0)` on land and `(0, depth)` on sea with depth positive.	The hook-side `terrain` module is the primary extraction API	`(0, depth)` on sea with depth positive
+terrain.getsurfaceheightwithseabed	definition		The seabed return is the third channel of the fill test; no layer stores the depth.	The hook-side `terrain` module is the primary extraction API	fill test; no layer stores the depth.
+terrain.isvisible	dependency		`isVisible` is terrain-only: a 41 × 43 m warehouse at 0.5 m AGL does not block it.	The hook-side `terrain` module is the primary extraction API	warehouse between two points at 0.5 m AGL does not block it
+offline los check	dependency		`isVisible` agrees with an offline straight-line check over `GetHeight` at 10 m on 300 of 300 pairs, 0.5 to 15 km, in hills.	The hook-side `terrain` module is the primary extraction API	an offline straight-line check over `GetHeight` at 10 m on 300 of 300
+terrain.getobjectsatmappoint	dependency		`getObjectsAtMapPoint` is a point-in-footprint test returning nil unless the point lies inside an object's box.	The hook-side `terrain` module is the primary extraction API	is a point-in-footprint test (nil unless the
+terrain.getobjectsatmappoint	dependency		`getObjectsAtMapPoint` costs 0.004 ms/call.	The hook-side `terrain` module is the primary extraction API	point is inside an object's box), 0.004 ms/call
+scenery object hit	definition		A hit carries `id` (a string of digits), `model` (lower-case), `type`, `radius`, `rotation`, and four positional arrays `sizeOBB`, `center`, `boxMin` and `boxMax`.	The hook-side `terrain` module is the primary extraction API	`radius`, `rotation`, and four positional arrays: `sizeOBB[1], [2]`
+scenery object hit	dependency		`type` values 65536, 65537 and 131072 have been seen.	The hook-side `terrain` module is the primary extraction API	(a string of digits), `model` (lower-case), `type` (65536, 65537 or 131072 seen),
+scenery object hit	definition		`sizeOBB[1], [2]` is `w, d`; `center[1], [2]` is `x, z`; `boxMin` and `boxMax` are `[1], [2]` arrays.	The hook-side `terrain` module is the primary extraction API	(`w, d`), `center[1], [2]` (`x, z`), `boxMin[1], [2]`, `boxMax[1], [2]`.
+scenery object hit	constraint		No hit field is keyed `x`, `z`, `w` or `d`.	The hook-side `terrain` module is the primary extraction API	No field is keyed `x`, `z`, `w` or `d`.
+terrain.getobjectsatmappoint	constraint		Use `getObjectsAtMapPoint` to fetch a footprint for a known object, not to discover objects.	The hook-side `terrain` module is the primary extraction API	know about, not to discover objects
+terrain.getclosestpointonroads	dependency		`getClosestPointOnRoads` costs 0.26 ms/call random.	The hook-side `terrain` module is the primary extraction API	`getClosestPointOnRoads` 0.26 ms/call random
+terrain.findpathonroads	dependency		`findPathOnRoads` takes 16 ms for a 23 km, 161-vertex path with endpoints snapped to the road.	The hook-side `terrain` module is the primary extraction API	23 km, 161-vertex path, endpoints snapped to the road
+getterrainconfig keys	dependency		ED uses keys `id`, `Airdromes`, `defaultcamera`, `SW_bound`, `NE_bound`, `defaultDateTime`, `standDescriptionVersion`, `SummerTimeDelta`, `defaultBullseye` and `seaEnabled`.	The hook-side `terrain` module is the primary extraction API	`GetTerrainConfig` keys ED uses: `id`, `Airdromes`, `defaultcamera`,
+getterrainconfig keys	dependency		All `GetTerrainConfig` keys answer from the hook.	The hook-side `terrain` module is the primary extraction API	`SummerTimeDelta`, `defaultBullseye`, `seaEnabled`. All answer from the hook
+sw_bound/ne_bound	definition		`SW_bound` and `NE_bound` are `{x_km, 0, z_km}`.	The hook-side `terrain` module is the primary extraction API	`SW_bound` and `NE_bound` are `{x_km, 0, z_km}`
+sw_bound/ne_bound	dependency		ED reads `[1]` as x and `[3]` as z and multiplies by 1000 at `me_map_window.lua:908-921`.	The hook-side `terrain` module is the primary extraction API	`me_map_window.lua:908-921`
+bounds rectangle	dependency		Caucasus gives SW (−600, −560) km and NE (380, 1130) km.	The hook-side `terrain` module is the primary extraction API	Caucasus gives SW (−600, −560) km, NE (380,
+bounds rectangle	definition		The bounds rectangle is the raster rectangle (Caucasus 980 × 1690 km), not the authored hull.	The hook-side `terrain` module is the primary extraction API	980 × 1690 km, not the authored hull
+authored hull	definition		The authored hull is `nodesMapBorders` in `entry.lua` where present.	The hook-side `terrain` module is the primary extraction API	The authored hull is `nodesMapBorders` in `entry.lua` where present
+authored hull	dependency		Only the Caucasus `nodesMapBorders` bounds the authored area: x −418.6..26.4 km, z 113.7..943.2 km.	The hook-side `terrain` module is the primary extraction API	authored area (x −418.6..26.4 km, z 113.7..943.2 km); elsewhere the
+authored hull	dependency		The other seven theatres ship `nodesMapBorders` in `MissionGenerator/nodesMap.lua`, where it is the node-map image extent and not the hull.	The hook-side `terrain` module is the primary extraction API	`MissionGenerator/nodesMap.lua`, where it is the node-map image extent
+authored hull	dependency		Afghanistan's `nodesMapBorders` equals its bounds rectangle and Cold War Germany's exceeds it.	The hook-side `terrain` module is the primary extraction API	Germany's exceeds it **[install]**). Only the Caucasus value bounds the
+authored hull	behavior		Where `nodesMapBorders` does not bound the authored area, the extractor's pre-sweep finds the hull (Geometry facts).	The hook-side `terrain` module is the primary extraction API	extractor's pre-sweep finds the hull (Geometry facts).
+airdromes entry	definition		`Airdromes` is a table keyed by the numeric airdrome id (Kutaisi 25, Batumi 22).	The hook-side `terrain` module is the primary extraction API	`Airdromes` is a table keyed by the numeric airdrome id (Kutaisi 25,
+airdromes entry	dependency		The `Airdromes` table key is the same number `Airbase:getID()` returns in the mission state.	The hook-side `terrain` module is the primary extraction API	Batumi 22; the same number `Airbase:getID()` returns in the mission
+airdromes entry	definition		Each `Airdromes` entry carries `id` (a string name, `"KUTAISI"`), `code` (ICAO), `display_name` and `names`.	The hook-side `terrain` module is the primary extraction API	state). Each entry carries `id` (a string name, `"KUTAISI"`), `code`
+airdromes entry	definition		`reference_point` is `{x, y}` with `y` meaning z; `reference_point_geo` is `{lat, lon}`.	The hook-side `terrain` module is the primary extraction API	`reference_point` (`{x, y}`, `y` is z), `reference_point_geo`
+airdromes entry	definition		An entry carries `runways`, `runwayName`, and `beacons` and `radio` as beaconId lists.	The hook-side `terrain` module is the primary extraction API	`runways`, `runwayName`, `beacons` and `radio` (beaconId
+airdromes entry	definition		`towers`, `warehouses`, `fueldepots` and `shelters` hold `"externalId:NNN"` strings.	The hook-side `terrain` module is the primary extraction API	`towers`, `warehouses`, `fueldepots`, `shelters`
+airdromes entry	definition		`roadnet` and `roadnet5` are paths to the airfield `.rn4`/`.rn5`.	The hook-side `terrain` module is the primary extraction API	(`"externalId:NNN"` strings), `roadnet` and `roadnet5` (paths to the
+airdromes entry	definition		An entry carries `civilian`, `abandoned` and `class`.	The hook-side `terrain` module is the primary extraction API	`civilian`, `abandoned`, `class`
+airdromes entry	constraint		Prefer `reference_point` over `Airbase:getPoint()`, which is wrong for some FOBs.	The hook-side `terrain` module is the primary extraction API	`Airbase:getPoint()`, which is wrong for some FOBs
+airdromes entry	behavior		The extract records `abandoned`; consumers skip entries with `abandoned == true` as ED's editor does.	The hook-side `terrain` module is the primary extraction API	`abandoned`; consumers skip entries with `abandoned == true` as ED's own
+land api	constraint		Use the mission-scripting API only for `land.getSurfaceType` and `world.searchObjects`.	The mission-scripting `land` and `world` API is secondary	Use it for two things only
+land.getsurfacetype	dependency		`land.getSurfaceType` gives the integer enum with `ROAD = 4` and `RUNWAY = 5`, which the hook string lacks.	The mission-scripting `land` and `world` API is secondary	`RUNWAY = 5`, which the hook string lacks
+land api	interface		Reach the mission state with `net.dostring_in("server", ...)` from the hook or `dcs_eval_in` with `state: "server"`.	The mission-scripting `land` and `world` API is secondary	`net.dostring_in("server", ...)` from the hook
+land api	dependency		`land.*` takes Vec2/Vec3 tables, so the `y`-means-z trap applies there and nowhere in the terrain module.	The mission-scripting `land` and `world` API is secondary	the `y`-means-z trap
+world.searchobjects	interface		`world.searchObjects(Object.Category.SCENERY, {id = world.VolumeType.SPHERE, params = {point = vec3, radius = r}}, callback, acc)` enumerates scenery in the volume.	The mission-scripting `land` and `world` API is secondary	`world.searchObjects(Object.Category.SCENERY, {id = world.VolumeType.SPHERE,
+world.searchobjects	dependency		It returns 50 196 objects in a 20 km sphere around Kutaisi in 134 ms.	The mission-scripting `land` and `world` API is secondary	objects in a 20 km sphere around Kutaisi in 134 ms
+world.searchobjects	dependency		It returns 919 641 objects, the whole Caucasus, in a 600 km sphere in 1.34 s.	The mission-scripting `land` and `world` API is secondary	whole Caucasus, in a 600 km sphere in 1.34 s
+scenery object	dependency		`obj:getTypeName()` is the uppercase model name and `obj:getPoint()` the position.	The mission-scripting `land` and `world` API is secondary	`obj:getTypeName()` is the
+scenery object	dependency		`obj:getDesc()` has `life`, `category`, `typeName` and `displayName`.	The mission-scripting `land` and `world` API is secondary	`life`, `category`, `typeName`, `displayName`
+scenery object	dependency		A scenery object has no `getID`; `obj:getName()` returns its numeric id as a Lua number (70741507).	The mission-scripting `land` and `world` API is secondary	`getID`; `obj:getName()` returns its numeric id as a Lua number
+scenery object	dependency		`getObjectsAtMapPoint` returns the same id as a Lua string (`"70741507"`), so the two APIs join on the digits.	The mission-scripting `land` and `world` API is secondary	string (`"70741507"`) **[measured]**, so the two APIs join on the
+scenery object	constraint		A comparison of scenery ids across the two APIs must `tostring` both sides.	The mission-scripting `land` and `world` API is secondary	digits and a comparison must `tostring` both sides. The mission state
+world.searchobjects	dependency		The mission state does not return every object the hook sees.	The mission-scripting `land` and `world` API is secondary	does not return every object the hook sees: objects whose hook `type`
+world.searchobjects	dependency		Objects whose hook `type` is 131072 (`wire`, `powertranspole_rail_01`, `kran-stroi`, `kran_bash`, and `concrete_wall_01` by its absence from the whole-theatre catalogue) are invisible to `world.searchObjects` in every category.	The mission-scripting `land` and `world` API is secondary	is 131072 (`wire`, `powertranspole_rail_01`, `kran-stroi`,
+world.searchobjects	dependency		Every `type` 65536 and 65537 object is found by `world.searchObjects` (74 of 74 in 9 km² of Kutaisi).	The mission-scripting `land` and `world` API is secondary	(74 of 74 in 9 km² of Kutaisi) **[measured]**. Wires, walls and cranes
+scenery extraction	constraint		Wires, walls and cranes are absent from the dataset.	The mission-scripting `land` and `world` API is secondary	are therefore absent from the dataset; they do not block DCS's own
+scenery extraction	dependency		Wires, walls and cranes do not block DCS's own line of sight and a heliport clears them, so nothing in the design depends on them.	The mission-scripting `land` and `world` API is secondary	line of sight and a heliport clears them, so nothing in the design
+wall class	definition		The `wall` class exists for theatres that may expose wires, walls and cranes.	The mission-scripting `land` and `world` API is secondary	depends on them, and the `wall` class exists for theatres that may
+land.getsurfacetype	dependency		`land.getSurfaceType({x=, y=z})` costs 0.00075 ms/call sequential and 0.078 ms scattered.	The mission-scripting `land` and `world` API is secondary	0.00075 ms/call sequential, 0.078 ms scattered
+land.getheight	dependency		`land.getHeight` sequential costs 0.00045 ms, the same as the hook call.	The mission-scripting `land` and `world` API is secondary	`land.getHeight` sequential costs the same as the hook call
+vegetation	dependency		Trees are not reachable through any API.	The mission-scripting `land` and `world` API is secondary	**Trees are not reachable.**
+vegetation	dependency		Wooded hillsides return zero scenery objects by both methods.	The mission-scripting `land` and `world` API is secondary	Wooded hillsides return zero scenery objects
+land.getip	dependency		`land.getIP` cast downward returns exactly `getHeight` in woods, in a city and at a warehouse's origin.	The mission-scripting `land` and `world` API is secondary	`land.getIP` cast downward returns exactly `getHeight` in woods
+building los	dependency		`land.isVisible` and `terrain.isVisible` ignore buildings.	The mission-scripting `land` and `world` API is secondary	`terrain.isVisible` ignore buildings
+vegetation	dependency		No API in `scripting`, `hook`, `gui`, `export` or `config` names vegetation.	The mission-scripting `land` and `world` API is secondary	`export` or `config` names vegetation
+vegetation	nongoal		Vegetation is out of the dataset.	The mission-scripting `land` and `world` API is secondary	Vegetation is out of the dataset
+land cover	definition		Land cover for siting comes from terrain morphology (TPI, slope, roughness) and building density.	The mission-scripting `land` and `world` API is secondary	cover for siting comes from terrain morphology
+land.profile	dependency		`land.profile(vec3, vec3)` returns irregularly spaced points, median 60 m, range 0.2 to 290 m.	The mission-scripting `land` and `world` API is secondary	`land.profile(vec3, vec3)` returns irregularly spaced points
+land.profile	dependency		Its heights differ from `getHeight` by up to 1.9 m, from a coarser mesh, at 5 ms per 10 km.	The mission-scripting `land` and `world` API is secondary	from a coarser mesh, 5 ms per 10 km
+land.profile	nongoal		`land.profile` is not the height posts and is not used.	The mission-scripting `land` and `world` API is secondary	It is not the height posts and is not
+terrain container	dependency		Every terrain binary has bytes 0-3 version `2`, bytes 4-7 header size `0x30` and bytes 8-15 payload size.	The map files	bytes 0-3 version
+terrain container	dependency		Offset `0x20` holds a length-prefixed class name.	The map files	`0x20` a length-prefixed class name
+surface5 file	dependency		`landscape5::Surface5File` is the class of `Surface/<Map>.surface5`.	The map files	`landscape5::Surface5File`
+scn5 file	dependency		`landscape5::Scene5File` is `Scenes/<Map>.scn5` and lists scenery model names in plain text near the head.	The map files	which lists scenery model names in plain text near the head
+rn4 file	dependency		`landscape4::lRoadNetwork` is the class of both `roads/<Map>.rn4` and `AirfieldsTaxiways/<Airfield>.rn4`.	The map files	`landscape4::lRoadNetwork` (both `roads/<Map>.rn4` and
+routes file	dependency		`landscape4::lRoutesFile` is the class of `roads/<Map>.routes`.	The map files	`landscape4::lRoutesFile`
+rn4 file	dependency		The map-wide road network is `Mods/terrains/<Map>/roads/<Map>.rn4` (Caucasus 203 MB, Syria 2.3 GB).	The map files	(Caucasus 203 MB, Syria 2.3 GB)
+rn4 file	dependency		`getStandList` and `getRunwayList` parse airfield files of the same class on demand.	The map files	`getStandList` and `getRunwayList`
+known-plaintext oracle	definition		The oracle hands the engine a copied file, finds returned coordinates in the bytes, flips one and watches which output moves.	The map files	floats in the bytes, flip one, feed it back, watch which output moves
+map lua files	dependency		`MissionGenerator/nodes.lua` holds named regions with positions and `Map/towns.lua` town names with lat/lon.	The map files	`MissionGenerator/nodes.lua` (named regions with
+notinstances.lua	dependency		`notInstances.lua` lists scenery instance ids the map suppresses, ED's own scenery-removal mechanism.	The map files	(scenery instance ids the map suppresses
+map lua files	dependency		`beacons.lua`, `radio.lua` and `entry.lua` are plain Lua beside the binaries.	The map files	`beacons.lua`, `radio.lua`, `entry.lua`
+terrain.cfg.lua	dependency		`terrain.cfg.lua` is encrypted as `.pak.crypt`.	The map files	`terrain.cfg.lua` is
+earth shape	dependency		`getTerrainShpare()` returns `"FLAT"`, so there is no earth curvature.	Geometry facts	`getTerrainShpare()` returns `"FLAT"`
+offline los check	behavior		Offline line-of-sight over the extracted heightfield reproduces DCS's model up to interpolation detail.	Geometry facts	model up to interpolation detail
+dcs axes	definition		DCS x is north, z is east, in metres.	Geometry facts	z is east, metres. Every installed theatre
+projection	dependency		Every installed theatre is a transverse Mercator on WGS84 with `k_0 = 0.9996` and an integer `lon_0`.	Geometry facts	transverse Mercator on WGS84 with `k_0 = 0.9996` and an integer
+projection	dependency		The projection is exact to 0.000 m on 20 points per map.	Geometry facts	exact to 0.000 m on 20 points per map
+projection	dependency		Afghanistan: `lon_0` 63, easting offset 300150, northing offset 3759657.	Geometry facts	| Afghanistan | 63 | 300150 | 3759657 |
+projection	dependency		Caucasus: `lon_0` 33, easting offset 99517, northing offset 4998115.	Geometry facts	| Caucasus | 33 | 99517 | 4998115 |
+projection	dependency		Cold War Germany (`GermanyCW`): `lon_0` 21, easting offset −35427.62, northing offset 6061633.128.	Geometry facts	| 21 | −35427.62 | 6061633.128 |
+projection	dependency		Marianas (`MarianaIslands`): `lon_0` 147, easting offset −238418, northing offset 1491840.	Geometry facts	| Marianas (`MarianaIslands`) | 147 |
+projection	dependency		Marianas WWII (`MarianaIslandsWWII`): `lon_0` 147, easting offset −238418, northing offset 1491840.	Geometry facts	| Marianas WWII (`MarianaIslandsWWII`) | 147 |
+projection	dependency		Persian Gulf (`PersianGulf`): `lon_0` 57, easting offset −75756, northing offset 2894933.	Geometry facts	| 57 | −75756 | 2894933 |
+projection	dependency		Sinai (`SinaiMap`): `lon_0` 33, easting offset −169222, northing offset 3325313.	Geometry facts	| 33 | −169222 | 3325313 |
+projection	dependency		Syria: `lon_0` 39, easting offset −282801, northing offset 3879866.	Geometry facts	| Syria | 39 | −282801 | 3879866 |
+proj string	behavior		Negating both offsets into `+x_0` and `+y_0` makes PROJ's forward direction emit `(z_dcs, x_dcs)`.	Geometry facts	emits `(z_dcs, x_dcs)`
+proj string	definition		Afghanistan's string is `+proj=tmerc +lat_0=0 +lon_0=63 +k_0=0.9996 +x_0=-300150 +y_0=-3759657 +datum=WGS84 +units=m`.	Geometry facts	`+proj=tmerc +lat_0=0 +lon_0=63 +k_0=0.9996 +x_0=-300150 +y_0=-3759657
+projection	dependency		Kola and Nevada are not installed and not measured.	Geometry facts	Kola and Nevada are not installed and not
+pack	behavior		`pack` fits any unlisted theatre from the extract's `latlon_samples` and verifies a listed one the same way.	Geometry facts	`latlon_samples` and verifies a listed one the same way
+probe log	dependency		Every theatre's bounds rectangle, `defaultBullseye` and airdrome count are in the probe-log table.	Geometry facts	airdrome count are in the same probe-log table
+defaultbullseye	dependency		`defaultBullseye` is `{0, 0}` on Persian Gulf and Marianas, so it is not a reliable campaign reference.	Geometry facts	`{0, 0}` on Persian Gulf and Marianas
+fill constant	dependency		Queries outside the terrain return a per-map fill constant, not nil.	Geometry facts	return a per-map fill constant, not nil
+fill constant	dependency		The fill was measured from the hook 500 km outside the bounds rectangle.	Geometry facts	500 km outside the bounds
+fill constant	dependency		The fill is height 5.000005 with surface `land` on Afghanistan, Caucasus and Cold War Germany.	Geometry facts	height 5.000005 with surface `land` on Afghanistan
+fill constant	dependency		The fill is 10.00001 `land` on Persian Gulf.	Geometry facts	10.00001 `land` on Persian Gulf
+fill constant	dependency		The fill is 0 `sea` with seabed 100 on Syria, Sinai, Marianas and Marianas WWII.	Geometry facts	0 `sea` with seabed
+fill triple	definition		A point is fill when `GetHeight`, `GetSurfaceType` and the seabed return all equal the map's constants.	Geometry facts	`GetHeight`, `GetSurfaceType` and the seabed return all equal the
+map extent	dependency		On Caucasus `nodesMapBorders` is smaller than the bounds rectangle and contains a fill margin along its edges.	Geometry facts	`nodesMapBorders` is smaller than the rectangle and contains a fill
+map extent	dependency		On the sea-fill maps the seabed channel separates fill from in-bounds sea: in-bounds sea reads its real depth (63 to 96 m off Batumi, 2 571 m off Cyprus, 8 944 m in the Mariana Trench) and the void reads exactly 100.000.	Geometry facts	in-bounds sea: in-bounds sea reads its real depth (63 to 96 m off
+map extent	dependency		Inside the Caucasus `nodesMapBorders` 11 843 of 368 905 lattice points read exact fill and 500 read near-fill.	Geometry facts	margin along its edges (11 843 of 368 905 points, 500 near-fill).
+fill triple	constraint		The fill test is exact equality of all three channels, not a depth threshold.	Geometry facts	reads exactly 100.000, and the test is exact equality of all three
+fill triple	dependency		On Syria, Sinai and Marianas the exact fill triple occurs at 0 of 189 000, 210 000 and 520 000 lattice points inside the bounds.	Geometry facts	exact triple occurs at 0 of 189 000, 210 000 and 520 000 lattice
+fill triple	dependency		Fill lies outside the bounds rectangle, not inside it, measured on 1 or 2 km lattices over the whole rectangle.	Geometry facts	it **[measured, 1 or 2 km lattices over the whole rectangle]**:
+fill triple	dependency		Exact fill occurs at 0 of 2 210 192 lattice points on Afghanistan and 0 of 535 500 on Persian Gulf.	Geometry facts	exact fill at 0 of 2 210 192 points on Afghanistan, 0 of 535 500 on
+fill triple	dependency		On Cold War Germany 3 of 640 000 lattice points read exact fill (real land at 5.000005 m) and 3 258 further points lie within 0.5 m.	Geometry facts	5.000005 m: 3 258 further points lie within 0.5 m). On Caucasus
+fill triple	behavior		The extractor tests each cell against the exact fill triple before rounding and writes fill cells as nodata; pack derives valid from nodata.	Geometry facts	fill is 5, like real 5 m land) and writes fill cells as `nodata`;
+height raster	dependency		The height raster is far larger than the authored map: Afghanistan 1837 × 1413 km around a 552 × 798 km hull.	Geometry facts	1413 km of posts around an authored hull of 552 × 798 km
+post spacing	dependency		Post spacing is 30 to 110 m inside the authored area and 250 to 1500 m outside, measured on 2.9.28.	Geometry facts	is 30 to 110 m inside the authored area, 250 to 1500 m outside
+interpolation	dependency		On 2.9.29.27278 the second difference of `GetHeight` along a 4 km line sampled at 5 m is non-zero at almost every sample inside the authored area (Berlin 262 of 799, Leipzig 410).	Geometry facts	difference of `GetHeight` along a 4 km line sampled at 5 m is
+pre-sweep	dependency		The raster outside the hull is real, coarse terrain, so neither fill nor `nodesMapBorders` finds the hull; post density and roads do.	Geometry facts	neither fill nor `nodesMapBorders` finds the hull; post density and
+pre-sweep	definition		Breakpoints are the samples along a 2 km line sampled at 10 m where the second difference of height is non-zero.	Geometry facts	count of samples where the second difference of height is non-zero
+pre-sweep	dependency		Breakpoints per 2 km are 100 to 170 inside the authored area (Kabul, Kandahar, Herat, Jalalabad, Berlin, Hamburg, Frankfurt, Leipzig, Bremen, Kerman).	Geometry facts	is 100 to 170 inside the authored area (Kabul, Kandahar, Herat,
+pre-sweep	dependency		Breakpoints per 2 km are 0 to 35 outside the authored area (Mazar-i-Sharif, Islamabad, the Turkmen and Tajik corners, Amsterdam, Prague, Muscat, Doha).	Geometry facts	0 to 35 outside it (Mazar-i-Sharif, Islamabad, the Turkmen and Tajik
+pre-sweep	dependency		A road lies within 150 m of the inside sites and 50 to 800 km away from the outside sites.	Geometry facts	inside and 50 to 800 km away outside. Flat authored ground reads
+pre-sweep	dependency		Flat authored ground reads few breakpoints: Dubai 0 with a road at 403 m, Bandar Abbas 58.	Geometry facts	few breakpoints (Dubai 0, road 403 m; Bandar Abbas 58), so the rule
+pre-sweep	constraint		A 5 km cell is authored when breakpoints ≥ 60 or a road lies within 5 km.	Geometry facts	is: a 5 km cell is authored when breakpoints ≥ 60 or a road lies
+pre-sweep	dependency		Detailed terrain without roads exists (Zahedan, Quetta: 120 to 160 breakpoints, roads 37 to 80 km away) and counts as authored.	Geometry facts	120 to 160 breakpoints, roads 37 to 80 km away) and counts as
+design decisions	constraint		Take the design decisions as decided unless a probe contradicts them.	Design decisions	Take these as decided unless a probe contradicts them
+base grid	definition		The sweep collects the minimum: height, hook surface string and mission-state surface enum; the seabed return is read only for the fill test.	Design decisions	hook surface string, mission-state surface enum; the seabed return is
+pre-sweep	behavior		Where the theatre ships no authored `nodesMapBorders`, the authored rectangle is found by the pre-sweep, post density or road proximity on a 5 km lattice.	Design decisions	found by the pre-sweep (post density or road proximity on a 5 km
+tile omission	behavior		Tiles that are entirely fill or entirely sea are not written.	Design decisions	that are entirely fill or entirely sea are not written.
+base grid	constraint		The base grid is fixed 50 m posts in the authored rectangle.	Design decisions	posts in the authored rectangle (Caucasus: 445 × 830 km → 8900 × 16600 =
+base grid	behavior		Caucasus is 445 × 830 km → 8900 × 16600 = 148 M cells, 296 MB int16.	Design decisions	148 M cells, 296 MB int16
+base grid	behavior		Afghanistan authored 552 × 798 km gives 176 M cells.	Design decisions	Afghanistan authored 552 × 798 km → 176 M cells
+sweep cost	behavior		The sweep takes about 2 minutes for height and 2 for surface per theatre.	Design decisions	about 2 minutes for height and 2 for
+derived layers	behavior		TPI, distance transforms, horizon, summed-area tables and coarser pyramids are computed in the pack step from the extracted grid.	Design decisions	surface per theatre. Everything else — TPI, distance transforms, horizon,
+query-time layers	behavior		The cheap window layers (slope, aspect, roughness, tpi_300) are computed at query time from the height window and never stored.	Design decisions	the extracted grid, and the cheap window layers (slope, aspect,
+packed base	constraint		The extract is always 50 m; the packed base is a pack decision.	Design decisions	window and never stored. The extract is always 50 m; the packed base
+packed base	behavior		The packed base is 50 m for theatres under 500 000 km² of authored area and 100 m above, recorded in meta.	Design decisions	is a pack decision, 50 m for theatres under 500 000 km² of authored
+multi-resolution	constraint		Do not multi-resolution the DCS sweep; multi-resolution the derived products.	Design decisions	recorded in `meta`. Do not multi-resolution the
+visibility in dcs	nongoal		No visibility work happens inside DCS: no `getIP` ray sweeps and no horizon layer through the API.	Design decisions	No `getIP` ray sweeps and no horizon
+horizon layer	behavior		The horizon is computed offline from the heightfield.	Design decisions	the horizon is computed offline from the
+visibility layers	behavior		The file's visibility layers reproduce DCS's own because the offline check matched `terrain.isVisible` on 300 of 300 pairs.	Design decisions	matched `terrain.isVisible` on 300 of 300 pairs, so the file's visibility
+horizon layer	constraint		Compute the horizon at grid resolution or 2×, with 32 or 64 bins as a tunable.	Design decisions	questions need (grid resolution or 2×), with 32 or 64 bins as a tunable
+horizon layer	constraint		Treat the horizon as one derived product among several, not the core abstraction.	Design decisions	treat it as one derived product among several rather than the core
+visibility queries	behavior		Point-to-point visibility and radial viewsheds read height tiles directly.	Design decisions	Point-to-point visibility and radial viewsheds read height tiles
+scenery extraction	behavior		Tile the bounds rectangle with 20 km spheres in the mission state and collect `id`, type name and position per object.	Design decisions	Tile the bounds rectangle with 20 km spheres (or boxes) in the mission state
+scenery extraction	behavior		In the hook, call `getObjectsAtMapPoint(x, z)` at each object's position to get its oriented box.	Design decisions	`getObjectsAtMapPoint(x, z)` at each object's own position to get its oriented
+scenery storage	behavior		Store objects as rows with an R-tree and summed-area tables of building and industrial counts at 100 m.	Design decisions	box. Store objects as rows with an R-tree and summed-area tables of
+blk_light_pole	dependency		`BLK_LIGHT_POLE` is 30 % of all objects.	Design decisions	`BLK_LIGHT_POLE` is 30 % of all objects
+blk_light_pole	constraint		Class `BLK_LIGHT_POLE` as `misc` so it does not dominate density.	Design decisions	class it as `misc` so it does not
+tree class	nongoal		The schema has no tree class.	Design decisions	the schema has no tree
+road graph	behavior		Seed the road graph with `getClosestPointOnRoads` from a 1 km grid plus every airdrome and town.	Design decisions	grid (1 km) plus every airdrome and town
+road graph	behavior		Call `findPathOnRoads` between each seed and its k nearest seeds, union the polylines and snap vertices within 1 m.	Design decisions	unioning the polylines, and snapping
+road graph	behavior		Repeat the road graph build with `'railroads'`.	Design decisions	Repeat with `'railroads'`
+road graph	behavior		The path oracle yields exact road geometry from the engine's own router.	Design decisions	This yields exact road geometry
+rn4 reverse engineering	constraint		Spend at most one bounded session on `<Map>.rn4` and stop if the node table is not located.	Design decisions	stop if the node table is not located
+sqlite	constraint		The file is stock SQLite with no application-defined functions.	Design decisions	**SQLite, stock, no application-defined functions.**
+tile blob	definition		Tiles are BLOBs of raw int16/uint8 in row-major order.	Design decisions	Tiles as BLOBs of raw
+tile size	constraint		Packed tiles are 64 × 64 cells (int16 8 KiB) so a window read fetches few blobs; page_size is 8192.	Design decisions	int16/uint8 in row-major order, 64 × 64 cells (int16 8 KiB) so a window
+tile size	behavior		The extract uses a larger tile (256) for fewer files and `pack` re-tiles.	Design decisions	larger tile (256) for fewer files; `pack` re-tiles.
+tile min/max	definition		Each tile stores `min_val`/`max_val`.	Design decisions	`min_val`/`max_val` per tile
+irregular data	behavior		Irregular data goes in normal tables with R-tree indexes.	Design decisions	Irregular data in normal tables with R-tree indexes
+sqlite	constraint		Open the file read-only with `query_only` and `mmap_size` set.	Design decisions	`query_only`, `mmap_size` set
+sqlite	constraint		Keep the file pure data because registering host functions binds it to one host.	Design decisions	binds the file to one host
+dcsterrain crate	definition		Predicates live in the `dcsterrain` core crate behind both the CLI and the MCP server.	Design decisions	`dcsterrain` core crate, behind both the CLI and the MCP server
+region bound	definition		The canonical region bound is an axis-aligned box in DCS metres `{minX, minZ, maxX, maxZ}`.	Design decisions	`{minX, minZ, maxX, maxZ}`
+region bound	behavior		Circle, polygon and airfield distance band are convenience inputs converted to a box plus a post-filter predicate.	Design decisions	convenience inputs `dcsterrain` converts to a box plus a post-filter predicate
+region bound	constraint		Every query takes the box.	Design decisions	Every query takes the box
+query results	behavior		Queries return a ranked, capped candidate list with each criterion's score as a separate field.	Design decisions	criterion's score kept as a separate field
+non-maximum suppression	behavior		Non-maximum suppression runs at a caller-given spacing.	Design decisions	non-maximum suppression at a
+query results	constraint		Never return a scored grid over MCP.	Design decisions	Never return a scored grid over MCP
+dcsterrain query	behavior		`dcsterrain query` may expose the grid for the campaign's own filtering.	Design decisions	expose the grid for the campaign's own filtering
+routing	behavior		Nodes and edges live in SQLite with an R-tree on edges and an index on node id.	Design decisions	R-tree on edges and an
+routing	behavior		A route query loads the subgraph in the endpoints' box expanded by 25 %, runs A* in memory and discards it.	Design decisions	expanded by 25 %, runs A* in memory, and discards it
+routing	constraint		The bounded per-query cache satisfies "no eager theatre load".	Design decisions	which satisfies "no eager theatre load"
+contraction hierarchies	nongoal		Contraction hierarchies are not worth it at the road-network sizes DCS ships.	Design decisions	hierarchies are not worth it at road-network sizes DCS ships
+campaign overlay	definition		The file describes the map as shipped; the campaign keeps its own overlay of placed and destroyed objects.	Design decisions	The campaign keeps its own overlay of placed and destroyed objects
+scenery clearing	dependency		A heliport-category static (`FARP`, `FARP_SINGLE_01`) removes every scenery object within about 150 m at spawn, permanently.	Design decisions	every scenery object within about 150 m at spawn time, permanently
+scenery clearing	dependency		A building static removes nothing.	Design decisions	building static removes nothing
+farp clearing	behavior		For a FARP, buildings inside 150 m are the "expected clearing" cost and never a veto.	Design decisions	never a veto: they are the "expected clearing" cost
+campaign overlay	behavior		The campaign records the cleared objects in its overlay when it places the FARP.	Design decisions	records the cleared objects in its overlay when it places the FARP
+building veto	constraint		For a building static, scenery inside the footprint is a hard veto.	Design decisions	building static, scenery inside the footprint is a hard veto
+scenery pass	constraint		The scenery pass of an extract runs in a mission with no heliports placed.	Design decisions	no heliports placed, since the terrain module and the mission share one
+trigger clearing	dependency		Two Mission Editor trigger actions clear scenery, reachable via `net.dostring_in("mission", ...)` per `me_trigrules.lua:2972-3005`.	Design decisions	`MissionEditor/modules/me_trigrules.lua:2972-3005`
+a_scenery_destruction_zone	interface		`a_scenery_destruction_zone(zone, destruction_level 0..100)` is a scenery-clearing trigger action.	Design decisions	`a_scenery_destruction_zone(zone, destruction_level 0..100)`
+a_remove_scene_objects	interface		`a_remove_scene_objects(zone, objects_mask)` takes mask `0` ALL, `1` TREES ONLY, `2` OBJECTS ONLY.	Design decisions	`a_remove_scene_objects(zone, objects_mask)` with mask `0` ALL, `1`
+trigger clearing	dependency		Both trigger actions take a trigger-zone name, so the mission must define the zone.	Design decisions	Both take a trigger-zone name
+trigger clearing	dependency		The `TREES ONLY` mask admits a tree layer the engine exposes no query for.	Design decisions	admitting a tree layer it exposes no query for
+trigger clearing	behavior		The mask is the tool for flattening a site before placing a building static.	Design decisions	a site before placing a building static
+trigger clearing	dependency		Neither trigger action is measured here.	Design decisions	Neither is measured here
+version stamps	definition		The DCS core build (`autoupdate.cfg`) and the terrain module's data are versioned separately by ED.	Design decisions	and the terrain module's data are versioned separately by ED
+version stamps	dependency		A terrain can be rebuilt under an unchanged core build, which moves heights, roads and scenery.	Design decisions	heights, roads and scenery. The install carries no readable terrain
+terrain version	dependency		The install has no readable terrain version string: `entry.lua` `version` is empty and `manifest.bin` is opaque.	Design decisions	version string (`entry.lua` `version` is empty, `manifest.bin` is
+terrain fingerprint	definition		The terrain version is a fingerprint of `.surface5`, `.rn4` and `.scn5`: size, container payload size, SHA-256 of the first MiB.	Design decisions	SHA-256 of the first MiB
+version stamps	constraint		Every extract, packed file, query response and file name carries both stamps.	Design decisions	Every extract, packed file, query response and
+version stamps	behavior		The consumer compares both stamps to the install it drives.	Design decisions	the consumer compares them to the install
+concealment	definition		Concealment is terrain masking plus building density.	Design decisions	**Concealment is terrain masking plus building density.**
+concealment	definition		The two concealment channels are exposure from the heightfield and built-up density from scenery counts.	Design decisions	unreachable, the two concealment channels are exposure
+concealment	constraint		Both concealment channels are stored separately and never fused in the file.	Design decisions	separately and never fused in the file
+size budget	dependency		Size estimates come from the grid list in `core.md`.	Size budget	from the grid list in `core.md`
+base layers	behavior		Base layers (height i16, surface u8, water u8, valid u8) cost 5 bytes per 50 m cell.	Size budget	layers (height i16, surface u8, water u8, valid u8) 5 bytes; `tpi_2000`
+derived layers	behavior		tpi_2000 is stored at 200 m.	Size budget	5 bytes; `tpi_2000`
+distance grids	behavior		Distances at 100 m (four u16) cost 2 bytes per 50 m cell.	Size budget	at 200 m; distances at 100 m (four u16) 2 bytes per 50 m cell;
+summed-area tables	behavior		Summed-area tables at 100 m (two i32) cost 2 bytes per cell.	Size budget	summed-area tables at 100 m (two
+horizon layer	behavior		Horizon with 32 bins at 200 m costs 2 bytes per cell.	Size budget	horizon 32 bins at
+size budget	behavior		The full file costs about 11 bytes per 50 m cell, with 400 000 cells per 1000 km².	Size budget	About 11 bytes per 50 m
+size budget	behavior		At 50 m the file is about 4.5 MB per 1000 km² full and 2 MB base-only; a quarter of that at 100 m.	Size budget	**about 4.5 MB per 1000 km² full, 2 MB
+extract directory	behavior		The extract is 4 bytes per cell (height, water, surface) plus JSON.	Size budget	of that at 100 m. The extract is 4 bytes per cell (height, water,
+vector tables	behavior		920 000 Caucasus scenery rows with an R-tree are about 100 MB and road graphs tens of megabytes.	Size budget	small beside the grids: 920 000 Caucasus scenery rows with an R-tree are
+size budget	behavior		Marianas and Marianas WWII (under 5 000 km² land, sea tiles omitted) are < 100 MB full, < 30 MB base, < 30 MB at 100 m.	Size budget	| < 100 MB | < 30 MB | < 30 MB |
+size budget	behavior		Caucasus (369 000 km² measured) and Afghanistan (440 000 measured) are 1.6 to 2.0 GB full, 0.7 to 0.9 GB base, 0.4 to 0.5 GB at 100 m.	Size budget	| 1.6 to 2.0 GB | 0.7 to 0.9 GB | 0.4 to 0.5 GB |
+size budget	behavior		Cold War Germany, Persian Gulf, Syria and Sinai (600 000 to 1 000 000 km²) are 2.7 to 4.5 GB full at 50 m, packed at 100 m by default at 0.7 to 1.1 GB, and 1.2 to 2 GB base.	Size budget	| 2.7 to 4.5 GB at 50 m; packed at 100 m by default: 0.7 to 1.1 GB | 1.2 to 2 GB | 0.7 to 1.1 GB |
+tile omission	definition		Land area in the table is the authored area; sea and fill tiles inside it are not stored.	Size budget	Land area here is the authored area; sea and fill tiles inside it are
+extract directory	behavior		The extract directory holds the three base layers, about 0.6 GB for Caucasus raw.	Size budget	extract directory holds the three base layers, so it is about 0.6 GB
+extract directory	behavior		Zipped heights compress two to three times, so a hand-off is 250 to 400 MB.	Size budget	hand-off is 250 to 400 MB
+tile omission	behavior		Not storing sea and fill tiles is what makes Marianas and Persian Gulf small.	Size budget	makes Marianas and Persian Gulf small
+size levers	behavior		Two further levers exist if a file is still too large, neither taken.	Size budget	Two further levers exist if a file is still too large, neither taken:
+size levers	behavior		Coarser summed-area tables and horizon (200 m and 400 m) would halve their 2 bytes each.	Size budget	coarser summed-area tables and horizon (200 m and 400 m, halving their
+size levers	constraint		Compressed tile blobs conflict with the goal that any stock SQLite client reads the file.	Size budget	2 bytes each), and compressed tile blobs, which conflict with the goal
+worked tasks	definition		Every worked task states the inputs, the computation against the file, and what goes back to DCS.	Worked tasks	Every task states the inputs, the computation against the file
+farp task	definition		Inputs: box = 20 km around Kutaisi airfield; footprint 120 × 80 m.	FARP for a helicopter forward base	Inputs: box = 20 km around Kutaisi airfield; footprint 120 × 80 m
+farp task	definition		Height span across the footprint is ≤ 2.5 m at the best of two orientations.	FARP for a helicopter forward base	span across the footprint ≤ 2.5 m at the best of two orientations
+farp task	definition		Surface `land`, 200 m to 3 km from a road, ≥ 3 km from the airfield.	FARP for a helicopter forward base	`land`; 200 m to 3 km from a road; ≥ 3 km from the airfield
+farp task	definition		Scenery objects within 100 m must be 0 (veto); within 500 m counts as a cost.	FARP for a helicopter forward base	within 100 m = 0 (veto) and within 500 m as a cost
+farp task	definition		Ground exposure from a 36-observer ring (12 bearings × 3, 6, 10 km at 2 m AGL) is a cost.	FARP for a helicopter forward base	36-observer ring (12 bearings × 3, 6, 10 km at 2 m AGL)
+farp task	definition		Spacing is 2 km and limit is 8.	FARP for a helicopter forward base	2 km; limit 8
+farp task	behavior		Read `slope` tile min/max to skip tiles whose minimum exceeds the limit.	FARP for a helicopter forward base	read `slope` tile min/max to skip tiles
+farp task	behavior		For surviving cells read the 4 × 4 `height` window and take max−min over the footprint corners at 0° and 90°.	FARP for a helicopter forward base	`height` window and take max−min over the footprint corners at 0° and 90°
+farp task	behavior		Add 45° and 135° orientations when the grid is 25 m.	FARP for a helicopter forward base	(add 45° and 135° when the grid is 25 m)
+dist_road_band	behavior		`dist_road_band` and `dist_airdrome_band` predicates use the `dist_road` grid and the `airdrome` table.	FARP for a helicopter forward base	predicates (the `dist_road` grid, the `airdrome` table)
+scenery_idx	behavior		A `scenery_idx` box query then exact OBB overlap gives the veto.	FARP for a helicopter forward base	`scenery_idx` box query then exact OBB overlap
+sat_building	behavior		A `sat_building` window gives the 500 m scenery cost.	FARP for a helicopter forward base	`sat_building` window for the 500 m cost
+farp task	behavior		Exposure comes from 36 `visible()` calls.	FARP for a helicopter forward base	exposure by 36
+farp task	behavior		Score = span/2.5 + road/3000 + 0.002 × scenery500 + exposure, keeping each term.	FARP for a helicopter forward base	Score = span/2.5 + road/3000 + 0.002 × scenery500
+farp task	behavior		Non-maximum suppress at 2 km.	FARP for a helicopter forward base	Non-maximum suppress at 2 km
+farp task	dependency		Live: 40 401 cells swept in 4.9 s from the hook and 26 085 passed the geometric filters.	FARP for a helicopter forward base	40 401 cells swept in 4.9 s from the hook
+farp task	dependency		Candidate 2 at (−275487, 684259) has zero scenery within 500 m and exposure 0.42.	FARP for a helicopter forward base	(−275487, 684259)
+farp task	dependency		Candidate 4 at (−283387, 679459) matches on exposure with a village 500 m off.	FARP for a helicopter forward base	(−283387, 679459)
+farp task	dependency		Candidate 3 has 14 objects inside 100 m and is rejected; candidate 7 is exposed to 78 % of observers.	FARP for a helicopter forward base	Candidate 3 has 14 objects inside 100 m
+farp task	behavior		Back to DCS: a FARP static at `(x, z)` with heading = chosen orientation.	FARP for a helicopter forward base	FARP static at `(x, z)` with heading = chosen orientation
+farp task	behavior		Record the placement in the overlay and report the building count the footprint covers as "expected clearing".	FARP for a helicopter forward base	footprint covers as "expected clearing"
+sam task	definition		Asset = Kutaisi airfield; protection set = airfield centre plus 24 points on a 5 km ring at 100 m AGL.	SAM site covering an airfield against low-level ingress	protection set = airfield centre plus 24
+sam task	definition		Candidates are 4 to 15 km from the asset, surface `land`, road within 500 m.	SAM site covering an airfield against low-level ingress	candidates 4 to 15 km from the asset
+sam task	definition		Masking: not visible from a 100 m AGL approach on the western arc at 10 km; spacing 5 km; limit 5.	SAM site covering an airfield against low-level ingress	visible from a 100 m AGL approach on the western arc at 10 km; spacing 5 km
+sam task	behavior		Per candidate, 25 `visible()` calls from a 6 m mast to the protection set and 7 to the western arc.	SAM site covering an airfield against low-level ingress	per candidate 25 `visible()` calls from a 6 m mast
+sam task	behavior		Rank candidates by coverage then masking.	SAM site covering an airfield against low-level ingress	rank by coverage then masking
+coverage()	behavior		`coverage()` samples 72 radials × 20 ranges × 4 altitudes for the dead-zone rings.	SAM site covering an airfield against low-level ingress	samples 72 radials × 20 ranges × 4 altitudes
+sam task	dependency		Live: 1 979 candidates × 32 LOS in 0.9 s.	SAM site covering an airfield against low-level ingress	1 979 candidates × 32 LOS in 0.9 s
+sam task	dependency		Every candidate on the plain covers 100 % of the ring, so masking decides.	SAM site covering an airfield against low-level ingress	covers 100 % of the ring
+sam task	dependency		Site 1 at (−293887, 682059), 9.2 km south, is masked from all seven western points by a 108 m rise and a 369 m ridge.	SAM site covering an airfield against low-level ingress	(−293887, 682059)
+unmasking point	dependency		An ingress at 100 m AGL from 60 km due west is first seen by site 1 at 7.8 km from the airfield.	SAM site covering an airfield against low-level ingress	seen by site 1 at 7.8 km from the airfield
+coverage()	behavior		`coverage()` on the final site returns the dead-zone rings for the briefing and the campaign's threat model.	SAM site covering an airfield against low-level ingress	returns the dead-zone rings for the
+bunker task	definition		Ground observer set = all `dist_road ≤ 30` cells at 2 m AGL within 3 km.	Concealed command bunker	ground observer set = all `dist_road ≤ 30` cells
+bunker task	definition		Air observer band = 300 m to 1500 m AGL on a 1 km lattice within 15 km.	Concealed command bunker	air observer band = 300 m to 1500 m AGL
+bunker task	definition		Maximum exposure fraction is 0.15 for ground and 0.35 for air.	Concealed command bunker	maximum exposure fraction 0.15 for ground and 0.35 for
+bunker task	definition		Plausibility: `dist_road ≤ 2 km`, `dist_builtup ≤ 5 km`, slope ≤ 8°.	Concealed command bunker	`dist_road ≤ 2 km`, `dist_builtup ≤ 5 km`, slope ≤ 8°
+bunker task	behavior		Ground exposure = fraction of road cells within 3 km with `visible()` true.	Concealed command bunker	ground exposure = fraction of road cells within 3 km
+bunker task	behavior		Air exposure = fraction of lattice points with `visible()` true.	Concealed command bunker	air exposure = fraction of lattice points
+bunker task	behavior		Keep terrain masking and built-up cover (building count in 150 m from `sat_building`) as two separate scores.	Concealed command bunker	(building count in 150 m from `sat_building`
+bunker task	behavior		Rank on exposure and report built-up cover as a second column.	Concealed command bunker	report built-up cover as a second column
+score_site()	behavior		`score_site()` on a hand-chosen position returns the same two numbers.	Concealed command bunker	`score_site()` on a hand-chosen position
+convoy task	definition		Inputs: from and to points, network `roads`, avoid = SAM coverage boxes, observers = enemy OPs, wheeled vehicle.	Convoy from depot to front	network `roads`; avoid = SAM coverage boxes
+route()	behavior		`route()` loads the road subgraph in the expanded box and removes edges inside avoid boxes.	Convoy from depot to front	`route()` loads the road subgraph in the expanded box
+route()	behavior		Each edge weighs length × (1 + exposure fraction from `visible()` at 25 m samples).	Convoy from depot to front	fraction along its geometry from `visible()` at 25 m samples
+route()	behavior		`route()` runs A* and emits edge polylines as waypoints simplified to ≤ 1 per 500 m.	Convoy from depot to front	simplified to ≤ 1 per 500 m
+route()	behavior		`route()` returns per-leg exposure so the campaign can time the move.	Convoy from depot to front	per-leg exposure so the campaign can time the move
+convoy task	behavior		Back to DCS: waypoints with `action = "On Road"` per point so DCS's router fills gaps between vertices.	Convoy from depot to front	`action = "On Road"` per point
+route_alternatives()	definition		Inputs: the same endpoints, `k = 3`, `max_stretch = 1.3`, `max_overlap = 0.4`.	Alternative routes for a recurring convoy	`k = 3`, `max_stretch = 1.3`, `max_overlap =
+route_alternatives()	behavior		After each accepted route, multiply the weight of its edges by 1.6 and search again.	Alternative routes for a recurring convoy	multiply the weight of its edges by 1.6
+route_alternatives()	behavior		Accept a candidate when stretch and overlap with every accepted route are within limits; stop at `k` or when candidates repeat.	Alternative routes for a recurring convoy	accepted route are within the limits; stop at `k` or when candidates
+route_alternatives()	behavior		Return each route's exposure and chokepoints plus the edges all routes share.	Alternative routes for a recurring convoy	the edges all of them share
+alternatives task	behavior		The campaign keeps the set and draws one route per departure; only the drawn route's waypoints enter the mission.	Alternative routes for a recurring convoy	Only the drawn route's waypoints go into the mission
+using-the-data	dependency		`using-the-data.md` covers the recurring convoy under "A recurring convoy that should not be predictable".	Alternative routes for a recurring convoy	(`using-the-data.md`, "A recurring convoy that should not be
+ambush task	definition		Inputs: the route, box = 2 km buffer, observer = the convoy at 2 m AGL every 200 m.	Ambush against that route	observer = the convoy at 2 m AGL every
+ambush task	definition		Site sees ≥ 400 m of road, is not visible from the approach side beyond 1.5 km, `dist_road` 100 to 600 m, slope ≤ 15°.	Ambush against that route	`dist_road` 100 to 600 m, slope
+ambush task	behavior		Candidates at 100 m in the buffer; count visible route samples within 1.5 km with `visible()`.	Ambush against that route	candidates at 100 m in the buffer
+ambush task	behavior		Masking from the approach direction comes from `horizon` bin lookup along the route's incoming bearing.	Ambush against that route	`horizon` bin lookup along the route's incoming bearing
+ambush task	behavior		Rank by visible road length × masking and return the top 5 with the road sector each covers.	Ambush against that route	Return top 5 with the sector of road each covers
+unmasking point	definition		Inputs: a flight's route polyline with altitudes and a SAM site with radar height.	Unmasking point on an ingress	route as a polyline with altitudes; a SAM site with radar
+unmasking point	behavior		Sample the route at 100 m, call `visible(site, sample)` in order; the first true sample is the unmasking point.	Unmasking point on an ingress	the first true sample is the unmasking point
+unmasking point	behavior		Return distance from the site and the masked segments if the route dips back below the horizon.	Unmasking point on an ingress	the list of masked segments if the route dips back below the horizon
+spawn visibility	definition		Inputs: a group's spawn point and the player's likely position and altitude.	Spawn visibility for fog of war	Inputs: a group's spawn point
+spawn visibility	behavior		One `visible()` call plus the building count within 100 m from `sat_building`; return boolean and count with no DCS call.	Spawn visibility for fog of war	Return boolean and the count. No DCS call
+betweenness	behavior		At pack time compute betweenness centrality over `road_edge`.	Choke points on a road network	betweenness centrality over `road_edge`
+choke points	behavior		At query time `chokepoints()` inside the box ranks edges by `betweenness` and reports `crosses_water` (bridges) and the mean `tpi_300` along the edge (defiles when strongly negative).	Choke points on a road network	time `chokepoints()` inside the box, which ranks edges by `betweenness`
+choke points	behavior		Return the top edges with their midpoints.	Choke points on a road network	edge (defiles when strongly negative). Return the top edges with their
+recovery sites	definition		Inputs: route polyline, footprint 30 × 30 m, slope ≤ 5°, surface LAND, scenery within 60 m = 0, within 3 km of the route.	Recovery landing sites along a route	helicopter footprint 30 × 30 m; slope ≤ 5°
+find_sites()	behavior		`find_sites()` in the route buffer with those criteria at 5 km spacing returns a chain of sites.	Recovery landing sites along a route	`find_sites()` in the route buffer with those criteria
+trafficability	behavior		Compute `nearest("road", x, z, 1)` distance, `slope` along the straight line sampled at 25 m, and `surface` not WATER anywhere on it.	Trafficability of a point for a ground group	`nearest("road", x, z, 1)` distance
+trafficability	behavior		Return reachable/unreachable with the blocking sample.	Trafficability of a point for a ground group	Return reachable/unreachable with the blocking sample
+site selection	constraint		The file ranks and the campaign chooses.	Choosing a site that is not the best	The file ranks; the campaign chooses
+site selection	behavior		Every `find_sites` result carries its full metric vector and the consumer selects from a band.	Choosing a site that is not the best	carries its full metric vector and the consumer selects from a band
+site selection	constraint		The file must supply the metrics the campaign's selection rules need.	Choosing a site that is not the best	must supply the metrics they need
+player metrics	definition		Player-facing SAM metrics all come from `visible()` and the road graph.	Choosing a site that is not the best	Player-facing metrics for a SAM candidate, all from `visible()` and the road
+approach_spectrum	behavior		When the player may come from any bearing, metrics are read around the compass with `approach_spectrum`.	Choosing a site that is not the best	are read around the compass with `approach_spectrum`
+approach_spectrum	behavior		The summary is the fraction of bearings with a masked way in, the widest such arc, the spread of unmask distances, plus one over the arc facing the player's base.	Choosing a site that is not the best	fraction of bearings with a masked way in, the widest such arc
+unmask distance	definition		Unmask distance per corridor is where a flight at corridor altitude first enters the site's line of sight.	Choosing a site that is not the best	**Unmask distance per corridor**
+blind approach	definition		A blind approach exists when a corridor at the player's altitude stays masked until inside weapon standoff.	Choosing a site that is not the best	**Blind approach exists**
+blind approach	constraint		A site with no blind approach at any allowed altitude is impossible without SEAD, so reject it or pair it with SEAD.	Choosing a site that is not the best	it or pair it with a SEAD flight
+dead-zone fraction	definition		Dead-zone fraction is the share of the engagement circle at low level without coverage, from `coverage()`.	Choosing a site that is not the best	**Dead-zone fraction** of the engagement circle
+terrain around site	definition		Terrain around the site is mean and max relief within 5 km from the `height` tiles.	Choosing a site that is not the best	mean and max relief within 5 km
+egress cover	definition		Egress cover is the nearest masked cell from the site's edge.	Choosing a site that is not the best	**Egress cover**: nearest masked cell
+difficulty band	definition		A difficulty band is a range on the player-facing metrics.	Choosing a site that is not the best	A difficulty band is a range on these
+difficulty band	definition		Easy = unmask distance ≥ 15 km on the primary corridor and a blind approach at 500 m AGL.	Choosing a site that is not the best	*easy* = unmask distance ≥ 15 km on the primary
+difficulty band	definition		Medium = unmask 6 to 15 km and a blind approach at ≤ 200 m AGL.	Choosing a site that is not the best	*medium* = unmask 6 to 15 km
+difficulty band	definition		Hard = unmask 2 to 6 km and a blind approach only at ≤ 100 m AGL.	Choosing a site that is not the best	*hard* = unmask 2 to 6 km
+difficulty band	definition		Unfair = no blind approach at any allowed altitude, or unmask under 2 km on every corridor.	Choosing a site that is not the best	*unfair* = no blind approach at any allowed altitude
+player rating	behavior		Player ability sets the band; a per-player rating moves up after a clean kill and down after a loss.	Choosing a site that is not the best	moves up after a clean kill
+site selection	constraint		Draw from the band at random rather than taking its top entry.	Choosing a site that is not the best	Draw from the band at random
+site selection	behavior		The same shape applies to a FARP and to a concealed target.	Choosing a site that is not the best	The same shape applies to a FARP
+site selection	constraint		The file returns the metric vector for every candidate above the hard constraints and never collapses it into one score.	Choosing a site that is not the best	collapse it into one score inside the file
+helicopter metrics	definition		A helicopter masked approach is judged at 15 to 60 m AGL.	Choosing a site that is not the best	approach is judged at 15 to 60 m AGL
+helicopter metrics	definition		The decisive helicopter metric is the count of pop-up positions hidden from the threat at 5 m AGL that see the target at 30 m AGL.	Choosing a site that is not the best	5 m AGL and see the target at 30 m AGL
+find_sites()	interface		`find_sites` takes `not_visible_from` and `visible_to` at given `own_alt_agl` values.	Choosing a site that is not the best	`not_visible_from` and `visible_to` at those `own_alt_agl` values
+helicopter metrics	definition		Also reported: the share of pop-up positions the threat cannot see at pop-up height and the distance to egress cover.	Choosing a site that is not the best	share of them the threat cannot see at pop-up height
+using-the-data	dependency		`using-the-data.md` defines every metric and gives difficulty bands for fixed-wing, helicopter, search, convoy and FARP tasks.	Choosing a site that is not the best	difficulty bands for fixed-wing, helicopter, search, convoy and FARP tasks
+dcs axes	definition		DCS x is north and z is east, in metres.	Coordinate rules	DCS x is north, z is east, metres. The terrain module takes
+terrain module	interface		The terrain module takes `(x, z)` scalars.	Coordinate rules	The terrain module takes `(x, z)` scalars
+land api	interface		`land.*` takes Vec2 `{x, y}` where `y` is DCS z, or Vec3 `{x, y, z}` where `y` is altitude.	Coordinate rules	`land.*` takes Vec2 `{x, y}` where `y` is DCS z
+coordinate conversion	constraint		Convert once at the bridge boundary and never pass a table to a terrain-module call.	Coordinate rules	Convert once at the bridge boundary
+terrain.convertmeterstolatlon	dependency		Geo conversion for the file's `meta` comes from `terrain.convertMetersToLatLon(x, z)`.	Coordinate rules	`terrain.convertMetersToLatLon(x, z)`
+crs_proj4	constraint		Verify the projection table against 20 sample points before stamping `crs_proj4`.	Coordinate rules	against 20 sample points before stamping `crs_proj4`
+tile size	dependency		A tile blob spills to overflow pages at any size because grid_tile is a WITHOUT ROWID index b-tree with an in-page payload limit near 2 KiB.	Design decisions	pages whatever its size (`grid_tile` is a `WITHOUT ROWID` index b-tree
+fill triple	constraint		After floor(h + 0.5) the fill height equals real 5 m land, so the test runs before rounding.	Geometry facts	against the exact triple before rounding (after `floor(h + 0.5)` the
+fill triple	behavior		config.json.fill records the fill triple.	Geometry facts	`config.json.fill` records the triple; `pack` derives `valid` from
+interpolation	dependency		Either the interior mesh is finer than 5 m or the interpolation is not linear between sparse posts.	Geometry facts	of 799, Leipzig 410), so the interior mesh is finer than 5 m or the
+post spacing	dependency		Outside the hull the breakpoints sit 250 to 1 085 m apart or vanish.	Geometry facts	the breakpoints sit 250 to 1 085 m apart or vanish. The 50 m extract
+post spacing	constraint		The 50 m extract undersamples the interior either way.	Geometry facts	undersamples the interior either way, and the line-of-sight
+offline los check	constraint		The line-of-sight agreement figure is the measure that matters for the extract's fidelity.	Geometry facts	agreement figure is the measure that matters. The raster outside

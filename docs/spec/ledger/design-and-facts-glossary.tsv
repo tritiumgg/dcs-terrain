@@ -1,0 +1,288 @@
+# spec: design-and-facts.md
+# sha256: da506cfeefcc9d8cf3fdf284ea86de7eb4dd3b7f60dbebeb339fd7186babccc7
+# generated: 2026-09-03 (re-stamped after rename; rows from the 2026-09-02 review)
+term	subject	defined_in	note
+plan.md	project plan	Design and facts	
+probe-log-2.9.29.27278.md	probe log	Design and facts	raw measurements
+probe log	probe log	Design and facts	
+Design and facts	design and facts	Design and facts	this document
+file	terrain file	Goal	one SQLite file per theatre per DCS build
+portable SQLite file	terrain file	Goal	
+campaign runtime	campaign runtime	Goal	
+layer	layer provenance	Goal	
+meta	meta table	Goal	self-describing table
+consumers	consumers	Goal	Kotlin campaign process and MCP server
+query engine	query engine	Goal	
+query surface	query surface	Goal	
+repository	repository	Goal	ships tools only
+dcs-api-lookup	dcs-api-lookup skill	Sources you have	
+dcs-scripting	dcs-scripting skill	Sources you have	
+DCS install	dcs install	Sources you have	build 2.9.29.27278
+terrains	installed terrains	Sources you have	
+dcs-api-bridge	dcs-api-bridge	Sources you have	MCP tools
+dcs_eval_in	dcs-api-bridge	Sources you have	
+dcs_reflect	dcs-api-bridge	Sources you have	
+dcs_ping	dcs-api-bridge	Sources you have	
+dcs_bridge_status	dcs-api-bridge	Sources you have	
+state	bridge state	Sources you have	hook, server, gui
+hook	bridge state	Sources you have	bridge's own state
+server	bridge state	Sources you have	mission-scripting state
+gui	bridge state	Sources you have	Mission Editor state
+terrain.Init	terrain lifetime calls	Sources you have	never call
+terrain.Create	terrain lifetime calls	Sources you have	never call
+terrain.Release	terrain lifetime calls	Sources you have	never call
+terrain.InitLight	terrain lifetime calls	Sources you have	never call
+terrain.getCrossParam	terrain lifetime calls	Sources you have	logs an error on bare call
+call site	call site reading	Sources you have	
+phase	phase sim rule	Sources you have	sim phase reported by dcs_bridge_status
+sim	phase sim rule	Sources you have	
+createGlobalLand	menu crash	Sources you have	Terrain.dll
+crash log	menu crash	Sources you have	
+dcs-api-eval	in-flight request	Sources you have	transport directory
+in flight	in-flight request	Sources you have	
+Hook-side	hook terrain at menu	Sources you have	
+terrain	terrain module	The hook-side `terrain` module is the primary extraction API	hook-side C module
+terrain module	terrain module	The hook-side `terrain` module is the primary extraction API	
+Terrain.GetHeight	terrain.getheight	The hook-side `terrain` module is the primary extraction API	
+GetHeight	terrain.getheight	The hook-side `terrain` module is the primary extraction API	
+Terrain.isVisible	terrain.isvisible	The hook-side `terrain` module is the primary extraction API	
+isVisible	terrain.isvisible	The hook-side `terrain` module is the primary extraction API	
+Terrain.getClosestPointOnRoads	terrain.getclosestpointonroads	The hook-side `terrain` module is the primary extraction API	
+getClosestPointOnRoads	terrain.getclosestpointonroads	The hook-side `terrain` module is the primary extraction API	
+Terrain.findPathOnRoads	terrain.findpathonroads	The hook-side `terrain` module is the primary extraction API	
+findPathOnRoads	terrain.findpathonroads	The hook-side `terrain` module is the primary extraction API	
+path oracle	terrain.findpathonroads	Design decisions	
+Terrain.FindNearestPoint	terrain.findnearestpoint	The hook-side `terrain` module is the primary extraction API	
+FindNearestPoint	terrain.findnearestpoint	The hook-side `terrain` module is the primary extraction API	
+Terrain.getObjectsAtMapPoint	terrain.getobjectsatmappoint	The hook-side `terrain` module is the primary extraction API	
+getObjectsAtMapPoint	terrain.getobjectsatmappoint	The hook-side `terrain` module is the primary extraction API	
+Terrain.GetTerrainConfig	terrain.getterrainconfig	The hook-side `terrain` module is the primary extraction API	
+GetTerrainConfig	terrain.getterrainconfig	The hook-side `terrain` module is the primary extraction API	
+typeRoad	typeroad	The hook-side `terrain` module is the primary extraction API	'roads' or 'railroads'
+sweep	height sweep	The hook-side `terrain` module is the primary extraction API	
+GetSurfaceType	terrain.getsurfacetype	The hook-side `terrain` module is the primary extraction API	returns a string
+hook surface string	terrain.getsurfacetype	The hook-side `terrain` module is the primary extraction API	
+row-major	surface sweep	The hook-side `terrain` module is the primary extraction API	
+GetSurfaceHeightWithSeabed	terrain.getsurfaceheightwithseabed	The hook-side `terrain` module is the primary extraction API	
+seabed	terrain.getsurfaceheightwithseabed	The hook-side `terrain` module is the primary extraction API	third channel of the fill test; the depth is not stored
+offline straight-line check	offline los check	The hook-side `terrain` module is the primary extraction API	
+sizeOBB	scenery object hit	The hook-side `terrain` module is the primary extraction API	
+boxMin	scenery object hit	The hook-side `terrain` module is the primary extraction API	
+boxMax	scenery object hit	The hook-side `terrain` module is the primary extraction API	
+Airdromes	getterrainconfig keys	The hook-side `terrain` module is the primary extraction API	GetTerrainConfig key
+defaultcamera	getterrainconfig keys	The hook-side `terrain` module is the primary extraction API	
+defaultDateTime	getterrainconfig keys	The hook-side `terrain` module is the primary extraction API	
+standDescriptionVersion	getterrainconfig keys	The hook-side `terrain` module is the primary extraction API	
+SummerTimeDelta	getterrainconfig keys	The hook-side `terrain` module is the primary extraction API	
+seaEnabled	getterrainconfig keys	The hook-side `terrain` module is the primary extraction API	
+SW_bound	sw_bound/ne_bound	The hook-side `terrain` module is the primary extraction API	{x_km, 0, z_km}
+NE_bound	sw_bound/ne_bound	The hook-side `terrain` module is the primary extraction API	
+bounds rectangle	bounds rectangle	The hook-side `terrain` module is the primary extraction API	raster rectangle from SW_bound/NE_bound
+raster rectangle	bounds rectangle	The hook-side `terrain` module is the primary extraction API	
+authored hull	authored hull	The hook-side `terrain` module is the primary extraction API	
+nodesMapBorders	authored hull	The hook-side `terrain` module is the primary extraction API	entry.lua on Caucasus; MissionGenerator/nodesMap.lua elsewhere, where it is the node-map image extent
+authored area	authored hull	UNDEFINED	
+reference_point	airdromes entry	The hook-side `terrain` module is the primary extraction API	
+reference_point_geo	airdromes entry	The hook-side `terrain` module is the primary extraction API	
+fueldepots	airdromes entry	The hook-side `terrain` module is the primary extraction API	
+roadnet	airdromes entry	The hook-side `terrain` module is the primary extraction API	
+roadnet5	airdromes entry	The hook-side `terrain` module is the primary extraction API	
+abandoned	airdromes entry	The hook-side `terrain` module is the primary extraction API	skip when true
+Airbase:getPoint	airdromes entry	The hook-side `terrain` module is the primary extraction API	wrong for some FOBs
+land	land api	The mission-scripting `land` and `world` API is secondary	mission-scripting module
+world	land api	The mission-scripting `land` and `world` API is secondary	mission-scripting module
+mission state	land api	UNDEFINED	server state
+net.dostring_in	net.dostring_in	Sources you have	hook-to-state bridge call; returns the chunk's string and a boolean
+land.getSurfaceType	land.getsurfacetype	The mission-scripting `land` and `world` API is secondary	integer enum
+ROAD	land.getsurfacetype	The mission-scripting `land` and `world` API is secondary	enum 4
+RUNWAY	land.getsurfacetype	The mission-scripting `land` and `world` API is secondary	enum 5
+world.searchObjects	world.searchobjects	The mission-scripting `land` and `world` API is secondary	
+Object.Category.SCENERY	world.searchobjects	The mission-scripting `land` and `world` API is secondary	
+scenery object	scenery object	The mission-scripting `land` and `world` API is secondary	
+getTypeName	scenery object	The mission-scripting `land` and `world` API is secondary	
+getDesc	scenery object	The mission-scripting `land` and `world` API is secondary	
+land.getHeight	land.getheight	The mission-scripting `land` and `world` API is secondary	
+Trees	vegetation	The mission-scripting `land` and `world` API is secondary	not reachable
+Vegetation	vegetation	The mission-scripting `land` and `world` API is secondary	out of the dataset
+land.getIP	land.getip	The mission-scripting `land` and `world` API is secondary	
+land.isVisible	building los	The mission-scripting `land` and `world` API is secondary	ignores buildings
+terrain morphology	land cover	The mission-scripting `land` and `world` API is secondary	
+TPI	land cover	UNDEFINED	topographic position index
+land.profile	land.profile	The mission-scripting `land` and `world` API is secondary	not used
+container	terrain container	The map files	shared binary header
+Surface5File	surface5 file	The map files	
+.surface5	surface5 file	The map files	
+Scene5File	scn5 file	The map files	
+.scn5	scn5 file	The map files	
+lRoadNetwork	rn4 file	The map files	
+.rn4	rn4 file	The map files	
+lRoutesFile	routes file	The map files	
+.routes	routes file	The map files	
+getStandList	rn4 file	The map files	
+getRunwayList	rn4 file	The map files	
+known-plaintext	known-plaintext oracle	The map files	mutation oracle
+mutation oracle	known-plaintext oracle	The map files	
+nodes.lua	map lua files	The map files	
+towns.lua	map lua files	The map files	
+entry.lua	map lua files	The map files	
+notInstances.lua	notinstances.lua	The map files	
+terrain.cfg.lua	terrain.cfg.lua	The map files	encrypted
+getTerrainShpare	earth shape	Geometry facts	returns FLAT
+FLAT	earth shape	Geometry facts	
+DCS x	dcs axes	Geometry facts	north
+transverse Mercator	projection	Geometry facts	
+lon_0	projection	Geometry facts	
+k_0	projection	Geometry facts	0.9996
+easting offset	projection	Geometry facts	
+northing offset	projection	Geometry facts	
++proj=tmerc	proj string	Geometry facts	PROJ string
+pack	pack	UNDEFINED	pack step
+latlon_samples	pack	Geometry facts	
+defaultBullseye	defaultbullseye	Geometry facts	
+fill constant	fill constant	Geometry facts	per-map out-of-terrain value
+map extent	map extent	Geometry facts	
+height raster	height raster	Geometry facts	
+post spacing	post spacing	Geometry facts	
+Interpolation	interpolation	Geometry facts	piecewise linear
+Design decisions	design decisions	Design decisions	
+base grid	base grid	Design decisions	fixed 50 m posts
+sequential cost	sweep cost	Design decisions	
+derived layers	derived layers	Design decisions	
+derived products	derived layers	Design decisions	
+multi-resolution	multi-resolution	Design decisions	
+getIP	visibility in dcs	Design decisions	no ray sweeps
+horizon	horizon layer	Design decisions	
+visibility	visibility layers	Design decisions	
+viewsheds	visibility queries	Design decisions	
+scenery	scenery extraction	Design decisions	
+R-tree	scenery storage	Design decisions	
+BLK_LIGHT_POLE	blk_light_pole	Design decisions	30 % of objects
+misc	blk_light_pole	Design decisions	class
+no tree	tree class	Design decisions	absent from schema
+road graph	road graph	Design decisions	
+railroads	road graph	The hook-side `terrain` module is the primary extraction API	typeRoad value
+reverse engineering	rn4 reverse engineering	Design decisions	
+SQLite	sqlite	Design decisions	
+query_only	sqlite	Design decisions	
+mmap_size	sqlite	Design decisions	
+Tiles	tile blob	Design decisions	
+tile size	tile size	Design decisions	64 × 64
+page_size	tile size	Design decisions	8192
+min_val	tile min/max	Design decisions	
+max_val	tile min/max	Design decisions	
+Irregular data	irregular data	Design decisions	
+dcsterrain	dcsterrain crate	Design decisions	core crate
+Region bound	region bound	Design decisions	
+box	region bound	Design decisions	axis-aligned, DCS metres
+Query results	query results	Design decisions	
+non-maximum suppression	non-maximum suppression	Design decisions	
+dcsterrain query	dcsterrain query	Design decisions	
+Routing	routing	Design decisions	
+A*	routing	Design decisions	
+Contraction	contraction hierarchies	Design decisions	
+campaign overlay	campaign overlay	Design decisions	
+overlay	campaign overlay	Design decisions	
+Scenery clearing	scenery clearing	Design decisions	
+FARP_SINGLE_01	scenery clearing	Design decisions	heliport static
+expected clearing	farp clearing	Design decisions	
+hard veto	building veto	Design decisions	
+scenery pass	scenery pass	Design decisions	
+trigger actions	trigger clearing	Design decisions	
+a_scenery_destruction_zone	a_scenery_destruction_zone	Design decisions	
+a_remove_scene_objects	a_remove_scene_objects	Design decisions	
+TREES ONLY	a_remove_scene_objects	Design decisions	mask 1
+version stamps	version stamps	Design decisions	core build plus terrain fingerprint
+autoupdate.cfg	version stamps	Design decisions	core build
+terrain version	terrain version	Design decisions	
+manifest.bin	terrain version	Design decisions	opaque
+fingerprint	terrain fingerprint	Design decisions	
+Concealment	concealment	Design decisions	
+Size budget	size budget	Size budget	
+core.md	size budget	Size budget	
+base layers	base layers	Size budget	
+distances	distance grids	Size budget	
+summed-area tables	summed-area tables	Size budget	
+Vector tables	vector tables	Size budget	
+extract directory	extract directory	Size budget	
+levers	size levers	Size budget	
+valid	fill triple	Geometry facts	grid that pack derives from nodata
+Worked tasks	worked tasks	Worked tasks	
+FARP	farp task	FARP for a helicopter forward base	
+dist_road_band	dist_road_band	FARP for a helicopter forward base	
+dist_airdrome_band	dist_road_band	FARP for a helicopter forward base	
+dist_road	dist_road_band	FARP for a helicopter forward base	grid
+airdrome	dist_road_band	FARP for a helicopter forward base	table
+scenery_idx	scenery_idx	FARP for a helicopter forward base	
+sat_building	sat_building	FARP for a helicopter forward base	
+SAM site	sam task	SAM site covering an airfield against low-level ingress	
+coverage()	coverage()	SAM site covering an airfield against low-level ingress	
+dead-zone	coverage()	SAM site covering an airfield against low-level ingress	
+unmasking point	unmasking point	Unmasking point on an ingress	
+bunker	bunker task	Concealed command bunker	
+dist_builtup	bunker task	Concealed command bunker	
+score_site()	score_site()	Concealed command bunker	
+Convoy	convoy task	Convoy from depot to front	
+route()	route()	Convoy from depot to front	
+On Road	convoy task	Convoy from depot to front	waypoint action
+route_alternatives()	route_alternatives()	Alternative routes for a recurring convoy	
+max_stretch	route_alternatives()	Alternative routes for a recurring convoy	
+max_overlap	route_alternatives()	Alternative routes for a recurring convoy	
+penalty method	route_alternatives()	Alternative routes for a recurring convoy	
+Alternative routes	alternatives task	Alternative routes for a recurring convoy	
+using-the-data.md	using-the-data	UNDEFINED	companion spec
+Ambush	ambush task	Ambush against that route	
+Spawn visibility	spawn visibility	Spawn visibility for fog of war	
+betweenness	betweenness	Choke points on a road network	
+road_edge	betweenness	Choke points on a road network	
+Choke points	choke points	Choke points on a road network	
+tpi_300	choke points	Choke points on a road network	
+Recovery landing sites	recovery sites	Recovery landing sites along a route	
+find_sites	find_sites()	UNDEFINED	
+not_visible_from	find_sites()	Choosing a site that is not the best	
+visible_to	find_sites()	Choosing a site that is not the best	
+own_alt_agl	find_sites()	Choosing a site that is not the best	
+Trafficability	trafficability	Trafficability of a point for a ground group	
+nearest	trafficability	Trafficability of a point for a ground group	
+metric vector	site selection	Choosing a site that is not the best	
+Player-facing metrics	player metrics	Choosing a site that is not the best	
+approach_spectrum	approach_spectrum	Choosing a site that is not the best	
+Unmask distance	unmask distance	Choosing a site that is not the best	
+Blind approach	blind approach	Choosing a site that is not the best	
+Dead-zone fraction	dead-zone fraction	Choosing a site that is not the best	
+Terrain around the site	terrain around site	Choosing a site that is not the best	
+Egress cover	egress cover	Choosing a site that is not the best	
+difficulty band	difficulty band	Choosing a site that is not the best	
+easy	difficulty band	Choosing a site that is not the best	
+medium	difficulty band	Choosing a site that is not the best	
+hard	difficulty band	Choosing a site that is not the best	
+unfair	difficulty band	Choosing a site that is not the best	
+per-player rating	player rating	Choosing a site that is not the best	
+pop-up	helicopter metrics	Choosing a site that is not the best	
+Vec2	land api	Coordinate rules	
+Vec3	land api	Coordinate rules	
+bridge boundary	coordinate conversion	Coordinate rules	
+terrain.convertMetersToLatLon	terrain.convertmeterstolatlon	Coordinate rules	
+crs_proj4	crs_proj4	Coordinate rules	
+hook state	hook state	Sources you have	Lua 5.1 facts measured on 2.9.29.27278
+onSimulationFrame	hook callbacks	Sources you have	fires at menu and in the Mission Editor
+lfs.attributes	hook state	Sources you have	file sizes, 64-bit
+externalId	airdromes entry	The hook-side `terrain` module is the primary extraction API	"externalId:NNN" strings in towers, warehouses, fueldepots, shelters
+shelters	airdromes entry	The hook-side `terrain` module is the primary extraction API	
+getName	scenery object	The mission-scripting `land` and `world` API is secondary	numeric id as a Lua number; getObjectsAtMapPoint gives the same id as a string; tostring both to join
+wall	wall class	The mission-scripting `land` and `world` API is secondary	scenery class for wires, walls and cranes (hook type 131072), which the mission state cannot see
+fill triple	fill triple	Geometry facts	GetHeight, GetSurfaceType and seabed all equal the map's constants
+config.json.fill	fill triple	Geometry facts	where the extractor records the triple
+tpi_2000	derived layers	Size budget	at 200 m
+chokepoints()	choke points	Choke points on a road network	query operation
+crosses_water	choke points	Choke points on a road network	bridge flag on an edge
+pre-sweep	pre-sweep	Design decisions	5 km lattice, post density or road proximity, that finds the authored rectangle
+window layers	query-time layers	Design decisions	slope, aspect, roughness, tpi_300; computed from the height window at query time, never stored
+packed base	packed base	Design decisions	50 m under 500 000 km² of authored area, 100 m above; a pack decision
+fill tile	tile omission	Design decisions	tile entirely fill; not written
+sea tile	tile omission	Design decisions	tile entirely sea; not written
+nodesMap.lua	authored hull	The hook-side `terrain` module is the primary extraction API	MissionGenerator/nodesMap.lua; node-map image extent, not the hull
+node-map image extent	authored hull	The hook-side `terrain` module is the primary extraction API	what nodesMapBorders is outside Caucasus
+breakpoints	pre-sweep	Geometry facts	samples on a 2 km line at 10 m whose second difference of height is non-zero
+post density	pre-sweep	Geometry facts	breakpoint count; finds the hull with road proximity
+road proximity	pre-sweep	Geometry facts	a road within 5 km marks a 5 km cell authored
+second difference	interpolation	Geometry facts	of `GetHeight` along a sampled line; non-zero where the height function bends

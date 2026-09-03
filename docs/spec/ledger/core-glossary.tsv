@@ -1,0 +1,159 @@
+# spec: core.md
+# sha256: 1e4e06add9150804e88f1ae9017191976598e1d0e90118e21ff404a06bcb5629
+# generated: 2026-09-03 (re-stamped after rename; rows from the 2026-09-02 review)
+term	subject	defined_in	note
+dcsterrain	dcsterrain-cli	Workspace	the CLI binary name
+dcsterrain-core	dcsterrain-core	Workspace	core library crate
+core crate	dcsterrain-core	Spec: `dcsterrain` core and `pack`	
+dcsterrain-cli	dcsterrain-cli	Workspace	binary crate
+dcsterrain-mcp	dcsterrain-mcp	Workspace	MCP library crate
+query-operations.md	query-operations.md	UNDEFINED	sibling spec
+mcp-server.md	mcp-server.md	UNDEFINED	sibling spec
+design-and-facts.md	design doc	UNDEFINED	
+design doc	design doc	UNDEFINED	
+extract-format.md	extract module	UNDEFINED	sibling spec for the extract directory
+rusqlite	rusqlite	Workspace	
+SQLite	packed file	UNDEFINED	
+R-tree	rtree queries	UNDEFINED	SQLite rtree module
+serde	serde	Workspace	
+serde_json	serde	Workspace	
+rayon	rayon	Workspace	
+clap	clap	Workspace	
+thiserror	thiserror	Workspace	
+memmap2	memmap2	Workspace	
+extract	extract module	Workspace	pub mod extract
+derive	derive module	Workspace	pub mod derive
+graph	graph module	Workspace	pub mod graph
+los	los module	Workspace	pub mod los
+ops	ops module	Workspace	pub mod ops
+synth	synth module	Workspace	pub mod synth; also a CLI subcommand and feature
+types	types module	Workspace	pub mod types
+packed file	packed file	Packed file	one SQLite file
+meta	meta table	Packed file	key/value table
+grid	grid table	Packed file	table of grid descriptors; also pub mod grid
+grid_tile	grid_tile table	Packed file	
+scenery	scenery table	Packed file	
+scenery_idx	scenery_idx	Packed file	
+scenery_class	scenery_class table	Packed file	
+road_node	road_node table	Packed file	
+road_edge	road_edge table	Packed file	
+road_edge_idx	road_edge_idx	Packed file	
+airdrome	airdrome table	Packed file	
+runway	runway table	Packed file	
+stand	stand table	Packed file	
+beacon	beacon table	Packed file	
+radio	radio table	Packed file	
+poi	poi table	Packed file	
+poi_idx	poi_idx	Packed file	
+geometry	edge geometry	Packed file	road_edge column
+layers_dropped	layers_dropped	Packed file	meta key
+params	grid params	Packed file	grid column
+terrain_fingerprint	terrain fingerprint	Packed file	meta key, manifest as JSON
+terrain_digest	terrain digest	Packed file	meta key
+dcs_build	version keys	Packed file	meta key
+dcs_build_timestamp	version keys	Packed file	meta key
+matches_install	matches_install	Versioning	Theatre::matches_install
+describe	describe	UNDEFINED	operation defined in query-operations.md
+--force	overwrite refusal	Versioning	
+cell_size	base resolution	Grids	
+tile_size	tile size	Grids	
+nodata	nodata	Grids	
+height	height grid	Grids	
+water	water grid	Grids	
+surface	surface grid	Grids	
+valid	valid grid	Grids	
+slope	slope layer	Grids	query-time layer, not stored
+aspect	aspect layer	Grids	query-time layer, not stored
+roughness	roughness layer	Grids	query-time layer, not stored
+tpi_300	tpi_300 layer	Grids	query-time layer, not stored
+tpi_2000	tpi_2000 grid	Grids	
+dist_road	dist_road grid	Grids	
+dist_rail	dist_rail grid	Grids	
+dist_water	dist_water grid	Grids	
+dist_builtup	dist_builtup grid	Grids	
+sat_building	sat grids	Grids	
+sat_industrial	sat grids	Grids	
+SAT	sat grids	UNDEFINED	summed-area table
+summed-area table	sat grids	Grids	
+horizon	horizon grid	Grids	
+enclosure	enclosure grid	Grids	
+Felzenszwalb–Huttenlocher	distance transform	Grids	
+distance transform	distance transform	Grids	
+pack.toml	pack config	Grids	
+drop	drop config	Grids	pack config key
+horizon_bins	horizon config	Grids	
+horizon_range_m	horizon config	Grids	
+builtup_threshold	horizon config	Grids	
+omit_sea_tiles	sea tile omission	Grids	
+cell_size (pack)	cell_size config	Grids	pack config key, 50 or 100; default by the 500 000 km² rule
+scenery_models.json	scenery_models.json	UNDEFINED	extract catalogue file
+catalogue	scenery catalogue	Scenery classification	
+getDesc	scenery catalogue	UNDEFINED	DCS API
+getObjectsAtMapPoint	scenery catalogue	UNDEFINED	DCS API
+classes/common.toml	class override	Scenery classification	
+override	class override	Scenery classification	scenery_class.source value
+wall	wall rule	Scenery classification	class
+misc	misc rule	Scenery classification	class
+industrial	industrial rule	Scenery classification	class
+building	building rule	Scenery classification	class
+source	scenery_class.source	Scenery classification	scenery_class column
+roads.jsonl	road graph	UNDEFINED	extract file
+railroads.jsonl	road graph	UNDEFINED	extract file
+crosses_water	crosses_water	Road graph	road_edge column
+betweenness	betweenness	Road graph	road_edge column
+Brandes	betweenness	Road graph	algorithm
+--betweenness-samples	betweenness samples	Road graph	
+nopath	seeds	UNDEFINED	
+coverage check	road coverage	Road graph	
+latlon_samples	latlon_samples	UNDEFINED	config.json key
+transverse Mercator	crs fit	Projection	
+crs_proj4	crs_proj4	Projection	meta key
+--allow-crs-residual	crs residual	Projection	
+Theatre::open	theatre open	Reader	file::Theatre::open
+LRU	tile lru	Reader	
+Window	grid window	Reader	grid::Window
+sample	grid sample	Reader	grid::sample
+visible	los visible	Line of sight	los::visible
+viewshed	los viewshed	Line of sight	los::viewshed
+spectrum	los spectrum	Line of sight	los::spectrum
+approach_spectrum	los spectrum	UNDEFINED	operation in query-operations.md
+terrain.isVisible	los validation	UNDEFINED	DCS API
+synthetic theatre	synth theatre	Synthetic theatre	
+Theatre::new	synth theatre	Synthetic theatre	synth::Theatre::new
+Lua harness	lua harness fake	UNDEFINED	
+check-extract	check-extract	Subcommands in this spec	
+pack	pack subcommand	Subcommands in this spec	
+check	check subcommand	Subcommands in this spec	
+stamp	stamp subcommand	Subcommands in this spec	
+schema	schema subcommand	Subcommands in this spec	
+schemars	schema subcommand	UNDEFINED	Rust crate
+--json	pack report	Subcommands in this spec	
+DCSTERRAIN_EXTRACT	DCSTERRAIN_EXTRACT	Testing	environment variable
+Kotlin client	schema subcommand	UNDEFINED	
+validation sortie	half-cell sampling	UNDEFINED	
+name_id	airdrome table	Packed file	airdrome column
+node_red	poi table	Packed file	poi kind, one of two rows per nodes.json node
+node_blue	poi table	Packed file	poi kind, one of two rows per nodes.json node
+validation_route_ratio	validation figures	Packed file	meta key
+fill_height	meta keys	Packed file	meta key
+fill_water	meta keys	Packed file	meta key
+fill_seabed	meta keys	Packed file	meta key
+tile_size (pack)	tile size	Grids	pack config key, default 64; not the extract tile size
+fill	fill cell	Grids	a cell whose height/water/seabed equal the fill triple
+fill triple	fill triple	Grids	per-theatre (height, water, seabed) fill values from config.json.fill
+sea tile	absent tile	Grids	absent tile whose water tile is entirely 2 and has no height tile
+fill tile	absent tile	Grids	absent tile with no water tile; nodata for every grid, valid 0
+--install	check install	Subcommands in this spec	check flag
+query-time layer	query-time layers	Grids	slope, aspect, roughness, tpi_300; computed from the height window
+--cell-size	pack flags	Subcommands in this spec	pack flag, sets pack config cell_size
+500 000 km² rule	cell_size config	Grids	default cell_size 50 below, 100 above
+derived_from	query-time layers	Grids	grid column; 'height' for the query-time layers
+rule:nofootprint	nofootprint rule	Scenery classification	scenery_class.source value
+reason	class override	Scenery classification	override table field
+BAK	industrial regex	Scenery classification	regex term
+classes/Caucasus.toml	classes/Caucasus.toml	Scenery classification	
+classes-Caucasus.toml	classes/Caucasus.toml	Scenery classification	draft beside the documents
+Logging	logging	Subcommands in this spec	
+--verbose	logging	Subcommands in this spec	
+--log	logging	Subcommands in this spec	serve only
+stderr	logging	Subcommands in this spec	

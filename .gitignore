@@ -1,0 +1,22 @@
+# No terrain data is committed. Extracts and packed files are derived from
+# ED terrain data and stay on the user's machine (docs/00-project-plan.md, P4).
+*.sqlite
+*.sqlite-*
+extracts/
+*.bin
+
+# Rust
+/target/
+**/*.rs.bk
+
+# Gradle / Kotlin
+.gradle/
+build/
+!src/**/build/
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

@@ -1,0 +1,70 @@
+# spec: mcp-server.md
+# sha256: 4c89082627e1ef4100f52fdd9323ea31a346fa639e5b732e3cb1d20ba775c90b
+# generated: 2026-09-03 (re-stamped after rename; rows from the 2026-09-02 review)
+subject	kind	status	claim	section	anchor
+dcsterrain serve	interface		dcsterrain serve <file> exposes the query operations as MCP tools over stdio.	Spec: MCP server	`dcsterrain serve <file>` exposes the operations of
+dcsterrain serve	constraint		The server is a thin layer with no logic outside dcsterrain-core::ops.	Spec: MCP server	no logic lives here that is not in `dcsterrain-core::ops`
+mcp-builder skill	dependency		The server is built with the mcp-builder skill loaded.	Spec: MCP server	the `mcp-builder` skill loaded, using the official Rust MCP SDK
+rmcp	dependency		The server uses the official Rust MCP SDK, rmcp.	Spec: MCP server	(`rmcp`), and follow that skill's guidance on tool naming, descriptions,
+mcp-builder skill	constraint		Tool naming, descriptions, error shape and response size follow the mcp-builder skill guidance.	Spec: MCP server	error shape and response size.
+serve command line	interface		serve takes one or more files via --file plus --max-rows N and --log path.	Process	- `dcsterrain serve <file> [--file <file>...] [--max-rows N]
+packed file	behavior		Each packed file is opened read-only at start and described.	Process	start and `describe`d, and the theatre id becomes the value of a
+theatre parameter	interface		Every tool accepts a theatre parameter whose value is the file's theatre id.	Process	`theatre` parameter that every tool accepts (required when more than
+theatre parameter	constraint		theatre is required when more than one file is loaded and defaulted otherwise.	Process	one file is loaded, defaulted otherwise).
+transport	interface		Transport is stdio with JSON-RPC per the MCP spec.	Process	- Transport: stdio, JSON-RPC per the MCP spec.
+transport	constraint		The server opens no network listener.	Process	No network listener.
+logging	constraint		Logging goes to stderr or --log, never to stdout.	Process	- Logging to stderr or `--log`; never to stdout.
+startup	behavior		Startup fails fast with a readable message when a file does not open.	Process	- Startup fails fast with a readable message if a file does not open or
+startup	behavior		Startup fails fast when check-level meta keys are missing.	Process	`check`-level `meta` keys are missing.
+tool mapping	constraint		There is one tool per operation with the same names and request and response structs.	Tools	One tool per operation, same names, same request and response structs
+input schema	behavior		The input schema is generated from the serde types with schemars.	Tools	generated from the `serde` types with `schemars`, so a field added to an
+input schema	behavior		A field added to an operation appears in the tool without a second edit.	Tools	operation appears in the tool without a second edit. Tool descriptions
+tool descriptions	constraint		Tool descriptions are the one-paragraph summaries from query-operations.md, in the imperative.	Tools	are the one-paragraph summaries from `query-operations.md`, in the
+tool descriptions	constraint		Each description states units: metres, degrees, DCS x north and z east.	Tools	imperative, and each states units (metres, degrees, DCS x north and z
+tool descriptions	constraint		Each description states the region-bound forms it accepts.	Tools	east) and the region-bound forms it accepts.
+terrain_describe	definition		Tool terrain_describe maps to operation describe.	Tools	| `terrain_describe` | `describe` |
+terrain_sample	definition		Tool terrain_sample maps to operation sample.	Tools	| `terrain_sample` | `sample` |
+terrain_score_site	definition		Tool terrain_score_site maps to operation score_site.	Tools	| `terrain_score_site` | `score_site` |
+terrain_find_sites	definition		Tool terrain_find_sites maps to operation find_sites.	Tools	| `terrain_find_sites` | `find_sites` |
+terrain_visible	definition		Tool terrain_visible maps to operation visible.	Tools	| `terrain_visible` | `visible` |
+terrain_viewshed	definition		Tool terrain_viewshed maps to operation viewshed.	Tools	| `terrain_viewshed` | `viewshed` |
+terrain_coverage	definition		Tool terrain_coverage maps to operation coverage.	Tools	| `terrain_coverage` | `coverage` |
+terrain_approach_spectrum	definition		Tool terrain_approach_spectrum maps to operation approach_spectrum.	Tools	| `terrain_approach_spectrum` | `approach_spectrum` |
+terrain_unmask_profile	definition		Tool terrain_unmask_profile maps to operation unmask_profile.	Tools	| `terrain_unmask_profile` | `unmask_profile` |
+terrain_route	definition		Tool terrain_route maps to operation route.	Tools	| `terrain_route` | `route` |
+terrain_route_alternatives	definition		Tool terrain_route_alternatives maps to operation route_alternatives.	Tools	| `terrain_route_alternatives` | `route_alternatives` |
+terrain_nearest	definition		Tool terrain_nearest maps to operation nearest.	Tools	| `terrain_nearest` | `nearest` |
+terrain_scenery_in	definition		Tool terrain_scenery_in maps to operation scenery_in.	Tools	| `terrain_scenery_in` | `scenery_in` |
+terrain_chokepoints	definition		Tool terrain_chokepoints maps to operation chokepoints.	Tools	| `terrain_chokepoints` | `chokepoints` |
+terrain_trafficability	definition		Tool terrain_trafficability maps to operation trafficability.	Tools	| `terrain_trafficability` | `trafficability` |
+conveniences	definition		Two conveniences exist only in the server because an assistant needs them and a program does not.	Tools	Two conveniences that exist only here, because an assistant needs them
+terrain_geo	definition		Tool terrain_geo maps to operation geo.	Tools	| `terrain_geo` | `geo` |
+terrain_criteria_help	definition		terrain_criteria_help returns the criteria table of query-operations.md as structured data.	Tools	- `terrain_criteria_help`: returns the criteria table of
+terrain_criteria_help	goal		The criteria tool lets a model discover the closed criteria set without reading source.	Tools	discover the closed set without reading source.
+terrain_metrics_help	definition		terrain_metrics_help returns the metric definitions of using-the-data.md ("The metrics") as structured data.	Tools	- `terrain_metrics_help`: returns the metric definitions of
+terrain_metrics_help	definition		The metrics data has one entry per field with its source operation and its unit.	Tools	per field with its source operation and its unit. It carries no
+result payload	behavior		Results are the operation's JSON.	Response discipline	- Results are the operation's JSON.
+large outputs	definition		viewshed bitmasks, large sample sets and scenery_in object lists are the outputs that can be big.	Response discipline	`sample` sets and `scenery_in` object lists are the outputs that can
+max-rows	constraint		The server caps sample rows and scenery_in objects at --max-rows, default 2 000, lower than the CLI's.	Response discipline	be big; the server caps `sample` rows and `scenery_in` objects at
+viewshed output	behavior		The server returns viewshed as polygons by default with the bitmask only on request.	Response discipline	returns `viewshed` as polygons by default with the bitmask only on
+error mapping	constraint		Errors come back as MCP tool errors carrying the Issue list.	Response discipline	- Errors come back as MCP tool errors carrying the `Issue` list, never
+error mapping	constraint		Errors never come back as a successful result with an error field.	Response discipline	as a successful result with an error field.
+provenance fields	constraint		Every result includes the theatre, dcs_build, terrain_digest and cell_size fields the operations carry.	Response discipline	- Every result includes the `theatre`, `dcs_build`, `terrain_digest`
+provenance fields	goal		Provenance fields let the model cite what it used.	Response discipline	cite what it used.
+describe resource	interface		One MCP resource per loaded file at dcsterrain://<theatre>/describe returns the describe output.	Resources	One MCP resource per loaded file, `dcsterrain://<theatre>/describe`,
+describe resource	goal		A client can read the dataset's self-description without a tool call.	Resources	self-description without a tool call.
+unit tests	behavior		Unit test: the tool list equals the operation list plus the two conveniences.	Testing	- Unit: the tool list equals the operation list plus the two
+unit tests	behavior		Unit test: every tool's generated schema round-trips a sample request.	Testing	conveniences; every tool's generated schema round-trips a sample
+unit tests	behavior		Unit test: an unknown theatre value errors.	Testing	request; an unknown `theatre` value errors.
+integration test	behavior		The integration test spawns the server on the synthetic packed file.	Testing	- Integration: spawn the server on the synthetic packed file, drive it
+synthetic packed file	dependency		Integration testing depends on the synthetic packed file.	Testing	spawn the server on the synthetic packed file
+integration test	behavior		The test drives the server with the SDK's test client over an in-process stdio pair.	Testing	with the SDK's test client over an in-process stdio pair (`rmcp`
+integration test	behavior		The test calls every tool once with an operation-test request and compares against calling the operation directly.	Testing	tool once with a request from the operation tests, and compare the
+description evaluation	behavior		The mcp-builder skill's evaluation approach runs on the tool descriptions with natural-language tasks.	Testing	result to calling the operation directly. Run the `mcp-builder`
+description evaluation	definition		The worked tasks in the design doc are the evaluation task set.	Testing	of natural-language tasks (the worked tasks in the design doc are the
+description evaluation	goal		The evaluation checks a model picks the right tool with the right region form.	Testing	set) to check a model picks the right tool with the right region
+acceptance 1	behavior		dcsterrain serve on the synthetic file answers every tool from a stock MCP client.	Acceptance	1. `dcsterrain serve` on the synthetic file answers every tool from a
+acceptance 2	behavior		An assistant given only the tool list and the FARP example produces the same candidate list as the direct operation.	Acceptance	2. An assistant given only the tool list and the design doc's FARP
+acceptance 3	constraint		No stdout output exists other than JSON-RPC frames.	Acceptance	3. No stdout output other than JSON-RPC frames.
+terrain_metrics_help	nongoal		terrain_metrics_help carries no difficulty tables; turning metrics into difficulty is the campaign's business.	Tools	difficulty tables; how a campaign turns metrics into difficulty is
+integration test	dependency		`rmcp` accepts any `(AsyncRead, AsyncWrite)` pair as a transport, so a `tokio::io::duplex` pair serves as the in-process stdio pair.	Testing	`tokio::io::duplex` pair serves), call every

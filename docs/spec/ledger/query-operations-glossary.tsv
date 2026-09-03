@@ -1,0 +1,146 @@
+# spec: query-operations.md
+# sha256: d970d4a842bf50e28c2cf8d0a1416c32551e6b94c6fa4170ac147847b989e2e3
+# generated: 2026-09-03 (re-stamped after rename; rows from the 2026-09-02 review)
+term	subject	defined_in	note
+ops	ops module	Spec: query operations	dcsterrain-core::ops
+dcsterrain-core::ops	ops module	Spec: query operations	
+operation	operation surfaces	Spec: query operations	one function, one subcommand, one MCP tool
+query	query subcommand	Spec: query operations	dcsterrain query subcommand
+MCP tool	mcp tool	Spec: query operations	
+mcp-server.md	mcp tool	UNDEFINED	sibling spec
+design-and-facts.md	design doc	UNDEFINED	
+design doc	design doc	UNDEFINED	
+Box	box type	Common types	
+Region	region type	Common types	
+Circle	region type	Common types	Region variant
+Polygon	region type	Common types	Region variant; also viewshed rings type
+AirdromeBand	airdrome band	Common types	Region variant
+Point	point type	Common types	
+Point3	point3 type	Common types	
+Observer	observer type	Common types	
+Footprint	footprint type	Common types	
+orientations_deg	footprint type	Common types	
+agl	point3 type	UNDEFINED	above ground level
+theatre	response envelope	Common types	response field
+dcs_build	response envelope	Common types	response field
+terrain_digest	response envelope	Common types	response field
+cell_size	response envelope	Common types	response field; also grid resolution
+elapsed_ms	response envelope	Common types	
+Issue	errors	Common types	
+describe	describe	`describe`	
+sample	sample	`sample`	
+max_rows	max_rows	`sample`	
+score_site	score_site	`score_site`	
+term	term	`score_site`	
+hard_fail	score_site	`score_site`	
+pass	term	`score_site`	hard test result
+score	term	`score_site`	soft value 0..1
+find_sites	find_sites	`find_sites`	
+spacing	spacing	`find_sites`	
+weights	weights	`find_sites`	
+stats	find_sites stats	`find_sites`	
+tiles_skipped	find_sites stats	`find_sites`	
+visible	visible	`visible`	
+clearance_m	clearance_m	`visible`	
+blocking	visible	`visible`	
+viewshed	viewshed	`viewshed`	
+as_polygons	as_polygons	`viewshed`	
+rings	as_polygons	`viewshed`	
+visible_fraction	viewshed	`viewshed`	
+coverage	coverage	`coverage`	
+envelope	coverage	`coverage`	
+asset	coverage	`coverage`	
+dead_zones	coverage	`coverage`	
+asset_covered_fraction	asset_covered_fraction	`coverage`	
+blind_approach_exists	blind_approach_exists	`coverage`	
+min_masked_range	min_masked_range	`coverage`	
+approach_spectrum	approach_spectrum	`approach_spectrum`	
+azimuth_step_deg	azimuth_step_deg	`approach_spectrum`	
+sector	approach_spectrum	`approach_spectrum`	
+radials	radials	`approach_spectrum`	
+unmask_dist	unmask_dist	`approach_spectrum`	
+masked_fraction	masked_fraction	`approach_spectrum`	
+blind	blind radial	`approach_spectrum`	
+blind_arc_fraction	spectrum summaries	`approach_spectrum`	
+widest_blind_arc_deg	spectrum summaries	`approach_spectrum`	
+blind_arcs	spectrum summaries	`approach_spectrum`	
+sector_summary	sector_summary	`approach_spectrum`	
+unmask_profile	unmask_profile	`unmask_profile`	
+first_seen	unmask_profile	`unmask_profile`	
+masked_segments	unmask_profile	`unmask_profile`	
+route	route	`route`	
+network	route	`route`	roads or railroads
+avoid	avoid	`route`	
+exposure_observers	exposure	`route`	
+exposure_weight	route defaults	`route`	
+max_detour_factor	route defaults	`route`	
+waypoints	route	`route`	
+legs	route legs	`route`	
+length	route length	`route`	
+ascent	ascent descent	`route`	
+descent	ascent descent	`route`	
+max_grade_pct	max_grade_pct	`route`	
+straight_line	detour factor	`route`	
+detour factor	detour factor	`route`	
+exposure	exposure	`route`	
+A*	a star	UNDEFINED	
+route_alternatives	route_alternatives	`route_alternatives`	
+k	route_alternatives	`route_alternatives`	
+max_stretch	max_stretch	`route_alternatives`	
+max_overlap	max_overlap	`route_alternatives`	
+penalty	penalty	`route_alternatives`	
+stretch	max_stretch	`route_alternatives`	
+overlap_with	overlap_with	`route_alternatives`	
+shared_edges_with_all	shared_edges_with_all	`route_alternatives`	
+penalty method	penalty method	`route_alternatives`	
+Yen's k-shortest	yen k-shortest	`route_alternatives`	not used
+nearest	nearest	`nearest`	
+scenery_in	scenery_in	`scenery_in`	
+footprint_at	scenery_in	`scenery_in`	
+counts_by_class	scenery_in	`scenery_in`	
+OBB	obb overlap	UNDEFINED	oriented bounding box
+chokepoints	chokepoints	`chokepoints`	operation; also a route_alternatives field
+betweenness	chokepoints	UNDEFINED	road_edge column from core.md
+trafficability	trafficability	`trafficability`	
+Criterion	criterion	Criteria	
+hard test	criterion	Criteria	
+soft score	criterion	Criteria	
+slope_max	slope_max	Criteria	
+span_max	span_max	Criteria	
+surface_in	surface_in	Criteria	
+surface_enum_in	surface_enum_in	Criteria	
+dist_road_band	dist_road_band	Criteria	
+dist_rail_band	dist_rail_band	Criteria	
+dist_water_min	dist_water_min	Criteria	
+dist_airdrome_band	dist_airdrome_band	Criteria	
+scenery_max	scenery_max	Criteria	
+SAT	scenery_max	UNDEFINED	summed-area table
+scenery_in_footprint_max	scenery_in_footprint_max	Criteria	
+clearing_max	clearing_max	Criteria	
+probe log	clearing_max	UNDEFINED	
+enclosure_min	enclosure_min	Criteria	
+masked_from	masked_from	Criteria	
+not_visible_from	not_visible_from	Criteria	
+visible_to	visible_to	Criteria	
+own_alt_agl	not_visible_from	Criteria	
+tpi_class_in	tpi_class_in	Criteria	
+valid	valid criterion	Criteria	criterion; also the valid grid
+LOS	los criteria	UNDEFINED	line of sight
+cold cache	performance targets	Performance targets	
+benchmark	benchmarks	Performance targets	
+synthetic theatre	synthetic theatre	UNDEFINED	defined in core.md
+closed-form expectations	synthetic tests	UNDEFINED	
+FARP	live examples	UNDEFINED	
+SAM	live examples	UNDEFINED	
+alt_agl	point3 type	Common types	Point3 above-ground altitude, exclusive with alt
+points	sample	`sample`	sample request alternative to region
+geo	geo	`geo`	coordinate conversion operation
+to_latlon	geo	`geo`	
+to_xz	geo	`geo`	
+node	nearest	`nearest`	nearest kind matching poi node_red and node_blue
+airdrome_id	dist_airdrome_band	Criteria	optional criterion param
+min_elev_deg	masked_from	Criteria	renamed from max_elev_deg (AMB-05)
+threshold_m	tpi_class_in	Criteria	default 10
+tpi class	tpi class	Criteria	ridge, valley, upper, lower, mid, flat
+tile min/max	tile skipping	`find_sites`	per-tile height, dist_* and valid ranges used to prune tiles
+clearing	clearing_max	Criteria	the metrics document and campaign word

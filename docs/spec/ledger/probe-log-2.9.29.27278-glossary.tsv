@@ -1,0 +1,141 @@
+# spec: probe-log-2.9.29.27278.md
+# sha256: 61ebfd3132178c831468edcc64fd75a1158e1e8dc405e5eff7e13f617bb61323
+# generated: 2026-09-03 (re-stamped after rename; rows from the 2026-09-02 review)
+term	subject	defined_in	note
+hook	hook state	Terrain probe log, DCS 2.9.29.27278, Caucasus	bridge's own Lua state with terrain module
+server	server state	Terrain probe log, DCS 2.9.29.27278, Caucasus	mission-scripting state
+dcs_eval_in	probe session	Terrain probe log, DCS 2.9.29.27278, Caucasus	the bridge used for every call
+bridge	probe session	UNDEFINED	dcs_eval_in
+DcsApiEval	crash record	UNDEFINED	the bridge's hook-side component
+terrain	terrain lifecycle	UNDEFINED	the hook-side Lua module from require("terrain")
+Mission Editor	terrain lifecycle	UNDEFINED	editor open is enough to load a terrain
+GetTerrainConfig	getterrainconfig	GetTerrainConfig from the hook	
+id	terrain id	GetTerrainConfig from the hook	
+SW_bound	sw_bound	GetTerrainConfig from the hook	km
+NE_bound	ne_bound	GetTerrainConfig from the hook	km
+defaultBullseye	defaultbullseye	GetTerrainConfig from the hook	y is z
+seaEnabled	seaenabled	GetTerrainConfig from the hook	
+defaultcamera	defaultcamera	GetTerrainConfig from the hook	km
+SummerTimeDelta	summertimedelta	GetTerrainConfig from the hook	
+defaultDateTime	defaultdatetime	GetTerrainConfig from the hook	
+standDescriptionVersion	standdescriptionversion	GetTerrainConfig from the hook	
+Airdromes	airdromes	GetTerrainConfig from the hook	
+getTerrainShpare	getterrainshpare	GetTerrainConfig from the hook	FLAT
+bounds rectangle	bounds rectangle	GetTerrainConfig from the hook	SW_bound to NE_bound
+raster	bounds rectangle	UNDEFINED	what the bounds describe
+authored hull	nodesmapborders	UNDEFINED	area inside the Caucasus nodesMapBorders; found by the pre-sweep elsewhere
+nodesMapBorders	nodesmapborders	GetTerrainConfig from the hook	entry.lua on Caucasus; MissionGenerator/nodesMap.lua on the other seven
+entry.lua	nodesmapborders	UNDEFINED	terrain file holding nodesMapBorders
+pre-sweep	nodesmapborders	UNDEFINED	finds the hull where nodesMapBorders is not the authored area
+reference_point	airdrome reference_point	GetTerrainConfig from the hook	airdrome origin in DCS metres
+roadnet	roadnet	GetTerrainConfig from the hook	.rn4 path per airfield
+rn4	roadnet	UNDEFINED	airfield taxiway file extension
+GetHeight	terrain.getheight	Height and surface, hook	
+terrain.GetHeight	terrain.getheight	Height and surface, hook	
+GetSurfaceType	terrain.getsurfacetype	Height and surface, hook	returns a string
+terrain.GetSurfaceType	terrain.getsurfacetype	Height and surface, hook	
+land.SurfaceType	land.getsurfacetype	Spec-review measurements, 2026-09-02	integer enum in the mission state; values listed
+row-major	sweep order	UNDEFINED	sequential sweep order
+GetSurfaceHeightWithSeabed	terrain.getsurfaceheightwithseabed	Height and surface, hook	returns (height, depth)
+fill	fill value	UNDEFINED	out-of-bounds sentinel value
+getObjectsAtMapPoint	terrain.getobjectsatmappoint	Scenery	point-in-footprint test
+sizeOBB	terrain.getobjectsatmappoint	Scenery	{w, d}
+concrete_wall_01	terrain.getobjectsatmappoint	Scenery	example model
+sklad_new	terrain.getobjectsatmappoint	Scenery	example model, a warehouse
+searchObjects	world.searchobjects	Scenery	
+world.searchObjects	world.searchobjects	Scenery	
+Object.Category.SCENERY	world.searchobjects	UNDEFINED	category argument
+getTypeName	scenery object	Scenery	uppercase model name
+getDesc	scenery object	Scenery	
+getLife	scenery object	Scenery	
+BLK_LIGHT_POLE	blk_light_pole	Scenery	most common model
+Sataplia	trees	UNDEFINED	wooded site near Kutaisi
+getIP	land.getip	getIP	
+land.getIP	land.getip	getIP	
+land.profile	land.profile	land.profile	
+getClosestPointOnRoads	terrain.getclosestpointonroads	Roads, hook	
+findPathOnRoads	terrain.findpathonroads	Roads, hook	
+railroads	terrain.getclosestpointonroads	Roads, hook	network name argument
+isVisible	terrain.isvisible	Visibility	terrain only
+terrain.isVisible	terrain.isvisible	Visibility	
+non-maximum suppression	farp ranking	UNDEFINED	2 km spacing
+ground exposure	ground exposure	FARP siting example, live	
+LOS	sam score	UNDEFINED	line of sight
+Rioni plain	rioni plain	UNDEFINED	flat plain around Kutaisi
+unmasking point	unmasking point	SAM siting example, live	
+land.getSurfaceType	land.getsurfacetype	Sizing figures, server state	
+land.getHeight	land.getheight	Sizing figures, server state	
+getRunwayList	getrunwaylist	Airfield, beacon and radio tables, hook	
+getRunwayHeading	getrunwayheading	Airfield, beacon and radio tables, hook	
+getStandList	getstandlist	Airfield, beacon and radio tables, hook	
+getBeacons	getbeacons	Airfield, beacon and radio tables, hook	
+t:NNN	getbeacons	Airfield, beacon and radio tables, hook	scene instance id
+notInstances.lua	getbeacons	UNDEFINED	file sharing the t:NNN ids
+getRadio	getradio	Airfield, beacon and radio tables, hook	
+transverse Mercator	projection model	Projection check, Caucasus	
+tmerc	projection model	UNDEFINED	PROJ name for transverse Mercator
+PROJ	projection model	UNDEFINED	projection library
+lon_0	projection model	Projection check, Caucasus	central meridian
+k_0	projection model	Projection check, Caucasus	scale factor 0.9996
+easting offset	offset convention	Projection check, Caucasus	negated as PROJ +x_0
+northing offset	offset convention	Projection check, Caucasus	negated as PROJ +y_0
+convertLatLonToMeters	projection check	UNDEFINED	
+convertMetersToLatLon	projection check	UNDEFINED	
+coord.LLtoLO	projection check	UNDEFINED	
+addStaticObject	coalition.addstaticobject	Scenery clearing by spawned statics	
+Heliports	heliport clearing radius	Scenery clearing by spawned statics	static category that clears scenery
+FARP	farp static	Scenery clearing by spawned statics	
+FARP_SINGLE_01	farp static	Scenery clearing by spawned statics	
+Hangar A	building static	Scenery clearing by spawned statics	
+Fortifications	building static	Scenery clearing by spawned statics	static category
+clearing zone	scenery clearing	Scenery clearing by spawned statics	about 150 m radius
+StaticObject.destroy	staticobject.destroy	Scenery clearing by spawned statics	
+isExist	staticobject.destroy	Scenery clearing by spawned statics	
+Object.Category.STATIC	object.category.static	Scenery clearing by spawned statics	
+projection-samples	projection-samples	Projection, bounds and fill for every installed theatre	
+fit.py	fit.py	Projection, bounds and fill for every installed theatre	
+seabed	fill seabed	Projection, bounds and fill for every installed theatre	third channel
+Black Sea	black sea depth	UNDEFINED	
+Controller.isTargetDetected	controller.istargetdetected	Not measured	
+Kola	installed theatres	Not measured	not installed
+Nevada	installed theatres	Not measured	not installed
+ACCESS_VIOLATION	crash record	Crash record	
+createGlobalLand	crash record	Crash record	Terrain.dll
+--restarted	crash record	Crash record	DCS relaunch flag
+sim	server state call rule	Crash record	the only phase for server-state land/world calls
+transport directory	transport directory	Crash record	
+externalId	airdromes	GetTerrainConfig from the hook	"externalId:NNN" strings in towers, warehouses, fueldepots, shelters
+shelters	airdromes	GetTerrainConfig from the hook	
+getName	scenery object	Scenery	numeric id as a string; joins to getObjectsAtMapPoint id
+channel	getbeacons	Airfield, beacon and radio tables, hook	optional beacon field, 27 entries
+Spec-review measurements	spec-review measurements	Spec-review measurements, 2026-09-02	measurements taken 2026-09-02 while reviewing the specs
+net.dostring_in	net.dostring_in	Spec-review measurements, 2026-09-02	returns chunk string and boolean
+lfs	lfs	Spec-review measurements, 2026-09-02	LuaFileSystem in the hook state
+Object.Category	object.category	Spec-review measurements, 2026-09-02	enum
+world.VolumeType	world.volumetype	Spec-review measurements, 2026-09-02	enum
+Airbase.Category	airbase.category	Spec-review measurements, 2026-09-02	enum
+world.getAirbases	world.getairbases	Spec-review measurements, 2026-09-02	
+payload field	terrain container	Spec-review measurements, 2026-09-02	container's own size field, not the file size
+terrain container	terrain container	Spec-review measurements, 2026-09-02	versioned header of the terrain binaries
+missionNodes	map lua files	Spec-review measurements, 2026-09-02	global set by nodes.lua
+towns.lua	map lua files	Spec-review measurements, 2026-09-02	Map/towns.lua
+onSimulationFrame	hook callbacks	Spec-review measurements, 2026-09-02	fires at menu and in the Mission Editor
+fill triple	fill triple	Plan measurement V0: fill and hull on the land-fill theatres, 2026-09-02	GetHeight, GetSurfaceType and seabed all equal the map's constants
+kutaisi reference point	kutaisi reference point	Spec-review measurements, 2026-09-02	(−284887, 683859)
+terrain directories	terrain directories	Spec-review measurements, 2026-09-02	Mods/terrains on this install
+nodesMap.lua	nodesmapborders	Plan measurement V0: fill and hull on the land-fill theatres, 2026-09-02	MissionGenerator/nodesMap.lua; node-map image extent
+node-map image extent	nodesmapborders	Plan measurement V0: fill and hull on the land-fill theatres, 2026-09-02	what nodesMapBorders is outside Caucasus
+X7a	plan measurements	Plan measurements X7a and C8a, 2026-09-02	short-path cost measurement
+C8a	plan measurements	Plan measurements X7a and C8a, 2026-09-02	scenery catalogue measurement
+Plan measurements	plan measurements	Plan measurements X7a and C8a, 2026-09-02	measurements the project plan asked for
+scenery catalogue	scenery catalogue	Plan measurements X7a and C8a, 2026-09-02	caucasus-scenery-catalogue.tsv, one row per model
+caucasus-scenery-catalogue.tsv	scenery catalogue	Plan measurements X7a and C8a, 2026-09-02	the catalogue file
+V0	v0 method	Plan measurement V0: fill and hull on the land-fill theatres, 2026-09-02	fill and hull measurement on the land-fill theatres
+land-fill theatres	fill inside bounds rectangle	Plan measurement V0: fill and hull on the land-fill theatres, 2026-09-02	Afghanistan, Persian Gulf, Cold War Germany
+breakpoints	breakpoints	Plan measurement V0: fill and hull on the land-fill theatres, 2026-09-02	samples on a 2 km line at 10 m whose second difference of GetHeight exceeds 1e-4
+Site	breakpoint site	Plan measurement V0: fill and hull on the land-fill theatres, 2026-09-02	column of the breakpoint table; one ledger row per site
+bridge heartbeat	v0 method	Plan measurement V0: fill and hull on the land-fill theatres, 2026-09-02	stops while a lattice chunk holds the editor's frame
+post spacing	post spacing	Plan measurement V0: fill and hull on the land-fill theatres, 2026-09-02	distance between consecutive breakpoints on a 4 km line at 5 m
+surface strings	surface strings	Plan measurement V0: fill and hull on the land-fill theatres, 2026-09-02	`GetSurfaceType` return values over a lattice
+131072	invisible objects	Objects the mission state cannot see, 2026-09-02	hook `type` of wires, poles, cranes and walls that `world.searchObjects` cannot see
+Round trip ms	searchobjects timing	Objects the mission state cannot see, 2026-09-02	column of the scenery sphere cost table; server time plus bridge overhead

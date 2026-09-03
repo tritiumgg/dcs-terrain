@@ -1,0 +1,187 @@
+# spec: extractor-hook.md
+# sha256: 2a39c9894c3d9fca31658f38566b6f742b1e65f720888ec0028bbd044be4a15a
+# generated: 2026-09-03 (re-stamped after rename; rows from the 2026-09-02 review)
+term	subject	defined_in	note
+hook	hook	Spec: extractor hook	
+GameGUI hook	hook	Spec: extractor hook	
+extractor	hook	UNDEFINED	
+extract-format.md	extract format	Spec: extractor hook	
+extract	extract format	UNDEFINED	the output directory
+design-and-facts.md	design doc	Spec: extractor hook	
+design doc	design doc	UNDEFINED	
+probe log	design doc	UNDEFINED	probe-log-2.9.29.27278.md
+dcs-scripting	dcs-scripting skill	Spec: extractor hook	
+dcs-api-lookup	dcs-api-lookup	Spec: extractor hook	
+DcsTerrainExtract.lua	hook file	Files	also the config file name
+Saved Games	hook file	Files	
+Config	config file	Files	
+config	config file	UNDEFINED	the config table
+Progress log	progress log	Files	
+DcsTerrainExtract.log	progress log	Files	
+dcs.log	dcs.log	Files	
+INFO	dcs.log	Files	
+DCS install	dcs install	Files	
+enabled	enabled	Config table	
+output_dir	output_dir	Config table	
+cell_size	cell_size	Config table	
+tile_size	tile_size	Config table	
+frame_budget_ms	frame_budget_ms	Config table	
+crop_m	crop_m	Config table	
+authored_bounds_m	authored_bounds_m	Config table	
+nodesMapBorders	authored_bounds_m	Config table	
+omit_sea_tiles	omit_sea_tiles	Config table	
+road_seed_spacing	road_seed_spacing	Config table	
+road_seed_neighbours	road_seed_neighbours	Config table	
+passes	passes	Config table	
+towns_lua	towns_lua	Config table	
+nodes_lua	nodes_lua	Config table	
+crs	crs	Config table	
+terrain_dir	terrain_dir	Config table	
+SinaiMap	terrain_dir	Hook-pass sweeps	example id whose directory is Sinai
+validates	config validation	Config table	
+DCS.setUserCallbacks	callbacks	Lifecycle	
+state machine	state machine	Lifecycle	
+onSimulationFrame	state machine	Lifecycle	
+onMissionLoadEnd	state machine	Lifecycle	
+onSimulationStop	state machine	Lifecycle	
+onSimulationStart	state machine	Lifecycle	
+idle	idle state	Lifecycle	
+GetTerrainConfig	idle state	Lifecycle	
+prepare	prepare state	Lifecycle	
+resume	resume	Lifecycle	
+hook pass	hook pass	Lifecycle	
+mission pass	mission pass	Lifecycle	
+DCS.getModelTime	mission pass	Lifecycle	
+done	done state	Lifecycle	
+sweep	sweep iterator	Lifecycle	
+iterator	sweep iterator	Lifecycle	
+frame callback	frame budget	Lifecycle	
+os.clock	frame budget	Lifecycle	
+.tmp	tile write	Lifecycle	
+manifest	tile write	UNDEFINED	manifest.json
+getTerrainShpare	latlon samples	Hook-pass sweeps	
+convertMetersToLatLon	latlon samples	Hook-pass sweeps	
+autoupdate.cfg	dcs_build	Hook-pass sweeps	
+lfs.currentdir	dcs_build	Hook-pass sweeps	
+dcs_build	dcs_build	Hook-pass sweeps	
+dcs_build_timestamp	dcs_build	Hook-pass sweeps	
+terrain_fingerprint	terrain fingerprint	Hook-pass sweeps	
+airdromes	airdromes sweep	Hook-pass sweeps	
+roadnet	airdromes sweep	UNDEFINED	
+getRunwayList	airdromes sweep	Hook-pass sweeps	
+getRunwayHeading	airdromes sweep	Hook-pass sweeps	
+getStandList	stand params	Hook-pass sweeps	
+getBeacons	airdromes sweep	Hook-pass sweeps	
+getRadio	airdromes sweep	Hook-pass sweeps	
+dofile	sandboxed dofile	Hook-pass sweeps	
+sandboxed	sandboxed dofile	Hook-pass sweeps	
+tile order	layer sweeps	Hook-pass sweeps	
+tx	layer sweeps	UNDEFINED	
+tz	layer sweeps	UNDEFINED	
+row-major	layer sweeps	Hook-pass sweeps	
+Sequential	sequential access	Hook-pass sweeps	
+interleave	sequential access	Hook-pass sweeps	
+height	height sweep	Hook-pass sweeps	layer and sweep
+GetHeight	height sweep	Hook-pass sweeps	
+water	water sweep	Hook-pass sweeps	
+GetSurfaceType	water sweep	Hook-pass sweeps	
+GetSurfaceHeightWithSeabed	fill sweep	Hook-pass sweeps	third call of the fill triple; no seabed layer
+Encode	encoders	Hook-pass sweeps	
+Order	sweep order	Hook-pass sweeps	layer sweep order
+skip set	skip set	Hook-pass sweeps	fill tiles and, with `omit_sea_tiles`, all-sea tiles
+seeds	road seeds	Hook-pass sweeps	
+lattice	road seeds	Hook-pass sweeps	
+roads	roads sweep	Hook-pass sweeps	
+railroads	roads sweep	Hook-pass sweeps	
+getClosestPointOnRoads	roads sweep	Hook-pass sweeps	
+seed	roads sweep	Hook-pass sweeps	line kind
+path	roads sweep	Hook-pass sweeps	line kind
+nopath	roads sweep	Hook-pass sweeps	line kind
+snap point	neighbour lookup	Hook-pass sweeps	
+grid bucket lookup	neighbour lookup	Hook-pass sweeps	
+findPathOnRoads	path cost	Hook-pass sweeps	
+net.dostring_in	net.dostring_in	Mission-pass sweeps	
+server	net.dostring_in	Mission-pass sweeps	Lua state name
+states.md	states rules	Mission-pass sweeps	
+chunk	chunk injection	Mission-pass sweeps	
+%q	chunk injection	Mission-pass sweeps	
+DcsTerrainExtract_	chunk injection	Mission-pass sweeps	global namespace prefix
+payload	payload length check	Mission-pass sweeps	
+surface	surface sweep	Mission-pass sweeps	
+land.getSurfaceType	surface sweep	Mission-pass sweeps	
+quarter-tiles	surface sweep	Mission-pass sweeps	
+scenery	scenery sweep	Mission-pass sweeps	
+sphere	scenery sweep	Mission-pass sweeps	20 km search sphere
+getTypeName	scenery sweep	Mission-pass sweeps	
+getPoint	scenery sweep	Mission-pass sweeps	
+getDesc	scenery sweep	Mission-pass sweeps	
+getLife	scenery sweep	Mission-pass sweeps	
+de-duplicates	scenery dedup	Mission-pass sweeps	
+catalogue	model catalogue	Mission-pass sweeps	
+scenery_models.json	model catalogue	Mission-pass sweeps	
+footprint	footprint call	Mission-pass sweeps	
+terrain.getObjectsAtMapPoint	footprint call	Mission-pass sweeps	
+obb	footprint call	Mission-pass sweeps	
+radius	footprint call	Mission-pass sweeps	
+scenery.jsonl	scenery.jsonl	Mission-pass sweeps	
+heliport	heliport	Mission-pass sweeps	
+FARPs	heliport	Mission-pass sweeps	
+world.getAirbases	helipad check	Mission-pass sweeps	
+Airbase.Category.HELIPAD	helipad check	Mission-pass sweeps	
+airdromes.json	helipad check	UNDEFINED	
+allow_helipads	allow_helipads	Mission-pass sweeps	
+encoders	encoders	Encoders	
+i16le	i16le	Encoders	
+u8	i16le	Encoders	
+json	json encoder	Encoders	
+RFC 8259	json encoder	Encoders	
+%.17g	json encoder	Encoders	
+JSON_NULL	json_null	Encoders	
+Literal.lua	literal.lua	Encoders	
+pcall	pcall	Failure handling	
+failure	failure	Failure handling	
+notes	failure	Failure handling	manifest key
+failed	failed tile	Failure handling	
+nodata	failed tile	UNDEFINED	
+terrain id	terrain change	Failure handling	
+measured machine	performance	Performance targets	
+responsive	responsiveness	Performance targets	
+StubHarness.lua	stub harness	Testing	
+harness	stub harness	Testing	
+closed-form	closed-form terrain	Testing	
+synthetic generator	closed-form terrain	Testing	
+Synthetic theatre	closed-form terrain	UNDEFINED	section of core.md
+check-extract	harness test	UNDEFINED	`dcsterrain check-extract`
+sample-for-sample	harness test	Testing	
+boundary values	unit tests	Testing	encoder unit tests
+Acceptance	acceptance	Acceptance	
+Kutaisi	acceptance	Acceptance	
+bridge	acceptance	UNDEFINED	the live DCS bridge
+timing_ms	acceptance	UNDEFINED	manifest key
+`fill` triple	fill sweep	Hook-pass sweeps	`GetHeight`, `GetSurfaceType`, `GetSurfaceHeightWithSeabed` outside the bounds
+fill	fill sweep	Hook-pass sweeps	
+name_id	airdromes sweep	Hook-pass sweeps	entry's own `id` field
+pairs	airdromes sweep	Hook-pass sweeps	
+loadfile	sandboxed dofile	Hook-pass sweeps	
+setfenv	sandboxed dofile	Hook-pass sweeps	
+i_18n	sandboxed dofile	Hook-pass sweeps	
+gettext.translate	sandboxed dofile	Hook-pass sweeps	
+missionNodes	sandboxed dofile	Hook-pass sweeps	global set by `nodes.lua`
+sliced iterator	sha-256	Hook-pass sweeps	SHA-256 under the frame budget
+lfs.attributes	terrain fingerprint	Hook-pass sweeps	
+step	frame budget	Mission-pass sweeps	one chunk in the mission pass; one path call in roads
+getName	scenery sweep	Mission-pass sweeps	numeric id as a Lua number; the hook `id` is a string, join on `tostring`
+getID	helipad check	Mission-pass sweeps	
+extractor/test/StubHarness.lua	stub harness	Testing	vendored copy
+**config**	config sweep	Hook-pass sweeps	the config sweep
+hook state	hook state speed	Hook-pass sweeps	about 17 million simple Lua operations per second
+pre-sweep	pre-sweep	Lifecycle	5 km lattice, post-density line and road snap; bounds `authored_bounds_m`
+fill test	fill test	Hook-pass sweeps	per-cell comparison with the fill triple
+fill cell	fill test	Hook-pass sweeps	encoded `nodata`
+fill and sea skip set	skip set	Testing	unit-test name for the skip set
+post-density line	pre-sweep	Lifecycle	201 `GetHeight` calls at 10 m along x
+authored cell	pre-sweep	Lifecycle	
+tiles.jsonl	tile write	Lifecycle	tile journal
+journal	tile write	Lifecycle	
+merged	seed merge	Hook-pass sweeps	seeds whose snaps lie within 100 m
+package.loaded	stub harness	Testing	how the fake `terrain` module installs under the harness

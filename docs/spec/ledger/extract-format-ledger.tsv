@@ -1,0 +1,232 @@
+# spec: extract-format.md
+# sha256: 1a7c7365e8b2366cb668aaea435afa12f8c9ecc1aaa33fe5807dd10788737daa
+# generated: 2026-09-03 (re-stamped after rename; rows from the 2026-09-02 review)
+subject	kind	status	claim	section	anchor
+extract directory	definition		The extract directory is what the extractor writes and `dcsterrain pack` reads.	Spec: extract format	The directory the extractor writes and `dcsterrain pack` reads.
+extractor	definition		The extractor is the Lua side, `pack` is the Rust side, and this format is their only contract.	Spec: extract format	only contract between the Lua side and the Rust side
+extract directory	goal		The format is the hand-off between the Windows machine running DCS and any machine running `dcsterrain`.	Spec: extract format	between the Windows machine that runs DCS and any machine that runs
+extract directory	constraint		Both sides implement this file exactly and neither reads the other's code.	Spec: extract format	Both sides implement this file exactly; neither reads the
+design doc	dependency		Background lives in `design-and-facts.md`.	Spec: extract format	Background: `design-and-facts.md`.
+manifest.json	definition		The extract root contains `manifest.json`.	Directory layout	  manifest.json
+config.json	definition		The extract root contains `config.json`.	Directory layout	  config.json
+airdromes.json	definition		The extract root contains `airdromes.json`.	Directory layout	  airdromes.json
+runways.json	definition		The extract root contains `runways.json`.	Directory layout	  runways.json
+stands.json	definition		The extract root contains `stands.json`.	Directory layout	  stands.json
+beacons.json	definition		The extract root contains `beacons.json`.	Directory layout	  beacons.json
+radio.json	definition		The extract root contains `radio.json`.	Directory layout	  radio.json
+towns.json	definition		The extract root contains `towns.json`.	Directory layout	  towns.json
+nodes.json	definition		The extract root contains `nodes.json`.	Directory layout	  nodes.json
+roads.jsonl	definition		The extract root contains `roads.jsonl` and `railroads.jsonl`.	Directory layout	  roads.jsonl
+scenery.jsonl	definition		`scenery.jsonl` is written by the mission pass.	Directory layout	  scenery.jsonl            (mission pass)
+scenery_models.json	definition		`scenery_models.json` is written by the mission pass.	Directory layout	  scenery_models.json      (mission pass)
+height layer	definition		Height tiles live at `tiles/height/<tx>_<tz>.bin`.	Directory layout	    height/<tx>_<tz>.bin
+water layer	definition		Water tiles live at `tiles/water/<tx>_<tz>.bin`.	Directory layout	    water/<tx>_<tz>.bin
+surface layer	definition		Surface tiles live at `tiles/surface/<tx>_<tz>.bin` and come from the mission pass.	Directory layout	    surface/<tx>_<tz>.bin  (mission pass)
+path conventions	constraint		Every path inside the directory is relative, forward-slash and ASCII.	Directory layout	Every path inside the directory is relative, forward-slash, ASCII.
+tmp file	behavior		Files are written as `<name>.tmp` and renamed into place.	Directory layout	are written as `<name>.tmp` and renamed into place
+tmp file	behavior		A leftover `.tmp` means an interrupted write and `pack` ignores it.	Directory layout	means an interrupted write and `pack` ignores it.
+coordinate axes	definition		Units are DCS metres; `x` is north and `z` is east.	Coordinate conventions	DCS metres. `x` is north, `z` is east.
+coordinate axes	constraint		Every JSON object in this format uses the keys `x` and `z`.	Coordinate conventions	uses the keys `x` and `z`; the DCS Vec2 convention
+vec2 convention	behavior		The DCS Vec2 convention where `y` means z is translated at the extractor boundary and never appears here.	Coordinate conventions	translated at the extractor boundary and never appears here.
+height unit	definition		Heights and altitudes are metres above the DCS zero plane.	Coordinate conventions	altitudes are metres above the DCS zero plane.
+angle unit	definition		Angles are radians unless a key ends in `_deg`.	Coordinate conventions	Angles are radians unless a
+grid extent	definition		The grid covers `[origin_x, origin_x + height × cell_size)` by `[origin_z, origin_z + width × cell_size)`.	Grid geometry	The grid covers the rectangle `[origin_x, origin_x + height × cell_size)`
+cell centre	definition		Cell (row, col) is centred at origin plus (index + 0.5) × cell_size on each axis.	Grid geometry	centred at `(origin_x + (row + 0.5) × cell_size, origin_z + (col + 0.5) ×
+grid axes	definition		Rows run north and columns run east.	Grid geometry	cell_size)`: rows run north, columns run east.
+sampling	constraint		Sampling is at cell centres.	Grid geometry	east. Sampling is at cell
+tile size	definition		Tiles are `tile_size × tile_size` cells.	Grid geometry	Tiles are `tile_size × tile_size` cells.
+tile indexing	definition		Tile (tx, tz) holds rows tx × tile_size through (tx + 1) × tile_size − 1 and columns likewise.	Grid geometry	`tx × tile_size .. (tx + 1) × tile_size − 1` and columns likewise.
+sample index	definition		Within a tile the sample index is `local_row × tile_size + local_col`, row-major with columns fastest.	Grid geometry	a tile, sample index is `local_row × tile_size + local_col` (row-major,
+edge tile	constraint		The last tile in each direction is a full tile.	Grid geometry	The last tile in each direction is a full tile; cells
+nodata	behavior		Cells beyond the grid are written as the layer's `nodata` value.	Grid geometry	beyond the grid are written as the layer's `nodata` value.
+manifest.tiles	definition		A tile absent from `manifest.tiles` was not written.	Grid geometry	A tile absent from `manifest.tiles` was not written.
+manifest.tiles	behavior		`pack` reads absent tiles of a pass whose `complete` is true by the `water` tile.	Grid geometry	`pack` reads absent tiles of a pass whose `complete` is true by the
+manifest.tiles	behavior		No `water` tile means fill: `nodata` in every layer and `valid` 0.	Grid geometry	`water` tile: no `water` tile means fill (`nodata` in every layer,
+manifest.tiles	behavior		A `water` tile entirely `2` with no `height` tile means sea: `height` 0, `surface` 3 WATER.	Grid geometry	`valid` 0); a `water` tile entirely `2` with no `height` tile means sea
+manifest.tiles	behavior		`pack` reads an absent tile of an incomplete pass (`--allow-partial`) as all-`nodata`.	Grid geometry	tile of an incomplete pass (`--allow-partial`) as all-`nodata`.
+fill tile omission	constraint		The extractor omits a tile in two cases: an all-fill tile and, with `omit_sea_tiles`, an all-sea tile.	Grid geometry	a tile in two cases. A tile whose every cell is fill (see "Tile binary
+fill tile omission	behavior		A tile whose every cell is fill is omitted from every layer.	Grid geometry	layout") is omitted from every layer. A tile whose every cell is sea
+sea tile omission	constraint		A tile whose every cell is sea (`water` entirely `2`) is omitted from `height` and `surface` when `omit_sea_tiles` is true in the manifest.	Grid geometry	(`water` layer entirely `2`) is omitted from `height` and `surface` when
+sea tile omission	constraint		The `water` tile of an all-sea tile is written.	Grid geometry	`omit_sea_tiles` is true in the manifest; its `water` tile is written.
+sea tile omission	constraint		Otherwise every tile of every layer in a completed pass is present.	Grid geometry	Otherwise every tile of every layer in a completed pass is present.
+tile binary	definition		Tile files are raw little-endian samples with no header and a fixed dtype per layer.	Tile binary layout	Raw samples, no header, little-endian, fixed dtype per layer, exactly
+tile binary	constraint		Each tile file holds exactly `tile_size²` samples.	Tile binary layout	`tile_size²` samples. File size is therefore `tile_size² × bytes_per_sample`
+tile file size	constraint		`pack` rejects any tile file whose size is not `tile_size² × bytes_per_sample`.	Tile binary layout	and `pack` rejects any other size.
+height layer	definition		`height` is `i16` metres, `floor(h + 0.5)`, nodata −32768, from `terrain.GetHeight(x, z)` in the hook pass.	Tile binary layout	| `height` | `i16` | metres, `floor(h + 0.5)` | −32768 | `terrain.GetHeight(x, z)` | hook |
+water layer	definition		`water` is `u8` with 0 land, 1 lake, 2 sea, 3 river, 255 unknown; nodata 255.	Tile binary layout	| `water` | `u8` | 0 land, 1 lake, 2 sea, 3 river, 255 unknown string | 255 |
+water layer	dependency		`water` comes from the `terrain.GetSurfaceType(x, z)` string in the hook pass.	Tile binary layout	`terrain.GetSurfaceType(x, z)` string | hook |
+surface layer	definition		`surface` is `u8` `land.SurfaceType`: 1 LAND, 2 SHALLOW_WATER, 3 WATER, 4 ROAD, 5 RUNWAY; nodata 0.	Tile binary layout	| `surface` | `u8` | `land.SurfaceType` value: 1 LAND, 2 SHALLOW_WATER, 3 WATER, 4 ROAD, 5 RUNWAY | 0 |
+surface layer	dependency		`surface` comes from `land.getSurfaceType({x=x, y=z})` in the mission pass.	Tile binary layout	`land.getSurfaceType({x=x, y=z})` | mission |
+i16 clamp	constraint		`i16` values are clamped to [−32767, 32767] before encoding so −32768 stays reserved.	Tile binary layout	`i16` values are clamped to `[−32767, 32767]` before encoding so −32768
+unknown water string	behavior		Unknown `water` strings are logged once per distinct string and encoded 255.	Tile binary layout	Unknown `water` strings are logged once per distinct
+unknown water string	behavior		`pack` reports the count of unknown water strings.	Tile binary layout	string and encoded 255; `pack` reports their count.
+lua 5.1	dependency		Lua 5.1 in DCS has no `string.pack`.	Tile binary layout	Lua 5.1 in DCS has no `string.pack`.
+i16 encoding	behavior		The extractor encodes `i16` by hand as `v < 0 and v + 65536 or v`, then low byte, high byte.	Tile binary layout	complement by hand: `v < 0 and v + 65536 or v`, then low byte, high byte.
+u8 encoding	behavior		`u8` is one `string.char`.	Tile binary layout	`u8` is one `string.char`.
+i16 decoding	dependency		The Rust side reads `i16` with `i16::from_le_bytes`.	Tile binary layout	The Rust side reads with `i16::from_le_bytes`.
+format_version	definition		The manifest carries an integer `format_version`, currently 1.	manifest.json	"format_version": 1,
+extractor_version	definition		The manifest records `extractor_version` as a version string.	manifest.json	"extractor_version": "0.1.0",
+theatre	definition		The manifest records the `theatre` id string.	manifest.json	"theatre": "Caucasus",
+dcs_build	definition		The manifest records `dcs_build` and `dcs_build_timestamp` as strings.	manifest.json	"dcs_build": "2.9.29.27278",
+terrain_fingerprint	definition		`terrain_fingerprint` holds `surface5`, `rn4` and `scn5` entries with path, size, payload_size and head_sha256.	manifest.json	"surface5": { "path": "Mods/terrains/Caucasus/Surface/Caucasus.surface5"
+digest	definition		`terrain_fingerprint.digest` is an 8-hex-character string.	manifest.json	"digest": "3f9a1c2e"
+extracted_at	definition		The manifest records `extracted_at` as an ISO 8601 UTC timestamp.	manifest.json	"extracted_at": "2026-09-02T18:04:11Z",
+bounds_km	definition		`bounds_km` holds `sw` and `ne` coordinate pairs.	manifest.json	"bounds_km": { "sw": [-600, -560], "ne": [380, 1130] },
+authored_bounds_m	definition		`authored_bounds_m` holds `min_x`, `min_z`, `max_x` and `max_z` in metres.	manifest.json	"authored_bounds_m": { "min_x": -418619.19,
+crop_m	definition		`crop_m` is null when no crop box was given.	manifest.json	"crop_m": null,
+grid	definition		`grid` holds `cell_size`, `origin_x`, `origin_z`, `height`, `width` and `tile_size`.	manifest.json	"cell_size": 50,
+grid	definition		`grid.height` is the row count and `grid.width` the column count.	manifest.json	"height": 8901,
+sea tile omission	definition		The manifest records the `omit_sea_tiles` flag.	manifest.json	"omit_sea_tiles": true,
+layers	definition		`layers` records `dtype`, `nodata`, `unit` and `pass` for each layer.	manifest.json	"height":  { "dtype": "i16", "nodata": -32768, "unit": "m",     "pass": "hook" },
+water layer	definition		The manifest lists `water` with unit `class`, nodata 255, pass hook.	manifest.json	"water":   { "dtype": "u8",  "nodata": 255,
+surface layer	definition		The manifest lists `surface` with unit `enum`, nodata 0, pass mission.	manifest.json	"surface": { "dtype": "u8",  "nodata": 0,
+passes	definition		`passes.<name>` records `complete`, `started_at`, `finished_at` and `frames`.	manifest.json	"hook":    { "complete": true,
+passes	definition		An unstarted pass has `complete` false, null timestamps and zero frames.	manifest.json	"mission": { "complete": false, "started_at": null,
+manifest.tiles	definition		Each `tiles` entry holds `layer`, `tx`, `tz`, `path`, `min` and `max`.	manifest.json	{ "layer": "height", "tx": 0, "tz": 0, "path": "tiles/height/0_0.bin", "min": -3, "max": 412 }
+tables	definition		`tables` maps each table name to its file name in the directory.	manifest.json	"config": "config.json", "airdromes": "airdromes.json", "runways": "runways.json",
+timing_ms	definition		`timing_ms` records per-sweep elapsed milliseconds, including a `presweep` entry.	manifest.json	"timing_ms": { "presweep": 58000,
+notes	definition		`notes` is an array, empty by default.	manifest.json	"notes": []
+format_version	behavior		`format_version` is bumped on any incompatible change.	manifest.json	- `format_version` is bumped on any incompatible change; `pack` refuses a
+format_version	behavior		`pack` refuses a format version it does not know.	manifest.json	version it does not know.
+dcs_build	dependency		`dcs_build` and `dcs_build_timestamp` are `version` and `timestamp` from `autoupdate.cfg` at the install root.	manifest.json	- `dcs_build` and `dcs_build_timestamp` are `version` and `timestamp`
+autoupdate.cfg	dependency		The hook reads the install root through `lfs.currentdir()`.	manifest.json	from `autoupdate.cfg` at the install root, which the hook reads
+dcs_build	definition		`dcs_build` and `dcs_build_timestamp` identify the DCS core build.	manifest.json	through `lfs.currentdir()`. They identify the DCS core build.
+terrain_fingerprint	definition		`terrain_fingerprint` identifies the terrain module's data, which updates on its own schedule.	manifest.json	- `terrain_fingerprint` identifies the terrain module's data, which
+terrain_fingerprint	dependency		Terrain data can change heights, roads and scenery under an unchanged `dcs_build`.	manifest.json	under an unchanged `dcs_build`. The three files are
+terrain files	dependency		The fingerprinted files are `Mods/terrains/<terrain_dir>/Surface/<id>.surface5`, `Mods/terrains/<terrain_dir>/roads/<id>.rn4` and `Mods/terrains/<terrain_dir>/Scenes/<id>.scn5`.	manifest.json	`Mods/terrains/<terrain_dir>/Surface/<id>.surface5`,
+terrain files	definition		`<id>` is the theatre id and `<terrain_dir>` is the directory name from the extractor config.	manifest.json	theatre id and `<terrain_dir>` is the directory name from the
+terrain files	dependency		`terrain_dir` is `Sinai` for `SinaiMap`, `GermanyColdWar` for `GermanyCW` and `MarianasWWII` for `MarianaIslandsWWII`; the file base names use the id.	manifest.json	extractor config (`Sinai` for `SinaiMap`, `GermanyColdWar` for
+terrain files	dependency		Directory-name case does not matter on Windows.	manifest.json	names use the id). Directory-name case does not matter on Windows.
+terrain_fingerprint	behavior		For each file the hook records the file size from `lfs.attributes(path, "size")`, the little-endian `u64` at bytes 8–15 of the container header, and the SHA-256 of the first 1 MiB.	manifest.json	For each file the hook records the file size from
+terrain_fingerprint	constraint		Hook-state file handles have no `seek`.	manifest.json	`lfs.attributes(path, "size")` (hook-state file handles have no
+payload_size	definition		The `u64` at bytes 8–15 is the container's own payload-size field, which is smaller than the file for `.surface5` and `.scn5`.	manifest.json	(the container's own payload-size field, which is smaller than the
+terrain_fingerprint	behavior		Header and head are taken from one `read` of the file head.	manifest.json	all taken from one `read` of the file head. `digest` is
+digest	definition		`digest` is the first 8 hex characters of the SHA-256 over the three `head_sha256` values concatenated.	manifest.json	the first 8 hex characters of the SHA-256 over the three `head_sha256`
+digest	behavior		`digest` is the short id used in file names.	manifest.json	values concatenated, and is the short id used in file names. Hashing
+terrain_fingerprint	constraint		Hashing 1 MiB is instant; hashing the 6 GB surface file is not.	manifest.json	1 MiB is instant; hashing the 6 GB surface file is not, and the header
+terrain_fingerprint	dependency		The container header and head change whenever the terrain is rebuilt.	manifest.json	and head change whenever the terrain is rebuilt. The hook needs a
+sha-256	dependency		The hook needs SHA-256 in pure Lua 5.1: the hook state has no `bit` library and no `string.pack`.	manifest.json	SHA-256 in pure Lua 5.1: the hook state has no `bit` library and no
+sha-256	constraint		Use the arithmetic SHA-256 implementation and test it against a known vector.	manifest.json	`string.pack`; use the arithmetic implementation and test it against a
+bounds_km	dependency		`bounds_km` is `GetTerrainConfig("SW_bound")[1], [3]` and `NE_bound` likewise, in kilometres.	manifest.json	- `bounds_km` is `GetTerrainConfig("SW_bound")[1], [3]` and `NE_bound`
+authored_bounds_m	dependency		`authored_bounds_m` is `nodesMapBorders` from the theatre's `entry.lua` when the extractor is given it in config, recorded as `authored_bounds_source: "config"`.	manifest.json	- `authored_bounds_m` is `nodesMapBorders` from the theatre's `entry.lua`
+pre-sweep	behavior		Without configured bounds, `authored_bounds_m` is the bounding rectangle, expanded by 10 km, of the authored cells of a 5 km pre-sweep over the bounds rectangle.	manifest.json	expanded by 10 km, of the authored cells of a 5 km pre-sweep over the
+authored_bounds_source	definition		`authored_bounds_source` is `"presweep"` when `authored_bounds_m` came from the pre-sweep.	manifest.json	bounds rectangle (`authored_bounds_source: "presweep"`). A cell is
+authored_bounds_m	constraint		Either `authored_bounds_m` rectangle can include a fill margin; on Caucasus 3.2 % of a 1 km lattice inside `nodesMapBorders` reads the fill value.	manifest.json	rectangle can include a fill margin (on Caucasus 3.2 % of a 1 km
+authored_bounds_m	constraint		`authored_bounds_m` bounds the sweep and does not by itself mark valid terrain; the per-cell fill test and fill-tile omission do.	manifest.json	lattice inside `nodesMapBorders` reads the fill value), so it bounds
+crop_m	definition		`crop_m` is the user's bounding box when one was given, else null.	manifest.json	fill-tile omission do. `crop_m` is the
+grid origin	behavior		The extractor computes `grid.origin_*` and extents from `crop_m`, else `authored_bounds_m`.	manifest.json	`crop_m`, else `authored_bounds_m`, snapped
+grid origin	constraint		The grid bounds are snapped outward to a multiple of `cell_size`.	manifest.json	outward to a multiple of `cell_size`. `cell_size` is 50 in every
+grid	constraint		`cell_size` is 50 in every extract.	manifest.json	extract; a coarser packed base is `pack`'s choice. The manifest records the result;
+grid	nongoal		A coarser packed base is `pack`'s choice, not the extractor's.	manifest.json	extract; a coarser packed base is `pack`'s choice. The manifest records the result;
+grid origin	constraint		`pack` never recomputes the grid.	manifest.json	`pack` never recomputes it.
+manifest.tiles	constraint		`tiles` lists every tile file present with per-tile `min` and `max` over non-nodata samples.	manifest.json	- `tiles` lists every tile file present, with per-tile `min` and `max`
+tile min max	definition		`min` and `max` are null when every sample in the tile is nodata.	manifest.json	over non-nodata samples (null when every sample is nodata). The
+tiles.jsonl	behavior		The extractor appends one line per written tile to `tiles.jsonl`, the same object as a `tiles` entry.	manifest.json	extractor appends one line per written tile to `tiles.jsonl`, the
+manifest.tiles	behavior		The extractor writes `tiles` into the manifest at the end of each pass and at every phase change.	manifest.json	at the end of each pass and at every phase change. When the journal
+pass completion	definition		`passes.<name>.complete` is true only when every tile and table of that pass has been written.	manifest.json	- `passes.<name>.complete` is true only when every tile and table of that
+allow-partial	behavior		`pack` packs an incomplete hook pass only with `--allow-partial`.	manifest.json	pass has been written. `pack` packs an incomplete hook pass only with
+mission pass	behavior		An incomplete mission pass is normal and leaves `surface` and `scenery` absent from the packed file.	manifest.json	`--allow-partial`; an incomplete mission pass is normal and simply
+json encoding	constraint		All JSON files are UTF-8 with one document per file.	Tables	All JSON files are UTF-8, one document per file, keys as below. Numbers
+number precision	constraint		Numbers are written with `%.17g` so they round-trip a double.	Tables	are written with enough precision to round-trip a double (`%.17g`).
+config.json	definition		`config.json` holds `id`, `bounds_km`, `default_bullseye`, `sea_enabled`, `default_camera_km`, `summer_time_delta`, `shape`, `crs`, `latlon_samples` and `fill`.	Tables	**config.json**: `id`, `bounds_km`, `default_bullseye` (`{blue: {x, z},
+default_camera_km	definition		`default_camera_km` is `[x, alt, z]` and `default_bullseye` has `blue` and `red` points.	Tables	red: {x, z}}`), `sea_enabled`, `default_camera_km` (`[x, alt, z]`),
+shape	dependency		`shape` is the `getTerrainShpare()` string.	Tables	`summer_time_delta`, `shape` (the `getTerrainShpare()` string), `crs`
+crs	definition		`crs` is an object with a `proj4` string and fitted parameters when given, else null.	Tables	(object with `proj4` string and the fitted parameters when the extractor
+latlon_samples	definition		`latlon_samples` is 20 `{x, z, lat, lon}` entries from `terrain.convertMetersToLatLon` on a regular lattice inside the grid.	Tables	was given them, else null), `latlon_samples`: 20 entries `{x, z, lat,
+latlon_samples	goal		`pack` uses `latlon_samples` to verify or fit the projection.	Tables	grid, for `pack` to verify or fit the projection; `fill`: `{height,
+fill	definition		`config.json.fill` is `{height, water, seabed, samples: [{x, z, height, water, seabed}]}`, the fill triple the theatre returns outside its terrain.	Tables	water, seabed, samples: [{x, z, height, water, seabed}]}`, the fill
+fill	behavior		The fill triple is measured at three points 500 km outside the bounds rectangle.	Tables	points 500 km outside the bounds rectangle (`height` as returned,
+fill	definition		In `fill`, `height` is as returned, `water` is the encoded class and `seabed` is as returned.	Tables	`water` as the encoded class, `seabed` as returned). The extractor uses
+fill	goal		The extractor uses `fill` for the per-cell fill test and `pack` copies it into `meta`.	Tables	it for the per-cell fill test ("Tile binary layout") and `pack` copies
+fill	constraint		The three fill samples must agree; the extractor logs, writes `fill: null` and skips the fill test when they do not.	Tables	logs, writes `fill: null` and skips the fill test when they do not.
+airdromes.json	definition		`airdromes.json` is an array with id, name_id, code, display_name, names, x, z, lat, lon, civilian, abandoned, class and more.	Tables	**airdromes.json**: array of `{id, name_id, code, display_name, names, x,
+airdromes.json	definition		Airdrome entries also carry runway_names, beacon_ids, radio_ids, roadnet, roadnet5, towers, warehouses, fueldepots and shelters.	Tables	z, lat, lon, civilian, abandoned, class, runway_names, beacon_ids,
+airdromes.json	definition		Airdrome `id` is the numeric key of the entry in the `Airdromes` table.	Tables	shelters}`. `id` is the numeric key of the entry in the `Airdromes`
+airdromes.json	dependency		Airdrome `id` is 25 for Kutaisi and equals `Airbase:getID()` in the mission state.	Tables	table (25 for Kutaisi; it equals `Airbase:getID()` in the mission
+name_id	definition		`name_id` is the airdrome entry's own `id` field, a string such as `"KUTAISI"`.	Tables	state); `name_id` is the entry's own `id` field, a string (`"KUTAISI"`).
+airdromes.json	definition		`towers`, `warehouses`, `fueldepots` and `shelters` are arrays of `"externalId:NNN"` strings as DCS gives them.	Tables	The last four are arrays of `"externalId:NNN"` strings as DCS gives
+airdromes.json	dependency		Airdrome `x, z` come from `reference_point`, a `{x, y}` table whose `y` is z.	Tables	them. `x, z` from `reference_point` (`{x, y}`, `y` is z). Entries with
+abandoned airdrome	behavior		Airdromes with `abandoned == true` are included and flagged.	Tables	`abandoned == true` are included and flagged.
+runways.json	definition		`runways.json` is an array of airdrome_id, name, edge1_name, edge1_x, edge1_z, edge2_name, edge2_x, edge2_z, course.	Tables	**runways.json**: array of `{airdrome_id, name, edge1_name, edge1_x,
+runways.json	dependency		Runways come from `terrain.getRunwayList(roadnet)` per airdrome with `course` in radians as returned.	Tables	`terrain.getRunwayList(roadnet)` per airdrome, `course` in radians as
+stands.json	definition		`stands.json` is an array of airdrome_id, crossroad_index, name, flag, x, z and params.	Tables	**stands.json**: array of `{airdrome_id, crossroad_index, name, flag, x,
+stands.json	definition		Stand `params` hold SHELTER, FOR_HELICOPTERS, FOR_AIRPLANES, WIDTH, LENGTH, HEIGHT.	Tables	z, params: {SHELTER, FOR_HELICOPTERS, FOR_AIRPLANES, WIDTH, LENGTH,
+stands.json	dependency		Stands come from `terrain.getStandList(roadnet, [...])`.	Tables	HEIGHT}}`, from `terrain.getStandList(roadnet, [...])`.
+beacons.json	definition		`beacons.json` is an array of beacon_id, callsign, display_name, type, frequency_hz, channel, direction, x, alt, z, lat, lon, scene_objects.	Tables	**beacons.json**: array of `{beacon_id, callsign, display_name, type,
+beacons.json	dependency		Beacon `x, alt, z` are `position[1..3]`, a positional array.	Tables	from `terrain.getBeacons()`; `x, alt, z` are `position[1..3]` (a
+beacons.json	dependency		Beacon `lat, lon` are `positionGeo.latitude/longitude`.	Tables	positional array), `lat, lon` are `positionGeo.latitude/longitude`;
+beacons.json	dependency		Beacons come from `terrain.getBeacons()` and `channel` is null when absent; 27 of 164 Caucasus beacons carry one.	Tables	`channel` null when absent (27 of 164 Caucasus beacons carry one).
+radio.json	definition		`radio.json` is an array of radio_id, callsigns, roles, frequencies_hz {hf, fm, vhf, uhf}, scene_objects.	Tables	**radio.json**: array of `{radio_id, callsigns, roles, frequencies_hz:
+radio.json	dependency		Radio `frequency` is keyed `0..3`, each value a pair whose second element is the frequency in Hz, mapped to `hf`, `fm`, `vhf`, `uhf` in that order.	Tables	`frequency` is keyed `0..3`, each value a pair whose second element is
+radio.json	dependency		Anapa's radio frequencies are 3.75, 38.4, 121 and 250 MHz.	Tables	the frequency in Hz (Anapa: 3.75, 38.4, 121, 250 MHz), mapped to `hf`,
+callsigns	dependency		Radio `callsign` is an array of `{<lang> = {name, name}}` tables.	Tables	`fm`, `vhf`, `uhf` in that order. `callsign` is an array of
+callsigns	definition		`callsigns` records the callsign as `{<lang>: name}` using the first name of each entry.	Tables	`{<lang>: name}` using the first name of each entry.
+towns.json	definition		`towns.json` is an array of name, display_name, lat, lon, x, z from the theatre's `Map/towns.lua`.	Tables	**towns.json**: array of `{name, display_name, lat, lon, x, z}` from the
+towns.lua	dependency		The extractor reads `towns.lua` at the config-given path with `dofile` in a sandboxed environment.	Tables	theatre's `Map/towns.lua` (path given in config; the extractor reads it
+towns.json	dependency		Town `x, z` come from `terrain.convertLatLonToMeters`.	Tables	`terrain.convertLatLonToMeters`.
+nodes.json	definition		`nodes.json` is an array of id, name, red {x, z}, blue {x, z} from `MissionGenerator/nodes.lua`.	Tables	**nodes.json**: array of `{id, name, red: {x, z}, blue: {x, z}}` from
+nodes.json	dependency		`nodes.lua` is read by the same sandboxed rule and positions are kept as given.	Tables	`MissionGenerator/nodes.lua`, same reading rule, positions as given.
+roads.jsonl	definition		`roads.jsonl` and `railroads.jsonl` hold one JSON object per line.	Tables	**roads.jsonl** and **railroads.jsonl**: one JSON object per line.
+seed line	definition		A seed line holds kind, id, x, z, snap_x, snap_z and snap_dist.	Tables	`{"kind": "seed", "id": n, "x": ..., "z": ..., "snap_x": ..., "snap_z": ...,
+seed line	dependency		Each seed's snap comes from `getClosestPointOnRoads`.	Tables	`getClosestPointOnRoads` snap (`snap_x`, `snap_z`, `snap_dist` null
+seed line	behavior		`snap_x`, `snap_z` and `snap_dist` are null when `getClosestPointOnRoads` returns nil, which it does where no road is reachable, as on open sea on Marianas.	Tables	when the call returns nil, which it does where no road is reachable,
+seed line	constraint		A seed whose snap is null gets no paths.	Tables	as on open sea on Marianas; such a seed gets no paths), then `{"kind": "path", "from": seed_id,
+path line	definition		A path line holds from, to and points for each `findPathOnRoads` result.	Tables	"to": seed_id, "points": [[x, z], ...]}` for each `findPathOnRoads` result,
+nopath line	definition		A nopath line with from and to is written where `findPathOnRoads` returned nil.	Tables	and `{"kind": "nopath", "from": ..., "to": ...}` where it returned nil.
+road seeds	definition		Seeds are a lattice at `road_seed_spacing` metres, default 1000, over the grid.	Tables	Seeds are a lattice at `road_seed_spacing` metres (default 1000) over the
+road seeds	definition		Seeds also include every airdrome reference point and every town.	Tables	grid plus every airdrome reference point and every town. Paths are
+road_seed_neighbours	definition		Paths are requested from each seed to its `road_seed_neighbours`, default 4, nearest seeds by snap point.	Tables	requested from each seed to its `road_seed_neighbours` (default 4) nearest
+road_seed_neighbours	constraint		Each unordered seed pair is requested once.	Tables	seeds by snap point, each unordered pair once. Graph building is `pack`'s
+road graph	nongoal		Graph building is `pack`'s job; the extractor records what the engine said.	Tables	job; the extractor records what the engine said.
+scenery.jsonl	definition		`scenery.jsonl` holds one object per line with id, model, x, alt, z, obb and radius.	Tables	**scenery.jsonl** (mission pass): one object per line, `{"id": n,
+obb	definition		`obb` holds w, d, rotation, cx, cz or is null; `radius` may be null.	Tables	"d": ..., "rotation": ..., "cx": ..., "cz": ...} | null, "radius": ... |
+scenery.jsonl	dependency		`id`, `model` and position come from `world.searchObjects` over `Object.Category.SCENERY`.	Tables	null}`. `id`, `model`, position from `world.searchObjects` over
+obb	dependency		`obb` and `radius` come from `terrain.getObjectsAtMapPoint(x, z)` at the object's position when it returns a matching `id`, else null.	Tables	`terrain.getObjectsAtMapPoint(x, z)` at the object's own position when
+scenery dedup	constraint		Objects are unique by `id`; the extractor de-duplicates across overlapping search spheres.	Tables	by `id`; the extractor de-duplicates across overlapping search spheres.
+scenery.jsonl	dependency		Objects whose hook `type` is 131072 (wires, power-line poles, cranes, walls) are not returned by `world.searchObjects`.	Tables	Objects whose hook `type` is 131072 (wires, power-line poles, cranes,
+scenery.jsonl	constraint		Objects of hook `type` 131072 are absent from the extract.	Tables	walls) are not returned by `world.searchObjects` and are absent from
+scenery_models.json	definition		`scenery_models.json` is the per-theatre model catalogue.	Tables	**scenery_models.json** (mission pass): the per-theatre model
+scenery.jsonl	dependency		Scenery `id` is `obj:getName()`, a Lua number.	Tables	`Object.Category.SCENERY`: `id` is `obj:getName()`, a Lua number
+scenery.jsonl	constraint		Scenery objects have no `getID`; `getName()` gives the numeric id (70741507).	Tables	(scenery objects have no `getID`; 70741507), `model` is `obj:getTypeName()`,
+scenery.jsonl	dependency		Scenery `model` is `obj:getTypeName()`.	Tables	70741507), `model` is `obj:getTypeName()`,
+scenery.jsonl	dependency		Scenery position is `obj:getPoint()` with `alt` its `y`.	Tables	position is `obj:getPoint()` with `alt` its `y`. `obb` and `radius` from
+obb	dependency		`obb` and `radius` come from `terrain.getObjectsAtMapPoint(x, z)` at the object's position when it returns an entry whose `id` (a string of digits in the hook) equals `tostring` of the same number, else null.	Tables	that returns an entry whose `id` (a string of digits in the hook)
+obb	constraint		The hook entry's `id` is matched by `tostring` of the mission-state number.	Tables	equals `tostring` of the same number, else null; in
+obb	dependency		In the `getObjectsAtMapPoint` entry, `sizeOBB`, `center`, `boxMin` and `boxMax` are positional arrays.	Tables	that entry `sizeOBB`, `center`, `boxMin` and `boxMax` are positional
+obb	definition		`w, d` are `sizeOBB[1], [2]` and `cx, cz` are `center[1], [2]`.	Tables	arrays, so `w, d` are `sizeOBB[1], [2]` and `cx, cz` are
+scenery_models.json	dependency		`display_name`, `category` and `life` come from `getDesc()` and `getLife()` on the first instance seen.	Tables	`life` come from `getDesc()` and `getLife()` on the first instance seen;
+type_bits	definition		`type_bits` is the sorted array of distinct `type` values seen.	Tables	`type_bits` is the sorted array of distinct `type` values seen (65536,
+type_bits	dependency		`type` values 65536, 65537 and 131072 occur on Caucasus.	Tables	65537 and 131072 occur on Caucasus), the OBB medians and `radius` from
+scenery_models.json	dependency		The OBB medians and `radius` come from `getObjectsAtMapPoint` over every instance that returned one, null when none did.	Tables	`getObjectsAtMapPoint` over every instance that returned one (null when
+scenery_models.json	behavior		The extractor builds the catalogue while writing `scenery.jsonl` and writes it at the end of the scenery sweep.	Tables	builds it while writing `scenery.jsonl` and writes it at the end of the
+scenery classification	dependency		`pack` classifies scenery from the catalogue per `core.md` "Scenery classification".	Tables	(`core.md`, "Scenery classification"), and it is small
+scenery_models.json	constraint		The catalogue is about 130 rows on Caucasus, small enough to paste into a review.	Tables	enough (about 130 rows on Caucasus) to paste into a review.
+pack validation	behavior		`pack` validates `format_version`.	Versioning and validation	`pack` validates: `format_version`; every listed tile exists with the
+pack validation	behavior		`pack` checks every listed tile exists with the exact byte size and no tile file is unlisted.	Versioning and validation	exact byte size; no unlisted tile files; per-tile min/max match the
+pack validation	behavior		`pack` checks per-tile min/max match the contents and every JSON file parses with the listed keys.	Versioning and validation	contents; every JSON file parses and has the keys above; `passes.hook.
+pack validation	behavior		`pack` requires `passes.hook.complete` or `--allow-partial`.	Versioning and validation	complete` or `--allow-partial`. It reports each failure with the path
+pack validation	behavior		`pack` reports each validation failure with the path and stops.	Versioning and validation	and stops. A `dcsterrain check-extract <dir>` subcommand runs the same
+check-extract	interface		`dcsterrain check-extract <dir>` runs the same validation without packing.	Versioning and validation	validation without packing, so a user can confirm an extraction on the
+check-extract	goal		A user can confirm an extraction on the Windows machine before moving it.	Versioning and validation	Windows machine before moving it.
+synthetic theatre generator	dependency		The synthetic theatre generator in `core.md` writes a directory in this format.	Test contract	The synthetic theatre generator (`core.md`) writes a
+stub harness	dependency		The stub-harness run of the extractor writes a directory from the same closed-form terrain.	Test contract	(`extractor-hook.md`) writes one from the same closed-form terrain.
+contract test	constraint		Both directories are read by the same `pack` and a test asserts they are sample-for-sample identical.	Test contract	Both are read by the same `pack`, and a test asserts the two directories
+contract test	definition		That identity test is the cross-language contract test.	Test contract	are sample-for-sample identical. That is the cross-language contract
+fill cell	definition		A cell is fill when the unrounded returns of all three hook calls equal the fill triple.	Tile binary layout	A cell is fill when the unrounded returns of all three hook calls equal
+fill cell	constraint		The extractor tests fill before encoding because after rounding the Caucasus fill height 5.000005 equals real 5 m land.	Tile binary layout	before encoding, because after `floor(h + 0.5)` the Caucasus fill
+fill cell	behavior		A fill cell is written as `nodata` in `height` and `water`.	Tile binary layout	as `nodata` in `height` and `water`. The seabed return is read for the
+fill cell	nongoal		The seabed return is read for the fill test only; no layer stores it, since no query reads depth.	Tile binary layout	test only; no layer stores it, since no query reads depth. A tile that
+fill tile omission	behavior		A tile that is entirely fill is omitted.	Tile binary layout	is entirely fill is omitted.
+authored_bounds_source	definition		The manifest records `authored_bounds_source`, `"config"` in the example.	manifest.json	"authored_bounds_source": "config",
+payload_size	dependency		The `.surface5` and `.scn5` payload sizes in the example (43964216 and 11888248) are smaller than the file sizes; the `.rn4` payload size equals its file size.	manifest.json	"payload_size": 203468160, "head_sha256"
+tiles.jsonl	definition		The extract root contains `tiles.jsonl`, an append-only tile journal.	Directory layout	  tiles.jsonl              (append-only tile journal)
+timing_ms	definition		The example `timing_ms` records presweep 58000, height 71020, water 98400 and roads 612000 ms.	manifest.json	"height": 71020, "water": 98400, "roads": 612000 },
+authored cell	definition		A cell is authored when a 2 km line from its centre sampled at 10 m has at least 60 samples whose second difference of `GetHeight` is non-zero.	manifest.json	authored when a 2 km line from its centre sampled at 10 m has at
+authored cell	definition		A cell is also authored when `getClosestPointOnRoads("roads", ...)` snaps within 5 km.	manifest.json	or `getClosestPointOnRoads("roads", ...)` snaps within 5 km
+authored cell	dependency		The authored-cell test is documented in `design-and-facts.md`, "Geometry facts".	manifest.json	(`design-and-facts.md`, "Geometry facts"). `config.json.presweep`
+config.json.presweep	definition		`config.json.presweep` records `cell_km`, `breakpoint_min`, `road_max_m` and the counts of authored and total cells.	manifest.json	records `cell_km`, `breakpoint_min`, `road_max_m`, the counts of
+config.json.presweep	definition		`config.json.presweep` records the authored cells as a bitmask row by row in base64.	manifest.json	authored and total cells, and the authored cells as a bitmask row by
+tiles.jsonl	behavior		When the journal holds lines the manifest lacks, `pack` and `check-extract` take the union and report the count.	manifest.json	holds lines the manifest lacks, `pack` and `check-extract` take the
+tiles.jsonl	constraint		A journal line for a file that does not exist, or a file with no line, is an error.	manifest.json	or a file with no line, is an error. Resume reads the journal, so an
+tiles.jsonl	behavior		Resume reads the journal, so an interrupted run loses at most the tile being written.	manifest.json	interrupted run loses at most the tile being written.
+water layer	dependency		`land`, `sea`, `lake` and `river` are the only `water` strings seen: 60 000 samples on Caucasus, 40 000 on Cold War Germany.	Tile binary layout	`lake` and `river` are the only strings seen (60 000 samples on
