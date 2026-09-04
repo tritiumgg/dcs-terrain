@@ -154,6 +154,18 @@ ask_bash 'gh pr merge 14 --merge'
 # A tag listing is not a tag.
 allow_bash 'git tag --list'
 
+# Deleting a remote branch, in all three spellings. A remote branch is shared,
+# restoring one means knowing the sha it pointed at, and deleting the base of
+# an open pull request closes that request.
+ask_bash 'git push origin --delete build/guards'
+ask_bash 'git push origin -d build/guards'
+ask_bash 'git push origin :build/guards'
+ask_bash 'git push --delete origin docs/adr-format'
+# A local branch is not shared and is cheap to restore from the reflog.
+allow_bash 'git branch -d build/guards'
+allow_bash 'git branch -D build/guards'
+allow_bash 'git push origin HEAD'
+
 # --- guard-bash: portability -----------------------------------------------
 
 refuse_bash 'sed -i s/a/b/ f.txt'

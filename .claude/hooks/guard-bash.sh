@@ -182,12 +182,27 @@ if has "git[[:space:]]+push([[:space:]]|$)"; then
     args=$(printf '%s\n' "$lines" | grep -E 'git[[:space:]]+push' | head -1 \
         | sed 's/.*git[[:space:]]*push//' | tr ' ' '\n' | grep -v '^-' | grep -v '^$' || true)
     n=$(printf '%s\n' "$args" | grep -c . || true)
+
+    # Deleting a remote branch, in any of its three spellings: --delete, -d,
+    # and the colon refspec. Checked before the main-push cases below, because
+    # a delete carries two names and would otherwise look like an ordinary
+    # push of a named branch and pass unremarked.
+    #
+    # It is a prompt rather than a refusal: deleting a merged branch is the
+    # normal end of a task. What it must not be is silent. A remote branch is
+    # shared, restoring one means knowing the sha it pointed at, and deleting
+    # the base of an open pull request closes that request.
+    if has "git[[:space:]]+push.*([[:space:]]--delete|[[:space:]]-d)([[:space:]]|$)" \
+        || printf '%s\n' "$args" | grep -q '^:'; then
+        ask "This deletes a remote branch. Deleting the base branch of an open pull request closes it, and a stacked pull request closes as CLOSED rather than MERGED. Say which branch and why, and confirm the work is on main first."
+    fi
+
     if printf '%s\n' "$args" | grep -Eq '^(\+?main|[^:]*:main)$'; then
-        ask "This pushes main. $RULE"
+        ask "This pushes main. $RULE Retarget every open stacked pull request to main BEFORE this push: afterwards GitHub refuses the retarget, because the head is already contained in main, and those requests can then only close as CLOSED rather than MERGED."
     fi
     if [ "$n" -le 1 ]; then
         current_branch
-        [ "$branch" = "main" ] && ask "This pushes the current branch, which is main. $RULE"
+        [ "$branch" = "main" ] && ask "This pushes the current branch, which is main. $RULE Retarget every open stacked pull request to main BEFORE this push, or they can only close as CLOSED rather than MERGED."
     fi
 fi
 

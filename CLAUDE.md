@@ -376,7 +376,23 @@ lines that changed.
   procedures that drift.
 - **History is linear. Rebase, never merge-commit.** Bring a branch up to date
   with `git rebase main`; land it with `git merge --ff-only`. If the
-  fast-forward is refused, fix the branch.
+  fast-forward is refused, fix the branch. Git enforces this once
+  `merge.ff = only` and `pull.ff = only` are set, which is a machine setting
+  rather than a repository one:
+
+  ```sh
+  git config --global merge.ff only
+  git config --global pull.ff only
+  ```
+
+- **A stack lands as one fast-forward, and the pull requests are retargeted
+  first.** Merge each branch locally bottom-up, then push `main` once. Retarget
+  every stacked pull request to `main` **before** that push: afterwards GitHub
+  refuses, because the head is already contained in `main` and there is nothing
+  to diff, and those requests can then only be closed rather than merged.
+- **Deleting a remote branch is a prompt, not a reflex.** A local branch is
+  cheap to restore from the reflog; a remote one is shared, and deleting the
+  base of an open pull request closes it.
 - Put a document edit in the pull request whose code changes it, not in a
   documentation pull request of its own. A `plan.md` row and the code that
   reshapes it are one reviewable thought.
