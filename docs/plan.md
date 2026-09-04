@@ -86,6 +86,8 @@ component are in build order.
 | X9 | Failure handling: `pcall` everywhere, `notes` entries, terrain change mid-run | Offline tests inject failures and the run completes with `nodata` cells and notes | X4 |
 | X10 | Live run, cropped: 10 × 10 km around Kutaisi, both passes, ten cells spot-checked through the bridge | Acceptance 2 and 3 in the spec; `check-extract` passes | X5, X6, X7, X8c, X9, C3 |
 | X11 | Live run, full Caucasus, both passes; timings recorded in the probe log | Acceptance 4 | X10 |
+| X12 | Progress reporting: `start` returns `step, progress` and `progress()` answers `(done, total)` or nil; a wall-clock heartbeat naming phase, sweep, elapsed and fraction; an overall fraction weighted by the measured per-sweep costs, because roads is over half the run and an unweighted bar sits still through it; totals at done. The sweeps from X5 on implement `progress()`. Needs an ADR: the spec's progress log is "one line per tile and per phase change" and this adds a third kind | An offline driver over 10 000 frames emits one heartbeat per interval, never reports a fraction above 1, and names the phase it is actually in; a sweep that cannot count its work still gets a heartbeat | X2a, X4 |
+| X13 | Progress window: `Window`, `Panel`, `Static` and `HorzProgressBar` required from the hook state, holding a bar, a line naming the current sweep and a line naming the progress log path; opened at prepare, closed at done. Every widget call `pcall`ed, one failure disabling the window and logging once, because a run must never depend on its own progress display | The window appears with the Mission Editor open during a live cropped run, the bar advances and the text tracks the log; forcing every widget call to fail leaves the sweep running and the extract identical | X12 |
 
 ### C: core and pack
 
@@ -193,8 +195,8 @@ changes nothing about them.
 | Milestone | Contains | Proof |
 |---|---|---|
 | MS0 Contract | P1, P2, F1, F2, C1, C2, C3, X1, X3 | `check-extract` accepts the Rust synthetic extract, and the hook's encoders and grid computation reproduce the F2 constants byte for byte on the same inputs (ADR 0005: the full-format contract is proven at X10) |
-| MS1 Packed file | C4, C5a–C5c, C6–C10, C8a, C8b, C12a–C12c, X2a, X2b, X4–X9 | `pack` and `check` pass on the synthetic extract; the hook completes a live cropped sweep |
-| MS2 Real extract | X10, X11, C13, C14 | A full Caucasus extract exists, packs, and `check` passes |
+| MS1 Packed file | C4, C5a–C5c, C6–C10, C8a, C8b, C12a–C12c, X2a, X2b, X4–X9, X12 | `pack` and `check` pass on the synthetic extract; the hook completes a live cropped sweep |
+| MS2 Real extract | X10, X11, X13, C13, C14 | A full Caucasus extract exists, packs, and `check` passes |
 | MS3 Queries | Q1–Q5, Q6a–Q6c, Q7, Q8, C11 | Every operation tested on the synthetic theatre; benchmarks within target |
 | MS4 Server | M1–M4, Q9 | The assistant answers the FARP example, and `query` returns the same result for it as the server does |
 | MS5 Validated | V1, V2, P3, P4, D1 | A stamped Caucasus file, release binaries, and a guide a newcomer can follow |

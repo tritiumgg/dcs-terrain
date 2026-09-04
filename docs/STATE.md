@@ -77,9 +77,9 @@ Max 5 entries, in dependency order. Task ids from `plan.md`.
    ADR 0007 carries the Caucasus head hashes and digest as its test vector.
    The install reads 2.9.29.27468 / 20260902-093323, the build ADR 0007
    measured.
-2. **X5 / X6 / X7** — the tables, `water` and `height`, and roads sweeps, each
-   an `add_job("hook", ...)` on X4's machine. Verified against a running
-   theatre through the bridge, not offline.
+2. **X12 / X5 / X6 / X7** — progress reporting first, so the sweeps are written
+   against its `progress()` contract; then the tables, `water` and `height`, and
+   roads, each an `add_job("hook", ...)`. Verified through the bridge.
 3. **X8a / X8b / X8c / X9** — the mission pass, scenery, the model catalogue
    and failure handling. X ends here until `check-extract` exists.
 4. **C1 / C2 / C3** — the Rust interlude X10 needs, and no more of C than
@@ -104,3 +104,4 @@ Things a later task must not lose. Max 10 — `CLAUDE.md` has the rules.
 |---|---|---|
 | 1 | `synth` produces no all-fill tile at any size: the fill margin is 2 km and a tile is 12.8 km, so no tile is fill throughout. Test the absent-fill-tile read against a hand-built manifest, not against a generated extract. The all-sea case is generated, as one interior tile. | C4 |
 | 2 | The `water` sweep's fill and sea skip set does not survive a restart and cannot be rebuilt from the manifest and journal. An all-fill tile is *absent* from the journal, which reads the same as not yet swept; and per-tile `min`/`max` cannot identify an all-sea tile, because they are taken over non-nodata samples only, so a tile that is part fill and part sea also reads `min = max = 2`. Rehydrate the set by re-reading the written `water` tile bytes. Getting it wrong makes `pack` read a fill cell as sea. | X6 |
+| 3 | X13 needs no spike for the widget signatures. Measured on 2.9.29.27468: `require` of `dxgui`, `Window`, `Panel`, `Static` and `HorzProgressBar` all answer from the hook state with no `package.path` change, and `HorzProgressBar` carries `new`, `setRange` and `setValue`. The raw calls are `install:dxgui/bind/ProgressBar.lua`: `ProgressBarSetRange(w, min, max)` and `ProgressBarSetValue(w, v)`; the bind classes are thin wrappers over the `Gui.*` globals of the same name, so either layer works from a hook. `Gui.SetTaskbarProgressState` has a measured arity of 2 and would put progress on the taskbar button, for the case where the user is in another window. | X13 |
