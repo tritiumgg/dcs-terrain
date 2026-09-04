@@ -19,6 +19,8 @@ disagree, the later accepted one wins, and the earlier is marked
 | [0004](0004-projection-samples-not-kept.md) | Accepted | The projection samples are not kept; `fit.py` moves to `tools/probe-theatre/` | `validation.md`, probe log — both name `projection-samples/` |
 | [0005](0005-extractor-verified-live.md) | Accepted | The extractor is verified live; offline Lua tests are minimal | `extractor-hook.md` "Testing"; `plan.md` P1, P2, X1, X3–X9, MS0 |
 | [0006](0006-mise-provisions-the-toolchain.md) | Accepted | `mise` provisions the toolchain, and Windows builds its own Lua 5.1 | `core.md` "Workspace"; `kotlin-consumer.md`; `extractor-hook.md`; `plan.md` P1, P2, P3 |
+| [0007](0007-extract-format-v1.md) | Accepted | Extract format v1 is frozen, with measured field sources and a separate code for an unrecognised surface string | `extract-format.md` "Tile binary layout", "Tables", "manifest.json"; `design-and-facts.md` `Airdromes`; `plan.md` F1, X1, X5, C5c |
+| [0008](0008-packed-meta-carries-the-authored-rectangle.md) | Accepted | The packed file's `meta` carries the authored rectangle, and its bounds keys are metres | `core.md` "Packed file"; `plan.md` C5a, C6 |
 
 Add a row when you add an ADR. This table is the index Claude reads, so an ADR
 missing from it will not be found.

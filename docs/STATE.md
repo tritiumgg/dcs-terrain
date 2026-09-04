@@ -4,26 +4,37 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-03
+**Last updated:** 2026-09-04
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **Language servers pinned in `mise.toml`.** `rust-analyzer` and
+1. **F1 — the extract format is frozen at v1.** ADR-0007 records what v1 is:
+   every field traced to the DCS call behind it, measured live on
+   2.9.29.27468 across three theatres and, where no map load was needed, all
+   eight installed (an airdrome's sub-tables are keyed from 0 and are often
+   empty, a runway's name is its two edge names joined, `missionNodes`
+   positions are positional arrays, `towns` is keyed by name);
+   an unrecognised surface string encoded 254, so 255 means nodata alone; the
+   Caucasus fill triple 5.000005 / `land` / 0 that the probe log left
+   unmeasured; and a manifest example built from measured numbers. ADR-0008
+   gives the packed `meta` the authored rectangle and makes its bounds keys
+   metres.
+2. **Language servers pinned in `mise.toml`.** `rust-analyzer` and
    `lua-language-server`, provisioned by `mise install` like the rest of the
    toolchain. A root `.luarc.json` sets the Lua server to 5.1 and declares the
    hook-state globals `DCS`, `net`, `log` and `lfs`, so `string.pack` and the
    rest of what 5.1 lacks are flagged where they are written rather than where
    the hook is loaded.
-2. **CI workflows, ahead of P2.** `.github/workflows/rust.yml` and `lua.yml`,
+3. **CI workflows, ahead of P2.** `.github/workflows/rust.yml` and `lua.yml`,
    one per language, each scoped to the paths it tests, so a documentation
    commit starts no runner. In-flight runs are superseded on a new push, and
    Windows and macOS wait on Linux so a broken commit costs one runner rather
    than three. The repository is public, so standard runners burn no Actions
    minutes. P2 stays open: its done test needs C1 and X1 to exist, and the Lua
    job has no tests to run until X1.
-3. **Kotlin client cut.** It becomes its own project, consuming the MCP server
+4. **Kotlin client cut.** It becomes its own project, consuming the MCP server
    and the CLI like any other client. Deleted `kotlin/`, tasks K1–K3c,
    `kotlin-consumer.md` and its ledger pair — the one exception ever made to
    the frozen rule, agreed with the user, and no other frozen file joined to
@@ -31,30 +42,19 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    references. MS4 is now the server alone, proved by `query` and the server
    agreeing; C1 gains a schema snapshot test, which is what K1 used to catch.
    `mise.toml` loses `java` and `node`, leaving Rust, Lua and Python.
-4. **P1 — repository layout.** The `dcsterrain/` Cargo workspace with its three
+5. **P1 — repository layout.** The `dcsterrain/` Cargo workspace with its three
    crates builds; `extractor/` and `tools/validate/` exist with a README saying
    what belongs in each. `mise.toml` and `rust-toolchain.toml` pin the
    toolchain and `tools/lua51/` builds Lua 5.1.5 on Windows, all per ADR-0006.
    The `.gitignore` `target/` rule no longer anchors to the repository root.
-5. **ADR-0005**: the extractor is verified live through the `dcs-api-bridge`
-   MCP, and offline Lua tests cover only what DCS cannot be driven to do on
-   demand (X1–X4, X9). No stub harness is vendored. Rephrased eleven done
-   tests and MS0's proof, which loses its byte-identical cross-language check
-   — the format contract is proven at X10 instead. Component X is therefore
-   developed on the Windows machine; the Rust and MCP work is on
-   macOS, which carries the only toolchain. F1's done test now names the
-   consumers its sign-off must walk.
 
 ## Next
 
 One task. The thing to pick up immediately.
 
-**F1 — freeze the extract format v1.** Confirm every field against the probe
-log, decide the `water` codes and the `nodata` values, and write the manifest
-example by hand. The X and C authors both sign off, having walked every field
-that C5c, C7, C8, C9 and C10 read back. It carries more weight than it did,
-because MS0 no longer proves the format across languages (ADR-0005) — a
-mistyped field now surfaces at X10.
+**F2 — reference constants for the synthetic theatre**, `synth_constants.lua`
+and `synth.rs`, the same numbers in both, each naming the other in a comment.
+Take the fill triple, the `water` codes and the layer table from ADR-0007.
 
 Blocked on nothing.
 
@@ -62,15 +62,16 @@ Blocked on nothing.
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **F2** — reference constants for the synthetic theatre, `synth_constants.lua`
-   and `synth.rs`, same numbers.
-2. **C1** — workspace scaffold, `types`, `clap` CLI stubs, `schemars`, stderr
+1. **C1** — workspace scaffold, `types`, `clap` CLI stubs, `schemars`, stderr
    logging. Head of the longest dependency chain.
-3. **X1** — Lua encoders `i16le`, `u8`, `json` with offline Lua tests. Runs in
-   parallel with C1.
-4. **C2 / C3** — `synth` and `check-extract`, which unlock MS0.
-5. **X3** — grid computation from each bounds source, tile addressing, the
+2. **X1** — Lua encoders `i16le`, `u8`, `json` and the ADR-0007 list
+   normalisation, with offline Lua tests. Runs in parallel with C1.
+3. **C2 / C3** — `synth` and `check-extract`, which unlock MS0.
+4. **X3** — grid computation from each bounds source, tile addressing, the
    journal and resume.
+5. **X2a / X2b** — config load and validation, then `dcs_build` from
+   `autoupdate.cfg` and the `terrain_fingerprint`; ADR-0007 carries the
+   Caucasus head hashes and digest as X2b's test vector.
 
 Milestone in view: **MS0 Contract** (P1, P2, F1, F2, C1, C2, C3, X1, X3).
 Proof is `check-extract` accepting the Rust synthetic extract and the hook's

@@ -64,14 +64,14 @@ component are in build order.
 
 | Id | Deliverable | Done | Depends on |
 |---|---|---|---|
-| F1 | Freeze `extract-format.md` v1: confirm every field against the probe log, decide `water` codes and `nodata` values, write the manifest example by hand | X and C authors both sign off, having walked every field C5c, C7, C8, C9 and C10 read back to a field the format emits; any later change bumps `format_version` | — |
+| F1 | Freeze the extract format v1: confirm every field against the probe log, decide `water` codes and `nodata` values, write the manifest example by hand | Done; ADR-0007 records the field sources measured on 2.9.29.27468, the `water` codes and the manifest example, and both authors' walk of every field C5c, C7, C8, C9 and C10 read back. Any later change bumps `format_version` | — |
 | F2 | Reference constants for the synthetic theatre, one file per language (`synth_constants.lua`, `synth.rs`), same numbers | Both files exist and a comment in each names the other | F1 |
 
 ### X: extractor hook
 
 | Id | Deliverable | Done | Depends on |
 |---|---|---|---|
-| X1 | Encoders `i16le`, `u8`, `json`; offline tests on boundary values and on nested tables, strings with quotes, unicode, empty arrays and objects | Offline Lua tests pass | F1, P1 |
+| X1 | Encoders `i16le`, `u8`, `json`, and the list normalisation of ADR-0007; offline tests on boundary values, on nested tables, strings with quotes, unicode, empty arrays and objects, and on a DCS table keyed from 0 | Offline Lua tests pass | F1, P1 |
 | X2a | Config load and validation, progress log, `dcs.log` lines | Every bad config field produces one log line and a disabled run | X1 |
 | X2b | `dcs_build` from `autoupdate.cfg`; `terrain_fingerprint` with a pure Lua SHA-256 as a sliced step, tested against a known vector | The fingerprint of a known file matches `sha256sum` of its first 1 MiB | X2a |
 | X3 | Grid computation from crop, authored bounds, or the pre-sweep; tile addressing; `tiles.jsonl` journal, manifest write and resume | Offline tests for each bounds source and for resume with half the tiles journalled | F1, X1 |
@@ -95,7 +95,7 @@ component are in build order.
 | C2 | `synth`: closed-form theatre and extract-directory writer including the fill margin; `dcsterrain synth` | Writes a directory `check-extract` accepts once C3 exists; constants match F2 | F2, C1 |
 | C3 | `extract`: manifest and journal parse, validation, tile reader; `dcsterrain check-extract` | Accepts the synthetic extract; rejects each corrupted variant (wrong size, missing tile, extra file, bad min/max, unknown version, journal ahead of manifest) | F1, C1 |
 | C4 | `grid`: tile addressing, cross-tile window reads, bilinear sample, absent-tile rules (fill, sea), nodata handling | Window tests at every edge and corner; absent fill and sea tiles read per the spec | C3 |
-| C5a | `pack` skeleton: schema creation, `meta`, pragmas, one transaction per grid, `VACUUM` | Empty packed file opens and `check` reports every `meta` key | C1 |
+| C5a | `pack` skeleton: schema creation, `meta` (ADR-0008 adds the authored-rectangle keys and makes the bounds keys metres), pragmas, one transaction per grid, `VACUUM` | Empty packed file opens and `check` reports every `meta` key | C1 |
 | C5b | Base grids: re-tiled to the pack `tile_size` with min/max, fill and sea tile omission, `cell_size` 50 or 100 by the size rule with resampling | Synthetic file opens; `describe` matches the manifest at both cell sizes | C4, C5a |
 | C5c | Vector tables from JSON (airdromes, runways, stands, beacons, radio, `poi`) and their R-trees | Row counts and R-tree counts match the extract; `nearest` on `poi` finds towns and nodes | C3, C5a |
 | C6 | `derive` stored local layers `valid` and `tpi_2000`, and the query-time window layers `slope`, `aspect`, `roughness`, `tpi_300` with their `grid` rows | Closed-form tolerances in the spec; the synthetic fill margin is `valid = 0` | C5b |
