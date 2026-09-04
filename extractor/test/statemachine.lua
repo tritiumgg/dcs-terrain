@@ -20,6 +20,9 @@ E.now_iso = function() return "2026-09-04T09:12:44Z" end
 local logged = {}
 E.log = function(message) logged[#logged + 1] = message end
 
+-- A map is always open here. Idle has its own test file.
+E.terrain_id = function() return "Caucasus" end
+
 local grid = E.grid_from_rect({ min_x = 0, min_z = 0, max_x = 51200, max_z = 51200 }, 50, 256)
 
 -- A job that finishes after `steps` steps, each costing one millisecond.
@@ -88,7 +91,7 @@ T.group("phases run in order")
 --------------------------------------------------------------------------------
 
 local run = new_run()
-T.eq("starts in prepare", run.state, E.STATE_PREPARE)
+T.eq("starts idle", run.state, E.STATE_IDLE)
 
 local seen = { run.state }
 for _ = 1, 200 do
@@ -101,7 +104,8 @@ for _ = 1, 200 do
   end
 end
 
-T.eq("prepare to hook to done", table.concat(seen, " "), "prepare hook done")
+T.eq("idle to prepare to hook to done",
+  table.concat(seen, " "), "idle prepare hook done")
 
 --------------------------------------------------------------------------------
 T.group("done is the end of it")
@@ -151,6 +155,7 @@ run = new_run({
     passes = { hook = false },
   },
 })
+until_past(run, E.STATE_IDLE, 5)
 until_past(run, E.STATE_PREPARE, 5)
 T.eq("prepare straight to done", run.state, E.STATE_DONE)
 T.eq("hook pass incomplete", run.manifest.passes.hook.complete, false)

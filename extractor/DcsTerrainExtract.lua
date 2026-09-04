@@ -1526,9 +1526,9 @@ end
 --------------------------------------------------------------------------------
 -- State machine
 --
--- prepare -> hook -> done, with idle before them and the mission pass between
--- the last two still to come. DCS gives the hook one callback per simulation
--- frame, and this is what a frame does.
+-- idle -> prepare -> hook -> done, with the mission pass between the last two
+-- still to come. DCS gives the hook one callback per simulation frame, and
+-- this is what a frame does.
 --
 -- What a phase contains is not decided here. Each phase is a list of jobs the
 -- sweeps register, run in the order they registered, and the machine knows
@@ -1537,11 +1537,16 @@ end
 -- and why this section can be tested without a sweep in it.
 --------------------------------------------------------------------------------
 
+M.STATE_IDLE = "idle"
 M.STATE_PREPARE = "prepare"
 M.STATE_HOOK = "hook"
 M.STATE_DONE = "done"
 
 M.DEFAULT_FRAME_BUDGET_MS = 5
+
+-- Frames between terrain polls in idle. The poll is two DCS calls and idle
+-- lasts for as long as DCS sits at the main menu, which can be hours.
+M.IDLE_POLL_FRAMES = 60
 
 -- Of the states so far only the hook pass is one the manifest records.
 local PASS_OF = { [M.STATE_HOOK] = "hook" }
@@ -1557,17 +1562,42 @@ function M.add_job(phase, job)
   return job
 end
 
+-- Seam. The theatre id, or nil when no map is open: the module loads at the
+-- main menu and answers nil there, so a non-nil id is what says the editor has
+-- a map open or a mission is running.
+--
+-- The hook state spells the module table lowercase, terrain.GetTerrainConfig,
+-- where the editor state spells it Terrain. Those are two entries in the DCS
+-- symbol table and only the lowercase one is reachable from here.
+--
+-- The global is the fallback rather than an error because Lua 5.1 require
+-- returns true, not the module, when a C module installs itself as a global
+-- and returns nothing.
+function M.terrain_id()
+  local ok, mod = pcall(require, "terrain")
+  if not ok then
+    return nil
+  end
+  local terrain = type(mod) == "table" and mod or rawget(_G, "terrain")
+  if type(terrain) ~= "table" or type(terrain.GetTerrainConfig) ~= "function" then
+    return nil
+  end
+  local got, id = pcall(terrain.GetTerrainConfig, "id")
+  if not got then
+    return nil
+  end
+  return id
+end
+
 -- Seam, replaced by the progress log. A run that logs nowhere still runs,
 -- which is what the offline tests want.
 function M.log(message) end
 
--- A run starts in prepare, which is where the phases begin. The idle state
--- that waits for a terrain sits in front of this and is not built yet.
 function M.new_run(opts)
   opts = opts or {}
   local config = opts.config or {}
   local run = {
-    state = nil,
+    state = M.STATE_IDLE,
     config = config,
     jobs = opts.jobs or M.jobs,
     dir = config.output_dir,
@@ -1576,6 +1606,7 @@ function M.new_run(opts)
     -- the fingerprint and the bounds are read.
     identity = opts.identity or {},
     frames = 0,
+    idle_frames = 0,
     phase_frames = 0,
     -- Accumulated on the run rather than in the manifest, because prepare
     -- times its own jobs before there is a manifest to put the timings in.
@@ -1584,7 +1615,6 @@ function M.new_run(opts)
     queue = nil,
     manifest = nil,
   }
-  M.enter(run, M.STATE_PREPARE)
   return run
 end
 
@@ -1673,6 +1703,25 @@ local function record_finished(run)
   end
 end
 
+local function frame_idle(run)
+  run.idle_frames = run.idle_frames + 1
+  -- Poll on the first idle frame and every sixtieth after it, so a hook that
+  -- loads with a map already open does not sit out a second of frames first.
+  if (run.idle_frames - 1) % M.IDLE_POLL_FRAMES ~= 0 then
+    return M.STATE_IDLE
+  end
+  local id = M.terrain_id()
+  if id == nil then
+    return M.STATE_IDLE
+  end
+  run.identity.theatre = id
+  -- Which callbacks fire where is a per-build measurement, so the count
+  -- reached in idle is the only evidence the hook has that it was given frames
+  -- at the menu at all.
+  M.log(format("terrain %s after %d idle frames", tostring(id), run.idle_frames))
+  return M.enter(run, M.STATE_PREPARE)
+end
+
 local function frame_pass(run)
   run.phase_frames = run.phase_frames + 1
   local pass = PASS_OF[run.state]
@@ -1699,6 +1748,9 @@ function M.run_frame(run)
     return M.STATE_DONE
   end
   run.frames = run.frames + 1
+  if run.state == M.STATE_IDLE then
+    return frame_idle(run)
+  end
   return frame_pass(run)
 end
 
