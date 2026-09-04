@@ -10,7 +10,17 @@ back. This file holds progress; `plan.md` holds the task graph and
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **X1 — the Lua encoders.** `extractor/DcsTerrainExtract.lua` holds `i16le`,
+1. **X3 — the grid and the journal.** Grid snapping, tile addressing, the
+   pre-sweep lattice, the `tiles.jsonl` journal, the manifest and resume, in
+   `extractor/DcsTerrainExtract.lua` with 9 offline test files and 487 checks.
+   A JSON decoder came with it, because resume must read the manifest back and
+   X2b's `autoupdate.cfg` is strict JSON. Two reference vectors pin the
+   snapping and neither subsumes the other: ADR-0007's Caucasus rectangle
+   catches rounding to the nearest cell, F2's synth rectangle catches snapping
+   inward, and two smaller vectors exist because both reference rectangles
+   agree with the wrong extent formula. Shipped as an 11-PR stack, which is
+   also when `CLAUDE.md` gained its delivery and subagent rules.
+2. **X1 — the Lua encoders.** `extractor/DcsTerrainExtract.lua` holds `i16le`,
    `u8`, `json` and `normalise_list`; 121 checks in `encoders.lua` over
    `testing.lua`, the whole framework the later offline tasks get. `i16le`
    clamps to ±32767 and so cannot reach −32768: nodata comes from
@@ -19,7 +29,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    list from an empty object once both are one Lua table. The hook returns its
    module table and registers nothing without DCS globals, which is how the
    offline tests reach into a one-file hook.
-2. **F2 — reference constants for the synthetic theatre.**
+3. **F2 — reference constants for the synthetic theatre.**
    `extractor/test/support/synth_constants.lua` and
    `dcsterrain-core/src/synth.rs`, 149 constants each, and a Rust test that
    parses the Lua file and fails on any name or value the two do not share, so
@@ -28,7 +38,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    origin, so raising the size adds land and moves nothing; 70 km is the
    default because a smaller theatre cannot hold an all-sea tile clear of the
    fill margin.
-3. **F1 — the extract format is frozen at v1.** ADR-0007 records what v1 is:
+4. **F1 — the extract format is frozen at v1.** ADR-0007 records what v1 is:
    every field traced to the DCS call behind it, measured live on
    2.9.29.27468 across three theatres and, where no map load was needed, all
    eight installed (an airdrome's sub-tables are keyed from 0 and are often
@@ -39,48 +49,39 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    unmeasured; and a manifest example built from measured numbers. ADR-0008
    gives the packed `meta` the authored rectangle and makes its bounds keys
    metres.
-4. **Language servers pinned in `mise.toml`.** `rust-analyzer` and
+5. **Language servers pinned in `mise.toml`.** `rust-analyzer` and
    `lua-language-server`, provisioned by `mise install` like the rest of the
    toolchain. A root `.luarc.json` sets the Lua server to 5.1 and declares the
    hook-state globals `DCS`, `net`, `log` and `lfs`, so `string.pack` and the
    rest of what 5.1 lacks are flagged where they are written rather than where
    the hook is loaded.
-5. **CI workflows, ahead of P2.** `.github/workflows/rust.yml` and `lua.yml`,
-   one per language, each scoped to the paths it tests, so a documentation
-   commit starts no runner. In-flight runs are superseded on a new push, and
-   Windows and macOS wait on Linux so a broken commit costs one runner rather
-   than three. The repository is public, so standard runners burn no Actions
-   minutes. P2 stays open: its done test needs C1 and X1 to exist, and the Lua
-   job has no tests to run until X1.
 
 ## Next
 
 One task. The thing to pick up immediately.
 
-**X3 — the grid and the journal**: grid computation from a crop, from authored
-bounds and from the pre-sweep; tile addressing; the `tiles.jsonl` journal, the
-manifest write and resume.
+**X4 — the state machine and frame budget**: idle, prepare, hook pass, mission
+pass, done, sliced across `onSimulationFrame` on `os.clock()`.
 
-Blocked on nothing, and offline like X1. It is the other half of what MS0
-proves, so doing it now gives C1 to C3 something to check against when they
-arrive.
+Blocked on nothing now that X3 is in, and offline like X1 and X3. It is the
+last piece before a sweep can run at all, and every sweep from X5 on is an
+iterator it drives.
 
 ## Then
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **X4** — the state machine and frame budget: idle, prepare, hook pass,
-   mission pass, done, sliced across `onSimulationFrame` on `os.clock()`.
-2. **X2a / X2b** — config load and validation, then `dcs_build` from
+1. **X2a / X2b** — config load and validation, then `dcs_build` from
    `autoupdate.cfg` and the `terrain_fingerprint`; ADR-0007 carries the
    Caucasus head hashes and digest as X2b's test vector.
-3. **X5 / X6 / X7** — the tables, `water` and `height`, and roads sweeps.
+2. **X5 / X6 / X7** — the tables, `water` and `height`, and roads sweeps.
    Verified against a running theatre through the bridge, not offline.
-4. **X8a / X8b / X8c / X9** — the mission pass, scenery, the model catalogue
+3. **X8a / X8b / X8c / X9** — the mission pass, scenery, the model catalogue
    and failure handling. X ends here until `check-extract` exists.
-5. **C1 / C2 / C3** — the Rust interlude X10 needs, and no more of C than
+4. **C1 / C2 / C3** — the Rust interlude X10 needs, and no more of C than
    that: scaffold, `synth` on the F2 constants, `check-extract`. Closes P2 and
    MS0 on the way past.
+5. **X10** — the live cropped run, once C3 exists.
 
 Milestone in view: **MS0 Contract** (P1, P2, F1, F2, C1, C2, C3, X1, X3).
 Proof is `check-extract` accepting the Rust synthetic extract and the hook's
@@ -98,6 +99,7 @@ Things a later task must not lose. Max 10 — see the rules below.
 | # | Carry | Discharged by |
 |---|---|---|
 | 1 | `synth` produces no all-fill tile at any size: the fill margin is 2 km and a tile is 12.8 km, so no tile is fill throughout. Test the absent-fill-tile read against a hand-built manifest, not against a generated extract. The all-sea case is generated, as one interior tile. | C4 |
+| 2 | The `water` sweep's fill and sea skip set does not survive a restart and cannot be rebuilt from the manifest and journal. An all-fill tile is *absent* from the journal, which reads the same as not yet swept; and per-tile `min`/`max` cannot identify an all-sea tile, because they are taken over non-nodata samples only, so a tile that is part fill and part sea also reads `min = max = 2`. Rehydrate the set by re-reading the written `water` tile bytes. Getting it wrong makes `pack` read a fill cell as sea. | X6 |
 
 ### Rules for this file
 

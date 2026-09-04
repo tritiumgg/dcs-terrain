@@ -1301,4 +1301,110 @@ function M.read_manifest(dir)
   return value
 end
 
+--------------------------------------------------------------------------------
+-- Resume
+--
+-- A resume carries forward what it cannot recompute: when the run started, how
+-- far each pass got, the accumulated timings, and the notes. The notes are the
+-- ones that matter. A tile written with nodata cells because a DCS call threw
+-- is recorded there, and dropping it turns a recorded partial failure into an
+-- extract that looks clean.
+--------------------------------------------------------------------------------
+
+local function or_nil(v)
+  if v == M.JSON_NULL then
+    return nil
+  end
+  return v
+end
+
+local function differs(problems, key, was, now)
+  if was ~= now then
+    problems[#problems + 1] = format("%s was %s, now %s", key, tostring(was), tostring(now))
+  end
+end
+
+-- Deep compare through the encoder: it sorts keys, so two tables that encode
+-- to the same string hold the same data.
+local function differs_deep(problems, key, was, now)
+  local before = was ~= nil and M.json(was) or "absent"
+  local after = now ~= nil and M.json(now) or "absent"
+  if before ~= after then
+    problems[#problems + 1] = format("%s was %s, now %s", key, before, after)
+  end
+end
+
+-- The cheap half of the check, and the half that runs before the pre-sweep. A
+-- pre-sweep is about a minute of frame-budgeted work on a large theatre, and
+-- there is no sense paying it to find out the directory belongs to another
+-- theatre.
+function M.identity_problems(existing, opts)
+  if type(existing) ~= "table" then
+    return { "manifest is not an object" }
+  end
+  local problems = {}
+  differs(problems, "format_version", existing.format_version, M.FORMAT_VERSION)
+  differs(problems, "theatre", existing.theatre, opts.theatre)
+  differs(problems, "dcs_build", existing.dcs_build, opts.dcs_build)
+  differs(problems, "dcs_build_timestamp",
+    existing.dcs_build_timestamp, opts.dcs_build_timestamp)
+  differs(problems, "omit_sea_tiles", existing.omit_sea_tiles, opts.omit_sea_tiles)
+  differs_deep(problems, "terrain_fingerprint",
+    existing.terrain_fingerprint, opts.terrain_fingerprint)
+  return problems
+end
+
+function M.grid_problems(existing, grid)
+  local problems = {}
+  differs_deep(problems, "grid", existing.grid, grid)
+  return problems
+end
+
+-- Decides what a run does with an output directory that may already hold one.
+-- Returns the resume state, or nil and one problem per line for the log.
+--
+-- A resumed run takes its grid and its authored rectangle from the manifest
+-- rather than recomputing them. The fingerprint check already covers a terrain
+-- rebuilt under the extract, and re-running a pre-sweep can shift the lattice
+-- by a cell, move the rectangle derived from it, and refuse a half-finished
+-- extract that was perfectly good. So the grid is compared only when a fresh
+-- one was computed, which is the crop and config paths.
+function M.prepare_resume(dir, opts)
+  local existing = M.read_manifest(dir)
+  local journal, partial = M.load_journal(dir)
+
+  if not existing then
+    -- No manifest and no journal is a fresh run. A journal without a manifest
+    -- is not: the manifest is renamed aside and rewritten at every phase
+    -- change, and reading that window as a fresh run would re-sweep everything
+    -- and could leave two grids' tiles in one directory.
+    if #journal > 0 or partial > 0 then
+      return nil, { "tiles.jsonl is present and manifest.json is not" }
+    end
+    return { resumed = false, done = {}, entries = {}, partial_bytes = 0 }
+  end
+
+  local problems = M.identity_problems(existing, opts)
+  if opts.grid then
+    local from_grid = M.grid_problems(existing, opts.grid)
+    for i = 1, #from_grid do
+      problems[#problems + 1] = from_grid[i]
+    end
+  end
+  if #problems > 0 then
+    return nil, problems
+  end
+
+  return {
+    resumed = true,
+    manifest = existing,
+    grid = existing.grid,
+    authored_bounds_m = or_nil(existing.authored_bounds_m),
+    authored_bounds_source = or_nil(existing.authored_bounds_source),
+    done = M.journal_index(journal),
+    entries = journal,
+    partial_bytes = partial,
+  }
+end
+
 return M
