@@ -4,20 +4,39 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-04T20:24Z
+**Last updated:** 2026-09-04T22:18Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **The project setup, ported from `dcs-bridge`.** A pull request template,
+1. **X4 — the state machine and frame budget.** idle to prepare to hook to
+   mission to done, driven by the four DCS callbacks. A phase is a list of jobs
+   the sweeps register: a job is `{name, start}`, `start(run)` returns a step,
+   and a step returns `MORE` or `DONE`, so X5 onward add a sweep without
+   touching the machine. A frame runs steps until `frame_budget_ms` is spent,
+   checked between steps and never inside one, and always runs at least one, so
+   a budget smaller than a step still finishes. The manifest is saved at each
+   phase change and each sweep end, never per tile. **Prepare has no jobs yet**
+   — X2a and X2b give it its first. ADR 0010 came out of building it: the
+   server-state pass is gated on loaded terrain, not on a mission. A 6-PR
+   stack.
+2. **ADR 0010 — `server`-state calls need terrain, not a mission.** Measured
+   on 2.9.29.27468, editor open on Caucasus, no mission: `land.getHeight`
+   returns the acceptance value at Kutaisi, `land.getSurfaceType` the `RUNWAY`
+   enum, `world.searchObjects` real scenery. The crash the phase-`sim` rule
+   generalised was a call reaching the state with no terrain at all. So a whole
+   extract can be taken from a bare editor map, which also stops a mission
+   altering what is extracted: a heliport static clears scenery within 150 m,
+   into the scene the terrain module reads. `CLAUDE.md` is rewritten with it.
+3. **The project setup, ported from `dcs-bridge`.** A pull request template,
    `mise` tasks, and five tools: `ledger.sh` retrieves a claim and lints the 18
    stamps, beside `statecheck.sh`, `nospecrefs.sh`, `readmeopen.sh` and
    `hooktest.sh`. Seven hooks load this file at session start, refuse an
    unstamped stop, refuse a write to `docs/spec/`, check every shell command,
    and check a commit before and after; a `docs` workflow runs the five on
    every change. The ADRs are reformatted to four headings, cited `ADR NNNN`.
-2. **X3 — the grid and the journal.** Grid snapping, tile addressing, the
+4. **X3 — the grid and the journal.** Grid snapping, tile addressing, the
    pre-sweep lattice, the `tiles.jsonl` journal, the manifest and resume, in
    `extractor/DcsTerrainExtract.lua` with 9 offline test files and 487 checks.
    A JSON decoder came with it, because resume must read the manifest back and
@@ -27,16 +46,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    inward, and two smaller vectors exist because both reference rectangles
    agree with the wrong extent formula. Shipped as an 11-PR stack, which is
    also when `CLAUDE.md` gained its delivery and subagent rules.
-3. **X1 — the Lua encoders.** `extractor/DcsTerrainExtract.lua` holds `i16le`,
-   `u8`, `json` and `normalise_list`; 121 checks in `encoders.lua` over
-   `testing.lua`, the whole framework the later offline tasks get. `i16le`
-   clamps to ±32767 and so cannot reach −32768: nodata comes from
-   `I16_NODATA_BYTES`, and a clipped mountain never reads as a hole.
-   `normalise_list` tags its result, the only thing separating an empty DCS
-   list from an empty object once both are one Lua table. The hook returns its
-   module table and registers nothing without DCS globals, which is how the
-   offline tests reach into a one-file hook.
-4. **F2 — reference constants for the synthetic theatre.**
+5. **F2 — reference constants for the synthetic theatre.**
    `extractor/test/support/synth_constants.lua` and
    `dcsterrain-core/src/synth.rs`, 149 constants each, and a Rust test that
    parses the Lua file and fails on any name or value the two do not share, so
@@ -45,38 +55,31 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    origin, so raising the size adds land and moves nothing; 70 km is the
    default because a smaller theatre cannot hold an all-sea tile clear of the
    fill margin.
-5. **F1 — the extract format is frozen at v1.** ADR 0007 records what v1 is:
-   every field traced to the DCS call behind it, measured live on
-   2.9.29.27468 across three theatres and, where no map load was needed, all
-   eight installed (an airdrome's sub-tables are keyed from 0 and are often
-   empty, a runway's name is its two edge names joined, `missionNodes`
-   positions are positional arrays, `towns` is keyed by name);
-   an unrecognised surface string encoded 254, so 255 means nodata alone; the
-   Caucasus fill triple 5.000005 / `land` / 0 that the probe log left
-   unmeasured; and a manifest example built from measured numbers. ADR 0008
-   gives the packed `meta` the authored rectangle and makes its bounds keys
-   metres.
 
 ## Next
 
 One task. The thing to pick up immediately.
 
-**X4 — the state machine and frame budget**: idle, prepare, hook pass, mission
-pass, done, sliced across `onSimulationFrame` on `os.clock()`.
+**X2a — config load and validation, the progress log and the `dcs.log` lines**:
+every bad field produces one log line and a disabled run.
 
-Blocked on nothing now that X3 is in, and offline like X1 and X3. It is the
-last piece before a sweep can run at all, and every sweep from X5 on is an
-iterator it drives.
+It fills `M.log`, X4's no-op seam, and gives prepare its first job: the machine
+has the phases, but nothing yet puts a manifest in them.
+
+*Verified by:* an agent offline for the validation table; a maintainer at a
+live install for the two log destinations and for the hook registering at all.
 
 ## Then
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **X2a / X2b** — config load and validation, then `dcs_build` from
-   `autoupdate.cfg` and the `terrain_fingerprint`; ADR 0007 carries the
-   Caucasus head hashes and digest as X2b's test vector.
-2. **X5 / X6 / X7** — the tables, `water` and `height`, and roads sweeps.
-   Verified against a running theatre through the bridge, not offline.
+1. **X2b** — `dcs_build` from `autoupdate.cfg` and the `terrain_fingerprint`;
+   ADR 0007 carries the Caucasus head hashes and digest as its test vector.
+   The install reads 2.9.29.27468 / 20260902-093323, the build ADR 0007
+   measured.
+2. **X5 / X6 / X7** — the tables, `water` and `height`, and roads sweeps, each
+   an `add_job("hook", ...)` on X4's machine. Verified against a running
+   theatre through the bridge, not offline.
 3. **X8a / X8b / X8c / X9** — the mission pass, scenery, the model catalogue
    and failure handling. X ends here until `check-extract` exists.
 4. **C1 / C2 / C3** — the Rust interlude X10 needs, and no more of C than
