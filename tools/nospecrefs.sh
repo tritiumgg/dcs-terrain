@@ -47,11 +47,12 @@ PATTERN="$PATTERN|[Dd]one test|[Tt]ask [A-Z][0-9]|(^|[^A-Za-z])MS[0-9]"
 # git ls-files rather than find, so an untracked scratch file is not the thing
 # that fails somebody's build.
 #
-# This script is exempt because a frozen document's name is its subject rather
-# than its authority: it names the patterns it refuses, and would otherwise
-# fail on its own test data.
+# Two scripts are exempt because a frozen document's name is their subject
+# rather than their authority: this one names the patterns it refuses, and
+# hooktest.sh feeds the guards real frozen paths to prove they are refused.
+# Both would otherwise fail on their own test data.
 EXEMPT='^docs/|(^|/)README\.md$|^CLAUDE\.md$'
-EXEMPT="$EXEMPT|^tools/nospecrefs\.sh\$"
+EXEMPT="$EXEMPT|^tools/nospecrefs\.sh\$|^tools/hooktest\.sh\$"
 FILES=$(git ls-files | grep -vE "$EXEMPT")
 [ -n "$FILES" ] || { printf 'no files to check. Is this a checkout?\n' >&2; exit 2; }
 
