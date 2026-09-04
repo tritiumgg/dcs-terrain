@@ -11,6 +11,19 @@ python = "3.12"
 # and served by the `lua51` task below instead.
 lua = { version = "5.1.5", os = ["linux", "macos"] }
 
+# Editor language servers, pinned so every machine reports the same
+# diagnostics. Both ship binaries for all three platforms.
+#
+# The Lua server matters more than it looks: `.luarc.json` sets it to Lua 5.1,
+# so it flags `string.pack`, `bit` and the rest of what the DCS hook state does
+# not have, at the point of writing rather than at the point of loading.
+lua-language-server = "3.19.1"
+
+# This is the standalone editor binary, not a toolchain component, so it does
+# not conflict with rust-toolchain.toml below: that still pins the rustc and
+# cargo this server shells out to.
+rust-analyzer = "2026-08-31"
+
 [env]
 # Where the `lua51` task puts the Windows interpreter. Harmless elsewhere.
 _.path = [".tools/bin"]

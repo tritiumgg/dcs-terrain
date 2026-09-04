@@ -10,14 +10,20 @@ back. This file holds progress; `plan.md` holds the task graph and
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **CI workflows, ahead of P2.** `.github/workflows/rust.yml` and `lua.yml`,
+1. **Language servers pinned in `mise.toml`.** `rust-analyzer` and
+   `lua-language-server`, provisioned by `mise install` like the rest of the
+   toolchain. A root `.luarc.json` sets the Lua server to 5.1 and declares the
+   hook-state globals `DCS`, `net`, `log` and `lfs`, so `string.pack` and the
+   rest of what 5.1 lacks are flagged where they are written rather than where
+   the hook is loaded.
+2. **CI workflows, ahead of P2.** `.github/workflows/rust.yml` and `lua.yml`,
    one per language, each scoped to the paths it tests, so a documentation
    commit starts no runner. In-flight runs are superseded on a new push, and
    Windows and macOS wait on Linux so a broken commit costs one runner rather
    than three. The repository is public, so standard runners burn no Actions
    minutes. P2 stays open: its done test needs C1 and X1 to exist, and the Lua
    job has no tests to run until X1.
-2. **Kotlin client cut.** It becomes its own project, consuming the MCP server
+3. **Kotlin client cut.** It becomes its own project, consuming the MCP server
    and the CLI like any other client. Deleted `kotlin/`, tasks K1–K3c,
    `kotlin-consumer.md` and its ledger pair — the one exception ever made to
    the frozen rule, agreed with the user, and no other frozen file joined to
@@ -25,12 +31,12 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    references. MS4 is now the server alone, proved by `query` and the server
    agreeing; C1 gains a schema snapshot test, which is what K1 used to catch.
    `mise.toml` loses `java` and `node`, leaving Rust, Lua and Python.
-3. **P1 — repository layout.** The `dcsterrain/` Cargo workspace with its three
+4. **P1 — repository layout.** The `dcsterrain/` Cargo workspace with its three
    crates builds; `extractor/` and `tools/validate/` exist with a README saying
    what belongs in each. `mise.toml` and `rust-toolchain.toml` pin the
    toolchain and `tools/lua51/` builds Lua 5.1.5 on Windows, all per ADR-0006.
    The `.gitignore` `target/` rule no longer anchors to the repository root.
-4. **ADR-0005**: the extractor is verified live through the `dcs-api-bridge`
+5. **ADR-0005**: the extractor is verified live through the `dcs-api-bridge`
    MCP, and offline Lua tests cover only what DCS cannot be driven to do on
    demand (X1–X4, X9). No stub harness is vendored. Rephrased eleven done
    tests and MS0's proof, which loses its byte-identical cross-language check
@@ -38,12 +44,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    developed on the Windows machine; the Rust and MCP work is on
    macOS, which carries the only toolchain. F1's done test now names the
    consumers its sign-off must walk.
-5. `CLAUDE.md` rules: the `dcs-scripting` skill is forbidden, replaced by
-   `dcs-api-lookup` + the bridge + the read-only install, with the four
-   citations left in the frozen specs marked as ignorable. A DCS version bump
-   is no longer an ADR trigger — the install being ahead of the spec is normal,
-   and only a measurement that differs is an ADR. Install paths are discovered
-   through the bridge (`lfs.currentdir()`), never recorded in the repository.
+
 ## Next
 
 One task. The thing to pick up immediately.
