@@ -1192,4 +1192,113 @@ function M.load_journal(dir)
   return M.parse_journal(text)
 end
 
+--------------------------------------------------------------------------------
+-- Manifest
+--
+-- Written whole at every phase change, and read back once: when a run finds an
+-- output directory that already holds one.
+--------------------------------------------------------------------------------
+
+M.MANIFEST_NAME = "manifest.json"
+
+-- Replaced in the tests, so a manifest can be compared against a fixed string.
+function M.now_iso()
+  return os.date("!%Y-%m-%dT%H:%M:%SZ")
+end
+
+local function or_null(v)
+  if v == nil then
+    return M.JSON_NULL
+  end
+  return v
+end
+
+local function new_pass()
+  return {
+    complete = false,
+    started_at = M.JSON_NULL,
+    finished_at = M.JSON_NULL,
+    frames = 0,
+  }
+end
+
+local MANIFEST_REQUIRED = {
+  "theatre", "dcs_build", "dcs_build_timestamp", "terrain_fingerprint",
+  "bounds_km", "grid",
+}
+
+function M.new_manifest(opts)
+  for i = 1, #MANIFEST_REQUIRED do
+    if opts[MANIFEST_REQUIRED[i]] == nil then
+      error("new_manifest: " .. MANIFEST_REQUIRED[i] .. " is missing", 2)
+    end
+  end
+  if type(opts.omit_sea_tiles) ~= "boolean" then
+    error("new_manifest: omit_sea_tiles is not a boolean: "
+      .. tostring(opts.omit_sea_tiles), 2)
+  end
+  -- ADR-0009: the authored rectangle and its source are known together or
+  -- unknown together. A source naming where an absent rectangle came from, or
+  -- a rectangle with no provenance, is a state no reader can interpret.
+  if (opts.authored_bounds_m == nil) ~= (opts.authored_bounds_source == nil) then
+    error("new_manifest: authored_bounds_m and authored_bounds_source are set"
+      .. " together or neither is", 2)
+  end
+
+  return {
+    format_version = M.FORMAT_VERSION,
+    extractor_version = M.EXTRACTOR_VERSION,
+    theatre = opts.theatre,
+    dcs_build = opts.dcs_build,
+    dcs_build_timestamp = opts.dcs_build_timestamp,
+    terrain_fingerprint = opts.terrain_fingerprint,
+    extracted_at = opts.extracted_at or M.now_iso(),
+    bounds_km = opts.bounds_km,
+    authored_bounds_m = or_null(opts.authored_bounds_m),
+    authored_bounds_source = or_null(opts.authored_bounds_source),
+    crop_m = or_null(opts.crop_m),
+    grid = opts.grid,
+    omit_sea_tiles = opts.omit_sea_tiles,
+    layers = M.layers(),
+    passes = { hook = new_pass(), mission = new_pass() },
+    tiles = M.as_array({}),
+    tables = M.table_files(),
+    timing_ms = {},
+    notes = M.as_array({}),
+  }
+end
+
+-- The old manifest is renamed aside, and the aside removed only once the new
+-- one is in place.
+--
+-- write_file removes the destination before renaming, which is right for a
+-- tile and wrong here: it would leave a window with no manifest at all while
+-- the journal already holds thousands of lines, and a run that started in that
+-- window would have to refuse the directory or re-sweep the theatre.
+function M.write_manifest(dir, manifest)
+  local path = M.join(dir, M.MANIFEST_NAME)
+  local aside = path .. ".prev"
+  M.fs.remove(aside)
+  M.fs.rename(path, aside)
+  local ok, err = M.write_file(path, M.json(manifest))
+  if not ok then
+    M.fs.rename(aside, path)
+    return nil, err
+  end
+  M.fs.remove(aside)
+  return true
+end
+
+function M.read_manifest(dir)
+  local text, err = M.read_file(M.join(dir, M.MANIFEST_NAME))
+  if not text then
+    return nil, err
+  end
+  local ok, value = pcall(M.decode, text)
+  if not ok then
+    return nil, value
+  end
+  return value
+end
+
 return M
