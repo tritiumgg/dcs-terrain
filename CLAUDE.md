@@ -7,58 +7,176 @@ going through one query engine.
 
 The repository ships **tools only**. Users extract their own theatres.
 
-## Start here
+## Layout
 
-**Read [docs/STATE.md](docs/STATE.md) first.** It holds what was just done,
-what is next, what follows, and the carries — the notes a later task must not
-lose. It is the only record of where the work is.
+```
+docs/STATE.md          where the work is: done, next, then, and the carries
+docs/plan.md           the task graph. Tasks have ids. Changes. Not frozen
+docs/spec/             frozen: nine documents, with ledger/ beside them
+docs/decisions/        ADRs, and the only place divergence is recorded
+docs/data/             measured reference data and a model census
+dcsterrain/            Cargo workspace: core, cli, mcp                (partial)
+extractor/             the Lua GameGUI hook and its offline Lua tests
+tools/                 ledger.sh, statecheck.sh, nospecrefs.sh,
+                       readmeopen.sh, hooktest.sh, luatest.sh
+tools/lua51/           builds Lua 5.1.5 for Windows with MSVC
+tools/probe-theatre/   the per-map measurement, packaged             (partial)
+tools/validate/        the validation sortie                         (empty)
+.claude/hooks/         the frozen-write guard, the shell guard, the commit
+                       checks, the session start, the stop check
+.github/workflows/     rust, lua, docs
+```
 
-Then check [docs/decisions/](docs/decisions/) for an ADR covering whatever you
-are about to touch. The specs are frozen; the ADRs override them.
+Marked entries do not exist yet, or exist only in part. `docs/README.md` is the
+index to `docs/`.
 
-## Documents
+## Platforms
 
-[docs/README.md](docs/README.md) is the index. The short version:
+Developed on Windows, macOS and Linux from one checkout. Windows is
+distinguished by one thing only: **DCS runs there**.
 
-- [docs/STATE.md](docs/STATE.md) — where the work is. You maintain it.
-- [docs/plan.md](docs/plan.md) — the task graph. Tasks have ids (`C5b`, `X8a`),
-  a deliverable, a done test, and dependencies. Work by task id, and edit it as
-  the work changes shape.
-- **[docs/spec/](docs/spec/) — the specification. Read
-  [design-and-facts.md](docs/spec/design-and-facts.md) first**; every other
-  document there cites it instead of restating it.
-- **[docs/decisions/](docs/decisions/) — the ADRs. These override the specs.**
+- **Windows, with DCS installed.** Component X (the Lua extractor hook), the V
+  validation sortie through the bridge, and the live acceptance steps X10,
+  X11, Q9 and V1. Anything that talks to a running DCS happens only here.
+- **macOS and Linux.** Everything else — the Rust workspace, the query
+  operations, the MCP server, and every document tool. No DCS, no GPU.
 
-### Never touch `docs/spec/`
+The longest dependency chain needs no DCS at all. So do not assume a shell, a
+path separator or a tool is present because another platform has it: check
+before relying on one, and keep scripts portable where a task does not pin
+them.
+
+## `docs/STATE.md` is the handoff between sessions
+
+Read it before anything else. It names what was just done, what to pick up,
+what follows, and what carries forward. A `SessionStart` hook prints it into
+context, so it arrives without being asked for.
+
+**Update it at the end of every working session, before handing back.** A
+session that changed something and left it alone has lost that work. A `Stop`
+hook refuses once when the tree is dirty and the stamp is not today's.
+
+- Add what you did to **Done**, newest first, and drop the oldest to keep 5.
+- Move the task you finished out of **Next**, promote from **Then**, and refill
+  **Then** from `plan.md` in dependency order. Keep 1 and 5.
+- **Delete** every carry the session discharged. Do not mark it done, do not
+  keep it for the record — git has the record.
+- Stamp **Last updated** with a bare UTC datetime, `YYYY-MM-DDTHH:MMZ`. It
+  carries a datetime and nothing else: a status clause there repeats what
+  **Done** says three lines below and goes stale on the next change, so
+  `tools/statecheck.sh` refuses one.
+
+Add a carry only for something **learned while working** that no document
+already records, and only with the task id that will discharge it. If
+`plan.md`, a spec or an ADR already says it, it is not a carry — nor is a
+task's own done test, a rule from this file, or anything in `git log`. Most
+sessions add none. A carry with no discharging task, or one that has survived
+three turns of the Next slot, means promote it to an ADR and delete the row.
+
+**Keep it small.** It is loaded cold every session, so its size is a tax on
+every session. Each section has a line budget, `tools/statecheck.sh` enforces
+them, and CI fails when the file is over. Over budget, nothing is deleted — it
+moves. A completion older than the last five goes to `git log`. A choice with
+reasoning behind it becomes an ADR. A durable fact about the project belongs in
+this file, not that one. A discharged carry is deleted.
+
+Never write a paragraph where a line will do, and never copy a fact into
+`docs/STATE.md` that already lives here. Do not restate the task graph, a spec
+or an ADR — point at them.
+
+## `README.md` is for users, and the change that moves it updates it
+
+The root README is for a human who has never seen the project. It answers what
+this is, how to get it, how to build it, how to use it, and the license —
+nothing else. Keep it under about 80 lines; detail belongs in `docs/` behind a
+link.
+
+Update it in the same session that changes **the surface a user touches**: a
+subcommand or flag they type, install or build steps, requirements, the
+extract → pack → query pipeline, or the license. If you change that surface and
+cannot update the README in the same session, add a carry naming the task that
+will.
+
+**Never document something that does not work yet without saying so.** Where
+the build has not reached a thing the README describes, the sentence says so,
+on one line, with "not usable yet", "not final" or "planned".
+`tools/readmeopen.sh` lists those lines, and the task that settles one takes
+the note out. The README currently carries a "not usable yet" banner; remove it
+when the binary can actually do what the page claims, not before.
+
+Do not put progress, task ids, milestones or a changelog in the README —
+`docs/STATE.md` holds progress and git holds history. The one exception is the
+status banner, which is for the reader's benefit, not for tracking.
+
+Milestones MS2, MS4 and MS5 change what a user can do, so each gets a
+deliberate README pass. The usage examples must be real commands with real flag
+names from the core spec. Check them before writing them. Every pull request
+body answers the `README` heading of `.github/PULL_REQUEST_TEMPLATE.md`.
+
+## `docs/spec/` is frozen. Nothing else is.
 
 **Everything under `docs/spec/` is frozen: do not edit, rename or move any of
 it.** That is the whole rule. Anything you would have changed there goes in
 `docs/decisions/` as an ADR instead, and the ADR wins over the spec text.
 
-What lives there: the seven component specs, `design-and-facts.md` (the shared
-background every spec cites), the probe log (the measurements the
-design rests on), `using-the-data.md` (metric definitions, and the source task
-M1 generates `terrain_metrics_help` from), and `ledger/` — the claims ledgers
-and glossaries that index them.
+What lives there: the nine documents, `design-and-facts.md` (the shared
+background every spec cites), the probe log, `using-the-data.md` (the source
+task M1 generates `terrain_metrics_help` from), and `ledger/` — the claims
+ledgers and glossaries that index them.
 
 The reason it is a hard rule rather than a judgment call: those documents were
 reviewed as one set, they cite each other by bare file name, and every
 `ledger/` row quotes a verbatim line from them. One edit silently breaks joins
-that nothing in this repository can rebuild. See
-[ADR 0001](docs/decisions/0001-what-is-frozen.md).
+that nothing in this repository can rebuild. A `PreToolUse` hook refuses the
+edit, and `tools/ledger.sh lint` in CI catches one made another way.
 
 Everything else — `docs/plan.md`, `docs/STATE.md`, both READMEs,
-`docs/decisions/`, `docs/data/` — is yours to edit directly.
+`docs/decisions/`, `docs/data/` — is yours to edit directly. The plan states
+build order; edit it when the order changes.
 
-### Never cite `docs/` from code
+**Check `docs/decisions/README.md` before acting on any frozen text.** Where an
+ADR and a document disagree, the ADR wins; where two ADRs disagree, the later
+accepted one wins. The index table is how an ADR is found, so it is not
+optional.
 
-Read the specs freely — that is what they are for. But **code never points back
-at them**, with ADRs the single exception.
+A record has Michael Nygard's four headings and no others, is numbered
+`NNNN-title-in-kebab-case.md`, and is cited as `ADR NNNN`. Copy `TEMPLATE.md`
+and take the next free number. One decision per record; consequences must
+include the ones that hurt. `docs/decisions/README.md` holds the rest.
+
+Write an ADR when a measurement contradicts a document, when a specified
+approach does not work or a done test cannot be met as written, when a
+dependency or platform fact named in a spec turns out to be wrong, when a
+field, name, default or threshold ends up different from the spec's, when
+something the specs leave open gets settled, or when a new DCS build or theatre
+is measured. No ADR is needed for work that does what the specs already say, or
+for a plain task change — that is an edit to the plan.
+
+A committed ADR is not rewritten. A decision that changes gets a new record,
+and the old one's Status becomes `Superseded by ADR NNNN`. Before that first
+commit it may still be rewritten or dropped, so a decision reversed the same
+day is consolidated rather than superseded.
+
+**Propose an ADR before writing it**, unless the user has already agreed to the
+decision. An ADR records a choice that binds later work; it is not a
+note-to-self. Do not put its content in a code comment or a commit message
+instead — `docs/decisions/` is the only place divergence is recorded.
+
+Reworking a frozen document is possible but is a deliberate project, agreed
+with the user first: fold the accumulated ADRs into a revised document,
+regenerate its ledger and glossary, re-stamp, and freeze that. Never a side
+effect of another change.
+
+## Never cite `docs/` from code
+
+**Code never points back at the documents**, with ADRs the single exception.
 
 No file path, section title or document name from `docs/` appears in source
 code, comments, docstrings, test names, error messages or commit messages. Not
 `// per extract-format.md "Tile binary layout"`, not `# see design-and-facts.md`,
-not a doc comment quoting a spec paragraph.
+not a doc comment quoting a spec paragraph. Neither does a task id or the
+plan's word "done test": tasks are ephemeral, the plan retires when the tools
+ship, and a comment reading "task X3" then points at nothing.
 
 The reason is that the specs are frozen, so they will drift from the code as
 ADRs accumulate. A citation is a claim that the named section still describes
@@ -74,97 +192,18 @@ a decision, and it belongs in an ADR.
 ADR is a stable, numbered record of one decision, it is superseded rather than
 edited, and it is the thing that stays true as the specs age.
 
-Prose documentation is different: `docs/README.md` and the root `README.md` are
-navigation and may link into `docs/`. Prefer the index over a deep link to a
-spec section.
+`tools/nospecrefs.sh` enforces this, and CI runs it. Everything under `docs/`,
+plus this file and any `README.md`, is exempt, because documents cite
+documents. Prose documentation may link into `docs/`; prefer the index over a
+deep link to a spec section.
 
-### Maintaining `docs/STATE.md`
+## The DCS boundary
 
-**Update it at the end of every working session, before handing back.** A
-session that changed something and left STATE.md alone has lost that work.
+These are not optional; the phase-`sim` rule exists because that call crashed
+DCS.
 
-- Add what you did to **Done**, newest first, and drop the oldest to keep 5.
-- Move the task you finished out of **Next**, promote from **Then**, and refill
-  **Then** from `plan.md` in dependency order. Keep 1 and 5.
-- **Delete** every carry the session discharged. Do not mark it done, do not
-  keep it for the record — git has the record.
-- Add a carry only for something **learned while working** that no document
-  already records, and only with the task id that will discharge it. If
-  `plan.md`, a spec or an ADR already says it, it is not a carry — nor is a
-  task's own done test, a rule from this file, or anything in `git log`. Most
-  sessions add none. Hard cap 10; a full table, a carry with no discharging
-  task, or one that has survived three turns of the Next slot means promote it
-  to an ADR and delete the row.
-- Update the **Last updated** date.
-
-Do not restate the task graph, a spec, or an ADR in STATE.md — point at them.
-The file stays under about 120 lines because it is read every session.
-
-### Maintaining `README.md`
-
-The root README is for a human who has never seen the project. It answers what
-this is, how to get it, how to build it, how to use it, and the license —
-nothing else. Keep it under about 80 lines; detail belongs in `docs/` behind a
-link.
-
-Update it in the same session that changes **the surface a user touches**: a
-subcommand or flag they type, install or build steps, requirements, the
-extract → pack → query pipeline, or the license. If you change that surface and
-cannot update the README in the same session, add a STATE.md carry naming the
-task that will.
-
-- **Never document something that does not work yet without saying so.** The
-  README currently carries a "not usable yet" banner because no code exists.
-  Remove it when the binary can actually do what the page claims, not before.
-- Do not put progress, task ids, milestones or a changelog in the README —
-  STATE.md holds progress and git holds history. The one exception is the
-  status banner, which is for the reader's benefit, not for tracking.
-- Milestones MS2, MS4 and MS5 change what a user can do, so each gets a
-  deliberate README pass.
-- The usage examples must be real commands with real flag names from
-  the core spec. Check them before writing them.
-
-### Working with decision records
-
-**Before acting on any frozen text, check `docs/decisions/README.md` for an ADR
-covering it.** Where an ADR and a document disagree, the ADR wins; where two
-ADRs disagree, the later accepted one wins. The index table is how ADRs are
-found, so it is not optional.
-
-Write an ADR when a measurement contradicts a document, when a specified
-approach does not work or a done test cannot be met as written, when a
-dependency or platform fact named in a spec turns out to be wrong, when a
-field, name, default or threshold ends up different from the spec's, when
-something the specs leave open gets settled, or when a new DCS build or theatre
-is measured. No ADR is needed for work that does what the specs already say, or
-for a plain task change — that is an edit to the plan.
-
-To write one: copy `docs/decisions/TEMPLATE.md` to
-`NNNN-title-in-kebab-case.md` with the next free number, fill it in, and add
-the row to the index. One decision per record. Consequences must include the
-ones that hurt.
-
-An ADR that is already committed is not rewritten — a decision that changes
-gets a new ADR, and the old one's Status becomes `Superseded by ADR-NNNN`.
-Before that first commit it may still be rewritten or dropped, so a decision
-reversed the same day is consolidated rather than superseded.
-
-**Propose an ADR to the user before writing it**, unless they have already
-agreed to the decision. An ADR records a choice that binds later work; it is
-not a note-to-self.
-
-Do not put an ADR's content in a code comment or a commit message instead.
-`docs/decisions/` is the only place divergence is recorded.
-
-
-## Working rules
-
-These are the plan's rules plus what the review established. They are not
-optional; the phase-`sim` rule exists because that call crashed DCS.
-
-### The DCS boundary
-
-- **Never write into the DCS install.** It is read-only.
+- **Never write into the DCS install.** It is read-only. `guard-bash.sh`
+  refuses a shell write into it, in the quoted form a real install path takes.
 - **Know which build you are on before trusting any measurement.** The core
   build is `version` in `autoupdate.cfg` at the install root, with `timestamp`
   beside it. Never state a build from memory — read the file. The install is
@@ -201,7 +240,14 @@ optional; the phase-`sim` rule exists because that call crashed DCS.
   coordinates and the airdrome table are all settled there against
   measurement.
 
-### Data
+**Say who verifies.** Most done tests in the plan need a running DCS install or
+a person watching. Before starting a task, decide whether an agent can observe
+the result itself, whether it needs a maintainer reading a CI result, or
+whether only somebody at a live install can see it. Write it in
+`docs/STATE.md` under the task. An agent that skips this declares victory on
+something it never observed.
+
+## Data
 
 - **Never commit extracted or packed data.** No `*.sqlite`, no extract
   directories, no tile blobs. `docs/data/` holds measurements and a model
@@ -210,7 +256,7 @@ optional; the phase-`sim` rule exists because that call crashed DCS.
   user's machine; publishing them is the user's call against the ED EULA
   (task P4).
 
-### Testing
+## Testing
 
 - **Test against the synthetic theatre first.** `dcsterrain synth` writes a
   closed-form extract; almost every done test in the plan is stated against it.
@@ -224,45 +270,38 @@ optional; the phase-`sim` rule exists because that call crashed DCS.
   running theatre. Nothing named `StubHarness.lua` is vendored into this
   repository.
 
-### Keeping the record true
+## Version control
 
-- **A measurement that contradicts a frozen document becomes an ADR**, with the
-  numbers and the DCS build string in it. A measurement that only lives in a
-  conversation is lost.
-- A change to the plan is an edit, not an ADR. Write an ADR alongside it only
-  when the reasoning binds later work — as ADR 0003 does for task D1.
-- A new DCS build or theatre gets a new `docs/spec/probe-log-<build>.md` when
-  someone re-measures it, and the existing one is never appended to. The ADR
-  comes with a measurement that differs, not with the new file and not with
-  the version bump that prompted it.
-- Design decisions in `design-and-facts.md` are decided unless a probe
-  contradicts them. Do not relitigate them from first principles — and if a
-  probe does contradict one, that is an ADR, not an edit.
-- ADR prose matches the specs' style: plain words, one idea per sentence,
-  active voice with a named actor, present tense, no narrative or changelog
-  prose.
-- Reworking a frozen document is possible but is a deliberate project, agreed
-  with the user first: fold the accumulated ADRs into a revised document,
-  regenerate its ledger and glossary, re-stamp, and freeze that. Never a side
-  effect of another change.
+Conventional Commits: `type(scope): summary`, imperative, under 72 characters.
+Add a body when the change needs explaining. `postcommit.sh` checks the subject
+after the commit; the fix is `git commit --amend`.
 
-### How changes are delivered
+**A branch per plan task**, named `task/<id>-<summary>`, such as
+`task/X4-frame-budget`. Work that belongs to no task takes the `type` it would
+commit under: `fix/`, `docs/`, `build/`, `ci/`.
 
 **Every change is a pull request, and no pull request exceeds 400 lines of
 change** — counting tests, and counting the lines it removes. Work larger than
-that becomes a stack of pull requests, each branching off the one before it.
+that becomes a stack of branches, each branching off the one before it:
+`task/X3-11-resume`, then `task/X3-12-bitmask`, landing in order.
 
 The limit is about review, not tidiness. A 400-line diff gets read; a
 2 000-line one gets approved. Splitting also forces the seams to be named
-before the code is written, which is where most of the design argument
-actually happens.
+before the code is written, which is where most of the design argument actually
+happens. A preparatory refactor always takes its own branch, claiming no change
+in behaviour: sharing a diff with the feature hides which lines moved among the
+lines that changed.
 
 - **Every pull request in a stack stands on its own.** Its tests pass, so a
   reviewer can stop after any one of them and the repository still works.
 - **Order a stack by dependency, not by size.** It is reviewed bottom up, so
   what everything else needs goes first.
-- **Merge fast-forward only, after review.** Merge the bottom of the stack,
-  then rebase what is left onto main.
+- **The last branch in a stack carries the testing steps.** An intermediate
+  branch names it instead. One procedure copied onto five branches becomes five
+  procedures that drift.
+- **History is linear. Rebase, never merge-commit.** Bring a branch up to date
+  with `git rebase main`; land it with `git merge --ff-only`. If the
+  fast-forward is refused, fix the branch.
 - Put a document edit in the pull request whose code changes it, not in a
   documentation pull request of its own. A `plan.md` row and the code that
   reshapes it are one reviewable thought.
@@ -271,7 +310,28 @@ Splitting a task across pull requests does not split it across sessions.
 `docs/STATE.md` is updated in whichever pull request ends the session, whether
 or not the task it names is finished.
 
-### Subagents
+**Every pull request body follows `.github/PULL_REQUEST_TEMPLATE.md`.** `gh pr
+create --body` does not read the template, so write the body to its headings;
+`guard-bash.sh` refuses one that is missing them. Summary ends with what the
+change is reviewed against: the plan task, the ADR, or for a stacked branch the
+claim that branch alone makes. Testing says how a reader runs the tests, not
+that they were run. Its steps are numbered, start from a clean checkout, and
+are grouped by phase (without DCS, then with DCS) and by platform (PowerShell
+on Windows, bash on macOS and Linux). Each step is an imperative sentence: an
+action, or a `Verify ...` naming what the tester sees when the steps before it
+worked. Each heading reads `none` where nothing applies.
+
+Do these without asking: branch, commit, rebase onto `main`, push a topic
+branch, force-with-lease a topic branch that is yours, delete a branch that is
+already merged, and open a pull request with `gh`.
+
+**Ask first before merging a pull request, before pushing `main`, before
+rewriting history that has been pushed, and before tagging.** A small diff and
+a green CI run are not permission, and permission given for one pull request
+does not carry to the next. `guard-bash.sh` turns each of those into a prompt
+rather than refusing it.
+
+## Subagents
 
 Spawning a subagent is allowed, and worth it for work that fans out: sweeping
 the specs for every place a claim appears, pressure-testing a plan before it is
@@ -282,9 +342,9 @@ finish by reading three files you can already name is faster done directly.
   exist because one of those calls crashed DCS, and a running sim is the
   scarce resource on the Windows machine. Bridge calls stay in the session
   that is talking to the user.
-- **A subagent never writes `docs/`.** Not an ADR, not STATE.md, not the plan.
-  Those record decisions, and a decision is agreed with the user before it is
-  written down. Reading all of it and reporting back is fine.
+- **A subagent never writes `docs/`.** Not an ADR, not `STATE.md`, not the
+  plan. Those record decisions, and a decision is agreed with the user before
+  it is written down. Reading all of it and reporting back is fine.
 - **A subagent's report is a claim, not a source.** Check a number, a symbol
   or a quoted spec line before acting on it, the same as any other second-hand
   figure.
@@ -321,41 +381,3 @@ Cited so they can be checked, not so they replace reading the spec.
 - **No vegetation.** DCS exposes no tree layer to query, so the schema has no
   tree class. Concealment is terrain masking plus building density, stored
   separately and never fused.
-
-## Target layout
-
-From task P1. None of it exists yet.
-
-```
-dcsterrain/          Cargo workspace
-  crates/dcsterrain-core/    extract reader, packer, file reader, operations
-  crates/dcsterrain-cli/     binary `dcsterrain`
-  crates/dcsterrain-mcp/     MCP tool definitions over core
-  tests/                     workspace integration tests (synthetic only)
-extractor/           the Lua hook and its offline Lua tests
-tools/validate/      the validation sortie
-tools/probe-theatre/ the per-map measurement, packaged
-docs/                the frozen documents
-docs/decisions/      ADRs — the only place divergence is recorded
-```
-
-X (extractor, Windows with DCS) and everything after F (the extract format
-contract) can be built in parallel: both are tested against the same synthetic
-theatre and neither needs the other to exist. The longest dependency chain
-needs no DCS at all.
-
-## Two machines
-
-The work is split across platforms, and which one you are on decides what you
-can do:
-
-- **Windows, with DCS installed.** Component X (the Lua extractor hook), the
-  V validation sortie through the bridge, and the live acceptance steps X10,
-  X11, Q9 and V1. Anything that talks to a running DCS happens only here.
-- **macOS.** Everything else — the Rust workspace, the query operations and
-  the MCP server. No DCS, no GPU.
-
-So do not assume a shell, a path separator or a tool is present because the
-other machine has it. Check before relying on one, and keep scripts portable
-where a task does not pin them to a platform.
-
