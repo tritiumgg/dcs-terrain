@@ -1,11 +1,13 @@
-# ADR-0003: The user guide is a separate document, written after the tools work
+# ADR 0003: The user guide is a separate document, written after the tools work
 
-- **Status:** Accepted
-- **Date:** 2026-09-03
-- **Affects:** `using-the-data.md`, which stays as it is; recorded in
-  `plan.md` as component D and task D1 at MS5.
+## Status
+
+Accepted
 
 ## Context
+
+**Affects:** `using-the-data.md`, which stays as it is; recorded in
+`plan.md` as component D and task D1 at MS5.
 
 The project needs a guide that teaches someone how to use the tools. The
 obvious candidate to become that guide is `using-the-data.md`, which already
@@ -58,7 +60,7 @@ The task and its milestone live in `plan.md`; this record holds only
 the reasoning, which is what a reader picking up D1 at MS5 will otherwise not
 have.
 
-## Alternatives considered
+### Alternatives considered
 
 **Rewrite `using-the-data.md` as the guide.** Breaks the M1 contract, and
 its ledger and stamp with it.

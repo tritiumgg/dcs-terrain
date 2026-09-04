@@ -1,11 +1,13 @@
-# ADR-0008: The packed file's `meta` carries the authored rectangle, and its bounds keys are metres
+# ADR 0008: The packed file's `meta` carries the authored rectangle, and its bounds keys are metres
 
-- **Status:** Accepted
-- **Date:** 2026-09-04
-- **Affects:** `core.md` "Packed file", the `meta` key list and the `check`
-  subcommand; `plan.md` tasks C5a and C6.
+## Status
+
+Accepted
 
 ## Context
+
+**Affects:** `core.md` "Packed file", the `meta` key list and the `check`
+subcommand; `plan.md` tasks C5a and C6.
 
 `core.md` lists `bounds_sw_x`, `bounds_sw_z`, `bounds_ne_x` and `bounds_ne_z`
 among the `meta` keys and does not give their unit. They come from the
@@ -23,7 +25,7 @@ is `config` when the value came from `nodesMapBorders` and `presweep` when the
 extractor found the hull itself. The `meta` list carries neither. A packed
 file therefore cannot say which rectangle its own `valid` layer was cut to, or
 whether that rectangle was authored by ED or inferred by a 5 km lattice, and
-ADR-0004 removed the samples that would let anyone re-derive it.
+ADR 0004 removed the samples that would let anyone re-derive it.
 
 The two sources differ in trustworthiness. On Caucasus `nodesMapBorders`
 bounds the authored area; on the other seven theatres the equivalent value is
@@ -61,7 +63,7 @@ under either unit.
 The keys are per-theatre provenance and not a query surface; no operation in
 `query-operations.md` reads them.
 
-## Alternatives considered
+### Alternatives considered
 
 **State the unit and add nothing.** One line, no new keys. Rejected: it leaves
 the packed file unable to describe its own `valid` layer, and the extract that

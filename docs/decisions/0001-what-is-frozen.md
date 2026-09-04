@@ -1,11 +1,13 @@
-# ADR-0001: `docs/spec/` is frozen; everything else is living
+# ADR 0001: `docs/spec/` is frozen; everything else is living
 
-- **Status:** Accepted
-- **Date:** 2026-09-03
-- **Affects:** all documents in `docs/`; `plan.md` "Working rules", whose
-  fourth bullet is edited to match.
+## Status
+
+Accepted
 
 ## Context
+
+**Affects:** all documents in `docs/`; `plan.md` "Working rules", whose
+fourth bullet is edited to match.
 
 Ten of these documents came out of a full review on 2026-09-02: 0 Blocker, 15
 Major, 62 Minor, 67 findings applied, 10 deferred and then settled. They are
@@ -42,7 +44,7 @@ is the seven component specs, `design-and-facts.md`,
 `STATE.md`, both READMEs, `decisions/`, `data/`.
 
 Anything that diverges from a frozen document is recorded as an ADR in
-`docs/decisions/`, numbered from `0001`, using `0000-template.md`. Where an ADR
+`docs/decisions/`, numbered from `0001`, using `TEMPLATE.md`. Where an ADR
 and a frozen document disagree, the ADR wins, and the most recent accepted ADR
 wins over an earlier one. A change to the plan is an edit, not an ADR; write an
 ADR alongside it only when the reasoning binds later work.
@@ -73,7 +75,7 @@ a new revised document, regenerate its ledger and glossary, and freeze that.
 This ADR does not schedule one; it records that it is the only sanctioned way
 to change frozen text.
 
-## Alternatives considered
+### Alternatives considered
 
 **Freeze everything, including the plan.** Puts the task list under the same
 rule as the specification, so adding a task needs an ADR. The failure mode is

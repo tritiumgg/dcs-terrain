@@ -20,4 +20,4 @@ The tests cover only what a running DCS cannot be driven to do on demand: the
 encoders, grid computation, the journal and resume, the frame-budget state
 machine, and injected failures. Each supplies its own fakes, sized to the one
 function under test. The sweeps that read terrain are verified against a
-running theatre instead (ADR-0005), so nothing here stubs a terrain module.
+running theatre instead (ADR 0005), so nothing here stubs a terrain module.

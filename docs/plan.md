@@ -55,7 +55,7 @@ component are in build order.
 
 | Id | Deliverable | Done | Depends on |
 |---|---|---|---|
-| P1 | Repository layout: `dcsterrain/` Cargo workspace, `extractor/` for the Lua hook and its offline Lua tests (ADR-0005: no stub harness is vendored), `tools/validate/`, `docs/` holding these documents; `.gitignore` excludes `*.sqlite`, `extracts/`, `*.bin` | Tree exists; README states "no terrain data is committed" | — |
+| P1 | Repository layout: `dcsterrain/` Cargo workspace, `extractor/` for the Lua hook and its offline Lua tests (ADR 0005: no stub harness is vendored), `tools/validate/`, `docs/` holding these documents; `.gitignore` excludes `*.sqlite`, `extracts/`, `*.bin` | Tree exists; README states "no terrain data is committed" | — |
 | P2 | CI: Rust build and test on Windows, macOS, Linux; Lua 5.1 offline tests. One workflow per language, each scoped to the paths it tests, so a documentation commit starts no runner | Green on an empty synthetic run | P1, C1, X1 |
 | P3 | Release build: static `dcsterrain` binaries for the three platforms, each built on its own CI runner with `cargo build --release`, attached to tags | The tagged Windows binary packs a synthetic extract on the Windows machine and the tagged macOS binary does the same on macOS, without a toolchain on either | P2, C13 |
 | P4 | Licensing note in README: extracts and packed files are derived from ED terrain data and stay on the user's machine; publishing them is the user's call against the ED EULA | Text reviewed | P1 |
@@ -64,14 +64,14 @@ component are in build order.
 
 | Id | Deliverable | Done | Depends on |
 |---|---|---|---|
-| F1 | Freeze the extract format v1: confirm every field against the probe log, decide `water` codes and `nodata` values, write the manifest example by hand | Done; ADR-0007 records the field sources measured on 2.9.29.27468, the `water` codes and the manifest example, and both authors' walk of every field C5c, C7, C8, C9 and C10 read back. Any later change bumps `format_version` | — |
+| F1 | Freeze the extract format v1: confirm every field against the probe log, decide `water` codes and `nodata` values, write the manifest example by hand | Done; ADR 0007 records the field sources measured on 2.9.29.27468, the `water` codes and the manifest example, and both authors' walk of every field C5c, C7, C8, C9 and C10 read back. Any later change bumps `format_version` | — |
 | F2 | Reference constants for the synthetic theatre, one file per language (`synth_constants.lua`, `synth.rs`), same numbers | Both files exist and a comment in each names the other | F1 |
 
 ### X: extractor hook
 
 | Id | Deliverable | Done | Depends on |
 |---|---|---|---|
-| X1 | Encoders `i16le`, `u8`, `json`, and the list normalisation of ADR-0007; offline tests on boundary values, on nested tables, strings with quotes, unicode, empty arrays and objects, and on a DCS table keyed from 0 | Offline Lua tests pass | F1, P1 |
+| X1 | Encoders `i16le`, `u8`, `json`, and the list normalisation of ADR 0007; offline tests on boundary values, on nested tables, strings with quotes, unicode, empty arrays and objects, and on a DCS table keyed from 0 | Offline Lua tests pass | F1, P1 |
 | X2a | Config load and validation, progress log, `dcs.log` lines | Every bad config field produces one log line and a disabled run | X1 |
 | X2b | `dcs_build` from `autoupdate.cfg`; `terrain_fingerprint` with a pure Lua SHA-256 as a sliced step, tested against a known vector | The fingerprint of a known file matches `sha256sum` of its first 1 MiB | X2a |
 | X3 | Grid computation from crop, authored bounds, or the pre-sweep, including the pre-sweep lattice, its authored-cell bounds derivation and its base64 bitmask record; tile addressing; `tiles.jsonl` journal, manifest write and resume | Offline tests for each bounds source, for the bitmask's row padding and its base64 against the RFC 4648 vectors, and for resume with half the tiles journalled | F1, X1 |
@@ -95,7 +95,7 @@ component are in build order.
 | C2 | `synth`: closed-form theatre and extract-directory writer including the fill margin; `dcsterrain synth` | Writes a directory `check-extract` accepts once C3 exists; constants match F2 | F2, C1 |
 | C3 | `extract`: manifest and journal parse, validation, tile reader; `dcsterrain check-extract` | Accepts the synthetic extract; rejects each corrupted variant (wrong size, missing tile, extra file, bad min/max, unknown version, journal ahead of manifest) | F1, C1 |
 | C4 | `grid`: tile addressing, cross-tile window reads, bilinear sample, absent-tile rules (fill, sea), nodata handling | Window tests at every edge and corner; absent fill and sea tiles read per the spec | C3 |
-| C5a | `pack` skeleton: schema creation, `meta` (ADR-0008 adds the authored-rectangle keys and makes the bounds keys metres), pragmas, one transaction per grid, `VACUUM` | Empty packed file opens and `check` reports every `meta` key | C1 |
+| C5a | `pack` skeleton: schema creation, `meta` (ADR 0008 adds the authored-rectangle keys and makes the bounds keys metres), pragmas, one transaction per grid, `VACUUM` | Empty packed file opens and `check` reports every `meta` key | C1 |
 | C5b | Base grids: re-tiled to the pack `tile_size` with min/max, fill and sea tile omission, `cell_size` 50 or 100 by the size rule with resampling | Synthetic file opens; `describe` matches the manifest at both cell sizes | C4, C5a |
 | C5c | Vector tables from JSON (airdromes, runways, stands, beacons, radio, `poi`) and their R-trees | Row counts and R-tree counts match the extract; `nearest` on `poi` finds towns and nodes | C3, C5a |
 | C6 | `derive` stored local layers `valid` and `tpi_2000`, and the query-time window layers `slope`, `aspect`, `roughness`, `tpi_300` with their `grid` rows | Closed-form tolerances in the spec; the synthetic fill margin is `valid = 0` | C5b |
@@ -170,7 +170,7 @@ The `Depends on` column is the graph: a task may start when every task
 it names is done, and tasks that share no chain run in parallel.
 
 The work is also staged by machine. Component X is developed on the
-Windows machine, because ADR-0005 verifies the sweeps against a running
+Windows machine, because ADR 0005 verifies the sweeps against a running
 theatre through the `dcs-api-bridge` MCP rather than against a stub of
 one; only the offline tests in X1 to X4 and X9 would run anywhere. The
 Rust and MCP work is otherwise developed on macOS, but the Windows
@@ -192,7 +192,7 @@ changes nothing about them.
 
 | Milestone | Contains | Proof |
 |---|---|---|
-| MS0 Contract | P1, P2, F1, F2, C1, C2, C3, X1, X3 | `check-extract` accepts the Rust synthetic extract, and the hook's encoders and grid computation reproduce the F2 constants byte for byte on the same inputs (ADR-0005: the full-format contract is proven at X10) |
+| MS0 Contract | P1, P2, F1, F2, C1, C2, C3, X1, X3 | `check-extract` accepts the Rust synthetic extract, and the hook's encoders and grid computation reproduce the F2 constants byte for byte on the same inputs (ADR 0005: the full-format contract is proven at X10) |
 | MS1 Packed file | C4, C5a–C5c, C6–C10, C8a, C8b, C12a–C12c, X2a, X2b, X4–X9 | `pack` and `check` pass on the synthetic extract; the hook completes a live cropped sweep |
 | MS2 Real extract | X10, X11, C13, C14 | A full Caucasus extract exists, packs, and `check` passes |
 | MS3 Queries | Q1–Q5, Q6a–Q6c, Q7, Q8, C11 | Every operation tested on the synthetic theatre; benchmarks within target |

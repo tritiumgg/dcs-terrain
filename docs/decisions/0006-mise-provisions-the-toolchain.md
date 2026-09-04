@@ -1,12 +1,14 @@
-# ADR-0006: `mise` provisions the toolchain, and Windows builds its own Lua 5.1
+# ADR 0006: `mise` provisions the toolchain, and Windows builds its own Lua 5.1
 
-- **Status:** Accepted
-- **Date:** 2026-09-03
-- **Affects:** `core.md` "Workspace" (dependencies and the Rust it names);
-  `extractor-hook.md` (the Lua the offline tests run under);
-  `plan.md` tasks P1, P2, P3.
+## Status
+
+Accepted
 
 ## Context
+
+**Affects:** `core.md` "Workspace" (dependencies and the Rust it names);
+`extractor-hook.md` (the Lua the offline tests run under);
+`plan.md` tasks P1, P2, P3.
 
 The frozen documents name the tools a build needs but not how a machine gets
 them. `core.md` says only:
@@ -19,7 +21,7 @@ them. `core.md` says only:
 machines, three CI platforms, and nothing saying which versions.
 
 The work is split across a Windows machine with DCS and a macOS machine
-(ADR-0005), so "whatever is installed" means two different sets of versions,
+(ADR 0005), so "whatever is installed" means two different sets of versions,
 and a version difference that only shows up on one of them is the kind of
 failure that costs a session to find.
 
@@ -84,7 +86,7 @@ P2 configures CI against these versions rather than choosing its own, and P3's
 release builds inherit them. P1 carries `mise.toml`, the `lua51` task and the
 build script.
 
-## Alternatives considered
+### Alternatives considered
 
 **Document the tools in the README and let each machine install them.** It
 loses because it is what produces the version drift described above, and

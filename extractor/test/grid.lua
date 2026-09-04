@@ -19,7 +19,7 @@ local nan = zero / zero
 T.group("snapping")
 --------------------------------------------------------------------------------
 
--- ADR-0007's Caucasus rectangle and the grid it publishes. This is the vector
+-- ADR 0007's Caucasus rectangle and the grid it publishes. This is the vector
 -- that catches rounding to the nearest cell, which would give origin -418600
 -- and a height of 8900, and an x/z swap, since the two extents differ.
 local caucasus = E.grid_from_rect(
@@ -86,7 +86,7 @@ local crop = { min_x = -285000, min_z = 683000, max_x = -275000, max_z = 693000 
 local authored = { min_x = -400000, min_z = 100000, max_x = 0, max_z = 900000 }
 local presweep = { min_x = -390000, min_z = 110000, max_x = -10000, max_z = 890000 }
 
--- ADR-0009: a crop with no authored rectangle records both keys nil, and nil
+-- ADR 0009: a crop with no authored rectangle records both keys nil, and nil
 -- means unknown rather than empty.
 local by_crop = E.plan_grid({ cell_size = 50, tile_size = 256, crop_m = crop })
 T.eq("the crop drives the grid", by_crop.grid.origin_x, -285000)

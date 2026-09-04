@@ -15,7 +15,7 @@ all of them.
 ## `spec/` — the specification, frozen
 
 **Nothing in `spec/` is ever edited, renamed or moved**
-([ADR-0001](decisions/0001-what-is-frozen.md)). Anything that diverges from it
+([ADR 0001](decisions/0001-what-is-frozen.md)). Anything that diverges from it
 is recorded in [decisions/](decisions/), and where an ADR and a spec disagree,
 the ADR wins. Everything outside `spec/` is living and edited directly.
 
@@ -33,7 +33,7 @@ the ADR wins. Everything outside `spec/` is living and edited directly.
 
 Specs refer to each other by bare file name (`extract-format.md`). Those names
 are load-bearing — `ledger/` rows use them as join keys — so a rename is the
-procedure in [ADR-0002](decisions/0002-document-names-and-layout.md), never a
+procedure in [ADR 0002](decisions/0002-document-names-and-layout.md), never a
 casual edit.
 
 ## Living documents
@@ -51,7 +51,7 @@ Edit these directly; no ADR needed.
 
 Every divergence from the frozen documents, newest wins.
 [decisions/README.md](decisions/README.md) has the index, the rules, and when
-an ADR is required; `decisions/0000-template.md` is the template.
+an ADR is required; `decisions/TEMPLATE.md` is the template.
 
 Check this directory before acting on any frozen text.
 
@@ -125,4 +125,4 @@ when task C8a runs. Until then it lives here.
 
 The measured projection samples that once sat here are not kept, and `fit.py`
 now lives at `tools/probe-theatre/fit.py` —
-[ADR-0004](decisions/0004-projection-samples-not-kept.md).
+[ADR 0004](decisions/0004-projection-samples-not-kept.md).

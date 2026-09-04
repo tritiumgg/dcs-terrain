@@ -1,13 +1,15 @@
-# ADR-0004: The projection samples are not kept; `fit.py` moves to `tools/probe-theatre/`
+# ADR 0004: The projection samples are not kept; `fit.py` moves to `tools/probe-theatre/`
 
-- **Status:** Accepted
-- **Date:** 2026-09-03
-- **Affects:** `validation.md` "Measuring a new theatre or build", which names
-  `projection-samples/fit.py`; `probe-log-2.9.29.27278.md` "Projection, bounds
-  and fill for every installed theatre", which cites
-  `projection-samples/<id>.txt`.
+## Status
+
+Accepted
 
 ## Context
+
+**Affects:** `validation.md` "Measuring a new theatre or build", which names
+`projection-samples/fit.py`; `probe-log-2.9.29.27278.md` "Projection, bounds
+and fill for every installed theatre", which cites
+`projection-samples/<id>.txt`.
 
 `docs/data/projection-samples/` held 20 measured `(x, z, lat, lon)` samples for
 each of seven theatres — Afghanistan, Cold War Germany, Marianas, Marianas
@@ -58,7 +60,7 @@ matters more than it did.
 `tools/probe-theatre/` exists before task V2 creates it. V2 adds the hook chunk
 and the packaging; the script is already in place.
 
-## Alternatives considered
+### Alternatives considered
 
 **Keep the samples.** 36 KB, and irreplaceable without owning all seven
 terrains and running a probe per map. Rejected: nothing reads them, the fitted

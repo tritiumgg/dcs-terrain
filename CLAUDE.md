@@ -45,7 +45,7 @@ The reason it is a hard rule rather than a judgment call: those documents were
 reviewed as one set, they cite each other by bare file name, and every
 `ledger/` row quotes a verbatim line from them. One edit silently breaks joins
 that nothing in this repository can rebuild. See
-[ADR-0001](docs/decisions/0001-what-is-frozen.md).
+[ADR 0001](docs/decisions/0001-what-is-frozen.md).
 
 Everything else — `docs/plan.md`, `docs/STATE.md`, both READMEs,
 `docs/decisions/`, `docs/data/` — is yours to edit directly.
@@ -70,7 +70,7 @@ absent tile reads as sea rather than a hole` survives; a pointer to the
 paragraph that says so does not. If the reason is too long for a comment, it is
 a decision, and it belongs in an ADR.
 
-**ADRs may be cited**, by id: `// ADR-0007: 100 m cells above 500 000 km²`. An
+**ADRs may be cited**, by id: `// ADR 0007: 100 m cells above 500 000 km²`. An
 ADR is a stable, numbered record of one decision, it is superseded rather than
 edited, and it is the thing that stays true as the specs age.
 
@@ -139,7 +139,7 @@ something the specs leave open gets settled, or when a new DCS build or theatre
 is measured. No ADR is needed for work that does what the specs already say, or
 for a plain task change — that is an edit to the plan.
 
-To write one: copy `docs/decisions/0000-template.md` to
+To write one: copy `docs/decisions/TEMPLATE.md` to
 `NNNN-title-in-kebab-case.md` with the next free number, fill it in, and add
 the row to the index. One decision per record. Consequences must include the
 ones that hurt.
@@ -230,7 +230,7 @@ optional; the phase-`sim` rule exists because that call crashed DCS.
   numbers and the DCS build string in it. A measurement that only lives in a
   conversation is lost.
 - A change to the plan is an edit, not an ADR. Write an ADR alongside it only
-  when the reasoning binds later work — as ADR-0003 does for task D1.
+  when the reasoning binds later work — as ADR 0003 does for task D1.
 - A new DCS build or theatre gets a new `docs/spec/probe-log-<build>.md` when
   someone re-measures it, and the existing one is never appended to. The ADR
   comes with a measurement that differs, not with the new file and not with

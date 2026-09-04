@@ -73,7 +73,7 @@ T.eq("a fresh manifest encodes", type(E.json(fresh)), "string")
 T.group("the authored rectangle")
 --------------------------------------------------------------------------------
 
--- ADR-0009: a crop run has no rectangle, and both keys are null.
+-- ADR 0009: a crop run has no rectangle, and both keys are null.
 local cropped = E.new_manifest(opts({
   authored_bounds_m = REMOVE, authored_bounds_source = REMOVE,
   crop_m = { min_x = 0, min_z = 0, max_x = 10000, max_z = 10000 },

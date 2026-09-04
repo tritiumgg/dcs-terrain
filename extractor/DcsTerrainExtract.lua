@@ -645,7 +645,7 @@ end
 -- tells a later reader which of those cells are terrain someone built rather
 -- than the fill the engine returns outside it.
 --
--- ADR-0009: a crop run with no authored rectangle leaves both nil, and the
+-- ADR 0009: a crop run with no authored rectangle leaves both nil, and the
 -- manifest writes them as null. Nil here means unknown, never empty.
 function M.plan_grid(opts)
   local authored, source = opts.authored_bounds_m, nil
@@ -1241,7 +1241,7 @@ function M.new_manifest(opts)
     error("new_manifest: omit_sea_tiles is not a boolean: "
       .. tostring(opts.omit_sea_tiles), 2)
   end
-  -- ADR-0009: the authored rectangle and its source are known together or
+  -- ADR 0009: the authored rectangle and its source are known together or
   -- unknown together. A source naming where an absent rectangle came from, or
   -- a rectangle with no provenance, is a state no reader can interpret.
   if (opts.authored_bounds_m == nil) ~= (opts.authored_bounds_source == nil) then

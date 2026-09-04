@@ -1,12 +1,14 @@
-# ADR-0009: A run may have no authored rectangle, and both manifest keys are then null
+# ADR 0009: A run may have no authored rectangle, and both manifest keys are then null
 
-- **Status:** Accepted
-- **Date:** 2026-09-04
-- **Affects:** `extract-format.md` "manifest.json", the `authored_bounds_m` and
-  `authored_bounds_source` rules; `core.md` "Packed file", the `valid` row;
-  ADR-0008; `plan.md` tasks X3, X10, C3, C4, C5a.
+## Status
+
+Accepted
 
 ## Context
+
+**Affects:** `extract-format.md` "manifest.json", the `authored_bounds_m` and
+`authored_bounds_source` rules; `core.md` "Packed file", the `valid` row;
+ADR 0008; `plan.md` tasks X3, X10, C3, C4, C5a.
 
 `extract-format.md` says `authored_bounds_m` "is `nodesMapBorders` from the
 theatre's `entry.lua` when the extractor is given it in config
@@ -30,7 +32,7 @@ cell is inside `authored_bounds_m` **if known**". What no document settles is
 what the extractor *writes* when it is not known, and what `pack` and `check`
 then do with it.
 
-ADR-0008 makes that gap a contradiction rather than an omission. It gives the
+ADR 0008 makes that gap a contradiction rather than an omission. It gives the
 packed `meta` five new keys — `authored_bounds_min_x`, `authored_bounds_min_z`,
 `authored_bounds_max_x`, `authored_bounds_max_z` and
 `authored_bounds_source` — "copied from the manifest without conversion", and
@@ -51,11 +53,11 @@ reports.
 means nothing is authored.** No reader treats it as an empty rectangle, and no
 reader substitutes the grid or `bounds_km` for it.
 
-**`pack` writes SQL NULL into all five `meta` keys of ADR-0008 when the
+**`pack` writes SQL NULL into all five `meta` keys of ADR 0008 when the
 manifest's `authored_bounds_m` is null, and `check` accepts NULL in the four
 coordinates exactly when `authored_bounds_source` is NULL.** Any other
 combination of NULL and non-NULL across the five is a `check` failure. This
-replaces ADR-0008's "`check` requires all five".
+replaces ADR 0008's "`check` requires all five".
 
 **`valid` falls back when the rectangle is unknown**: a cell is valid where
 `height` is not nodata and `water` is not 2, with no inside-the-rectangle
@@ -85,14 +87,14 @@ comparing two different definitions of `valid`, and only `meta` says which is
 which. That is the argument for `authored_bounds_source` being in `meta` at
 all, and it now carries a third value.
 
-ADR-0008's sentence "`check` requires all five" reads false and is superseded
-by the clause above. ADR-0008 is otherwise unchanged and stays Accepted; the
+ADR 0008's sentence "`check` requires all five" reads false and is superseded
+by the clause above. ADR 0008 is otherwise unchanged and stays Accepted; the
 `meta` keys, their units and their provenance are all still its decision.
 
 `extract-format.md`'s `authored_bounds_m` rule reads incomplete rather than
 false: its two sources are both correct, and neither covers a crop run.
 
-## Alternatives considered
+### Alternatives considered
 
 **Record the theatre bounds rectangle as `authored_bounds_m`, with a third
 source naming it.** Every key stays non-null and `check` needs no change.
@@ -110,7 +112,7 @@ about terrain a 10 × 10 km crop will never touch. It would also make the
 rectangle depend on which crop was asked for, since the grid is the crop's.
 
 **Omit the two keys rather than writing them null.** The format's other absent
-values are omitted rather than nulled in some places. Rejected: ADR-0007
+values are omitted rather than nulled in some places. Rejected: ADR 0007
 already fixed the opposite rule — a key DCS omits is written as JSON `null` —
 and an absent key cannot distinguish "this extractor did not know" from "this
 extractor is older than the field". A null says which.

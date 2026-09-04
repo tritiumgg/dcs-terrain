@@ -1,11 +1,13 @@
-# ADR-0002: Frozen documents live in `docs/spec/` under plain names
+# ADR 0002: Frozen documents live in `docs/spec/` under plain names
 
-- **Status:** Accepted
-- **Date:** 2026-09-03
-- **Affects:** `plan.md` task P1, which specifies `docs/` holding these
-  documents without naming a layout.
+## Status
+
+Accepted
 
 ## Context
+
+**Affects:** `plan.md` task P1, which specifies `docs/` holding these
+documents without naming a layout.
 
 The documents arrived numbered for reading order — `00-project-plan.md`,
 `01-design-and-facts.md`, `02-probe-log-2.9.29.27278.md`,
@@ -60,7 +62,7 @@ ADR removes.
 Ledger files are named after their document, so a document renamed
 later must have its ledger renamed with it.
 
-## Alternatives considered
+### Alternatives considered
 
 **Keep the reviewed names.** Preserves byte-identity with the originals and
 needs no verification pass. Rejected: it keeps numbers that duplicate the

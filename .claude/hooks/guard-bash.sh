@@ -92,7 +92,7 @@ if writes_to "$FROZEN"; then
     refuse "a shell write to a frozen document or to .gitattributes." \
 "docs/spec/ is frozen: not edited, not renamed, not moved. Anything you would
 have changed there goes in docs/decisions/ as an ADR instead, from
-docs/decisions/0000-template.md. .gitattributes keeps the ledger stamps valid
+docs/decisions/TEMPLATE.md. .gitattributes keeps the ledger stamps valid
 on a Windows checkout."
 fi
 

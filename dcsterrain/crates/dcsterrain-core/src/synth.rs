@@ -22,7 +22,7 @@
 //! * primitives only; anything derivable (grid extents, feature positions in
 //!   absolute metres, tile counts) is computed by the generator
 
-// Extract format. The layer table and the water codes are ADR-0007's.
+// Extract format. The layer table and the water codes are ADR 0007's.
 
 pub const FORMAT_VERSION: u32 = 1;
 pub const TILE_SIZE: u32 = 256;

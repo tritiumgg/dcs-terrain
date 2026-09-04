@@ -1,13 +1,15 @@
-# ADR-0007: Extract format v1 is frozen, with measured field sources and a separate code for an unrecognised surface string
+# ADR 0007: Extract format v1 is frozen, with measured field sources and a separate code for an unrecognised surface string
 
-- **Status:** Accepted
-- **Date:** 2026-09-04
-- **Affects:** `extract-format.md` "Tile binary layout", "Tables" and
-  "manifest.json"; `design-and-facts.md`, the `Airdromes` paragraph;
-  `probe-log-2.9.29.27278.md`, the Caucasus fill row; `plan.md` tasks F1, X1,
-  X5 and C5c.
+## Status
+
+Accepted
 
 ## Context
+
+**Affects:** `extract-format.md` "Tile binary layout", "Tables" and
+"manifest.json"; `design-and-facts.md`, the `Airdromes` paragraph;
+`probe-log-2.9.29.27278.md`, the Caucasus fill row; `plan.md` tasks F1, X1,
+X5 and C5c.
 
 Task F1 freezes the extract format at `format_version` 1. The freeze needs
 every field the format emits traced to the DCS call that produces it, and
@@ -303,7 +305,7 @@ corrections, and the terrain files are identical between the two builds.
 F2 takes the fill triple, the water codes and the layer table from this
 record. C3 validates against it, and C5c reads the table fields it names.
 
-## Alternatives considered
+### Alternatives considered
 
 **Leave `water` 255 with both meanings.** No divergence, and `pack` separates
 fill from an unrecognised string by reading `height` at the same cell.

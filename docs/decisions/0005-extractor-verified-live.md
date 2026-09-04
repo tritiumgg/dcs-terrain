@@ -1,11 +1,13 @@
-# ADR-0005: The extractor is verified live; offline Lua tests are minimal
+# ADR 0005: The extractor is verified live; offline Lua tests are minimal
 
-- **Status:** Accepted
-- **Date:** 2026-09-03
-- **Affects:** `extractor-hook.md` "Testing"; `plan.md` tasks P1, P2, X1, X3,
-  X4, X5, X6, X7, X8a, X8b, X8c, X9 and milestone MS0.
+## Status
+
+Accepted
 
 ## Context
+
+**Affects:** `extractor-hook.md` "Testing"; `plan.md` tasks P1, P2, X1, X3,
+X4, X5, X6, X7, X8a, X8b, X8c, X9 and milestone MS0.
 
 The extractor hook's tests were specified against a vendored stub harness.
 `extractor-hook.md` "Testing" says:
@@ -74,7 +76,7 @@ The done tests of P1, P2, X1, X3, X4, X5, X6, X7, X8a, X8b, X8c and X9 change,
 as does MS0's proof. `extractor-hook.md` "Testing" now reads false in its
 first sentence and in its sample-for-sample requirement.
 
-## Alternatives considered
+### Alternatives considered
 
 **Write a stub harness in this repository.** It would keep MS0's proof and an
 offline CI sweep. It loses because the stub surface is large, this project

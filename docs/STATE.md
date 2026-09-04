@@ -15,7 +15,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    `extractor/DcsTerrainExtract.lua` with 9 offline test files and 487 checks.
    A JSON decoder came with it, because resume must read the manifest back and
    X2b's `autoupdate.cfg` is strict JSON. Two reference vectors pin the
-   snapping and neither subsumes the other: ADR-0007's Caucasus rectangle
+   snapping and neither subsumes the other: ADR 0007's Caucasus rectangle
    catches rounding to the nearest cell, F2's synth rectangle catches snapping
    inward, and two smaller vectors exist because both reference rectangles
    agree with the wrong extent formula. Shipped as an 11-PR stack, which is
@@ -33,12 +33,12 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    `extractor/test/support/synth_constants.lua` and
    `dcsterrain-core/src/synth.rs`, 149 constants each, and a Rust test that
    parses the Lua file and fails on any name or value the two do not share, so
-   the pair cannot drift — the hole ADR-0005 left when it dropped the
+   the pair cannot drift — the hole ADR 0005 left when it dropped the
    byte-for-byte harness comparison. Positions are offsets from the grid
    origin, so raising the size adds land and moves nothing; 70 km is the
    default because a smaller theatre cannot hold an all-sea tile clear of the
    fill margin.
-4. **F1 — the extract format is frozen at v1.** ADR-0007 records what v1 is:
+4. **F1 — the extract format is frozen at v1.** ADR 0007 records what v1 is:
    every field traced to the DCS call behind it, measured live on
    2.9.29.27468 across three theatres and, where no map load was needed, all
    eight installed (an airdrome's sub-tables are keyed from 0 and are often
@@ -46,7 +46,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    positions are positional arrays, `towns` is keyed by name);
    an unrecognised surface string encoded 254, so 255 means nodata alone; the
    Caucasus fill triple 5.000005 / `land` / 0 that the probe log left
-   unmeasured; and a manifest example built from measured numbers. ADR-0008
+   unmeasured; and a manifest example built from measured numbers. ADR 0008
    gives the packed `meta` the authored rectangle and makes its bounds keys
    metres.
 5. **Language servers pinned in `mise.toml`.** `rust-analyzer` and
@@ -72,7 +72,7 @@ iterator it drives.
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
 1. **X2a / X2b** — config load and validation, then `dcs_build` from
-   `autoupdate.cfg` and the `terrain_fingerprint`; ADR-0007 carries the
+   `autoupdate.cfg` and the `terrain_fingerprint`; ADR 0007 carries the
    Caucasus head hashes and digest as X2b's test vector.
 2. **X5 / X6 / X7** — the tables, `water` and `height`, and roads sweeps.
    Verified against a running theatre through the bridge, not offline.

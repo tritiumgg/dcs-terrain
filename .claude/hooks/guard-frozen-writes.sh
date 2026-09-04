@@ -40,7 +40,7 @@ Blocked: a write to $norm, which is $why.
 
 docs/spec/ is frozen: not edited, not renamed, not moved. Anything you would
 have changed there goes in docs/decisions/ as an ADR instead, and the ADR wins
-over the spec text. Copy docs/decisions/0000-template.md to the next free
+over the spec text. Copy docs/decisions/TEMPLATE.md to the next free
 number and add the row to docs/decisions/README.md, which is the index an ADR
 is found by.
 

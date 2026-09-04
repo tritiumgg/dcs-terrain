@@ -22,7 +22,7 @@
 
 local M = {}
 
--- Extract format. The layer table and the water codes are ADR-0007's.
+-- Extract format. The layer table and the water codes are ADR 0007's.
 
 M.FORMAT_VERSION = 1
 M.TILE_SIZE = 256
