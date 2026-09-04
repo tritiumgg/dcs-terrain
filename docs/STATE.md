@@ -10,7 +10,16 @@ back. This file holds progress; `plan.md` holds the task graph and
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **F1 — the extract format is frozen at v1.** ADR-0007 records what v1 is:
+1. **F2 — reference constants for the synthetic theatre.**
+   `extractor/test/support/synth_constants.lua` and
+   `dcsterrain-core/src/synth.rs`, 149 constants each, and a Rust test that
+   parses the Lua file and fails on any name or value the two do not share, so
+   the pair cannot drift — the hole ADR-0005 left when it dropped the
+   byte-for-byte harness comparison. Positions are offsets from the grid
+   origin, so raising the size adds land and moves nothing; 70 km is the
+   default because a smaller theatre cannot hold an all-sea tile clear of the
+   fill margin.
+2. **F1 — the extract format is frozen at v1.** ADR-0007 records what v1 is:
    every field traced to the DCS call behind it, measured live on
    2.9.29.27468 across three theatres and, where no map load was needed, all
    eight installed (an airdrome's sub-tables are keyed from 0 and are often
@@ -21,20 +30,20 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    unmeasured; and a manifest example built from measured numbers. ADR-0008
    gives the packed `meta` the authored rectangle and makes its bounds keys
    metres.
-2. **Language servers pinned in `mise.toml`.** `rust-analyzer` and
+3. **Language servers pinned in `mise.toml`.** `rust-analyzer` and
    `lua-language-server`, provisioned by `mise install` like the rest of the
    toolchain. A root `.luarc.json` sets the Lua server to 5.1 and declares the
    hook-state globals `DCS`, `net`, `log` and `lfs`, so `string.pack` and the
    rest of what 5.1 lacks are flagged where they are written rather than where
    the hook is loaded.
-3. **CI workflows, ahead of P2.** `.github/workflows/rust.yml` and `lua.yml`,
+4. **CI workflows, ahead of P2.** `.github/workflows/rust.yml` and `lua.yml`,
    one per language, each scoped to the paths it tests, so a documentation
    commit starts no runner. In-flight runs are superseded on a new push, and
    Windows and macOS wait on Linux so a broken commit costs one runner rather
    than three. The repository is public, so standard runners burn no Actions
    minutes. P2 stays open: its done test needs C1 and X1 to exist, and the Lua
    job has no tests to run until X1.
-4. **Kotlin client cut.** It becomes its own project, consuming the MCP server
+5. **Kotlin client cut.** It becomes its own project, consuming the MCP server
    and the CLI like any other client. Deleted `kotlin/`, tasks K1–K3c,
    `kotlin-consumer.md` and its ledger pair — the one exception ever made to
    the frozen rule, agreed with the user, and no other frozen file joined to
@@ -42,31 +51,27 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    references. MS4 is now the server alone, proved by `query` and the server
    agreeing; C1 gains a schema snapshot test, which is what K1 used to catch.
    `mise.toml` loses `java` and `node`, leaving Rust, Lua and Python.
-5. **P1 — repository layout.** The `dcsterrain/` Cargo workspace with its three
-   crates builds; `extractor/` and `tools/validate/` exist with a README saying
-   what belongs in each. `mise.toml` and `rust-toolchain.toml` pin the
-   toolchain and `tools/lua51/` builds Lua 5.1.5 on Windows, all per ADR-0006.
-   The `.gitignore` `target/` rule no longer anchors to the repository root.
 
 ## Next
 
 One task. The thing to pick up immediately.
 
-**F2 — reference constants for the synthetic theatre**, `synth_constants.lua`
-and `synth.rs`, the same numbers in both, each naming the other in a comment.
-Take the fill triple, the `water` codes and the layer table from ADR-0007.
+**C1 — workspace scaffold**: `types`, a `clap` CLI with a stub per subcommand,
+`schemars` on every request and response type, stderr logging with `--verbose`,
+and a snapshot test on `dcsterrain schema` so a change to it is a deliberate
+diff. Head of the longest dependency chain.
 
-Blocked on nothing.
+Blocked on nothing. The crates and the `synth` feature already exist from P1.
 
 ## Then
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **C1** — workspace scaffold, `types`, `clap` CLI stubs, `schemars`, stderr
-   logging. Head of the longest dependency chain.
-2. **X1** — Lua encoders `i16le`, `u8`, `json` and the ADR-0007 list
+1. **X1** — Lua encoders `i16le`, `u8`, `json` and the ADR-0007 list
    normalisation, with offline Lua tests. Runs in parallel with C1.
-3. **C2 / C3** — `synth` and `check-extract`, which unlock MS0.
+2. **P2** — closes as soon as C1 and X1 give both workflows something to run.
+3. **C2 / C3** — `synth` and `check-extract`, which unlock MS0. C2 builds the
+   generator on the F2 constants, in the file that already holds them.
 4. **X3** — grid computation from each bounds source, tile addressing, the
    journal and resume.
 5. **X2a / X2b** — config load and validation, then `dcs_build` from
@@ -88,6 +93,7 @@ Things a later task must not lose. Max 10 — see the rules below.
 | # | Carry | Discharged by |
 |---|---|---|
 | 1 | Lua 5.1 folds numeric literals at compile time, and the result is order-dependent: `-0.0` and folded infinities in one chunk can print as another constant in that chunk. Assert on computed values, not folded literals. DCS's interpreter and ours behave identically here. | X1 |
+| 2 | `synth` produces no all-fill tile at any size: the fill margin is 2 km and a tile is 12.8 km, so no tile is fill throughout. Test the absent-fill-tile read against a hand-built manifest, not against a generated extract. The all-sea case is generated, as one interior tile. | C4 |
 
 ### Rules for this file
 

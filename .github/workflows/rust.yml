@@ -2,16 +2,22 @@ name: rust
 
 # Runs only when Rust sources or the toolchain pin change. Most commits in this
 # repository touch documentation only, and those must not start a runner.
+#
+# The Lua reference constants are here because a Rust test parses that file and
+# compares it to its twin, so editing the Lua side alone must still run this
+# job. It is the only file outside dcsterrain/ that a Rust test reads.
 on:
   push:
     branches: [main]
     paths:
       - "dcsterrain/**"
+      - "extractor/test/support/synth_constants.lua"
       - "rust-toolchain.toml"
       - ".github/workflows/rust.yml"
   pull_request:
     paths:
       - "dcsterrain/**"
+      - "extractor/test/support/synth_constants.lua"
       - "rust-toolchain.toml"
       - ".github/workflows/rust.yml"
   workflow_dispatch:
