@@ -1545,10 +1545,90 @@ end
 -- stop at the first of it.
 --------------------------------------------------------------------------------
 
+-- ADR 0011: constants, not config. Each is still written into the manifest, so
+-- the format stays parametric and a reader is told what the extract was built
+-- with; what none of them is any more is a question put to the user.
+--
+-- The extract is always 50 m, because a coarser base is pack's choice and the
+-- DCS sweep is deliberately not multi-resolution. tile_size is internal
+-- chunking, 128 KB a tile. Omitting an all-sea tile is lossless, because water
+-- 2 is sea and a lake at altitude is 1: an omitted tile reads back as height 0
+-- and surface WATER exactly. The two road seed numbers were measured rather
+-- than picked, and what moving them trades away is graph fidelity nothing
+-- reports.
+-- frame_budget_ms is here too, and for a reason worth writing down: it changes
+-- how long a run takes and never what it produces, and its effect is not even
+-- uniform. queue_frame always runs at least one step, and a server-state chunk
+-- is about 40 ms, so under any sane budget that sweep gets one chunk a frame
+-- whatever the number says, while roads scale with it. Nothing reports frame
+-- cost to tune against either. If the trade ever matters it comes back as a
+-- named mode with a measurement behind it, not as a millisecond number.
+M.CELL_SIZE = 50
+M.TILE_SIZE = 256
+M.OMIT_SEA_TILES = true
+M.FRAME_BUDGET_MS = 5
+M.ROAD_SEED_SPACING = 1000
+M.ROAD_SEED_NEIGHBOURS = 4
+
 local function bad_boolean(v, name)
   if type(v) ~= "boolean" then
     return format("%s is not true or false: %s", name, tostring(v))
   end
+end
+
+-- The crop is a centre and a radius, not the box the format records. A box is
+-- four coordinates nobody can produce from knowing where they want to extract;
+-- the Mission Editor shows the X and Z under the cursor, so a centre read off
+-- the map plus a radius is three numbers a user actually has.
+local CROP_KEYS = { "x", "z", "radius_m" }
+local CROP_BY_NAME = { x = true, z = true, radius_m = true }
+
+-- One line for the whole crop, naming the first thing wrong with it, so a crop
+-- with three bad members costs one line and not three. Anything else would make
+-- "one line per bad field" a count nobody can rely on.
+local function bad_crop(v, name)
+  if type(v) ~= "table" then
+    return format("%s is not a centre and a radius: %s", name, tostring(v))
+  end
+  for i = 1, #CROP_KEYS do
+    local key = CROP_KEYS[i]
+    if not is_finite(v[key]) then
+      return format("%s.%s is not a finite number: %s",
+        name, key, tostring(v[key]))
+    end
+  end
+  for key in pairs(v) do
+    if not CROP_BY_NAME[key] then
+      return format("%s has an unknown key: %s", name, tostring(key))
+    end
+  end
+  if v.radius_m <= 0 then
+    return format("%s.radius_m is not a positive number: %s",
+      name, tostring(v.radius_m))
+  end
+end
+
+-- The box the grid is planned from and the manifest records. A radius of r is
+-- half the side, so radius_m = 5000 is the 10 x 10 km crop X10 asks for.
+--
+-- Converted here rather than in validate_config, so a validated config keeps
+-- the user's own vocabulary: the window fills its controls from the same table
+-- the run starts from, and a centre that had to be recovered from a box would
+-- be a round trip waiting to lose a digit.
+function M.crop_box(crop)
+  if crop == nil then
+    return nil
+  end
+  local bad = bad_crop(crop, "crop")
+  if bad then
+    error("crop_box: " .. bad, 2)
+  end
+  return {
+    min_x = crop.x - crop.radius_m,
+    min_z = crop.z - crop.radius_m,
+    max_x = crop.x + crop.radius_m,
+    max_z = crop.z + crop.radius_m,
+  }
 end
 
 -- A control character in a path is almost always a Lua escape the user did not
@@ -1578,8 +1658,12 @@ end
 -- name, the check, the default, and whether absent is allowed. enabled is not
 -- in the list because it is read before the list is: it decides whether any of
 -- the rest is looked at.
+-- Two fields, and the window shows both. crop is optional rather than
+-- defaulted, because a crop is a deliberate choice and there is no area to
+-- invent for someone who did not ask for one.
 local CONFIG_FIELDS = {
   { name = "output_dir", check = bad_path, normalise = forward_slashes },
+  { name = "crop", check = bad_crop, optional = true },
 }
 
 local CONFIG_FIELD_BY_NAME = { enabled = true }
@@ -1678,8 +1762,6 @@ M.STATE_HOOK = "hook"
 M.STATE_MISSION = "mission"
 M.STATE_DONE = "done"
 
-M.DEFAULT_FRAME_BUDGET_MS = 5
-
 -- Frames between terrain polls in idle. The poll is two DCS calls and idle
 -- lasts for as long as DCS sits at the main menu, which can be hours.
 M.IDLE_POLL_FRAMES = 60
@@ -1737,7 +1819,9 @@ function M.new_run(opts)
     config = config,
     jobs = opts.jobs or M.jobs,
     dir = config.output_dir,
-    budget_ms = config.frame_budget_ms or M.DEFAULT_FRAME_BUDGET_MS,
+    -- A constant, not config (ADR 0011). It stays a field on the run so a test
+    -- can drive the budget by hand, which no config file could ever ask for.
+    budget_ms = config.frame_budget_ms or M.FRAME_BUDGET_MS,
     -- Filled in by the prepare jobs, which is where the theatre, the build,
     -- the fingerprint and the bounds are read.
     identity = opts.identity or {},
