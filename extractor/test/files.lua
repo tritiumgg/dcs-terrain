@@ -2,106 +2,21 @@
 --
 -- Run from the repository root with a plain lua5.1.
 --
--- The fake file system below is the reason the rest of X3 can be tested at
--- all: a manifest write, a journal append and a resume are all file access,
--- and none of them should need a disk to assert.
+-- The fake file system in support/fakefs.lua is the reason the rest of X3 can
+-- be tested at all: a manifest write, a journal append and a resume are all
+-- file access, and none of them should need a disk to assert.
 
 package.path = "extractor/?.lua;extractor/test/support/?.lua;" .. package.path
 
 local T = require("testing")
 local E = require("DcsTerrainExtract")
 
--- A file system in a table: paths are keys, file contents are strings, and a
--- directory is the DIR sentinel.
---
--- rename refuses an existing destination. Windows does; Linux replaces
--- silently. CI runs on Linux, so a fake that replaced silently would let the
--- remove step in write_file be deleted and stay green on every machine that
--- runs these tests. Modelling the strictest platform is what keeps that step
--- load-bearing.
-local DIR = {}
-
-local function new_fs()
-  local files = {}
-  local fs = { files = files, DIR = DIR }
-
-  function fs.open(path, mode)
-    if mode == "rb" then
-      local data = files[path]
-      if data == nil or data == DIR then
-        return nil, path .. ": no such file"
-      end
-      local done = false
-      return {
-        read = function()
-          if done then
-            return nil
-          end
-          done = true
-          return data
-        end,
-        close = function() return true end,
-      }
-    end
-    if files[path] == DIR then
-      return nil, path .. ": is a directory"
-    end
-    if mode == "wb" then
-      files[path] = ""
-    elseif mode == "ab" then
-      files[path] = files[path] or ""
-    else
-      return nil, "unsupported mode " .. tostring(mode)
-    end
-    return {
-      write = function(self, s)
-        files[path] = files[path] .. s
-        return self
-      end,
-      close = function() return true end,
-    }
-  end
-
-  function fs.remove(path)
-    if files[path] == nil then
-      return nil, path .. ": no such file"
-    end
-    -- os.remove will not delete a directory out from under a rename, so
-    -- neither does this. write_file ignores the result and lets the rename
-    -- report, which is the path that has to work.
-    if files[path] == DIR then
-      return nil, path .. ": is a directory"
-    end
-    files[path] = nil
-    return true
-  end
-
-  function fs.rename(from, to)
-    if files[from] == nil then
-      return nil, from .. ": no such file"
-    end
-    if files[to] ~= nil then
-      return nil, to .. ": destination exists"
-    end
-    files[to] = files[from]
-    files[from] = nil
-    return true
-  end
-
-  function fs.mkdir(path)
-    if files[path] ~= nil then
-      return nil, path .. ": exists"
-    end
-    files[path] = DIR
-    return true
-  end
-
-  function fs.is_dir(path)
-    return files[path] == DIR
-  end
-
-  return fs
-end
+-- The fake file system lives in support/ because the journal and resume tests
+-- drive the same code paths over it. Its strictness -- a rename that refuses
+-- an existing destination, a remove that refuses a directory -- is what most
+-- of the assertions below actually rest on.
+local FakeFs = require("fakefs")
+local new_fs = FakeFs.new
 
 --------------------------------------------------------------------------------
 T.group("the fake is strict")
@@ -192,5 +107,36 @@ T.eq("naming the component", mkerr:find("blocker", 1, true) ~= nil, true)
 
 T.raises("refuses an empty path", function() return E.mkdir_p("") end, "not a path")
 T.raises("refuses a non-string", function() return E.mkdir_p(7) end, "not a path")
+
+--------------------------------------------------------------------------------
+T.group("the output tree")
+--------------------------------------------------------------------------------
+
+local out = new_fs()
+E.fs = out
+
+T.eq("creates the tree", E.ensure_output_dirs("C:/extracts/caucasus"), true)
+T.eq("the extract directory", out.is_dir("C:/extracts/caucasus"), true)
+T.eq("the tiles directory", out.is_dir("C:/extracts/caucasus/tiles"), true)
+T.eq("height", out.is_dir("C:/extracts/caucasus/tiles/height"), true)
+T.eq("water", out.is_dir("C:/extracts/caucasus/tiles/water"), true)
+-- The mission-pass layer too, so the mission pass has nowhere left to fail
+-- before its first write.
+T.eq("surface", out.is_dir("C:/extracts/caucasus/tiles/surface"), true)
+T.eq("running it again succeeds", E.ensure_output_dirs("C:/extracts/caucasus"), true)
+
+out.files["C:/blocked"] = "not a directory"
+T.eq("a blocked output directory reports", E.ensure_output_dirs("C:/blocked/x"), nil)
+
+-- A tile file with no journal line fails validation permanently, and a sweep
+-- that decides to omit a tile is the case where nothing else would remove it.
+out.files["C:/extracts/caucasus/tiles/height/4_9.bin"] = "stale"
+T.eq("removes a tile", E.remove_tile("C:/extracts/caucasus", "height", 4, 9), true)
+T.eq("and it is gone", out.files["C:/extracts/caucasus/tiles/height/4_9.bin"], nil)
+-- Called unconditionally by a sweep that omits a tile, so absence is normal.
+T.eq("removing an absent tile is fine",
+  E.remove_tile("C:/extracts/caucasus", "height", 4, 9), true)
+T.raises("but not an unknown layer",
+  function() return E.remove_tile("C:/extracts/caucasus", "depth", 0, 0) end, "not a layer")
 
 T.done()

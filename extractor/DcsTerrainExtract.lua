@@ -1023,4 +1023,34 @@ function M.mkdir_p(path)
   return true
 end
 
+-- The whole tile tree, including the mission-pass layer. Making the surface
+-- directory during the hook pass costs an empty directory and means the
+-- mission pass has nowhere left to fail before its first write.
+function M.ensure_output_dirs(dir)
+  local ok, err = M.mkdir_p(dir)
+  if not ok then
+    return nil, err
+  end
+  for i = 1, #LAYER_SPECS do
+    ok, err = M.mkdir_p(M.join(dir, "tiles/" .. LAYER_SPECS[i].name))
+    if not ok then
+      return nil, err
+    end
+  end
+  return true
+end
+
+-- A tile file with no journal line fails validation, permanently.
+--
+-- The write order is file, rename, journal line, so a run killed between the
+-- last two leaves one behind. That normally heals: the tile is not in the
+-- journal, so the sweep writes it again. It does not heal when the second
+-- sweep decides to omit the tile, because then nothing ever overwrites the
+-- stale file and no line is ever written for it. So a sweep that omits a tile
+-- removes it, whether or not it believes one is there.
+function M.remove_tile(dir, layer, tx, tz)
+  M.fs.remove(M.join(dir, M.tile_path(layer, tx, tz)))
+  return true
+end
+
 return M
