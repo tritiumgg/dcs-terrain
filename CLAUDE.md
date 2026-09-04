@@ -243,10 +243,14 @@ DCS.
   not write a call from memory.
 - **Never call** `terrain.Init`, `terrain.Create`, `terrain.Release`,
   `terrain.InitLight` or `terrain.getCrossParam` from a probe.
-- **Mission-state (`server`) `land` and `world` calls only while
-  `dcs_bridge_status` reports phase `sim`.** A `land.getHeight` reaching the
-  `server` state at the main menu crashes DCS with an access violation. Hook-side
-  `terrain.*` calls are safe at the menu; they return nil.
+- **Mission-state (`server`) `land` and `world` calls only while terrain is
+  loaded, which is `terrain.GetTerrainConfig("id")` returning non-nil**
+  (ADR 0010). A `land.getHeight` reaching the `server` state at the main menu,
+  with no terrain, crashes DCS with an access violation. A mission is not
+  required: with the Mission Editor open on a map those calls answer
+  correctly. Do not use the bridge's `phase` field for this — it reports
+  `menu` with the editor open on a map, so it cannot tell loaded terrain from
+  none. Hook-side `terrain.*` calls are safe at the menu; they return nil.
 - **Never load or use the `dcs-scripting` skill.** Symbol authority is the
   `dcs-api-lookup` skill for signatures and existence checks, the
   `dcs-api-bridge` MCP tools for anything a running DCS can answer, and the

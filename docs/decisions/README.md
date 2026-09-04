@@ -21,6 +21,7 @@ disagree, the later accepted one wins, and the earlier is marked
 | [0007](0007-extract-format-v1.md) | Accepted | 2026-09-04 | Extract format v1 is frozen, with measured field sources and a separate code for an unrecognised surface string | `extract-format.md` "Tile binary layout", "Tables", "manifest.json"; `design-and-facts.md` `Airdromes`; `plan.md` F1, X1, X5, C5c |
 | [0008](0008-packed-meta-carries-the-authored-rectangle.md) | Accepted | 2026-09-04 | The packed file's `meta` carries the authored rectangle, and its bounds keys are metres | `core.md` "Packed file"; `plan.md` C5a, C6 |
 | [0009](0009-a-run-may-have-no-authored-rectangle.md) | Accepted | 2026-09-04 | A run may have no authored rectangle, and both manifest keys are then null | `extract-format.md` "manifest.json"; `core.md` `valid`; ADR 0008's `check` clause; `plan.md` X3, X10, C3, C4, C5a |
+| [0010](0010-server-state-calls-need-terrain-not-a-mission.md) | Accepted | 2026-09-04 | `server`-state `land` and `world` calls need loaded terrain, not a running mission | `design-and-facts.md` phase-`sim` rule; `extractor-hook.md` "Lifecycle" step 4, "Mission-pass sweeps"; probe log "Crash record"; `CLAUDE.md`; `plan.md` X4, X8a, X8b, X10 |
 
 Add a row when you add an ADR. This table is the index Claude reads, so an ADR
 missing from it will not be found. Each record's own `Affects` line, at the top
