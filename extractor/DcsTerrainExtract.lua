@@ -1523,4 +1523,183 @@ function M.queue_frame(queue, run, spent)
   return M.MORE
 end
 
+--------------------------------------------------------------------------------
+-- State machine
+--
+-- prepare -> hook -> done, with idle before them and the mission pass between
+-- the last two still to come. DCS gives the hook one callback per simulation
+-- frame, and this is what a frame does.
+--
+-- What a phase contains is not decided here. Each phase is a list of jobs the
+-- sweeps register, run in the order they registered, and the machine knows
+-- only how to give them frames, time them, stamp the pass and save what they
+-- finished. That is why a sweep can be added without touching this section,
+-- and why this section can be tested without a sweep in it.
+--------------------------------------------------------------------------------
+
+M.STATE_PREPARE = "prepare"
+M.STATE_HOOK = "hook"
+M.STATE_DONE = "done"
+
+M.DEFAULT_FRAME_BUDGET_MS = 5
+
+-- Of the states so far only the hook pass is one the manifest records.
+local PASS_OF = { [M.STATE_HOOK] = "hook" }
+
+M.jobs = { prepare = {}, hook = {} }
+
+function M.add_job(phase, job)
+  local list = M.jobs[phase]
+  if list == nil then
+    error("add_job: not a phase: " .. tostring(phase), 2)
+  end
+  list[#list + 1] = job
+  return job
+end
+
+-- Seam, replaced by the progress log. A run that logs nowhere still runs,
+-- which is what the offline tests want.
+function M.log(message) end
+
+-- A run starts in prepare, which is where the phases begin. The idle state
+-- that waits for a terrain sits in front of this and is not built yet.
+function M.new_run(opts)
+  opts = opts or {}
+  local config = opts.config or {}
+  local run = {
+    state = nil,
+    config = config,
+    jobs = opts.jobs or M.jobs,
+    dir = config.output_dir,
+    budget_ms = config.frame_budget_ms or M.DEFAULT_FRAME_BUDGET_MS,
+    -- Filled in by the prepare jobs, which is where the theatre, the build,
+    -- the fingerprint and the bounds are read.
+    identity = opts.identity or {},
+    frames = 0,
+    phase_frames = 0,
+    -- Accumulated on the run rather than in the manifest, because prepare
+    -- times its own jobs before there is a manifest to put the timings in.
+    timing_ms = {},
+    entries = {},
+    queue = nil,
+    manifest = nil,
+  }
+  M.enter(run, M.STATE_PREPARE)
+  return run
+end
+
+-- Every manifest write goes through here, so the tile list and the timings are
+-- never stale: the sweeps append to run.entries and the manifest copies are
+-- rebuilt from the run.
+function M.save(run)
+  if not (run.manifest and run.dir) then
+    return false
+  end
+  run.manifest.tiles = M.manifest_tiles(run.entries)
+  run.manifest.timing_ms = run.timing_ms
+  local ok, err = M.write_manifest(run.dir, run.manifest)
+  if not ok then
+    M.log("manifest write failed: " .. tostring(err))
+  end
+  return ok and true or false
+end
+
+function M.pass_enabled(run, name)
+  local passes = run.config.passes
+  if type(passes) ~= "table" then
+    return true
+  end
+  return passes[name] ~= false
+end
+
+-- Overridden once prepare has a job the machine owns. Until then the phase is
+-- whatever the sweeps registered.
+function M.prepare_jobs(run)
+  return run.jobs.prepare
+end
+
+-- Moves the run into a state, and is the only place that does. A phase change
+-- builds the queue for the phase it enters, stamps the pass, logs, and saves
+-- the manifest, which with the per-sweep save is the whole of "the manifest is
+-- rewritten at the end of each sweep and at every phase change".
+function M.enter(run, state)
+  run.state = state
+  run.phase_frames = 0
+  run.queue = nil
+
+  local pass = PASS_OF[state]
+  if pass then
+    if run.manifest then
+      run.manifest.passes[pass].started_at = M.now_iso()
+    end
+    run.queue = M.new_queue(run.jobs[pass])
+  elseif state == M.STATE_PREPARE then
+    run.queue = M.new_queue(M.prepare_jobs(run))
+  end
+
+  M.log("phase " .. state)
+  M.save(run)
+  return state
+end
+
+local function complete_pass(run, pass)
+  if not run.manifest then
+    return
+  end
+  local p = run.manifest.passes[pass]
+  p.complete = true
+  p.finished_at = M.now_iso()
+end
+
+-- A pass that never runs keeps the false `complete` a fresh manifest starts
+-- with, which is exactly what the hook is asked to write for a pass it did not
+-- run. So a skipped pass needs no code rather than code that skips it.
+local function next_state(run)
+  if run.state == M.STATE_PREPARE and M.pass_enabled(run, "hook") then
+    return M.STATE_HOOK
+  end
+  return M.STATE_DONE
+end
+
+local function record_finished(run)
+  local finished = run.queue.finished
+  for i = 1, #finished do
+    local job = finished[i]
+    run.timing_ms[job.name] = (run.timing_ms[job.name] or 0) + job.ms
+    M.log(format("%s finished in %d ms", job.name, job.ms))
+  end
+  if #finished > 0 then
+    M.save(run)
+  end
+end
+
+local function frame_pass(run)
+  run.phase_frames = run.phase_frames + 1
+  local pass = PASS_OF[run.state]
+  if pass and run.manifest then
+    local p = run.manifest.passes[pass]
+    p.frames = p.frames + 1
+  end
+
+  local status = M.queue_frame(run.queue, run, M.budget(run.budget_ms))
+  record_finished(run)
+  if status == M.MORE then
+    return run.state
+  end
+  if pass then
+    complete_pass(run, pass)
+  end
+  return M.enter(run, next_state(run))
+end
+
+-- One simulation frame. Returns the state the run is in after it, which is the
+-- same state on every frame but the ones that change phase.
+function M.run_frame(run)
+  if run.state == M.STATE_DONE then
+    return M.STATE_DONE
+  end
+  run.frames = run.frames + 1
+  return frame_pass(run)
+end
+
 return M
