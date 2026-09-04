@@ -67,6 +67,24 @@ whole document**, so they are working artifacts, not review leftovers. The
 glossary in particular cannot be rebuilt reliably later — synonym mappings are
 only discovered during a full read.
 
+`tools/ledger.sh` is how they are read. Locate first, then retrieve:
+
+```bash
+tools/ledger.sh codes                      the document codes and their paths
+tools/ledger.sh subjects <CODE>            every subject in a ledger
+tools/ledger.sh find <CODE> <text>         rows matching subject, claim or section
+tools/ledger.sh show <CODE> "<anchor>"     the prose around one anchor
+tools/ledger.sh sections <CODE>            the heading tree with line counts
+tools/ledger.sh read <CODE> "<section>"    one whole section
+tools/ledger.sh lint                       every stamp, anchor and glossary join
+```
+
+Start from `subjects` or `find`, not from `sections` — the ledger is the index.
+A `CODE` is a document's file name without `.md`, such as `core`.
+
+`lint` is tamper detection rather than maintenance. The documents are frozen,
+so a `MISMATCH` means one was edited, and it fails. `mise run docs` runs it.
+
 Each file's stamp lines name the document and its SHA-256. All twenty match
 their document and stay matching, because `spec/` is frozen — that is most of
 the reason for the freeze. The plan has no ledger: it is living, so its anchors

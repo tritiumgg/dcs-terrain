@@ -71,8 +71,9 @@ description = "Run the offline extractor tests under Lua 5.1"
 run = "sh tools/luatest.sh"
 
 [tasks.docs]
-description = "Check the documents: the state file, the citations, the README's open claims"
+description = "Check the documents: the ledger stamps, the state file, the citations"
 run = [
+  "sh tools/ledger.sh lint",
   "sh tools/nospecrefs.sh",
   "sh tools/statecheck.sh",
   "sh tools/readmeopen.sh",

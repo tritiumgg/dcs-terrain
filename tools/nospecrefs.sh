@@ -29,12 +29,16 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
 
 # The frozen documents by the bare name the specs use for each other, the
-# directory itself, the plan's word for a completion condition, and a task or
-# milestone id in citation position. A bare id such as X3 or C5b is
-# deliberately not matched: it collides with ordinary identifiers, and a
-# citation reads "task X3".
-PATTERN='docs/spec'
-PATTERN="$PATTERN|design-and-facts\.md|extract-format\.md|extractor-hook\.md"
+# plan's word for a completion condition, and a task or milestone id in
+# citation position. A bare id such as X3 or C5b is deliberately not matched:
+# it collides with ordinary identifiers, and a citation reads "task X3".
+#
+# The bare directory docs/spec/ is deliberately not matched either. What rots
+# is a claim that a named document still describes the code; a hook that
+# guards the directory, or a tool that reads it, has to name it, and that is
+# structure rather than a citation. Naming a document is the citation, so
+# docs/spec/core.md still fails, on core.md.
+PATTERN='design-and-facts\.md|extract-format\.md|extractor-hook\.md'
 PATTERN="$PATTERN|query-operations\.md|mcp-server\.md|using-the-data\.md"
 PATTERN="$PATTERN|probe-log[-0-9.]*\.md"
 PATTERN="$PATTERN|(^|[^a-zA-Z])core\.md|(^|[^a-zA-Z])validation\.md"
@@ -42,8 +46,12 @@ PATTERN="$PATTERN|[Dd]one test|[Tt]ask [A-Z][0-9]|(^|[^A-Za-z])MS[0-9]"
 
 # git ls-files rather than find, so an untracked scratch file is not the thing
 # that fails somebody's build.
-# This script names the patterns it refuses, so it skips itself.
-EXEMPT='^docs/|(^|/)README\.md$|^CLAUDE\.md$|^tools/nospecrefs\.sh$'
+#
+# This script is exempt because a frozen document's name is its subject rather
+# than its authority: it names the patterns it refuses, and would otherwise
+# fail on its own test data.
+EXEMPT='^docs/|(^|/)README\.md$|^CLAUDE\.md$'
+EXEMPT="$EXEMPT|^tools/nospecrefs\.sh\$"
 FILES=$(git ls-files | grep -vE "$EXEMPT")
 [ -n "$FILES" ] || { printf 'no files to check. Is this a checkout?\n' >&2; exit 2; }
 
