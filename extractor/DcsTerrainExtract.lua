@@ -513,6 +513,62 @@ function M.normalise_list(t)
 end
 
 --------------------------------------------------------------------------------
+-- Format constants
+--
+-- The layer and table blocks the manifest carries, and the two version
+-- strings beside them. Both blocks are handed out as fresh tables rather than
+-- shared ones: a manifest owns its copy, and a caller that edits one must not
+-- reach into every other manifest.
+--------------------------------------------------------------------------------
+
+M.FORMAT_VERSION = 1
+M.EXTRACTOR_VERSION = "0.1.0"
+
+local LAYER_SPECS = {
+  { name = "height",  dtype = "i16", nodata = -32768, unit = "m",     pass = "hook" },
+  { name = "water",   dtype = "u8",  nodata = 255,    unit = "class", pass = "hook" },
+  { name = "surface", dtype = "u8",  nodata = 0,      unit = "enum",  pass = "mission" },
+}
+
+local LAYER_BY_NAME = {}
+for i = 1, #LAYER_SPECS do
+  LAYER_BY_NAME[LAYER_SPECS[i].name] = LAYER_SPECS[i]
+end
+
+-- nil for a name that is not a layer, which is how every caller that takes a
+-- layer from outside checks one.
+function M.layer(name)
+  return LAYER_BY_NAME[name]
+end
+
+function M.layers()
+  local out = {}
+  for i = 1, #LAYER_SPECS do
+    local spec = LAYER_SPECS[i]
+    out[spec.name] = {
+      dtype = spec.dtype, nodata = spec.nodata, unit = spec.unit, pass = spec.pass,
+    }
+  end
+  return out
+end
+
+local TABLE_FILES = {
+  config = "config.json", airdromes = "airdromes.json", runways = "runways.json",
+  stands = "stands.json", beacons = "beacons.json", radio = "radio.json",
+  towns = "towns.json", nodes = "nodes.json",
+  roads = "roads.jsonl", railroads = "railroads.jsonl", scenery = "scenery.jsonl",
+  scenery_models = "scenery_models.json",
+}
+
+function M.table_files()
+  local out = {}
+  for name, file in pairs(TABLE_FILES) do
+    out[name] = file
+  end
+  return out
+end
+
+--------------------------------------------------------------------------------
 -- Files
 --
 -- Every handle is opened binary. A tile is raw samples with no header, so a
