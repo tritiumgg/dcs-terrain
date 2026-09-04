@@ -1,0 +1,20 @@
+# Line endings are not content. The repository stores LF and every checkout
+# gets LF, on Windows as much as anywhere else.
+#
+# Without this a Windows checkout carries CRLF, and that stays invisible until
+# something reads a file as text rather than as lines. It cost one green-here,
+# red-on-CI afternoon already: a test that reads its own source and rejoins the
+# lines the formatter wrapped matched on the newline, so the join missed and a
+# wrapped constant parsed as empty. Readers that tolerate either ending are
+# still worth writing; this is what keeps the question from coming up.
+#
+# Nothing here wants CRLF. The one PowerShell script runs the same either way,
+# and the hook the user copies into Saved Games is read by the sim's own Lua,
+# which does not care.
+* text=auto eol=lf
+
+# Never munge a binary someone adds by hand. Extracts and packed files are
+# ignored rather than committed, but a forced add must not corrupt one.
+*.sqlite binary
+*.bin    binary
+*.exe    binary
