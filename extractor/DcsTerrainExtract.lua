@@ -1526,9 +1526,8 @@ end
 --------------------------------------------------------------------------------
 -- State machine
 --
--- idle -> prepare -> hook -> done, with the mission pass between the last two
--- still to come. DCS gives the hook one callback per simulation frame, and
--- this is what a frame does.
+-- idle -> prepare -> hook -> mission -> done. DCS gives the hook one callback
+-- per simulation frame, and this is what a frame does.
 --
 -- What a phase contains is not decided here. Each phase is a list of jobs the
 -- sweeps register, run in the order they registered, and the machine knows
@@ -1540,6 +1539,7 @@ end
 M.STATE_IDLE = "idle"
 M.STATE_PREPARE = "prepare"
 M.STATE_HOOK = "hook"
+M.STATE_MISSION = "mission"
 M.STATE_DONE = "done"
 
 M.DEFAULT_FRAME_BUDGET_MS = 5
@@ -1548,10 +1548,10 @@ M.DEFAULT_FRAME_BUDGET_MS = 5
 -- lasts for as long as DCS sits at the main menu, which can be hours.
 M.IDLE_POLL_FRAMES = 60
 
--- Of the states so far only the hook pass is one the manifest records.
-local PASS_OF = { [M.STATE_HOOK] = "hook" }
+-- Only two of the five states are passes the manifest records.
+local PASS_OF = { [M.STATE_HOOK] = "hook", [M.STATE_MISSION] = "mission" }
 
-M.jobs = { prepare = {}, hook = {} }
+M.jobs = { prepare = {}, hook = {}, mission = {} }
 
 function M.add_job(phase, job)
   local list = M.jobs[phase]
@@ -1645,7 +1645,7 @@ end
 -- Overridden once prepare has a job the machine owns. Until then the phase is
 -- whatever the sweeps registered.
 function M.prepare_jobs(run)
-  return run.jobs.prepare
+  return run.jobs.prepare or {}
 end
 
 -- Moves the run into a state, and is the only place that does. A phase change
@@ -1662,7 +1662,9 @@ function M.enter(run, state)
     if run.manifest then
       run.manifest.passes[pass].started_at = M.now_iso()
     end
-    run.queue = M.new_queue(run.jobs[pass])
+    -- A phase with nothing registered is legitimate: it is what every phase
+    -- looks like before its sweeps are built.
+    run.queue = M.new_queue(run.jobs[pass] or {})
   elseif state == M.STATE_PREPARE then
     run.queue = M.new_queue(M.prepare_jobs(run))
   end
@@ -1688,7 +1690,25 @@ local function next_state(run)
   if run.state == M.STATE_PREPARE and M.pass_enabled(run, "hook") then
     return M.STATE_HOOK
   end
+  if run.state ~= M.STATE_MISSION and M.pass_enabled(run, "mission") then
+    return M.STATE_MISSION
+  end
   return M.STATE_DONE
+end
+
+-- ADR 0010: what a server-state land or world call needs is loaded terrain,
+-- not a running mission. Those calls answer correctly with the Mission Editor
+-- open on a map, and crash DCS only when there is no terrain under them.
+--
+-- Checked every frame rather than once when the pass starts, because terrain
+-- unloads when DCS returns to the main menu and this pass runs for tens of
+-- minutes. The check is a package.loaded lookup and one C call.
+local function terrain_loaded(run)
+  if M.terrain_id() ~= nil then
+    return true
+  end
+  M.log("terrain unloaded during the " .. run.state .. " pass")
+  return false
 end
 
 local function record_finished(run)
@@ -1728,6 +1748,13 @@ local function frame_pass(run)
   if pass and run.manifest then
     local p = run.manifest.passes[pass]
     p.frames = p.frames + 1
+  end
+
+  -- The sweeps of this pass reach the server state, so the run ends rather
+  -- than calling into a terrain layer that is no longer there. The pass keeps
+  -- the false `complete` it started with.
+  if run.state == M.STATE_MISSION and not terrain_loaded(run) then
+    return M.enter(run, M.STATE_DONE)
   end
 
   local status = M.queue_frame(run.queue, run, M.budget(run.budget_ms))

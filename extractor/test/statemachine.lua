@@ -66,6 +66,7 @@ local function new_run(edit)
     jobs = {
       prepare = { job("presweep", 1, open_output) },
       hook = { job("config", 1), job("water", 3) },
+      mission = { job("surface", 2) },
     },
   }
   for k, v in pairs(edit or {}) do
@@ -104,8 +105,8 @@ for _ = 1, 200 do
   end
 end
 
-T.eq("idle to prepare to hook to done",
-  table.concat(seen, " "), "idle prepare hook done")
+T.eq("idle to prepare to hook to mission to done",
+  table.concat(seen, " "), "idle prepare hook mission done")
 
 --------------------------------------------------------------------------------
 T.group("done is the end of it")
@@ -130,16 +131,14 @@ T.eq("hook finished", manifest.passes.hook.finished_at, "2026-09-04T09:12:44Z")
 -- the whole pass is one frame.
 T.eq("hook pass took one frame", manifest.passes.hook.frames, 1)
 
--- There is no mission pass yet, and a pass that never ran keeps the false its
--- fresh manifest started with. That is already what the hook is asked to write
--- for a mission pass it does not run.
-T.eq("mission pass incomplete", manifest.passes.mission.complete, false)
-T.eq("and never started", manifest.passes.mission.started_at, E.JSON_NULL)
+T.eq("mission complete", manifest.passes.mission.complete, true)
+T.eq("mission started", manifest.passes.mission.started_at, "2026-09-04T09:12:44Z")
+T.eq("mission finished", manifest.passes.mission.finished_at, "2026-09-04T09:12:44Z")
 
 T.eq("every job timed",
   table.concat({ manifest.timing_ms.presweep, manifest.timing_ms.config,
-    manifest.timing_ms.water }, ","),
-  "1,1,3")
+    manifest.timing_ms.water, manifest.timing_ms.surface }, ","),
+  "1,1,3,2")
 
 -- Nothing swept a tile, but the manifest must still carry the key as an array
 -- rather than as the empty object an empty Lua table would encode to.
@@ -152,14 +151,19 @@ T.group("a disabled pass is skipped")
 run = new_run({
   config = {
     output_dir = "C:/extract", frame_budget_ms = 5,
-    passes = { hook = false },
+    passes = { hook = false, mission = false },
   },
 })
 until_past(run, E.STATE_IDLE, 5)
 until_past(run, E.STATE_PREPARE, 5)
 T.eq("prepare straight to done", run.state, E.STATE_DONE)
 T.eq("hook pass incomplete", run.manifest.passes.hook.complete, false)
+T.eq("mission pass incomplete", run.manifest.passes.mission.complete, false)
+
+-- A pass that never runs keeps the false `complete` a fresh manifest starts
+-- with, so neither needed code to skip it.
 T.eq("config never ran", run.manifest.timing_ms.config, nil)
+T.eq("surface never ran", run.manifest.timing_ms.surface, nil)
 
 --------------------------------------------------------------------------------
 T.group("phases are logged")
@@ -179,7 +183,8 @@ for i = 1, #logged do
     phases[#phases + 1] = state
   end
 end
-T.eq("one line per phase change", table.concat(phases, " "), "prepare hook done")
+T.eq("one line per phase change",
+  table.concat(phases, " "), "prepare hook mission done")
 
 --------------------------------------------------------------------------------
 T.group("job registration")
