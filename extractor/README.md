@@ -6,7 +6,12 @@ without `seek`.
 
 - `DcsTerrainExtract.lua` — the hook. A user copies it to
   `Scripts/Hooks/` in their Saved Games folder, with a config table at
-  `Config/DcsTerrainExtract.lua`. It is disabled until that config exists.
+  `Config/DcsTerrainExtract.lua` holding `enabled = true`. It does nothing at
+  all until that is there. It is meant to be run with a map open in the Mission
+  Editor: a mission is not needed, and a FARP or heliport placed in one clears
+  the scenery around it. Configuration is a window rather than the file — the
+  file is what the window reads at start and writes at Start (ADR 0011), and
+  the nine fields it holds are in that record. *The window is not built yet.*
 - `test/` — offline tests, run with a plain `lua5.1` interpreter. Every `.lua`
   file directly under it is a test; `test/support/` holds what they read.
 - `test/support/testing.lua` — the whole test framework: a few checks and a

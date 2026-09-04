@@ -22,6 +22,7 @@ disagree, the later accepted one wins, and the earlier is marked
 | [0008](0008-packed-meta-carries-the-authored-rectangle.md) | Accepted | 2026-09-04 | The packed file's `meta` carries the authored rectangle, and its bounds keys are metres | `core.md` "Packed file"; `plan.md` C5a, C6 |
 | [0009](0009-a-run-may-have-no-authored-rectangle.md) | Accepted | 2026-09-04 | A run may have no authored rectangle, and both manifest keys are then null | `extract-format.md` "manifest.json"; `core.md` `valid`; ADR 0008's `check` clause; `plan.md` X3, X10, C3, C4, C5a |
 | [0010](0010-server-state-calls-need-terrain-not-a-mission.md) | Accepted | 2026-09-04 | `server`-state `land` and `world` calls need loaded terrain, not a running mission | `design-and-facts.md` phase-`sim` rule; `extractor-hook.md` "Lifecycle" step 4, "Mission-pass sweeps"; probe log "Crash record"; `CLAUDE.md`; `plan.md` X4, X8a, X8b, X10 |
+| [0011](0011-config-holds-only-what-a-user-can-answer.md) | Accepted | 2026-09-04 | The config table holds only what a user can answer; the rest is derived or constant | `extractor-hook.md` "Config table", "Hook-pass sweeps", "Mission-pass sweeps"; `extract-format.md` "Tables"; ADR 0010's `allow_helipads` clause; `plan.md` X2a, X2b, X5, X8b, X10, X12, X13 |
 
 Add a row when you add an ADR. This table is the index Claude reads, so an ADR
 missing from it will not be found. Each record's own `Affects` line, at the top

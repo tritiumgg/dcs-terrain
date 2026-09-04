@@ -12,8 +12,8 @@ fields, through a command line or an MCP server for assistants.
 extract is derived from Eagle Dynamics terrain data and stays on your machine;
 publishing one is your own call against the ED EULA.
 
-> **Not usable yet.** The specification is complete and implementation has not
-> started, so nothing below runs today. The commands are the specified
+> **Not usable yet.** The specification is complete and the extractor hook is
+> part built, so nothing below runs today. The commands are the specified
 > interface, kept here so the shape is visible. Progress is in
 > [docs/STATE.md](docs/STATE.md).
 
@@ -48,10 +48,13 @@ Three steps: extract a theatre from DCS, pack it, then query it. Only the first
 needs DCS.
 
 **Extract.** Copy the hook to `Scripts/Hooks/DcsTerrainExtract.lua` in your DCS
-Saved Games folder and a config to `Config/DcsTerrainExtract.lua`; without the
-config it does nothing. Start DCS and load a mission on the theatre: it sweeps
-across frames, logs to `Logs/DcsTerrainExtract.log`, resumes where it left off,
-and never writes into your DCS install.
+Saved Games folder and put `enabled = true` in a config at
+`Config/DcsTerrainExtract.lua`; without that it does nothing. Start DCS and open
+the theatre in the Mission Editor — a mission is not needed, and one with a FARP
+or heliport in it would leave holes in the scenery. A window then asks where to
+write the extract and starts the run: it sweeps across frames, logs to
+`Logs/DcsTerrainExtract.log`, resumes where it left off, and never writes into
+your DCS install. *The window is not built yet; nothing runs today.*
 
 **Pack** the extract into a single file, then verify it:
 

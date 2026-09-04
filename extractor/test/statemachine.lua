@@ -145,9 +145,12 @@ T.eq("every job timed",
 T.eq("tiles is an array", E.json(manifest.tiles), "[]")
 
 --------------------------------------------------------------------------------
-T.group("a disabled pass is skipped")
+T.group("no pass can be switched off")
 --------------------------------------------------------------------------------
 
+-- ADR 0011: prepare, hook, mission, done is a walk and not a choice. The switch
+-- that used to skip a pass is not a config field any more, and a config still
+-- carrying it changes nothing about the order.
 run = new_run({
   config = {
     output_dir = "C:/extract", frame_budget_ms = 5,
@@ -156,14 +159,13 @@ run = new_run({
 })
 until_past(run, E.STATE_IDLE, 5)
 until_past(run, E.STATE_PREPARE, 5)
-T.eq("prepare straight to done", run.state, E.STATE_DONE)
-T.eq("hook pass incomplete", run.manifest.passes.hook.complete, false)
-T.eq("mission pass incomplete", run.manifest.passes.mission.complete, false)
+T.eq("prepare goes to the hook pass", run.state, E.STATE_HOOK)
 
--- A pass that never runs keeps the false `complete` a fresh manifest starts
--- with, so neither needed code to skip it.
-T.eq("config never ran", run.manifest.timing_ms.config, nil)
-T.eq("surface never ran", run.manifest.timing_ms.surface, nil)
+-- These phases have no jobs registered in this test, so they cost a frame each
+-- and finish. What is being asserted is that they were entered at all.
+until_past(run, E.STATE_HOOK, 5)
+T.eq("then the mission pass", run.state, E.STATE_MISSION)
+T.eq("hook pass complete", run.manifest.passes.hook.complete, true)
 
 --------------------------------------------------------------------------------
 T.group("phases are logged")

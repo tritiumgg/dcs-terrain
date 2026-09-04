@@ -1634,14 +1634,6 @@ function M.save(run)
   return ok and true or false
 end
 
-function M.pass_enabled(run, name)
-  local passes = run.config.passes
-  if type(passes) ~= "table" then
-    return true
-  end
-  return passes[name] ~= false
-end
-
 -- Overridden once prepare has a job the machine owns. Until then the phase is
 -- whatever the sweeps registered.
 function M.prepare_jobs(run)
@@ -1683,14 +1675,14 @@ local function complete_pass(run, pass)
   p.finished_at = M.now_iso()
 end
 
--- A pass that never runs keeps the false `complete` a fresh manifest starts
--- with, which is exactly what the hook is asked to write for a pass it did not
--- run. So a skipped pass needs no code rather than code that skips it.
+-- ADR 0011: both passes always run, so this is a walk and not a choice. The two
+-- passes are the two Lua states the sweeps call from, which is not something a
+-- user was ever in a position to switch off usefully.
 local function next_state(run)
-  if run.state == M.STATE_PREPARE and M.pass_enabled(run, "hook") then
+  if run.state == M.STATE_PREPARE then
     return M.STATE_HOOK
   end
-  if run.state ~= M.STATE_MISSION and M.pass_enabled(run, "mission") then
+  if run.state == M.STATE_HOOK then
     return M.STATE_MISSION
   end
   return M.STATE_DONE
