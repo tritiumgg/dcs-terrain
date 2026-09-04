@@ -44,47 +44,49 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    minutes. P2 stays open: its done test needs C1 and X1 to exist, and the Lua
    job has no tests to run until X1.
 5. **Kotlin client cut.** It becomes its own project, consuming the MCP server
-   and the CLI like any other client. Deleted `kotlin/`, tasks K1–K3c,
-   `kotlin-consumer.md` and its ledger pair — the one exception ever made to
-   the frozen rule, agreed with the user, and no other frozen file joined to
-   them. `design-and-facts.md` and `core.md` keep their stale Kotlin
-   references. MS4 is now the server alone, proved by `query` and the server
-   agreeing; C1 gains a schema snapshot test, which is what K1 used to catch.
-   `mise.toml` loses `java` and `node`, leaving Rust, Lua and Python.
+   and the CLI like any other client. Deleted `kotlin/`, tasks K1–K3c and one
+   frozen document pair — the only exception ever made to the frozen rule,
+   agreed with the user, and nothing else joined to it. MS4 is now the server
+   alone; C1 gains the schema snapshot test that K1 used to catch. `mise.toml`
+   loses `java` and `node`, leaving Rust, Lua and Python.
 
 ## Next
 
 One task. The thing to pick up immediately.
 
-**C1 — workspace scaffold**: `types`, a `clap` CLI with a stub per subcommand,
-`schemars` on every request and response type, stderr logging with `--verbose`,
-and a snapshot test on `dcsterrain schema` so a change to it is a deliberate
-diff. Head of the longest dependency chain.
+**X1 — the Lua encoders**: `i16le`, `u8`, `json` and the ADR-0007 list
+normalisation, with offline Lua tests on boundary values, nested tables,
+quotes, unicode, empty arrays and objects, and a DCS table keyed from 0.
 
-Blocked on nothing. The crates and the `synth` feature already exist from P1.
+Blocked on nothing. First of the twelve X tasks that need no Rust at all, and
+`plan.md` now runs all of them before C, because this machine is the only one
+that can do them.
 
 ## Then
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **X1** — Lua encoders `i16le`, `u8`, `json` and the ADR-0007 list
-   normalisation, with offline Lua tests. Runs in parallel with C1.
-2. **P2** — closes as soon as C1 and X1 give both workflows something to run.
-3. **C2 / C3** — `synth` and `check-extract`, which unlock MS0. C2 builds the
-   generator on the F2 constants, in the file that already holds them.
-4. **X3** — grid computation from each bounds source, tile addressing, the
-   journal and resume.
-5. **X2a / X2b** — config load and validation, then `dcs_build` from
+1. **X3 / X4** — grid computation from each bounds source, tile addressing,
+   the journal and resume; then the state machine and frame budget.
+2. **X2a / X2b** — config load and validation, then `dcs_build` from
    `autoupdate.cfg` and the `terrain_fingerprint`; ADR-0007 carries the
    Caucasus head hashes and digest as X2b's test vector.
+3. **X5 / X6 / X7** — the tables, `water` and `height`, and roads sweeps.
+   Verified against a running theatre through the bridge, not offline.
+4. **X8a / X8b / X8c / X9** — the mission pass, scenery, the model catalogue
+   and failure handling. X ends here until `check-extract` exists.
+5. **C1 / C2 / C3** — the Rust interlude X10 needs, and no more of C than
+   that: scaffold, `synth` on the F2 constants, `check-extract`. Closes P2 and
+   MS0 on the way past.
 
 Milestone in view: **MS0 Contract** (P1, P2, F1, F2, C1, C2, C3, X1, X3).
 Proof is `check-extract` accepting the Rust synthetic extract and the hook's
 encoders and grid computation reproducing the F2 constants byte for byte.
 
 First real data: **X10**, a 10 x 10 km Kutaisi extract that `check-extract`
-accepts. Component X is developed on the Windows machine (ADR-0005);
-everything from C4 on is built on macOS against that crop.
+accepts, which is where X ends for now. X11 still waits for C4 onward to read
+that crop, so a field missing from the frozen format costs a crop re-run and
+not a theatre. Everything from C4 on is built on macOS against the crop.
 
 ## Carries
 

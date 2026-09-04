@@ -153,30 +153,38 @@ component are in build order.
 
 ## Order and milestones
 
-Build order is P1, F1, F2, then X and C in parallel, then Q, M, V.
+Build order is P1, F1, F2, then X1 to X9, then C1 to C3, then X10, then
+the rest of C, then Q, M, V. X leads because the Windows machine is the
+scarce resource and X is the only component that needs it. Twelve X
+tasks, X1 through X9 counting the sub-tasks, depend on nothing outside
+the component, and the
+only thing X ever needs from C is `check-extract` at X10, so C1 to C3
+are the whole Rust interlude that finishing the extractor costs.
+
 The longest dependency chain is P1 → C1 → C3 → C4 → C5b → C6 → C11 →
 Q3 → Q4 → Q7 → M1 → M2 (twelve tasks; C5b → C8b → C7 → Q3 is a chain
-of the same length), and nothing on it needs DCS; the DCS-dependent
-tasks (X10, X11, Q9, V1) slot in whenever the Windows machine is
-available. C11 sits on the chain only because Q3 tests the horizon
-criteria; building Q3 with `--drop horizon` first and adding those two
-criteria last takes it off. The `Depends on` column is the graph: a
-task may start when every task it names is done, and tasks that share
-no chain run in parallel.
+of the same length), and nothing on it needs DCS. C11 sits on the chain
+only because Q3 tests the horizon criteria; building Q3 with
+`--drop horizon` first and adding those two criteria last takes it off.
+The `Depends on` column is the graph: a task may start when every task
+it names is done, and tasks that share no chain run in parallel.
 
 The work is also staged by machine. Component X is developed on the
 Windows machine, because ADR-0005 verifies the sweeps against a running
 theatre through the `dcs-api-bridge` MCP rather than against a stub of
 one; only the offline tests in X1 to X4 and X9 would run anywhere. The
-Rust and MCP work is developed on macOS, and the Windows
-machine carries no toolchain, so `check-extract` runs on macOS after an
-extract is copied across rather than on Windows before it.
+Rust and MCP work is otherwise developed on macOS, but the Windows
+machine does carry the pinned Rust toolchain, so C1 to C3 are built
+there when they are reached as the X10 interlude and `check-extract`
+runs on the crop where it was extracted.
 
 X11, the full Caucasus sweep, waits until C4 onward have read the X10
 crop. A field missing from F1 then costs a re-run of a 10 x 10 km crop
-rather than of a whole theatre. V1 returns to the Windows machine at
-MS5, because the validation sortie compares the packed file against
-live DCS.
+rather than of a whole theatre. So the machine is never free for good
+before MS5: X11 calls it back once the C tasks have read the crop, Q9
+replays the design doc's examples against that full extract, and V1
+returns at MS5 because the validation sortie compares the packed file
+against live DCS.
 
 The milestones below are proof points, not a schedule. MS2 already
 depends on C11, which MS3 contains, so deferring X11 past the C tasks
