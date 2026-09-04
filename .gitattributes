@@ -8,10 +8,18 @@
 # wrapped constant parsed as empty. Readers that tolerate either ending are
 # still worth writing; this is what keeps the question from coming up.
 #
+# It is also what keeps the freeze checkable. Every ledger under
+# docs/spec/ledger/ stamps the SHA-256 of its document's bytes, and conversion
+# on checkout would rewrite those bytes and report all nine as a mismatch
+# against files nobody edited. Leave this file alone.
+#
 # Nothing here wants CRLF. The one PowerShell script runs the same either way,
 # and the hook the user copies into Saved Games is read by the sim's own Lua,
 # which does not care.
 * text=auto eol=lf
+
+# Shell scripts need LF whatever an editor does to them.
+*.sh text eol=lf
 
 # Never munge a binary someone adds by hand. Extracts and packed files are
 # ignored rather than committed, but a forced add must not corrupt one.

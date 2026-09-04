@@ -38,3 +38,34 @@ idiomatic_version_file_enable_tools = ["rust"]
 [tasks.lua51]
 description = "Build Lua 5.1.5 for Windows with MSVC into .tools/bin"
 run = "pwsh -NoProfile -ExecutionPolicy Bypass -File tools/lua51/Build-Lua51.ps1"
+
+# Tasks. Run project commands through these rather than reaching for the tool
+# directly: a non-interactive shell does not pick up mise's PATH activation, so
+# a bare `cargo` or `lua` is the wrong version or missing.
+#
+# Anything with a loop or a conditional lives in tools/ and is invoked as
+# `sh tools/<name>.sh`. mise runs an inline script through cmd on Windows,
+# which does not speak sh.
+
+[tasks.fmt]
+description = "Format every crate"
+dir = "dcsterrain"
+run = "cargo fmt --all"
+
+[tasks.test]
+description = "Run the workspace test suite"
+dir = "dcsterrain"
+run = "cargo test --workspace"
+
+[tasks.check]
+description = "What CI gates a pull request on"
+dir = "dcsterrain"
+run = [
+  "cargo fmt --all --check",
+  "cargo clippy --workspace --all-targets -- -D warnings",
+  "cargo test --workspace",
+]
+
+[tasks.lua-test]
+description = "Run the offline extractor tests under Lua 5.1"
+run = "sh tools/luatest.sh"
