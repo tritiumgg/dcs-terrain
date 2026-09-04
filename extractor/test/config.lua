@@ -124,6 +124,89 @@ T.eq("backslashes become forward slashes",
 T.eq("which is not a problem", joined(problems), "")
 
 --------------------------------------------------------------------------------
+T.group("the advanced fields default and are checked")
+--------------------------------------------------------------------------------
+
+config = E.validate_config(good())
+T.eq("cell_size defaulted", config.cell_size, E.CELL_SIZE)
+T.eq("tile_size defaulted", config.tile_size, E.DEFAULT_TILE_SIZE)
+T.eq("frame_budget_ms defaulted", config.frame_budget_ms,
+  E.DEFAULT_FRAME_BUDGET_MS)
+T.eq("road_seed_spacing defaulted", config.road_seed_spacing,
+  E.DEFAULT_ROAD_SEED_SPACING)
+T.eq("road_seed_neighbours defaulted", config.road_seed_neighbours,
+  E.DEFAULT_ROAD_SEED_NEIGHBOURS)
+
+-- Optional, so absent stays absent instead of gaining a box nobody asked for.
+T.eq("crop_m stays absent", config.crop_m, nil)
+
+-- name, the bad value, the substring the line must start with, and what the
+-- field holds afterwards. One row per way a field can be wrong.
+local CASES = {
+  { "cell_size", 25, "cell_size is 25", 50 },
+  { "cell_size", "50", "cell_size is 50", 50 },
+  { "cell_size", 100, "cell_size is 100", 50 },
+  { "tile_size", 256.5, "tile_size is not a positive integer", 256 },
+  { "tile_size", 0, "tile_size is not a positive integer", 256 },
+  { "tile_size", "256", "tile_size is not a positive integer", 256 },
+  { "frame_budget_ms", -1, "frame_budget_ms is not a positive number", 5 },
+  { "frame_budget_ms", 0, "frame_budget_ms is not a positive number", 5 },
+  { "road_seed_spacing", -5, "road_seed_spacing is not a positive number", 1000 },
+  { "road_seed_neighbours", 0,
+    "road_seed_neighbours is not a positive integer", 4 },
+  { "road_seed_neighbours", 2.5,
+    "road_seed_neighbours is not a positive integer", 4 },
+}
+
+for i = 1, #CASES do
+  local name, value, wants, default =
+    CASES[i][1], CASES[i][2], CASES[i][3], CASES[i][4]
+  config, problems = E.validate_config(with(name, value))
+  T.eq(name .. " = " .. tostring(value) .. ": one line", #problems, 1)
+  T.eq(name .. " = " .. tostring(value) .. ": naming the field",
+    problems[1]:find(wants, 1, true), 1)
+  T.eq(name .. " = " .. tostring(value) .. ": default in its place",
+    config[name], default)
+end
+
+--------------------------------------------------------------------------------
+T.group("a rectangle costs one line however many members are wrong")
+--------------------------------------------------------------------------------
+
+-- Absent is not in here: crop_m is optional, and the group above checks that an
+-- absent one stays absent.
+local RECTS = {
+  { false, "crop_m is not a rectangle" },
+  { 5, "crop_m is not a rectangle" },
+  { { min_x = 0, min_z = 0, max_x = 100 }, "crop_m.max_z is not a finite" },
+  { { min_x = 0, min_z = 0, max_x = 100, max_z = "100" },
+    "crop_m.max_z is not a finite" },
+  { { min_x = 0, min_z = 0, max_x = 100, max_z = 100, min_y = 0 },
+    "crop_m has an unknown key: min_y" },
+  { { min_x = 100, min_z = 0, max_x = 100, max_z = 100 }, "crop_m is empty" },
+  { { min_x = 0, min_z = 100, max_x = 100, max_z = 100 }, "crop_m is empty" },
+  -- Every member wrong at once is still one line. The first bad member is
+  -- enough to send the reader to the right place, and three lines would make
+  -- the per-field count meaningless.
+  { { min_x = "a", min_z = "b", max_x = "c", max_z = "d" },
+    "crop_m.min_x is not a finite" },
+}
+
+for i = 1, #RECTS do
+  local value, wants = RECTS[i][1], RECTS[i][2]
+  config, problems = E.validate_config(with("crop_m", value))
+  T.eq("crop_m case " .. i .. ": one line", #problems, 1)
+  T.eq("crop_m case " .. i .. ": naming what is wrong",
+    problems[1]:find(wants, 1, true), 1)
+  T.eq("crop_m case " .. i .. ": no crop left behind", config.crop_m, nil)
+end
+
+local rect = { min_x = -1000, min_z = -2000, max_x = 3000, max_z = 4000 }
+config, problems = E.validate_config(with("crop_m", rect))
+T.eq("a good crop_m validates", joined(problems), "")
+T.eq("and is kept", config.crop_m, rect)
+
+--------------------------------------------------------------------------------
 T.group("a key that is not a config field is one line and is dropped")
 --------------------------------------------------------------------------------
 

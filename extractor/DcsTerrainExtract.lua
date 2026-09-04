@@ -579,6 +579,13 @@ end
 
 local RECT_KEYS = { "min_x", "min_z", "max_x", "max_z" }
 
+-- A closed set, unlike the config's own field list, so a rectangle carrying a
+-- fifth key is a typo rather than a field this file has not caught up with.
+local RECT_BY_NAME = {}
+for i = 1, #RECT_KEYS do
+  RECT_BY_NAME[RECT_KEYS[i]] = true
+end
+
 local function check_rect(rect, what)
   if type(rect) ~= "table" then
     error(format("%s: not a rectangle: %s", what, type(rect)), 3)
@@ -1545,9 +1552,66 @@ end
 -- stop at the first of it.
 --------------------------------------------------------------------------------
 
+-- The extract is always 50 m. A coarser packed base is pack's choice, and a
+-- value the format cannot carry is worth refusing at the config rather than at
+-- pack time, when the sweep it describes has already run.
+M.CELL_SIZE = 50
+
+M.DEFAULT_TILE_SIZE = 256
+M.DEFAULT_ROAD_SEED_SPACING = 1000
+M.DEFAULT_ROAD_SEED_NEIGHBOURS = 4
+
+-- Lives here with the other config defaults rather than beside the state
+-- machine that spends it, so the field table and new_run's fallback read one
+-- constant and cannot drift apart.
+M.DEFAULT_FRAME_BUDGET_MS = 5
+
 local function bad_boolean(v, name)
   if type(v) ~= "boolean" then
     return format("%s is not true or false: %s", name, tostring(v))
+  end
+end
+
+local function bad_positive(v, name)
+  if not is_finite(v) or v <= 0 then
+    return format("%s is not a positive number: %s", name, tostring(v))
+  end
+end
+
+local function bad_positive_integer(v, name)
+  if not is_finite(v) or floor(v) ~= v or v <= 0 then
+    return format("%s is not a positive integer: %s", name, tostring(v))
+  end
+end
+
+local function bad_cell_size(v, name)
+  if v ~= M.CELL_SIZE then
+    return format("%s is %s, and every extract is %d",
+      name, tostring(v), M.CELL_SIZE)
+  end
+end
+
+-- One line for the whole rectangle, naming the first thing wrong with it, so a
+-- rect with three bad members costs one line and not three. Anything else would
+-- make "one line per bad field" a count nobody can rely on.
+local function bad_rect(v, name)
+  if type(v) ~= "table" then
+    return format("%s is not a rectangle: %s", name, tostring(v))
+  end
+  for i = 1, #RECT_KEYS do
+    local key = RECT_KEYS[i]
+    if not is_finite(v[key]) then
+      return format("%s.%s is not a finite number: %s",
+        name, key, tostring(v[key]))
+    end
+  end
+  for key in pairs(v) do
+    if not RECT_BY_NAME[key] then
+      return format("%s has an unknown key: %s", name, tostring(key))
+    end
+  end
+  if v.min_x >= v.max_x or v.min_z >= v.max_z then
+    return format("%s is empty: min is not below max on both axes", name)
   end
 end
 
@@ -1578,9 +1642,23 @@ end
 -- name, the check, the default, and whether absent is allowed. enabled is not
 -- in the list because it is read before the list is: it decides whether any of
 -- the rest is looked at.
+-- The first two are what the window shows; the rest sit behind its advanced
+-- section. crop_m is optional rather than defaulted, because a crop is a
+-- deliberate choice and there is no box to invent for someone who did not ask
+-- for one.
 local CONFIG_FIELDS = {
   { name = "output_dir", check = bad_path, normalise = forward_slashes },
   { name = "omit_sea_tiles", check = bad_boolean, default = true },
+  { name = "crop_m", check = bad_rect, optional = true },
+  { name = "cell_size", check = bad_cell_size, default = M.CELL_SIZE },
+  { name = "tile_size", check = bad_positive_integer,
+    default = M.DEFAULT_TILE_SIZE },
+  { name = "frame_budget_ms", check = bad_positive,
+    default = M.DEFAULT_FRAME_BUDGET_MS },
+  { name = "road_seed_spacing", check = bad_positive,
+    default = M.DEFAULT_ROAD_SEED_SPACING },
+  { name = "road_seed_neighbours", check = bad_positive_integer,
+    default = M.DEFAULT_ROAD_SEED_NEIGHBOURS },
 }
 
 local CONFIG_FIELD_BY_NAME = { enabled = true }
@@ -1678,8 +1756,6 @@ M.STATE_PREPARE = "prepare"
 M.STATE_HOOK = "hook"
 M.STATE_MISSION = "mission"
 M.STATE_DONE = "done"
-
-M.DEFAULT_FRAME_BUDGET_MS = 5
 
 -- Frames between terrain polls in idle. The poll is two DCS calls and idle
 -- lasts for as long as DCS sits at the main menu, which can be hours.
