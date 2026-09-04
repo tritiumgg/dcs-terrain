@@ -221,6 +221,247 @@ function M.json(value)
 end
 
 --------------------------------------------------------------------------------
+-- JSON decoding
+--
+-- The hook reads back three things. manifest.json, to decide whether a run can
+-- resume and to carry forward what a resume cannot recompute -- the notes, the
+-- timings and the pass record of the run being continued. tiles.jsonl, to learn
+-- which tiles are already written. And autoupdate.cfg, for the DCS build, which
+-- is strict JSON ending in a newline: that is why trailing whitespace after the
+-- top-level value is accepted and any other trailing content is not.
+--
+-- Object keys always come back as strings. M.json writes a numeric key as its
+-- %.17g name, so a table keyed by number does not survive a round trip; nothing
+-- the hook reads back is keyed that way.
+--
+-- Escapes above the basic multilingual plane are refused rather than decoded.
+-- Everything here is either the hook's own output, whose only escapes are the
+-- \u00XX the encoder writes for control characters, or ASCII from ED. A
+-- surrogate pair would be the hardest arithmetic in the file with no caller.
+--------------------------------------------------------------------------------
+
+local DECODE_MAX_DEPTH = 64
+
+local DECODE_ESCAPES = {
+  ['"'] = '"', ['\\'] = '\\', ['/'] = '/',
+  b = '\b', f = '\f', n = '\n', r = '\r', t = '\t',
+}
+
+-- Only ever called on the way to an error, so scanning from the start costs
+-- nothing and a hand-edited manifest can be found by line.
+local function decode_where(s, i)
+  local line, last = 1, 0
+  for at in s:sub(1, i):gmatch("()\n") do
+    line = line + 1
+    last = at
+  end
+  return line, i - last
+end
+
+local function decode_fail(s, i, message)
+  local line, col = decode_where(s, i)
+  error(format("json decode: %s at line %d column %d", message, line, col), 0)
+end
+
+local function skip_space(s, i)
+  local _, stop = s:find("^[ \t\r\n]*", i)
+  return stop + 1
+end
+
+local function utf8_bmp(cp)
+  if cp < 0x80 then
+    return char(cp)
+  elseif cp < 0x800 then
+    return char(0xC0 + floor(cp / 64), 0x80 + cp % 64)
+  end
+  return char(0xE0 + floor(cp / 4096), 0x80 + floor(cp / 64) % 64, 0x80 + cp % 64)
+end
+
+local function decode_string(s, i)
+  i = i + 1
+  local parts, n = {}, 0
+  while true do
+    local at = s:find('[%z\1-\31"\\]', i)
+    if not at then
+      decode_fail(s, i, "string is not terminated")
+    end
+    if at > i then
+      n = n + 1
+      parts[n] = s:sub(i, at - 1)
+    end
+    local c = s:sub(at, at)
+    if c == '"' then
+      return concat(parts), at + 1
+    elseif c ~= "\\" then
+      decode_fail(s, at, "a control character must be escaped")
+    end
+    local e = s:sub(at + 1, at + 1)
+    local literal = DECODE_ESCAPES[e]
+    if literal then
+      n = n + 1
+      parts[n] = literal
+      i = at + 2
+    elseif e == "u" then
+      local hex = s:sub(at + 2, at + 5)
+      if not hex:find("^%x%x%x%x$") then
+        decode_fail(s, at, "\\u needs four hex digits")
+      end
+      local cp = tonumber(hex, 16)
+      if cp >= 0xD800 and cp <= 0xDFFF then
+        decode_fail(s, at, "surrogate escapes are not decoded")
+      end
+      n = n + 1
+      parts[n] = utf8_bmp(cp)
+      i = at + 6
+    else
+      decode_fail(s, at, "unknown escape \\" .. e)
+    end
+  end
+end
+
+local function decode_number(s, i)
+  local from = i
+  if s:sub(i, i) == "-" then
+    i = i + 1
+  end
+  local a, b = s:find("^%d+", i)
+  if not a then
+    decode_fail(s, from, "a number needs a digit")
+  end
+  -- Refusing a leading zero keeps a hand-edited 007 from reading as 7.
+  if b > a and s:sub(a, a) == "0" then
+    decode_fail(s, from, "a number must not have a leading zero")
+  end
+  i = b + 1
+  if s:sub(i, i) == "." then
+    a, b = s:find("^%d+", i + 1)
+    if not a then
+      decode_fail(s, i, "a fraction needs a digit")
+    end
+    i = b + 1
+  end
+  local e = s:sub(i, i)
+  if e == "e" or e == "E" then
+    local j = i + 1
+    local sign = s:sub(j, j)
+    if sign == "+" or sign == "-" then
+      j = j + 1
+    end
+    a, b = s:find("^%d+", j)
+    if not a then
+      decode_fail(s, i, "an exponent needs a digit")
+    end
+    i = b + 1
+  end
+  -- 1e999 reads as infinity, which the encoder then refuses to write. Stopping
+  -- here is what makes a value that decodes always encodable again.
+  local v = tonumber(s:sub(from, i - 1))
+  if not is_finite(v) then
+    decode_fail(s, from, "number is out of range")
+  end
+  return v, i
+end
+
+local decode_value
+
+local function decode_object(s, i, depth)
+  i = skip_space(s, i + 1)
+  local out = {}
+  if s:sub(i, i) == "}" then
+    return out, i + 1
+  end
+  while true do
+    if s:sub(i, i) ~= '"' then
+      decode_fail(s, i, "expected a key")
+    end
+    local key, value
+    key, i = decode_string(s, i)
+    if out[key] ~= nil then
+      decode_fail(s, i, 'two members named "' .. key .. '"')
+    end
+    i = skip_space(s, i)
+    if s:sub(i, i) ~= ":" then
+      decode_fail(s, i, "expected :")
+    end
+    i = skip_space(s, i + 1)
+    value, i = decode_value(s, i, depth)
+    out[key] = value
+    i = skip_space(s, i)
+    local c = s:sub(i, i)
+    if c == "," then
+      i = skip_space(s, i + 1)
+    elseif c == "}" then
+      return out, i + 1
+    else
+      decode_fail(s, i, "expected , or }")
+    end
+  end
+end
+
+local function decode_array(s, i, depth)
+  i = skip_space(s, i + 1)
+  local out, n = {}, 0
+  if s:sub(i, i) == "]" then
+    return M.as_array(out), i + 1
+  end
+  while true do
+    local value
+    value, i = decode_value(s, i, depth)
+    n = n + 1
+    out[n] = value
+    i = skip_space(s, i)
+    local c = s:sub(i, i)
+    if c == "," then
+      i = skip_space(s, i + 1)
+    elseif c == "]" then
+      return M.as_array(out), i + 1
+    else
+      decode_fail(s, i, "expected , or ]")
+    end
+  end
+end
+
+decode_value = function(s, i, depth)
+  depth = depth + 1
+  if depth > DECODE_MAX_DEPTH then
+    decode_fail(s, i, "nested deeper than " .. DECODE_MAX_DEPTH)
+  end
+  local c = s:sub(i, i)
+  if c == "{" then
+    return decode_object(s, i, depth)
+  elseif c == "[" then
+    return decode_array(s, i, depth)
+  elseif c == '"' then
+    return decode_string(s, i)
+  elseif c == "-" or (c >= "0" and c <= "9") then
+    return decode_number(s, i)
+  elseif s:sub(i, i + 3) == "true" then
+    return true, i + 4
+  elseif s:sub(i, i + 4) == "false" then
+    return false, i + 5
+  elseif s:sub(i, i + 3) == "null" then
+    return M.JSON_NULL, i + 4
+  elseif c == "" then
+    decode_fail(s, i, "input ended early")
+  end
+  decode_fail(s, i, "unexpected " .. format("%q", c))
+end
+
+function M.decode(text)
+  if type(text) ~= "string" then
+    error("decode: not a string: " .. type(text), 2)
+  end
+  local i = skip_space(text, 1)
+  local value
+  value, i = decode_value(text, i, 0)
+  i = skip_space(text, i)
+  if i <= #text then
+    decode_fail(text, i, "trailing content")
+  end
+  return value
+end
+
+--------------------------------------------------------------------------------
 -- List normalisation
 --
 -- DCS keys some of its lists from 0 and some from 1, and the same field can
