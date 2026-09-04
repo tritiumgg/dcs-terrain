@@ -153,10 +153,12 @@ T.eq("breakpoint threshold", record.breakpoint_min, 60)
 T.eq("road distance", record.road_max_m, 5000)
 T.eq("authored cells", record.authored_cells, 2)
 T.eq("total cells", record.total_cells, 15)
-T.eq("bitmask", record.bitmask, "AEAAIAA=")
+-- The field is `bits`, the same name a base64 bitmask carries everywhere else
+-- in the project, and the packing above is the same shape.
+T.eq("bits", record.bits, "AEAAIAA=")
 
 T.eq("the record encodes", E.json(record),
-  '{"authored_cells":2,"bitmask":"AEAAIAA=","breakpoint_min":60,'
+  '{"authored_cells":2,"bits":"AEAAIAA=","breakpoint_min":60,'
   .. '"cell_km":5,"road_max_m":5000,"total_cells":15}')
 
 T.done()

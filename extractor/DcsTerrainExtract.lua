@@ -785,6 +785,10 @@ local BIT_VALUE = { [0] = 128, [1] = 64, [2] = 32, [3] = 16, [4] = 8, [5] = 4, [
 -- One bit per lattice cell, most significant bit first, each row padded to a
 -- whole byte. Padding per row rather than packing the lattice end to end keeps
 -- a row addressable on its own: row r starts at byte r * ceil(cols / 8).
+--
+-- This is the shape every base64 bitmask in the project has, and the field
+-- holding one is called `bits` wherever it appears. A reader that learns to
+-- unpack one has learned to unpack all of them.
 function M.presweep_bitmask(lattice, authored)
   local stride = ceil(lattice.cols / 8)
   local bytes, n = {}, 0
@@ -821,7 +825,7 @@ function M.presweep_record(lattice, authored, opts)
     road_max_m = opts.road_max_m,
     authored_cells = count,
     total_cells = total,
-    bitmask = M.presweep_bitmask(lattice, authored),
+    bits = M.presweep_bitmask(lattice, authored),
   }
 end
 
