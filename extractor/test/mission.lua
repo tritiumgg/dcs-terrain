@@ -134,9 +134,12 @@ T.eq("idle to prepare to hook to mission to done",
   table.concat(seen, " "), "idle prepare hook mission done")
 
 --------------------------------------------------------------------------------
-T.group("a disabled pass is skipped")
+T.group("no pass can be switched off")
 --------------------------------------------------------------------------------
 
+-- ADR 0011: the two passes are the two Lua states the sweeps call from, not a
+-- choice a user was ever in a position to make usefully, so both always run. A
+-- config carrying the switch that used to skip one changes nothing.
 run = new_run({
   config = {
     output_dir = "C:/extract", frame_budget_ms = 5,
@@ -145,11 +148,10 @@ run = new_run({
 })
 up_to_mission(run)
 
-T.eq("done after the hook pass", run.state, E.STATE_DONE)
-T.eq("hook pass ran", run.manifest.passes.hook.complete, true)
-T.eq("mission pass incomplete", run.manifest.passes.mission.complete, false)
-T.eq("and never started", run.manifest.passes.mission.started_at, E.JSON_NULL)
-T.eq("surface never swept", run.manifest.timing_ms.surface, nil)
+T.eq("the mission pass ran anyway", run.state, E.STATE_MISSION)
+T.eq("hook pass complete", run.manifest.passes.hook.complete, true)
+T.eq("and the mission pass has started",
+  run.manifest.passes.mission.started_at, "2026-09-04T09:12:44Z")
 
 --------------------------------------------------------------------------------
 T.group("terrain going away ends the pass")
