@@ -1,0 +1,52 @@
+name: docs
+
+# Runs on everything, with no path filter, unlike rust.yml and lua.yml. The
+# checks here are about the repository rather than about one language: a
+# frozen document edited from anywhere, a citation added to any file, a state
+# file over budget, a hook that stopped guarding. Filtering by path would let
+# exactly the change that breaks one of those skip the job that catches it.
+#
+# Cheap enough to run every time: no toolchain, no build, seconds on the
+# smallest runner.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch supersedes the one in flight.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  documents:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      # The ledger stamps are the SHA-256 of each document's bytes, so the
+      # checkout has to carry the bytes that were committed. .gitattributes
+      # settles that; this step is what would notice if it ever stopped.
+      - name: The frozen documents are unchanged
+        run: sh tools/ledger.sh lint
+
+      - name: The code cites no document
+        run: sh tools/nospecrefs.sh
+
+      - name: docs/STATE.md is inside its budget
+        run: sh tools/statecheck.sh
+
+      # Never fails. It runs here so the open claims are visible in the log of
+      # every pull request, next to the change that might have settled one.
+      - name: What the README still marks as open
+        run: sh tools/readmeopen.sh
+
+      # The hooks only run on a developer's machine, so CI is the only thing
+      # that would catch one silently passing everything.
+      - name: Every hook still guards what it claims to
+        run: sh tools/hooktest.sh
