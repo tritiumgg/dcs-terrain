@@ -512,4 +512,146 @@ function M.normalise_list(t)
   return M.as_array(out)
 end
 
+--------------------------------------------------------------------------------
+-- Files
+--
+-- Every handle is opened binary. A tile is raw samples with no header, so a
+-- 0x0A byte in a height sample would leave a text-mode handle as two bytes and
+-- the file would fail its size check.
+--
+-- M.fs is the one seam the offline tests replace. Nothing above it touches io
+-- or os directly, so a test can drive the whole write-and-resume path over a
+-- table of strings and never need a disk.
+--------------------------------------------------------------------------------
+
+M.fs = {}
+
+function M.fs.open(path, mode)
+  return io.open(path, mode)
+end
+
+function M.fs.remove(path)
+  return os.remove(path)
+end
+
+function M.fs.rename(from, to)
+  return os.rename(from, to)
+end
+
+-- lfs is a hook-state global, so it is fetched at the call and not at load:
+-- this file is also loaded by a plain interpreter with no DCS around it.
+function M.fs.mkdir(path)
+  local lfs = rawget(_G, "lfs")
+  if not lfs then
+    return nil, "lfs is not available"
+  end
+  return lfs.mkdir(path)
+end
+
+function M.fs.is_dir(path)
+  local lfs = rawget(_G, "lfs")
+  if not lfs then
+    return false
+  end
+  return lfs.attributes(path, "mode") == "directory"
+end
+
+function M.join(dir, name)
+  if dir == nil or dir == "" then
+    return name
+  end
+  if dir:sub(-1) == "/" then
+    return dir .. name
+  end
+  return dir .. "/" .. name
+end
+
+function M.read_file(path)
+  local f, err = M.fs.open(path, "rb")
+  if not f then
+    return nil, err or (path .. ": cannot open")
+  end
+  local data = f:read("*a")
+  f:close()
+  if not data then
+    return nil, path .. ": read failed"
+  end
+  return data
+end
+
+-- Writes whole, then renames, so a reader never sees half a file.
+--
+-- The destination is removed first because os.rename on Windows refuses an
+-- existing destination, where on Linux it would replace one silently. That
+-- leaves a window in which neither name exists, which is why a caller that
+-- cannot afford the gap renames the old file aside itself rather than letting
+-- this one remove it.
+function M.write_file(path, data)
+  local tmp = path .. ".tmp"
+  local f, err = M.fs.open(tmp, "wb")
+  if not f then
+    return nil, err or (tmp .. ": cannot open")
+  end
+  local written, werr = f:write(data)
+  -- Checked separately from the write: a buffered write that fills the disk
+  -- fails at the flush, which is here.
+  local closed, cerr = f:close()
+  if not written then
+    return nil, werr or (tmp .. ": write failed")
+  end
+  if not closed then
+    return nil, cerr or (tmp .. ": close failed")
+  end
+  M.fs.remove(path)
+  local renamed, rerr = M.fs.rename(tmp, path)
+  if not renamed then
+    return nil, rerr or (path .. ": rename failed")
+  end
+  return true
+end
+
+function M.append_file(path, data)
+  local f, err = M.fs.open(path, "ab")
+  if not f then
+    return nil, err or (path .. ": cannot open")
+  end
+  local written, werr = f:write(data)
+  local closed, cerr = f:close()
+  if not written then
+    return nil, werr or (path .. ": write failed")
+  end
+  if not closed then
+    return nil, cerr or (path .. ": close failed")
+  end
+  return true
+end
+
+-- Creates every missing component of a path.
+--
+-- A drive letter is stepped over rather than created: output_dir is an
+-- absolute Windows path and lfs.mkdir("C:") cannot succeed. A UNC path is not
+-- handled and fails with the component it could not create. An existing
+-- component is not a failure, so two callers reaching here for the same
+-- directory both succeed.
+function M.mkdir_p(path)
+  if type(path) ~= "string" or path == "" then
+    error("mkdir_p: not a path: " .. tostring(path), 2)
+  end
+  local made = path:match("^/*")
+  for part in path:gmatch("[^/]+") do
+    if made == "" or made:sub(-1) == "/" then
+      made = made .. part
+    else
+      made = made .. "/" .. part
+    end
+    if not made:find("^%a:$") and not M.fs.is_dir(made) then
+      local ok, err = M.fs.mkdir(made)
+      if not ok and not M.fs.is_dir(made) then
+        return nil, format("mkdir %s: %s", made, tostring(err))
+      end
+    end
+  end
+  return true
+end
+
 return M
