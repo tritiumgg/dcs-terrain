@@ -1053,4 +1053,143 @@ function M.remove_tile(dir, layer, tx, tz)
   return true
 end
 
+--------------------------------------------------------------------------------
+-- Tile journal
+--
+-- One line per tile, appended after the tile file is renamed into place. The
+-- manifest is rewritten at phase changes and never per tile, so the journal is
+-- what makes a killed run lose at most the tile it was writing.
+--------------------------------------------------------------------------------
+
+M.JOURNAL_NAME = "tiles.jsonl"
+
+-- min and max are over the tile's samples that are not nodata, and are nil
+-- together when every sample is nodata.
+function M.tile_entry(layer, tx, tz, min, max)
+  return M.check_tile_entry({
+    layer = layer,
+    tx = tx,
+    tz = tz,
+    path = M.tile_path(layer, tx, tz),
+    min = min == nil and M.JSON_NULL or min,
+    max = max == nil and M.JSON_NULL or max,
+  })
+end
+
+local function is_index(v)
+  return is_finite(v) and floor(v) == v and v >= 0
+end
+
+-- Checked on the way in and on the way back out, because the two failures it
+-- catches are the ones validation reports later and cannot repair: a line
+-- naming a file that does not exist, and a file with no line.
+function M.check_tile_entry(entry)
+  if type(entry) ~= "table" then
+    error("check_tile_entry: not an entry: " .. type(entry), 2)
+  end
+  if not LAYER_BY_NAME[entry.layer] then
+    error("check_tile_entry: not a layer: " .. tostring(entry.layer), 2)
+  end
+  if not is_index(entry.tx) or not is_index(entry.tz) then
+    error(format("check_tile_entry: (%s, %s) is not a tile address",
+      tostring(entry.tx), tostring(entry.tz)), 2)
+  end
+  local want = M.tile_path(entry.layer, entry.tx, entry.tz)
+  if entry.path ~= want then
+    error(format("check_tile_entry: path is %s, not %s", tostring(entry.path), want), 2)
+  end
+  local min_null = entry.min == M.JSON_NULL
+  local max_null = entry.max == M.JSON_NULL
+  if min_null ~= max_null then
+    error("check_tile_entry: min and max are null together or not at all", 2)
+  end
+  if not min_null then
+    if not is_finite(entry.min) or not is_finite(entry.max) then
+      error(format("check_tile_entry: min %s and max %s are not both numbers",
+        tostring(entry.min), tostring(entry.max)), 2)
+    end
+    if entry.min > entry.max then
+      error(format("check_tile_entry: min %s is above max %s",
+        tostring(entry.min), tostring(entry.max)), 2)
+    end
+  end
+  return entry
+end
+
+function M.journal_line(entry)
+  return M.json(M.check_tile_entry(entry)) .. "\n"
+end
+
+-- Only a line that ends in a newline counts, and the trailing bytes are
+-- returned rather than parsed. A run killed between the tile rename and this
+-- append leaves exactly that: a partial line, whose tile is swept again.
+function M.parse_journal(text)
+  local entries, n = {}, 0
+  local at, len = 1, #text
+  while true do
+    local stop = text:find("\n", at, true)
+    if not stop then
+      return entries, len - at + 1
+    end
+    local line = text:sub(at, stop - 1)
+    at = stop + 1
+    if line ~= "" then
+      n = n + 1
+      entries[n] = M.check_tile_entry(M.decode(line))
+    end
+  end
+end
+
+function M.tile_key(layer, tx, tz)
+  return format("%s/%d_%d", layer, tx, tz)
+end
+
+-- The last line for a tile wins. A tile written before a resume and written
+-- again after it has two lines, and the second is the one describing the file
+-- that is actually on disk.
+function M.journal_index(entries)
+  local index = {}
+  for i = 1, #entries do
+    local entry = entries[i]
+    index[M.tile_key(entry.layer, entry.tx, entry.tz)] = entry
+  end
+  return index
+end
+
+-- Sorted, so two runs over the same theatre produce the same manifest bytes.
+-- The format asks for no order; a stable one is what makes an extract diffable
+-- and makes a byte-for-byte comparison against the Rust generator mean
+-- anything.
+function M.manifest_tiles(entries)
+  local out, n = {}, 0
+  for _, entry in pairs(M.journal_index(entries)) do
+    n = n + 1
+    out[n] = entry
+  end
+  sort(out, function(a, b)
+    if a.layer ~= b.layer then
+      return a.layer < b.layer
+    end
+    if a.tx ~= b.tx then
+      return a.tx < b.tx
+    end
+    return a.tz < b.tz
+  end)
+  return M.as_array(out)
+end
+
+function M.append_tile(dir, entry)
+  return M.append_file(M.join(dir, M.JOURNAL_NAME), M.journal_line(entry))
+end
+
+-- No journal is a fresh run. An unreadable one looks the same, which costs
+-- nothing here: the tile writes that follow fail loudly on the same directory.
+function M.load_journal(dir)
+  local text = M.read_file(M.join(dir, M.JOURNAL_NAME))
+  if not text then
+    return {}, 0
+  end
+  return M.parse_journal(text)
+end
+
 return M
