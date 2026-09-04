@@ -1807,9 +1807,81 @@ function M.terrain_id()
   return id
 end
 
--- Seam, replaced by the progress log. A run that logs nowhere still runs,
--- which is what the offline tests want.
-function M.log(message) end
+--------------------------------------------------------------------------------
+-- Logging
+--
+-- Two destinations. The progress log in Saved Games takes everything: a line
+-- per tile, per phase change, per finished sweep and per failure. dcs.log takes
+-- a phase change at INFO and anything the user has to act on at WARNING, and
+-- nothing per tile -- at this hook's rate that would bury every other
+-- subsystem's output.
+--
+-- ADR 0013: the path is a value rather than a function to swap. Nil means log
+-- nowhere, which is a run with no Saved Games under it and is also every
+-- offline test, so nothing here opens a file until something sets a path.
+--
+-- Append per line rather than a held handle. DCS is more often killed than
+-- exited, and a buffered handle loses its tail in exactly the case where the
+-- log is the only record of what the run was doing.
+--------------------------------------------------------------------------------
+
+M.log_path = nil
+
+function M.log(message)
+  if not M.log_path then
+    return
+  end
+  M.append_file(M.log_path, M.now_iso() .. " " .. tostring(message) .. "\n")
+end
+
+-- Where the hook's own files live. Discovered, never recorded: no install or
+-- Saved Games path belongs in this repository.
+--
+-- lfs is a hook-state global fetched at the call, like M.fs.mkdir does it, so
+-- this file still loads under a plain interpreter. writedir() ends in a
+-- separator already -- ED concatenates "Config/..." straight onto it -- and
+-- M.join handles a trailing "/", so only the backslashes need turning around.
+function M.saved_games_dir()
+  local lfs = rawget(_G, "lfs")
+  if not lfs or type(lfs.writedir) ~= "function" then
+    return nil
+  end
+  local ok, dir = pcall(lfs.writedir)
+  if not ok or type(dir) ~= "string" or dir == "" then
+    return nil
+  end
+  return (dir:gsub("\\", "/"))
+end
+
+M.LOG_NAME = "Logs/DcsTerrainExtract.log"
+
+-- The subsystem name dcs.log tags these lines with, so a reader can find them
+-- among every other part of DCS writing to the same file.
+M.DCS_LOG_SUBSYSTEM = "DcsTerrainExtract"
+
+local DCS_LOG_LEVELS = { INFO = true, WARNING = true }
+
+-- One line into dcs.log. Silent where there is no log global, which is every
+-- offline test, and pcall'ed because a run must never fail on its own logging.
+function M.dcs_log(level, message)
+  if not DCS_LOG_LEVELS[level] then
+    error("dcs_log: not a level: " .. tostring(level), 2)
+  end
+  local log = rawget(_G, "log")
+  if type(log) ~= "table" or type(log.write) ~= "function" then
+    return false
+  end
+  local ok = pcall(log.write, M.DCS_LOG_SUBSYSTEM, log[level], tostring(message))
+  return ok
+end
+
+-- A problem the user has to act on: it goes to both destinations, because the
+-- progress log is the run's own record and dcs.log is where somebody looks
+-- when the hook appears to have done nothing.
+function M.warn(message)
+  M.log(message)
+  M.dcs_log("WARNING", message)
+end
 
 function M.new_run(opts)
   opts = opts or {}
@@ -1849,7 +1921,7 @@ function M.save(run)
   run.manifest.timing_ms = run.timing_ms
   local ok, err = M.write_manifest(run.dir, run.manifest)
   if not ok then
-    M.log("manifest write failed: " .. tostring(err))
+    M.warn("manifest write failed: " .. tostring(err))
   end
   return ok and true or false
 end
@@ -1860,10 +1932,17 @@ function M.prepare_jobs(run)
   return run.jobs.prepare or {}
 end
 
+-- The one place a phase change is announced, so the window X13 adds has one
+-- place to attach rather than two calls to keep in step.
+local function phase_change(state)
+  M.log("phase " .. state)
+  M.dcs_log("INFO", "phase " .. state)
+end
+
 -- Moves the run into a state, and is the only place that does. A phase change
--- builds the queue for the phase it enters, stamps the pass, logs, and saves
--- the manifest, which with the per-sweep save is the whole of "the manifest is
--- rewritten at the end of each sweep and at every phase change".
+-- builds the queue for the phase it enters, logs to both destinations, and
+-- saves the manifest, which with the per-sweep save is the whole of "the
+-- manifest is rewritten at the end of each sweep and at every phase change".
 function M.enter(run, state)
   run.state = state
   run.phase_frames = 0
@@ -1881,7 +1960,7 @@ function M.enter(run, state)
     run.queue = M.new_queue(M.prepare_jobs(run))
   end
 
-  M.log("phase " .. state)
+  phase_change(state)
   M.save(run)
   return state
 end
@@ -1919,7 +1998,7 @@ local function terrain_loaded(run)
   if M.terrain_id() ~= nil then
     return true
   end
-  M.log("terrain unloaded during the " .. run.state .. " pass")
+  M.warn("terrain unloaded during the " .. run.state .. " pass")
   return false
 end
 

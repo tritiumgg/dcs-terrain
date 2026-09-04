@@ -12,6 +12,9 @@ without `seek`.
   the scenery around it. Configuration is a window rather than the file — the
   file is what the window reads at start and writes at Start (ADR 0011), and
   the three fields it holds are in that record. *The window is not built yet.*
+  A run writes `Logs/DcsTerrainExtract.log` in the same Saved Games folder, one
+  line per tile and per phase change, appended across runs and never rotated;
+  `dcs.log` gets a phase change at `INFO` and anything to act on at `WARNING`.
 - `test/` — offline tests, run with a plain `lua5.1` interpreter. Every `.lua`
   file directly under it is a test; `test/support/` holds what they read.
 - `test/support/testing.lua` — the whole test framework: a few checks and a
