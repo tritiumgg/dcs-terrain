@@ -1411,4 +1411,116 @@ function M.prepare_resume(dir, opts)
   }
 end
 
+--------------------------------------------------------------------------------
+-- Frame budget
+--
+-- The hook gets one callback per simulation frame and has to give the frame
+-- back. Work is therefore cut into steps, and a frame runs steps until the
+-- budget is spent.
+--
+-- The budget is checked between steps and never inside one. A step is the
+-- smallest thing the hook can stop after, and several of them cost more than
+-- the whole budget on their own: one road path is about 0.61 ms, one
+-- mission-pass chunk about 40 ms. A frame always runs at least one step, so a
+-- budget smaller than a step still finishes the extract -- one step per frame,
+-- slowly -- rather than deadlocking on a budget that is spent before any work
+-- is attempted.
+--------------------------------------------------------------------------------
+
+-- Seam, like M.fs. The offline tests replace it with a clock they step by
+-- hand, so what a budget test asserts does not depend on how fast the machine
+-- running it is.
+function M.clock()
+  return os.clock()
+end
+
+function M.budget(budget_ms)
+  if not is_finite(budget_ms) or budget_ms < 0 then
+    error("budget: frame_budget_ms is not a non-negative number: "
+      .. tostring(budget_ms), 2)
+  end
+  local started = M.clock()
+  local limit = budget_ms / 1000
+  return function()
+    return (M.clock() - started) >= limit
+  end
+end
+
+--------------------------------------------------------------------------------
+-- Job queue
+--
+-- A job is one sweep: a name, and a `start` that is called once, when the job
+-- first gets a frame, and returns the step function. The step returns M.MORE
+-- while work remains and M.DONE when the sweep is finished; anything else
+-- raises, because a step that returned nil by accident would otherwise read as
+-- "not finished" and the sweep would never end.
+--
+-- Splitting `start` from the step is what lets a job be built against the run
+-- it will sweep -- the grid, the skip set, the journal -- at the moment the
+-- pass reaches it, rather than at load, when none of that exists yet.
+--
+-- The queue reports finished jobs in `finished` rather than writing anything
+-- itself. What happens at the end of a sweep is the manifest's business, and
+-- the queue does not know there is a manifest.
+--------------------------------------------------------------------------------
+
+M.MORE = "more"
+M.DONE = "done"
+
+function M.new_queue(jobs)
+  if type(jobs) ~= "table" then
+    error("new_queue: jobs is not a list: " .. type(jobs), 2)
+  end
+  for i = 1, #jobs do
+    local job = jobs[i]
+    if type(job) ~= "table" or type(job.name) ~= "string"
+      or type(job.start) ~= "function" then
+      error(format("new_queue: job %d is not {name = string, start = function}", i), 2)
+    end
+  end
+  return { jobs = jobs, index = 1, step = nil, started = nil, finished = {} }
+end
+
+-- Milliseconds, rounded, because that is what the manifest `timing_ms` holds.
+local function elapsed_ms(started)
+  return floor((M.clock() - started) * 1000 + 0.5)
+end
+
+-- Runs steps until the budget is spent, and returns M.MORE if the queue has
+-- more jobs or M.DONE once every job has finished. `finished` is emptied at
+-- the start of each frame, so a caller reads only the jobs this frame ended.
+function M.queue_frame(queue, run, spent)
+  queue.finished = {}
+  repeat
+    local job = queue.jobs[queue.index]
+    if job == nil then
+      return M.DONE
+    end
+    if queue.step == nil then
+      queue.started = M.clock()
+      queue.step = job.start(run)
+      if type(queue.step) ~= "function" then
+        error(format("job %s: start returned %s, not a step function",
+          job.name, type(queue.step)), 0)
+      end
+    end
+    local status = queue.step()
+    if status == M.DONE then
+      queue.finished[#queue.finished + 1] = {
+        name = job.name, ms = elapsed_ms(queue.started),
+      }
+      queue.index = queue.index + 1
+      queue.step = nil
+      queue.started = nil
+    elseif status ~= M.MORE then
+      error(format("job %s: step returned %s, not M.MORE or M.DONE",
+        job.name, tostring(status)), 0)
+    end
+  until spent()
+  if queue.jobs[queue.index] == nil then
+    return M.DONE
+  end
+  return M.MORE
+end
+
 return M
