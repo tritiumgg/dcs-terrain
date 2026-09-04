@@ -254,9 +254,8 @@ pub const NODES_FIRST_EAST_M: f64 = 40000.0;
 pub const NODES_SPACING_M: f64 = 15000.0;
 pub const NODES_SIDE_OFFSET_M: f64 = 2000.0;
 
-// Projection. Caucasus's parameters, because the fit task's done test is that
-// the fitted parameters match the published Caucasus row within a metre, and
-// the samples it fits are generated from these.
+// Projection. Caucasus's parameters, because the fit must reproduce the published
+// Caucasus row within a metre, and the samples it fits are generated from these.
 
 pub const CRS_LON_0_DEG: i32 = 33;
 pub const CRS_K_0: f64 = 0.9996;

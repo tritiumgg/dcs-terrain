@@ -4,7 +4,7 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-04
+**Last updated:** 2026-09-04T17:41Z
 
 ## Done
 
@@ -94,37 +94,9 @@ not a theatre. Everything from C4 on is built on macOS against the crop.
 
 ## Carries
 
-Things a later task must not lose. Max 10 — see the rules below.
+Things a later task must not lose. Max 10 — `CLAUDE.md` has the rules.
 
 | # | Carry | Discharged by |
 |---|---|---|
 | 1 | `synth` produces no all-fill tile at any size: the fill margin is 2 km and a tile is 12.8 km, so no tile is fill throughout. Test the absent-fill-tile read against a hand-built manifest, not against a generated extract. The all-sea case is generated, as one interior tile. | C4 |
 | 2 | The `water` sweep's fill and sea skip set does not survive a restart and cannot be rebuilt from the manifest and journal. An all-fill tile is *absent* from the journal, which reads the same as not yet swept; and per-tile `min`/`max` cannot identify an all-sea tile, because they are taken over non-nodata samples only, so a tile that is part fill and part sea also reads `min = max = 2`. Rehydrate the set by re-reading the written `water` tile bytes. Getting it wrong makes `pack` read a fill cell as sea. | X6 |
-
-### Rules for this file
-
-Keep the whole file under about 120 lines. It is read at the start of every
-session, so it competes with the specs for attention.
-
-- **Done** holds 5 entries, one or two lines each. Older history is in git.
-- **Next** holds exactly one task. If two things are genuinely next, one of
-  them is first.
-- **Then** holds 5 entries. Beyond that, `plan.md` is the task graph
-  — do not restate it here.
-- **Carries** hold 10 entries, hard cap. Every carry names the task that
-  discharges it, and is **deleted** on discharge, not marked done.
-
-A carry is something **learned while working** that no document already
-records. Before writing one, check `plan.md`, the specs and `decisions/` — if
-any of them already says it, there is no carry. A task's own deliverable or
-done test is not a carry; neither is a rule from `CLAUDE.md`, nor anything
-readable from `git log`. Most sessions add none, and an empty table is the
-normal state.
-
-A carry is also short-lived, not a decision. If one cannot name a discharging
-task, or survives three turns of the Next slot, write it as an ADR and delete
-the row. If the table is full and something new must be carried, that is the
-signal — promote the oldest to an ADR rather than growing the table.
-
-Nothing here duplicates `plan.md`, `docs/decisions/`, or a spec.
-Point at those instead of copying them.

@@ -55,8 +55,8 @@ artifacts, copy the hook into Saved Games (say the exact path and edit), then
 what to do in DCS, with a Verify after each thing the tester should see.
 Never write into the DCS install.
 
-Not covered: every part of the task's done test these steps do not reach, and
-where that gap is recorded — docs/STATE.md, an issue, or docs/plan.md.
+Not covered: every part of the task's completion condition these steps do not
+reach, and where that gap is recorded — docs/STATE.md, an issue, or the plan.
 -->
 
 ### Without DCS
