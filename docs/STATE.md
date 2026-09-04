@@ -4,13 +4,20 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-04T17:41Z
+**Last updated:** 2026-09-04T18:34Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **X3 — the grid and the journal.** Grid snapping, tile addressing, the
+1. **The project setup, ported from `dcs-bridge`.** A pull request template,
+   `mise` tasks, and five tools: `ledger.sh` retrieves a claim and lints the 18
+   stamps, beside `statecheck.sh`, `nospecrefs.sh`, `readmeopen.sh` and
+   `hooktest.sh`. Seven hooks load this file at session start, refuse an
+   unstamped stop, refuse a write to `docs/spec/`, check every shell command,
+   and check a commit before and after; a `docs` workflow runs the five on
+   every change. The ADRs are reformatted to four headings, cited `ADR NNNN`.
+2. **X3 — the grid and the journal.** Grid snapping, tile addressing, the
    pre-sweep lattice, the `tiles.jsonl` journal, the manifest and resume, in
    `extractor/DcsTerrainExtract.lua` with 9 offline test files and 487 checks.
    A JSON decoder came with it, because resume must read the manifest back and
@@ -20,7 +27,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    inward, and two smaller vectors exist because both reference rectangles
    agree with the wrong extent formula. Shipped as an 11-PR stack, which is
    also when `CLAUDE.md` gained its delivery and subagent rules.
-2. **X1 — the Lua encoders.** `extractor/DcsTerrainExtract.lua` holds `i16le`,
+3. **X1 — the Lua encoders.** `extractor/DcsTerrainExtract.lua` holds `i16le`,
    `u8`, `json` and `normalise_list`; 121 checks in `encoders.lua` over
    `testing.lua`, the whole framework the later offline tasks get. `i16le`
    clamps to ±32767 and so cannot reach −32768: nodata comes from
@@ -29,7 +36,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    list from an empty object once both are one Lua table. The hook returns its
    module table and registers nothing without DCS globals, which is how the
    offline tests reach into a one-file hook.
-3. **F2 — reference constants for the synthetic theatre.**
+4. **F2 — reference constants for the synthetic theatre.**
    `extractor/test/support/synth_constants.lua` and
    `dcsterrain-core/src/synth.rs`, 149 constants each, and a Rust test that
    parses the Lua file and fails on any name or value the two do not share, so
@@ -38,7 +45,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    origin, so raising the size adds land and moves nothing; 70 km is the
    default because a smaller theatre cannot hold an all-sea tile clear of the
    fill margin.
-4. **F1 — the extract format is frozen at v1.** ADR 0007 records what v1 is:
+5. **F1 — the extract format is frozen at v1.** ADR 0007 records what v1 is:
    every field traced to the DCS call behind it, measured live on
    2.9.29.27468 across three theatres and, where no map load was needed, all
    eight installed (an airdrome's sub-tables are keyed from 0 and are often
@@ -49,12 +56,6 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    unmeasured; and a manifest example built from measured numbers. ADR 0008
    gives the packed `meta` the authored rectangle and makes its bounds keys
    metres.
-5. **Language servers pinned in `mise.toml`.** `rust-analyzer` and
-   `lua-language-server`, provisioned by `mise install` like the rest of the
-   toolchain. A root `.luarc.json` sets the Lua server to 5.1 and declares the
-   hook-state globals `DCS`, `net`, `log` and `lfs`, so `string.pack` and the
-   rest of what 5.1 lacks are flagged where they are written rather than where
-   the hook is loaded.
 
 ## Next
 

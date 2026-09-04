@@ -167,6 +167,31 @@ with the user first: fold the accumulated ADRs into a revised document,
 regenerate its ledger and glossary, re-stamp, and freeze that. Never a side
 effect of another change.
 
+## The ledger locates a claim
+
+Read the specs freely — that is what they are for. But start from the ledger
+beside each one, which holds a row per claim with an anchor that locates the
+prose, so retrieval happens in `grep` and `awk` rather than by reading 680
+lines to find a sentence.
+
+```
+tools/ledger.sh codes                     document codes and paths
+tools/ledger.sh subjects CODE             every subject in a ledger
+tools/ledger.sh find CODE <text>          rows matching subject, claim or section
+tools/ledger.sh show CODE "<anchor>"      the prose around one anchor
+tools/ledger.sh sections CODE             the heading tree with line counts
+tools/ledger.sh read CODE "<section>"     one whole section
+tools/ledger.sh lint                      every stamp, anchor and glossary join
+```
+
+Start from `subjects` or `find`, not from `sections`. The ledger is the index.
+
+**The anchor beats the claim.** The anchor is verbatim specification text. The
+claim beside it is a summary and can misread what it summarizes.
+
+For a frozen document, `lint` is tamper detection rather than maintenance: a
+`MISMATCH` means one was edited.
+
 ## Never cite `docs/` from code
 
 **Code never points back at the documents**, with ADRs the single exception.
@@ -246,6 +271,56 @@ the result itself, whether it needs a maintainer reading a CI result, or
 whether only somebody at a live install can see it. Write it in
 `docs/STATE.md` under the task. An agent that skips this declares victory on
 something it never observed.
+
+## Toolchain
+
+Tool versions come from `mise.toml`. Do not install toolchains globally, and do
+not use a language's own version manager directly.
+
+Run every project command through mise, because a non-interactive shell does
+not pick up mise's PATH activation:
+
+```sh
+mise exec -- cargo test
+mise run check      # fmt, clippy, test
+mise run lua-test   # the offline extractor tests under Lua 5.1
+mise run docs       # the ledger, the state file, the citations, the hooks
+```
+
+`guard-bash.sh` refuses a bare `cargo`, `lua`, `rustc` or `rustfmt`. Anything
+with a loop or a conditional lives in `tools/` and is invoked as `sh
+tools/<name>.sh`: mise runs an inline script through `cmd` on Windows, which
+does not speak sh.
+
+**Rust is the exception, and `mise use rust@<version>` breaks it.** The
+version, profile and components live in `rust-toolchain.toml`, which rustup
+reads whether or not mise is installed. mise is told to read the same file, so
+Rust has one pin rather than two that can disagree; `mise use` writes a second
+version into `[tools]` and mise stops reading it. Edit `channel`, then
+`mise install`.
+
+On a fresh checkout, run `mise install` before anything else. On Windows,
+`mise run lua51` builds the Lua 5.1.5 interpreter into `.tools/bin`, which
+needs Visual Studio Build Tools with the C++ workload.
+
+## Portability
+
+Every script in `tools/` and `.claude/hooks/` is POSIX `sh` and `awk`, running
+on all three platforms — on Windows through Git-for-Windows `sh`, which is why
+`.claude/settings.json` invokes `sh` with the script as an argument rather than
+executing it.
+
+No bash arrays, no `[[`, no `local`. No `sed -i`, no `grep -P`, no
+`readlink -f`. Avoid `sed` for tabs, because BSD and GNU disagree on `\t`.
+Assume nothing beyond a stock machine: no `jq`, no `python`, no `gawk`. Detect
+`sha256sum` versus `shasum`. `tools/lua51/Build-Lua51.ps1` is the one
+PowerShell exception, because it drives MSVC.
+
+`guard-bash.sh` refuses the non-portable commands and `precommit.sh` scans
+every changed script, so this is checked rather than remembered.
+
+Leave `.gitattributes` alone. It disables line-ending conversion, without which
+every ledger stamp breaks on a Windows checkout.
 
 ## Data
 
