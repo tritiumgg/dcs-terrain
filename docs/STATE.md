@@ -10,40 +10,47 @@ back. This file holds progress; `plan.md` holds the task graph and
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **ADR-0005**: the extractor is verified live through the `dcs-api-bridge`
+1. **Kotlin client cut.** It becomes its own project, consuming the MCP server
+   and the CLI like any other client. Deleted `kotlin/`, tasks K1–K3c,
+   `kotlin-consumer.md` and its ledger pair — the one exception ever made to
+   the frozen rule, agreed with the user, and no other frozen file joined to
+   them. `design-and-facts.md` and `core.md` keep their stale Kotlin
+   references. MS4 is now the server alone, proved by `query` and the server
+   agreeing; C1 gains a schema snapshot test, which is what K1 used to catch.
+   `mise.toml` loses `java` and `node`, leaving Rust, Lua and Python.
+2. **P1 — repository layout.** The `dcsterrain/` Cargo workspace with its three
+   crates builds; `extractor/` and `tools/validate/` exist with a README saying
+   what belongs in each. `mise.toml` and `rust-toolchain.toml` pin the
+   toolchain and `tools/lua51/` builds Lua 5.1.5 on Windows, all per ADR-0006.
+   The `.gitignore` `target/` rule no longer anchors to the repository root.
+3. **ADR-0005**: the extractor is verified live through the `dcs-api-bridge`
    MCP, and offline Lua tests cover only what DCS cannot be driven to do on
    demand (X1–X4, X9). No stub harness is vendored. Rephrased eleven done
    tests and MS0's proof, which loses its byte-identical cross-language check
    — the format contract is proven at X10 instead. Component X is therefore
-   developed on the Windows machine; the Rust, Kotlin and MCP work is on
+   developed on the Windows machine; the Rust and MCP work is on
    macOS, which carries the only toolchain. F1's done test now names the
    consumers its sign-off must walk.
-2. `CLAUDE.md` rules: the `dcs-scripting` skill is forbidden, replaced by
+4. `CLAUDE.md` rules: the `dcs-scripting` skill is forbidden, replaced by
    `dcs-api-lookup` + the bridge + the read-only install, with the four
    citations left in the frozen specs marked as ignorable. A DCS version bump
    is no longer an ADR trigger — the install being ahead of the spec is normal,
    and only a measurement that differs is an ADR. Install paths are discovered
    through the bridge (`lfs.currentdir()`), never recorded in the repository.
-3. Deleted the seven measured projection sample sets — nothing reads them and
+5. Deleted the seven measured projection sample sets — nothing reads them and
    the fitted results are in the probe log. `fit.py` moved to
    `tools/probe-theatre/fit.py`, where V2 packages it. ADR-0004.
-4. `CLAUDE.md`: code never cites `docs/`, only ADR ids, so comments cannot rot
-   against frozen specs. Recorded the Windows/macOS split. Dropped the stale
-   bridge-transport rule and the hardcoded DCS build; Claude reads `version`
-   from `autoupdate.cfg`. No non-project skills are named. Tightened the carry
-   rule and cut the table from 10 padded rows to 1 real one.
-5. Dropped the numeric prefixes and `spec-` prefixes, and moved everything
-   frozen into `docs/spec/`. One rule now: nothing in `docs/spec/` is edited.
-   Ledgers re-stamped and all 2 036 anchors re-verified. ADR-0001, ADR-0002.
 
 ## Next
 
 One task. The thing to pick up immediately.
 
-**P1 — repository layout.** Create the `dcsterrain/` Cargo workspace, the
-`extractor/`, `kotlin/` and `tools/validate/` trees per the target layout in
-`CLAUDE.md`. Done when the tree exists and the README states "no terrain data
-is committed" — the README clause is already done.
+**F1 — freeze the extract format v1.** Confirm every field against the probe
+log, decide the `water` codes and the `nodata` values, and write the manifest
+example by hand. The X and C authors both sign off, having walked every field
+that C5c, C7, C8, C9 and C10 read back. It carries more weight than it did,
+because MS0 no longer proves the format across languages (ADR-0005) — a
+mistyped field now surfaces at X10.
 
 Blocked on nothing.
 
@@ -51,16 +58,15 @@ Blocked on nothing.
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **F1** — freeze the extract format v1: confirm every field against the probe
-   log, decide `water` codes and `nodata` values, write the manifest example by
-   hand.
-2. **F2** — reference constants for the synthetic theatre, `synth_constants.lua`
+1. **F2** — reference constants for the synthetic theatre, `synth_constants.lua`
    and `synth.rs`, same numbers.
-3. **C1** — workspace scaffold, `types`, `clap` CLI stubs, `schemars`, stderr
+2. **C1** — workspace scaffold, `types`, `clap` CLI stubs, `schemars`, stderr
    logging. Head of the longest dependency chain.
-4. **X1** — Lua encoders `i16le`, `u8`, `json` with offline Lua tests. Runs in
+3. **X1** — Lua encoders `i16le`, `u8`, `json` with offline Lua tests. Runs in
    parallel with C1.
-5. **C2 / C3** — `synth` and `check-extract`, which unlock MS0.
+4. **C2 / C3** — `synth` and `check-extract`, which unlock MS0.
+5. **X3** — grid computation from each bounds source, tile addressing, the
+   journal and resume.
 
 Milestone in view: **MS0 Contract** (P1, P2, F1, F2, C1, C2, C3, X1, X3).
 Proof is `check-extract` accepting the Rust synthetic extract and the hook's
@@ -76,6 +82,7 @@ Things a later task must not lose. Max 10 — see the rules below.
 
 | # | Carry | Discharged by |
 |---|---|---|
+| 1 | Lua 5.1 folds numeric literals at compile time, and the result is order-dependent: `-0.0` and folded infinities in one chunk can print as another constant in that chunk. Assert on computed values, not folded literals. DCS's interpreter and ours behave identically here. | X1 |
 
 ### Rules for this file
 

@@ -29,7 +29,6 @@ the ADR wins. Everything outside `spec/` is living and edited directly.
 | [spec/core.md](spec/core.md) | The Rust workspace, packed file schema, derived layers, `pack`, `check` |
 | [spec/query-operations.md](spec/query-operations.md) | The operations, criteria, and their tests |
 | [spec/mcp-server.md](spec/mcp-server.md) | `dcsterrain serve` |
-| [spec/kotlin-consumer.md](spec/kotlin-consumer.md) | How the campaign consumes the binary |
 | [spec/validation.md](spec/validation.md) | The validation sortie and how to measure a new theatre |
 
 Specs refer to each other by bare file name (`extract-format.md`). Those names

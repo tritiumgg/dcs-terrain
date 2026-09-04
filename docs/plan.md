@@ -19,7 +19,6 @@ users extract their own theatres.
 | `core.md` | The Rust workspace, packed file schema, derived layers, `pack`, `check` |
 | `query-operations.md` | The operations, criteria, and their tests |
 | `mcp-server.md` | `dcsterrain serve` |
-| `kotlin-consumer.md` | How the campaign consumes the binary |
 | `validation.md` | The validation sortie and how to measure a new theatre |
 
 Read `design-and-facts.md` first; every spec assumes it. Before any
@@ -35,7 +34,6 @@ exist because a call crashed DCS during the measurements.
 | C | `dcsterrain-core` and `pack`/`check` | Rust | any | `core.md` |
 | Q | Query operations | Rust | any | `query-operations.md` |
 | M | MCP server | Rust | any | `mcp-server.md` |
-| K | Kotlin client | Kotlin | any | `kotlin-consumer.md` |
 | V | Validation | Lua via bridge | Windows with DCS | `validation.md` |
 | D | Documentation | — | any | this file |
 | P | Project infrastructure | — | any | this file |
@@ -57,8 +55,8 @@ component are in build order.
 
 | Id | Deliverable | Done | Depends on |
 |---|---|---|---|
-| P1 | Repository layout: `dcsterrain/` Cargo workspace, `extractor/` for the Lua hook and its offline Lua tests (ADR-0005: no stub harness is vendored), `kotlin/` for the client, `tools/validate/`, `docs/` holding these documents; `.gitignore` excludes `*.sqlite`, `extracts/`, `*.bin` | Tree exists; README states "no terrain data is committed" | — |
-| P2 | CI: Rust build and test on Windows, macOS, Linux; Lua 5.1 offline tests; Kotlin build | Green on an empty synthetic run | P1, C1, X1, K1 |
+| P1 | Repository layout: `dcsterrain/` Cargo workspace, `extractor/` for the Lua hook and its offline Lua tests (ADR-0005: no stub harness is vendored), `tools/validate/`, `docs/` holding these documents; `.gitignore` excludes `*.sqlite`, `extracts/`, `*.bin` | Tree exists; README states "no terrain data is committed" | — |
+| P2 | CI: Rust build and test on Windows, macOS, Linux; Lua 5.1 offline tests | Green on an empty synthetic run | P1, C1, X1 |
 | P3 | Release build: static `dcsterrain` binaries for the three platforms, each built on its own CI runner with `cargo build --release`, attached to tags | The tagged Windows binary packs a synthetic extract on the Windows machine and the tagged macOS binary does the same on macOS, without a toolchain on either | P2, C13 |
 | P4 | Licensing note in README: extracts and packed files are derived from ED terrain data and stay on the user's machine; publishing them is the user's call against the ED EULA | Text reviewed | P1 |
 
@@ -93,7 +91,7 @@ component are in build order.
 
 | Id | Deliverable | Done | Depends on |
 |---|---|---|---|
-| C1 | Workspace scaffold, `types`, `clap` CLI with subcommand stubs, `schemars` on all request/response types, stderr logging with `--verbose` | `dcsterrain schema` prints valid JSON schema | P1 |
+| C1 | Workspace scaffold, `types`, `clap` CLI with subcommand stubs, `schemars` on all request/response types, stderr logging with `--verbose`; the schema is snapshot-tested, so a change to it is a deliberate diff | `dcsterrain schema` prints valid JSON schema, and the snapshot test fails on any change to it | P1 |
 | C2 | `synth`: closed-form theatre and extract-directory writer including the fill margin; `dcsterrain synth` | Writes a directory `check-extract` accepts once C3 exists; constants match F2 | F2, C1 |
 | C3 | `extract`: manifest and journal parse, validation, tile reader; `dcsterrain check-extract` | Accepts the synthetic extract; rejects each corrupted variant (wrong size, missing tile, extra file, bad min/max, unknown version, journal ahead of manifest) | F1, C1 |
 | C4 | `grid`: tile addressing, cross-tile window reads, bilinear sample, absent-tile rules (fill, sea), nodata handling | Window tests at every edge and corner; absent fill and sea tiles read per the spec | C3 |
@@ -139,16 +137,6 @@ component are in build order.
 | M3 | Response discipline: `--max-rows` on `sample` and `scenery_in`, polygons-by-default viewshed, error mapping, resource per file | Integration test over a `tokio::io::duplex` pair compares each tool result with the direct operation | M2 |
 | M4 | Tool descriptions and evaluation per `mcp-builder`: run the design doc's worked tasks as natural-language prompts against the server and check tool choice | Acceptance 2 in the spec | M3 |
 
-### K: Kotlin client
-
-| Id | Deliverable | Done | Depends on |
-|---|---|---|---|
-| K1 | Gradle module, `kotlinx.serialization`, code generation from `dcsterrain schema` with `quicktype --lang kotlin --framework kotlinx` | Generated classes compile with no edits | C1 |
-| K2 | `suspend` `Terrain` interface, `ProcessTerrain` over the Kotlin MCP SDK with restart, `CliTerrain`, `TerrainFactory.open` with `onMismatch` | Contract tests on the synthetic file; server kill survived | K1, M2 |
-| K3a | Overlay table and waypoint emission (`action = "On Road"`) | Overlay merges into `scenery_in` results; a `route` becomes waypoints | K2 |
-| K3b | `SitePolicy`: selection by a caller-supplied predicate over the metric vector, random draw among passes; no difficulty tables shipped | Unit tests on hand-written metric vectors; end-to-end FARP placement on the synthetic file | K2 |
-| K3c | `RoutePlan`: holds a `route_alternatives` result, rotates per departure by caller weight, never the same route twice running, re-plans on overlay change | Unit tests on a three-route set | K2, Q6b |
-
 ### V: validation
 
 | Id | Deliverable | Done | Depends on |
@@ -165,7 +153,7 @@ component are in build order.
 
 ## Order and milestones
 
-Build order is P1, F1, F2, then X and C in parallel, then Q, M, K, V.
+Build order is P1, F1, F2, then X and C in parallel, then Q, M, V.
 The longest dependency chain is P1 → C1 → C3 → C4 → C5b → C6 → C11 →
 Q3 → Q4 → Q7 → M1 → M2 (twelve tasks; C5b → C8b → C7 → Q3 is a chain
 of the same length), and nothing on it needs DCS; the DCS-dependent
@@ -180,7 +168,7 @@ The work is also staged by machine. Component X is developed on the
 Windows machine, because ADR-0005 verifies the sweeps against a running
 theatre through the `dcs-api-bridge` MCP rather than against a stub of
 one; only the offline tests in X1 to X4 and X9 would run anywhere. The
-Rust, Kotlin and MCP work is developed on macOS, and the Windows
+Rust and MCP work is developed on macOS, and the Windows
 machine carries no toolchain, so `check-extract` runs on macOS after an
 extract is copied across rather than on Windows before it.
 
@@ -200,7 +188,7 @@ changes nothing about them.
 | MS1 Packed file | C4, C5a–C5c, C6–C10, C8a, C8b, C12a–C12c, X2a, X2b, X4–X9 | `pack` and `check` pass on the synthetic extract; the hook completes a live cropped sweep |
 | MS2 Real extract | X10, X11, C13, C14 | A full Caucasus extract exists, packs, and `check` passes |
 | MS3 Queries | Q1–Q5, Q6a–Q6c, Q7, Q8, C11 | Every operation tested on the synthetic theatre; benchmarks within target |
-| MS4 Server and client | M1–M4, K1, K2, K3a–K3c, Q9 | Assistant and campaign both answer the FARP example from the same file |
+| MS4 Server | M1–M4, Q9 | The assistant answers the FARP example, and `query` returns the same result for it as the server does |
 | MS5 Validated | V1, V2, P3, P4, D1 | A stamped Caucasus file, release binaries, and a guide a newcomer can follow |
 
 ## Working rules

@@ -6,13 +6,8 @@ extracts/
 *.bin
 
 # Rust
-/target/
+target/
 **/*.rs.bk
-
-# Gradle / Kotlin
-.gradle/
-build/
-!src/**/build/
 
 # Editors and OS
 .idea/
@@ -20,3 +15,6 @@ build/
 *.swp
 .DS_Store
 Thumbs.db
+
+# Tools built locally rather than downloaded (mise run lua51).
+.tools/

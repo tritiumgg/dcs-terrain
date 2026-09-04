@@ -1,0 +1,27 @@
+# Development toolchain. `mise install` provisions every tool this repository
+# builds or tests with, so nothing has to be installed system-wide.
+
+[tools]
+# fit.py, which fits a theatre's projection constants.
+python = "3.12"
+
+# The offline extractor tests. 5.1 is not a preference: it is the version the
+# DCS hook state runs, and the tests exist to catch what 5.1 does differently.
+# mise's plugin builds it from source with make, so Windows is excluded here
+# and served by the `lua51` task below instead.
+lua = { version = "5.1.5", os = ["linux", "macos"] }
+
+[env]
+# Where the `lua51` task puts the Windows interpreter. Harmless elsewhere.
+_.path = [".tools/bin"]
+
+[settings]
+# Rust is deliberately absent from [tools]. rustup reads rust-toolchain.toml
+# whatever mise does, so pinning a version here too would create a second
+# source of truth that can disagree with it. This makes mise read that same
+# file, so `mise install` provisions Rust and cargo still works without mise.
+idiomatic_version_file_enable_tools = ["rust"]
+
+[tasks.lua51]
+description = "Build Lua 5.1.5 for Windows with MSVC into .tools/bin"
+run = "pwsh -NoProfile -ExecutionPolicy Bypass -File tools/lua51/Build-Lua51.ps1"

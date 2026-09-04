@@ -1,0 +1,12 @@
+[package]
+name = "dcsterrain-mcp"
+description = "MCP tool definitions over dcsterrain-core."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+dcsterrain-core = { path = "../dcsterrain-core" }

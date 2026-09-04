@@ -6,8 +6,7 @@ see, which road a convoy should take — without DCS doing any terrain work whil
 a campaign runs.
 
 Answers come back as ranked candidates with the reasoning kept as separate
-fields, through a command line, an MCP server for assistants, or a Kotlin
-client.
+fields, through a command line or an MCP server for assistants.
 
 **Tools only. No terrain data is shipped.** You extract your own theatres. An
 extract is derived from Eagle Dynamics terrain data and stays on your machine;
@@ -22,7 +21,12 @@ publishing one is your own call against the ED EULA.
 
 Extracting needs Windows with DCS World installed. Everything after that —
 packing, querying, serving — runs on Windows, macOS or Linux with no DCS and no
-GPU. Building needs stable Rust; the Kotlin client additionally needs a JDK.
+GPU.
+
+Building needs [mise](https://mise.jdx.dev), which installs the Python pinned
+in `mise.toml` and the Rust pinned in `rust-toolchain.toml`. The extractor's
+tests also need Lua 5.1; on Windows, `mise run lua51` builds it and needs
+Visual Studio Build Tools.
 
 ## Get it
 
@@ -32,10 +36,11 @@ attached to tags. To build instead:
 ```bash
 git clone https://github.com/tritiumgg/dcs-terrain
 cd dcs-terrain
-cargo build --release
+mise install
+cargo build --release --manifest-path dcsterrain/Cargo.toml
 ```
 
-The binary lands at `target/release/dcsterrain`.
+The binary lands at `dcsterrain/target/release/dcsterrain`.
 
 ## Use it
 
@@ -43,10 +48,10 @@ Three steps: extract a theatre from DCS, pack it, then query it. Only the first
 needs DCS.
 
 **Extract.** Copy the hook to `Scripts/Hooks/DcsTerrainExtract.lua` in your DCS
-Saved Games folder and a config to `Config/DcsTerrainExtract.lua`. It does
-nothing until the config enables it. Start DCS, load a mission on the theatre,
-and it sweeps across frames, logging to `Logs/DcsTerrainExtract.log`. It never
-writes into your DCS install, and it resumes where it left off.
+Saved Games folder and a config to `Config/DcsTerrainExtract.lua`; without the
+config it does nothing. Start DCS and load a mission on the theatre: it sweeps
+across frames, logs to `Logs/DcsTerrainExtract.log`, resumes where it left off,
+and never writes into your DCS install.
 
 **Pack** the extract into a single file, then verify it:
 
@@ -67,10 +72,9 @@ synthetic theatre if you want to try the tools without DCS.
 
 ## Understanding the results
 
-[docs/spec/using-the-data.md](docs/spec/using-the-data.md) defines every metric an
-operation returns — what it measures, its units, and which operation produces
-it — and shows how a campaign turns those metrics into easy, medium, hard and
-unfair missions. Read it before acting on a score.
+[docs/spec/using-the-data.md](docs/spec/using-the-data.md) defines every metric
+an operation returns and shows how a campaign turns them into easy, medium,
+hard and unfair missions. Read it before acting on a score.
 
 ## Documentation
 

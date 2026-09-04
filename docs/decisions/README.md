@@ -18,6 +18,7 @@ disagree, the later accepted one wins, and the earlier is marked
 | [0003](0003-user-guide-is-a-separate-document.md) | Accepted | The user guide is a separate document, written after the tools work | `using-the-data.md`; task D1 at MS5 |
 | [0004](0004-projection-samples-not-kept.md) | Accepted | The projection samples are not kept; `fit.py` moves to `tools/probe-theatre/` | `validation.md`, probe log — both name `projection-samples/` |
 | [0005](0005-extractor-verified-live.md) | Accepted | The extractor is verified live; offline Lua tests are minimal | `extractor-hook.md` "Testing"; `plan.md` P1, P2, X1, X3–X9, MS0 |
+| [0006](0006-mise-provisions-the-toolchain.md) | Accepted | `mise` provisions the toolchain, and Windows builds its own Lua 5.1 | `core.md` "Workspace"; `kotlin-consumer.md`; `extractor-hook.md`; `plan.md` P1, P2, P3 |
 
 Add a row when you add an ADR. This table is the index Claude reads, so an ADR
 missing from it will not be found.

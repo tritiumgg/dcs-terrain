@@ -2,8 +2,8 @@
 
 Tools that turn a DCS World theatre into one portable SQLite file, and answer
 terrain siting and routing questions from it, with DCS doing no terrain work at
-campaign runtime. The consumers are a Kotlin campaign process and an MCP
-server, both going through one query engine.
+campaign runtime. The consumers are an MCP server and a command line, both
+going through one query engine.
 
 The repository ships **tools only**. Users extract their own theatres.
 
@@ -290,7 +290,6 @@ dcsterrain/          Cargo workspace
   crates/dcsterrain-mcp/     MCP tool definitions over core
   tests/                     workspace integration tests (synthetic only)
 extractor/           the Lua hook and its offline Lua tests
-kotlin/              the campaign client module
 tools/validate/      the validation sortie
 tools/probe-theatre/ the per-map measurement, packaged
 docs/                the frozen documents
@@ -310,8 +309,8 @@ can do:
 - **Windows, with DCS installed.** Component X (the Lua extractor hook), the
   V validation sortie through the bridge, and the live acceptance steps X10,
   X11, Q9 and V1. Anything that talks to a running DCS happens only here.
-- **macOS.** Everything else — the Rust workspace, the query operations, the
-  MCP server, the Kotlin client. No DCS, no GPU.
+- **macOS.** Everything else — the Rust workspace, the query operations and
+  the MCP server. No DCS, no GPU.
 
 So do not assume a shell, a path separator or a tool is present because the
 other machine has it. Check before relying on one, and keep scripts portable
