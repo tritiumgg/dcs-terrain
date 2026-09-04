@@ -1524,6 +1524,142 @@ function M.queue_frame(queue, run, spent)
 end
 
 --------------------------------------------------------------------------------
+-- Config
+--
+-- What the user gets to decide, and what happens to a value they got wrong.
+--
+-- ADR 0012: validation never raises and always hands back a usable table. Each
+-- bad field costs one line and takes its default, so no bad value can reach a
+-- sweep and there is nothing to disable. output_dir is the exception, because
+-- it is the one field with no default: a bad one leaves it nil, and a run
+-- cannot start without somewhere to write.
+--
+-- The field list is data rather than a branch per field, because "one line per
+-- problem" is then a property of the loop instead of something every branch has
+-- to remember.
+--
+-- Every checker here returns nil for a good value and one message for a bad
+-- one. Nothing raises. The grid's own checkers do, and should: a caller that
+-- hands grid_from_rect a nil has a bug. A user who mistypes a config does not,
+-- and the whole point of this section is to collect what went wrong rather than
+-- stop at the first of it.
+--------------------------------------------------------------------------------
+
+local function bad_boolean(v, name)
+  if type(v) ~= "boolean" then
+    return format("%s is not true or false: %s", name, tostring(v))
+  end
+end
+
+-- A control character in a path is almost always a Lua escape the user did not
+-- mean to write: output_dir = "C:\temp\new" is not a path, because \t and \n are
+-- escapes, so the value already holds a tab and a newline by the time it arrives.
+-- Saying so is the difference between a baffling failure and a one-line fix.
+--
+-- "C:\Users\..." needs no check of its own: \U is not a valid escape, so the file
+-- fails to load and the syntax error is reported instead.
+local function bad_path(v, name)
+  if type(v) ~= "string" or v == "" then
+    return format("%s is not a non-empty string: %s", name, tostring(v))
+  end
+  if v:find("[%z\1-\31]") then
+    return format("%s contains a control character, which is usually a "
+      .. "backslash escape in a double-quoted path: %s", name, format("%q", v))
+  end
+end
+
+-- mkdir_p splits on "/" and steps over a drive letter only in a "/"-split
+-- path, so a pasted C:\extracts\caucasus would otherwise become one directory
+-- whose name holds colons and backslashes.
+local function forward_slashes(v)
+  return (v:gsub("\\", "/"))
+end
+
+-- name, the check, the default, and whether absent is allowed. enabled is not
+-- in the list because it is read before the list is: it decides whether any of
+-- the rest is looked at.
+local CONFIG_FIELDS = {
+  { name = "output_dir", check = bad_path, normalise = forward_slashes },
+}
+
+local CONFIG_FIELD_BY_NAME = { enabled = true }
+for i = 1, #CONFIG_FIELDS do
+  CONFIG_FIELD_BY_NAME[CONFIG_FIELDS[i].name] = true
+end
+
+-- Returns the config to run with and one line per problem.
+--
+-- The table comes back whatever went wrong, because the window that will own
+-- the config file needs it to fill its controls and the run needs it to start.
+-- Two code paths for those would be two chances to disagree about what a
+-- defaulted field holds.
+--
+-- Unknown keys are sorted before they are reported: pairs order is undefined,
+-- and a problem list whose order changes between runs is a log nobody can diff.
+function M.validate_config(config)
+  local problems = {}
+  local out = {}
+
+  if type(config) ~= "table" then
+    return { enabled = false },
+      { format("config is not a table: %s", type(config)) }
+  end
+
+  -- enabled short-circuits. Not true means the hook does nothing at all, so
+  -- there is nothing to validate and nobody to tell. An absent enabled is a
+  -- disabled hook and not a problem, because an absent config file means the
+  -- same thing and that is not an error either.
+  if config.enabled ~= nil then
+    local bad = bad_boolean(config.enabled, "enabled")
+    if bad then
+      problems[#problems + 1] = bad
+    end
+  end
+  if config.enabled ~= true then
+    return { enabled = false }, problems
+  end
+  out.enabled = true
+
+  for i = 1, #CONFIG_FIELDS do
+    local field = CONFIG_FIELDS[i]
+    local value = config[field.name]
+    if value == nil then
+      if not field.optional then
+        if field.default == nil then
+          problems[#problems + 1] =
+            format("%s is not set, and there is no default for it", field.name)
+        else
+          out[field.name] = field.default
+        end
+      end
+    else
+      local bad = field.check(value, field.name)
+      if bad then
+        problems[#problems + 1] = bad
+        out[field.name] = field.default
+      elseif field.normalise then
+        out[field.name] = field.normalise(value)
+      else
+        out[field.name] = value
+      end
+    end
+  end
+
+  local unknown = {}
+  for key in pairs(config) do
+    if not CONFIG_FIELD_BY_NAME[key] then
+      unknown[#unknown + 1] = tostring(key)
+    end
+  end
+  sort(unknown)
+  for i = 1, #unknown do
+    problems[#problems + 1] = format("%s is not a config field", unknown[i])
+  end
+
+  return out, problems
+end
+
+--------------------------------------------------------------------------------
 -- State machine
 --
 -- idle -> prepare -> hook -> mission -> done. DCS gives the hook one callback
