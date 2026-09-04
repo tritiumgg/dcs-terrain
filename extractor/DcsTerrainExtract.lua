@@ -670,6 +670,162 @@ function M.plan_grid(opts)
 end
 
 --------------------------------------------------------------------------------
+-- Pre-sweep lattice
+--
+-- When neither a crop nor an authored rectangle is given, the authored
+-- rectangle is measured: a coarse lattice over the theatre's bounds, each cell
+-- tested for terrain someone built, and the bounding rectangle of the cells
+-- that pass. This section is the lattice, the derivation and the record; what
+-- makes a cell authored is a terrain question and belongs with the sweeps.
+--
+-- The lattice takes metres. The theatre's own bounds are kilometres, so the
+-- caller multiplies, and the argument name says which unit it wanted.
+--------------------------------------------------------------------------------
+
+local function check_positive(v, what, name)
+  if not is_finite(v) or v <= 0 then
+    error(format("%s: %s is not a positive number: %s", what, name, tostring(v)), 3)
+  end
+  return v
+end
+
+function M.presweep_lattice(bounds_m, cell_km)
+  check_rect(bounds_m, "presweep_lattice")
+  check_positive(cell_km, "presweep_lattice", "cell_km")
+  local cell_m = cell_km * 1000
+  return {
+    cell_m = cell_m,
+    min_x = bounds_m.min_x,
+    min_z = bounds_m.min_z,
+    rows = ceil((bounds_m.max_x - bounds_m.min_x) / cell_m),
+    cols = ceil((bounds_m.max_z - bounds_m.min_z) / cell_m),
+  }
+end
+
+-- Row-major and 1-based, so the authored set is a plain Lua array and the
+-- bitmask can walk it in the order it is written.
+function M.presweep_index(lattice, row, col)
+  return row * lattice.cols + col + 1
+end
+
+function M.presweep_centre(lattice, row, col)
+  return lattice.min_x + (row + 0.5) * lattice.cell_m,
+         lattice.min_z + (col + 0.5) * lattice.cell_m
+end
+
+-- The bounding rectangle of the authored cells, grown by margin_m.
+--
+-- It bounds the cells' squares and not their centres, because a cell is
+-- authored as a whole: bounding the centres would lose half a cell at each
+-- edge, and a lattice cell is kilometres wide.
+--
+-- It is not clipped back to the theatre bounds. The margin can push it
+-- outside, where the engine returns fill and the per-cell fill test writes
+-- nodata anyway, so clipping would cost terrain at a theatre edge and buy
+-- nothing.
+function M.presweep_bounds(lattice, authored, margin_m)
+  if not is_finite(margin_m) or margin_m < 0 then
+    error("presweep_bounds: margin_m is not a distance: " .. tostring(margin_m), 2)
+  end
+  local min_row, max_row, min_col, max_col
+  for row = 0, lattice.rows - 1 do
+    for col = 0, lattice.cols - 1 do
+      if authored[M.presweep_index(lattice, row, col)] then
+        if min_row == nil or row < min_row then min_row = row end
+        if max_row == nil or row > max_row then max_row = row end
+        if min_col == nil or col < min_col then min_col = col end
+        if max_col == nil or col > max_col then max_col = col end
+      end
+    end
+  end
+  if min_row == nil then
+    error("presweep_bounds: no cell is authored", 2)
+  end
+  return {
+    min_x = lattice.min_x + min_row * lattice.cell_m - margin_m,
+    min_z = lattice.min_z + min_col * lattice.cell_m - margin_m,
+    max_x = lattice.min_x + (max_row + 1) * lattice.cell_m + margin_m,
+    max_z = lattice.min_z + (max_col + 1) * lattice.cell_m + margin_m,
+  }
+end
+
+local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+-- Base64 by arithmetic, because the hook state has no bit library.
+function M.base64(s)
+  if type(s) ~= "string" then
+    error("base64: not a string: " .. type(s), 2)
+  end
+  local out, n = {}, 0
+  local len = #s
+  local i = 1
+  while i <= len do
+    local b1, b2, b3 = s:byte(i), s:byte(i + 1), s:byte(i + 2)
+    local v = b1 * 65536 + (b2 or 0) * 256 + (b3 or 0)
+    local c1 = floor(v / 262144) % 64
+    local c2 = floor(v / 4096) % 64
+    local c3 = floor(v / 64) % 64
+    local c4 = v % 64
+    local head = B64:sub(c1 + 1, c1 + 1) .. B64:sub(c2 + 1, c2 + 1)
+    n = n + 1
+    if b3 then
+      out[n] = head .. B64:sub(c3 + 1, c3 + 1) .. B64:sub(c4 + 1, c4 + 1)
+    elseif b2 then
+      out[n] = head .. B64:sub(c3 + 1, c3 + 1) .. "="
+    else
+      out[n] = head .. "=="
+    end
+    i = i + 3
+  end
+  return concat(out)
+end
+
+local BIT_VALUE = { [0] = 128, [1] = 64, [2] = 32, [3] = 16, [4] = 8, [5] = 4, [6] = 2, [7] = 1 }
+
+-- One bit per lattice cell, most significant bit first, each row padded to a
+-- whole byte. Padding per row rather than packing the lattice end to end keeps
+-- a row addressable on its own: row r starts at byte r * ceil(cols / 8).
+function M.presweep_bitmask(lattice, authored)
+  local stride = ceil(lattice.cols / 8)
+  local bytes, n = {}, 0
+  for row = 0, lattice.rows - 1 do
+    for byte = 0, stride - 1 do
+      local v = 0
+      for bit = 0, 7 do
+        local col = byte * 8 + bit
+        if col < lattice.cols and authored[M.presweep_index(lattice, row, col)] then
+          v = v + BIT_VALUE[bit]
+        end
+      end
+      n = n + 1
+      bytes[n] = char(v)
+    end
+  end
+  return M.base64(concat(bytes))
+end
+
+-- The whole block config.json carries for a pre-sweep. Built here rather than
+-- where config.json is written, so the lattice's indexing convention and the
+-- record of it stay in one place.
+function M.presweep_record(lattice, authored, opts)
+  local total = lattice.rows * lattice.cols
+  local count = 0
+  for i = 1, total do
+    if authored[i] then
+      count = count + 1
+    end
+  end
+  return {
+    cell_km = lattice.cell_m / 1000,
+    breakpoint_min = opts.breakpoint_min,
+    road_max_m = opts.road_max_m,
+    authored_cells = count,
+    total_cells = total,
+    bitmask = M.presweep_bitmask(lattice, authored),
+  }
+end
+
+--------------------------------------------------------------------------------
 -- Tiles
 --
 -- A tile is tile_size by tile_size cells. Tile (tx, tz) holds rows from
