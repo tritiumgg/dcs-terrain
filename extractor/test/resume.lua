@@ -46,9 +46,8 @@ local fresh = E.new_manifest(opts())
 T.group("resume with half the tiles journalled")
 --------------------------------------------------------------------------------
 
--- What the interrupted run had recorded before it was killed.
-fresh.passes.hook.started_at = "2026-09-04T09:12:44Z"
-fresh.passes.hook.frames = 101884
+-- What the interrupted run had recorded before it was killed. It never reached
+-- done, so `complete` is still the false a fresh manifest starts with.
 fresh.timing_ms = { water = 98400 }
 fresh.notes = E.as_array({ "height 2_2: GetHeight failed on 4 cells" })
 E.write_manifest("C:/extract", fresh)
@@ -83,10 +82,10 @@ T.eq("eight tiles are skipped", done, 8)
 T.eq("eight are still to sweep", todo, 8)
 T.eq("and the height layer is untouched", state.done[E.tile_key("height", 0, 0)], nil)
 
--- The four fields a resume cannot recompute. Losing notes is the one that
--- turns a recorded partial failure into an extract that looks clean.
+-- The fields a resume cannot recompute. Losing notes is the one that turns a
+-- recorded partial failure into an extract that looks clean.
 T.eq("the original start time survives", state.manifest.extracted_at, "2026-09-04T09:12:44Z")
-T.eq("the pass record survives", state.manifest.passes.hook.frames, 101884)
+T.eq("the interrupted run is still incomplete", state.manifest.complete, false)
 T.eq("the timings survive", state.manifest.timing_ms.water, 98400)
 T.eq("the notes survive", E.json(state.manifest.notes),
   '["height 2_2: GetHeight failed on 4 cells"]')

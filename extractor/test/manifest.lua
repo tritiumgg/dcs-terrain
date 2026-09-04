@@ -56,9 +56,7 @@ T.eq("an explicit time wins",
   E.new_manifest(opts({ extracted_at = "2020-01-01T00:00:00Z" })).extracted_at,
   "2020-01-01T00:00:00Z")
 
-T.eq("no pass is complete", fresh.passes.hook.complete, false)
-T.eq("no frames yet", fresh.passes.mission.frames, 0)
-T.eq("nothing started", E.json(fresh.passes.hook.started_at), "null")
+T.eq("a fresh manifest is not complete", fresh.complete, false)
 
 -- notes and tiles are arrays even when empty, and timing_ms is an object.
 T.eq("tiles is an array", E.json(fresh.tiles), "[]")
@@ -120,9 +118,9 @@ T.eq("no tmp left", fs.files["C:/extract/manifest.json.tmp"], nil)
 T.eq("it round trips", E.json(E.read_manifest("C:/extract")), E.json(fresh))
 
 -- Rewritten at every phase change, so replacing one has to work.
-fresh.passes.hook.frames = 101884
+fresh.complete = true
 T.eq("rewritten", E.write_manifest("C:/extract", fresh), true)
-T.eq("with the new content", E.read_manifest("C:/extract").passes.hook.frames, 101884)
+T.eq("with the new content", E.read_manifest("C:/extract").complete, true)
 T.eq("still no aside", fs.files["C:/extract/manifest.json.prev"], nil)
 
 T.done()

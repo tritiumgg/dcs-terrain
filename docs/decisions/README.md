@@ -24,6 +24,7 @@ disagree, the later accepted one wins, and the earlier is marked
 | [0010](0010-server-state-calls-need-terrain-not-a-mission.md) | Accepted | 2026-09-04 | `server`-state `land` and `world` calls need loaded terrain, not a running mission | `design-and-facts.md` phase-`sim` rule; `extractor-hook.md` "Lifecycle" step 4, "Mission-pass sweeps"; probe log "Crash record"; `CLAUDE.md`; `plan.md` X4, X8a, X8b, X10 |
 | [0011](0011-config-holds-only-what-a-user-can-answer.md) | Accepted | 2026-09-04 | The config table holds only what a user can answer; the rest is derived or constant | `extractor-hook.md` "Config table", "Hook-pass sweeps", "Mission-pass sweeps"; `extract-format.md` "Tables"; ADR 0010's `allow_helipads` clause; `plan.md` X2a, X2b, X5, X8b, X10, X12, X13 |
 | [0012](0012-a-bad-config-value-falls-back-to-its-default.md) | Accepted | 2026-09-04 | A bad config value is logged and falls back to its default | `extractor-hook.md` "Config table" validation sentence, "Files" `dcs.log` clause; `plan.md` X2a |
+| [0013](0013-the-manifest-records-one-complete.md) | Accepted | 2026-09-04 | The manifest records one `complete`, not per-pass records | `extract-format.md` "manifest.json"; ADR 0007's manifest example; ADR 0010's `passes.mission` clause; `plan.md` X4, C3, C12b |
 
 Add a row when you add an ADR. This table is the index Claude reads, so an ADR
 missing from it will not be found. Each record's own `Affects` line, at the top

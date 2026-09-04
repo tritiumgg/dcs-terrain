@@ -1224,15 +1224,6 @@ local function or_null(v)
   return v
 end
 
-local function new_pass()
-  return {
-    complete = false,
-    started_at = M.JSON_NULL,
-    finished_at = M.JSON_NULL,
-    frames = 0,
-  }
-end
-
 local MANIFEST_REQUIRED = {
   "theatre", "dcs_build", "dcs_build_timestamp", "terrain_fingerprint",
   "bounds_km", "grid",
@@ -1271,7 +1262,10 @@ function M.new_manifest(opts)
     grid = opts.grid,
     omit_sea_tiles = opts.omit_sea_tiles,
     layers = M.layers(),
-    passes = { hook = new_pass(), mission = new_pass() },
+    -- ADR 0013: one flag for the run, set when it reaches done. What each job
+    -- cost is timing_ms, and which tiles exist is the journal; a per-pass
+    -- record on top of those could only ever repeat them.
+    complete = false,
     tiles = M.as_array({}),
     tables = M.table_files(),
     timing_ms = {},
@@ -1761,7 +1755,9 @@ M.STATE_DONE = "done"
 -- lasts for as long as DCS sits at the main menu, which can be hours.
 M.IDLE_POLL_FRAMES = 60
 
--- Only two of the five states are passes the manifest records.
+-- Two of the five states are passes with sweeps registered against them, and
+-- this is what maps one to the other's job list. The manifest records neither
+-- of them any more (ADR 0013); these are the names sweeps register under.
 local PASS_OF = { [M.STATE_HOOK] = "hook", [M.STATE_MISSION] = "mission" }
 
 M.jobs = { prepare = {}, hook = {}, mission = {} }
@@ -1864,9 +1860,6 @@ function M.enter(run, state)
 
   local pass = PASS_OF[state]
   if pass then
-    if run.manifest then
-      run.manifest.passes[pass].started_at = M.now_iso()
-    end
     -- A phase with nothing registered is legitimate: it is what every phase
     -- looks like before its sweeps are built.
     run.queue = M.new_queue(run.jobs[pass] or {})
@@ -1877,15 +1870,6 @@ function M.enter(run, state)
   M.log("phase " .. state)
   M.save(run)
   return state
-end
-
-local function complete_pass(run, pass)
-  if not run.manifest then
-    return
-  end
-  local p = run.manifest.passes[pass]
-  p.complete = true
-  p.finished_at = M.now_iso()
 end
 
 -- ADR 0011: both passes always run, so this is a walk and not a choice. The two
@@ -1949,15 +1933,11 @@ end
 
 local function frame_pass(run)
   run.phase_frames = run.phase_frames + 1
-  local pass = PASS_OF[run.state]
-  if pass and run.manifest then
-    local p = run.manifest.passes[pass]
-    p.frames = p.frames + 1
-  end
 
   -- The sweeps of this pass reach the server state, so the run ends rather
-  -- than calling into a terrain layer that is no longer there. The pass keeps
-  -- the false `complete` it started with.
+  -- than calling into a terrain layer that is no longer there. It reaches done
+  -- without passing through next_state, so the manifest keeps the false
+  -- `complete` it started with, which is what an interrupted run should say.
   if run.state == M.STATE_MISSION and not terrain_loaded(run) then
     return M.enter(run, M.STATE_DONE)
   end
@@ -1967,10 +1947,14 @@ local function frame_pass(run)
   if status == M.MORE then
     return run.state
   end
-  if pass then
-    complete_pass(run, pass)
+
+  -- ADR 0013: one flag, set on the way out of the last phase and before enter
+  -- saves, so the manifest left on disk is the one claiming the run finished.
+  local next = next_state(run)
+  if next == M.STATE_DONE and run.manifest then
+    run.manifest.complete = true
   end
-  return M.enter(run, next_state(run))
+  return M.enter(run, next)
 end
 
 -- One simulation frame. Returns the state the run is in after it, which is the

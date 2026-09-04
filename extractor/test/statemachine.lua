@@ -119,21 +119,15 @@ end
 T.eq("and takes no more frames", run.frames, frames_at_done)
 
 --------------------------------------------------------------------------------
-T.group("the manifest records the pass")
+T.group("the manifest records the run")
 --------------------------------------------------------------------------------
 
+-- ADR 0013: one flag for the run and no record per pass. What each phase cost
+-- is timing_ms, at finer grain than a pass, and which tiles exist is the
+-- journal.
 local manifest = run.manifest
-T.eq("hook complete", manifest.passes.hook.complete, true)
-T.eq("hook started", manifest.passes.hook.started_at, "2026-09-04T09:12:44Z")
-T.eq("hook finished", manifest.passes.hook.finished_at, "2026-09-04T09:12:44Z")
-
--- Four one-millisecond steps of hook work fit one five-millisecond frame, so
--- the whole pass is one frame.
-T.eq("hook pass took one frame", manifest.passes.hook.frames, 1)
-
-T.eq("mission complete", manifest.passes.mission.complete, true)
-T.eq("mission started", manifest.passes.mission.started_at, "2026-09-04T09:12:44Z")
-T.eq("mission finished", manifest.passes.mission.finished_at, "2026-09-04T09:12:44Z")
+T.eq("the run is complete", manifest.complete, true)
+T.eq("and the key it replaced is gone", manifest.passes, nil)
 
 T.eq("every job timed",
   table.concat({ manifest.timing_ms.presweep, manifest.timing_ms.config,
@@ -165,7 +159,7 @@ T.eq("prepare goes to the hook pass", run.state, E.STATE_HOOK)
 -- and finish. What is being asserted is that they were entered at all.
 until_past(run, E.STATE_HOOK, 5)
 T.eq("then the mission pass", run.state, E.STATE_MISSION)
-T.eq("hook pass complete", run.manifest.passes.hook.complete, true)
+T.eq("and the run is not complete part way through", run.manifest.complete, false)
 
 --------------------------------------------------------------------------------
 T.group("phases are logged")

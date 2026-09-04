@@ -187,6 +187,6 @@ T.eq("and keeps sweeping", run.state, E.STATE_MISSION)
 terrain = nil
 cb.onSimulationFrame()
 T.eq("terrain going ends the run", run.state, E.STATE_DONE)
-T.eq("pass incomplete", run.manifest.passes.mission.complete, false)
+T.eq("but the run is not complete", run.manifest.complete, false)
 
 T.done()

@@ -7,7 +7,7 @@
 -- calls need is loaded terrain rather than a running mission. So the gate is
 -- the same terrain check idle polls with, made every frame, and there is no
 -- waiting for a mission and no mission clock. It keeps the name "mission
--- pass" because `passes.mission` is a frozen manifest key.
+-- pass" because that is the name its sweeps register under.
 
 package.path = "extractor/?.lua;extractor/test/support/?.lua;" .. package.path
 
@@ -111,8 +111,7 @@ T.eq("in the pass", run.state, E.STATE_MISSION)
 until_past(run, E.STATE_MISSION, 20)
 T.eq("and it finished", run.state, E.STATE_DONE)
 T.eq("surface swept", run.manifest.timing_ms.surface, 40)
-T.eq("pass complete", run.manifest.passes.mission.complete, true)
-T.eq("and stamped", run.manifest.passes.mission.finished_at, "2026-09-04T09:12:44Z")
+T.eq("and the run is complete", run.manifest.complete, true)
 
 --------------------------------------------------------------------------------
 T.group("phases run in order through both passes")
@@ -149,9 +148,7 @@ run = new_run({
 up_to_mission(run)
 
 T.eq("the mission pass ran anyway", run.state, E.STATE_MISSION)
-T.eq("hook pass complete", run.manifest.passes.hook.complete, true)
-T.eq("and the mission pass has started",
-  run.manifest.passes.mission.started_at, "2026-09-04T09:12:44Z")
+T.eq("with the hook pass's sweeps behind it", run.manifest.timing_ms.water, 3)
 
 --------------------------------------------------------------------------------
 T.group("terrain going away ends the pass")
@@ -170,7 +167,9 @@ logged = {}
 terrain = nil
 E.run_frame(run)
 T.eq("the run is over", run.state, E.STATE_DONE)
-T.eq("pass incomplete", run.manifest.passes.mission.complete, false)
+-- Done, but not complete: it reached the state without passing through
+-- next_state, which is the only place the flag is set.
+T.eq("but not complete", run.manifest.complete, false)
 T.eq("and it says why", logged[1], "terrain unloaded during the mission pass")
 
 -- Nothing swept after the terrain went, so no chunk was sent into a state with
@@ -179,8 +178,8 @@ T.eq("surface never finished", run.manifest.timing_ms.surface, nil)
 
 -- The final manifest is on disk, not only in memory.
 local saved = E.read_manifest(run.dir)
-T.eq("hook pass complete on disk", saved.passes.hook.complete, true)
-T.eq("mission pass incomplete on disk", saved.passes.mission.complete, false)
+T.eq("the hook pass's work is on disk", saved.timing_ms.water, 3)
+T.eq("and the run is not complete on disk", saved.complete, false)
 
 --------------------------------------------------------------------------------
 T.group("the terrain check is made on every frame of the pass")
@@ -231,12 +230,16 @@ for _ = 1, 10000 do
   frames = frames + 1
   local saved_now = E.read_manifest(run.dir)
   if saved_now then
+    -- The rungs are the jobs' own timings and the run's one completion flag.
+    -- Each is written only once and never taken back, so a saved manifest that
+    -- ever showed a lower rung than one already seen would mean a write had
+    -- gone backwards.
     local reached = 0
-    if saved_now.passes.hook.started_at ~= E.JSON_NULL then reached = 1 end
-    if saved_now.timing_ms.water then reached = 2 end
-    if saved_now.passes.hook.complete then reached = 3 end
-    if saved_now.passes.mission.started_at ~= E.JSON_NULL then reached = 4 end
-    if saved_now.passes.mission.complete then reached = 5 end
+    if saved_now.timing_ms.presweep then reached = 1 end
+    if saved_now.timing_ms.config then reached = 2 end
+    if saved_now.timing_ms.water then reached = 3 end
+    if saved_now.timing_ms.surface then reached = 4 end
+    if saved_now.complete then reached = 5 end
     if reached < highest then
       ordered = false
     end
@@ -246,7 +249,7 @@ end
 E.save = save
 
 T.eq("the saved manifest only ever advances", ordered, true)
-T.eq("it reached both passes complete", highest, 5)
+T.eq("it reached a complete run", highest, 5)
 T.eq("the run finished inside ten thousand frames", run.state, E.STATE_DONE)
 T.eq("all ten thousand frames driven", frames, 10000)
 
