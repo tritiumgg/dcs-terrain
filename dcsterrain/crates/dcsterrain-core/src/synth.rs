@@ -322,6 +322,10 @@ mod tests {
         // one place; a constant added below is picked up with no second list
         // to maintain.
         let src = include_str!("synth.rs");
+        // A Windows checkout carries CRLF, and the join below matches on the
+        // newline, so normalise first. Nothing else here needs it: lines()
+        // drops the carriage return by itself.
+        let src = src.replace("\r\n", "\n");
         let mut out = BTreeMap::new();
         // `pub const NAME: T = value;` may wrap after the `=` when rustfmt
         // decides the line is too long, so joining continuations comes first.
