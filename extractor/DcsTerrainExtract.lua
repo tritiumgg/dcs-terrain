@@ -15,6 +15,7 @@
 local M = {}
 
 local floor = math.floor
+local ceil = math.ceil
 local char = string.char
 local format = string.format
 local concat = table.concat
@@ -566,6 +567,162 @@ function M.table_files()
     out[name] = file
   end
   return out
+end
+
+--------------------------------------------------------------------------------
+-- Grid
+--
+-- The grid covers [origin_x, origin_x + height * cell_size) by [origin_z,
+-- origin_z + width * cell_size). Rows run north with DCS x and columns run
+-- east with DCS z, and every sample is taken at a cell centre.
+--------------------------------------------------------------------------------
+
+local RECT_KEYS = { "min_x", "min_z", "max_x", "max_z" }
+
+local function check_rect(rect, what)
+  if type(rect) ~= "table" then
+    error(format("%s: not a rectangle: %s", what, type(rect)), 3)
+  end
+  for i = 1, #RECT_KEYS do
+    local key = RECT_KEYS[i]
+    if not is_finite(rect[key]) then
+      error(format("%s: %s is not a finite number: %s", what, key, tostring(rect[key])), 3)
+    end
+  end
+  if rect.min_x >= rect.max_x or rect.min_z >= rect.max_z then
+    error(format("%s: rectangle is empty", what), 3)
+  end
+  return rect
+end
+
+local function check_positive_integer(v, what, name)
+  if not is_finite(v) or floor(v) ~= v or v <= 0 then
+    error(format("%s: %s is not a positive integer: %s", what, name, tostring(v)), 3)
+  end
+  return v
+end
+
+-- Snaps the rectangle outward to a multiple of cell_size.
+--
+-- Outward and not to the nearest, so a cell the rectangle touches at all is
+-- inside the grid. Rounding to the nearest drops the cell at each edge that
+-- the rectangle only reaches partway into.
+--
+-- The extents are the difference of the two cell indices, not
+-- ceil((max - min) / cell_size). Those are different functions: the second
+-- measures the rectangle's own span, which misses the distance from the grid
+-- origin to where the rectangle starts, so it can come out a cell short.
+--
+-- Nothing here needs an epsilon, and adding one would be the bug. Every
+-- quantity is an exact double at theatre scale, and a correctly rounded
+-- division whose exact quotient is representable is exact, so ceil(26400 / 50)
+-- is 528 and never 528.000000001.
+function M.grid_from_rect(rect, cell_size, tile_size)
+  check_rect(rect, "grid_from_rect")
+  check_positive_integer(cell_size, "grid_from_rect", "cell_size")
+  check_positive_integer(tile_size, "grid_from_rect", "tile_size")
+
+  local low_row = floor(rect.min_x / cell_size)
+  local low_col = floor(rect.min_z / cell_size)
+  local high_row = ceil(rect.max_x / cell_size)
+  local high_col = ceil(rect.max_z / cell_size)
+
+  return {
+    cell_size = cell_size,
+    origin_x = low_row * cell_size,
+    origin_z = low_col * cell_size,
+    height = high_row - low_row,
+    width = high_col - low_col,
+    tile_size = tile_size,
+  }
+end
+
+-- Chooses the rectangle the grid covers and records where the authored
+-- rectangle came from.
+--
+-- A crop wins over the authored rectangle, because the user asked for that
+-- box. The authored rectangle is still recorded when there is one: it is what
+-- tells a later reader which of those cells are terrain someone built rather
+-- than the fill the engine returns outside it.
+--
+-- ADR-0009: a crop run with no authored rectangle leaves both nil, and the
+-- manifest writes them as null. Nil here means unknown, never empty.
+function M.plan_grid(opts)
+  local authored, source = opts.authored_bounds_m, nil
+  if authored then
+    source = "config"
+  elseif opts.presweep_bounds_m then
+    authored = opts.presweep_bounds_m
+    source = "presweep"
+  end
+
+  local rect = opts.crop_m or authored
+  if not rect then
+    error("plan_grid: no crop, authored bounds or pre-sweep rectangle", 2)
+  end
+
+  return {
+    grid = M.grid_from_rect(rect, opts.cell_size, opts.tile_size),
+    crop_m = opts.crop_m,
+    authored_bounds_m = authored,
+    authored_bounds_source = source,
+  }
+end
+
+--------------------------------------------------------------------------------
+-- Tiles
+--
+-- A tile is tile_size by tile_size cells. Tile (tx, tz) holds rows from
+-- tx * tile_size north and columns from tz * tile_size east, and within a tile
+-- the sample index is local_row * tile_size + local_col: row-major, columns
+-- fastest. The last tile in each direction is a full tile, so the cells past
+-- the grid edge are written as the layer's nodata rather than left out.
+--------------------------------------------------------------------------------
+
+function M.tile_counts(grid)
+  return ceil(grid.height / grid.tile_size), ceil(grid.width / grid.tile_size)
+end
+
+-- tx outer, tz inner. Sequential access is what makes GetSurfaceType cheap, so
+-- the order is stated once here rather than left to each sweep to choose.
+function M.each_tile(grid)
+  local high, wide = M.tile_counts(grid)
+  local tx, tz = 0, -1
+  return function()
+    tz = tz + 1
+    if tz >= wide then
+      tz = 0
+      tx = tx + 1
+    end
+    if tx >= high then
+      return nil
+    end
+    return tx, tz
+  end
+end
+
+function M.cell_centre(grid, row, col)
+  return grid.origin_x + (row + 0.5) * grid.cell_size,
+         grid.origin_z + (col + 0.5) * grid.cell_size
+end
+
+function M.tile_first_cell(grid, tx, tz)
+  return tx * grid.tile_size, tz * grid.tile_size
+end
+
+function M.cell_in_grid(grid, row, col)
+  return row >= 0 and row < grid.height and col >= 0 and col < grid.width
+end
+
+function M.tile_sample_index(grid, local_row, local_col)
+  return local_row * grid.tile_size + local_col
+end
+
+function M.tile_path(layer, tx, tz)
+  if not LAYER_BY_NAME[layer] then
+    error("tile_path: not a layer: " .. tostring(layer), 2)
+  end
+  return format("tiles/%s/%d_%d.bin", layer, tx, tz)
 end
 
 --------------------------------------------------------------------------------
