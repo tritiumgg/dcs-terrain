@@ -9,6 +9,8 @@ without `seek`.
   `Config/DcsTerrainExtract.lua`. It is disabled until that config exists.
 - `test/` — offline tests, run with a plain `lua5.1` interpreter. Every `.lua`
   file directly under it is a test; `test/support/` holds what they read.
+- `test/support/testing.lua` — the whole test framework: a few checks and a
+  `done()` that exits non-zero, since each file's exit status is its result.
 - `test/support/synth_constants.lua` — the reference constants for the
   synthetic theatre. Its twin is `synth.rs` in `dcsterrain-core`, and a Rust
   test parses this file and fails when the two disagree, so a change here runs
