@@ -56,7 +56,7 @@ component are in build order.
 | Id | Deliverable | Done | Depends on |
 |---|---|---|---|
 | P1 | Repository layout: `dcsterrain/` Cargo workspace, `extractor/` for the Lua hook and its offline Lua tests (ADR-0005: no stub harness is vendored), `tools/validate/`, `docs/` holding these documents; `.gitignore` excludes `*.sqlite`, `extracts/`, `*.bin` | Tree exists; README states "no terrain data is committed" | — |
-| P2 | CI: Rust build and test on Windows, macOS, Linux; Lua 5.1 offline tests | Green on an empty synthetic run | P1, C1, X1 |
+| P2 | CI: Rust build and test on Windows, macOS, Linux; Lua 5.1 offline tests. One workflow per language, each scoped to the paths it tests, so a documentation commit starts no runner | Green on an empty synthetic run | P1, C1, X1 |
 | P3 | Release build: static `dcsterrain` binaries for the three platforms, each built on its own CI runner with `cargo build --release`, attached to tags | The tagged Windows binary packs a synthetic extract on the Windows machine and the tagged macOS binary does the same on macOS, without a toolchain on either | P2, C13 |
 | P4 | Licensing note in README: extracts and packed files are derived from ED terrain data and stay on the user's machine; publishing them is the user's call against the ED EULA | Text reviewed | P1 |
 

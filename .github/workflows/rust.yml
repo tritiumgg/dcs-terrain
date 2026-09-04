@@ -1,0 +1,65 @@
+name: rust
+
+# Runs only when Rust sources or the toolchain pin change. Most commits in this
+# repository touch documentation only, and those must not start a runner.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "dcsterrain/**"
+      - "rust-toolchain.toml"
+      - ".github/workflows/rust.yml"
+  pull_request:
+    paths:
+      - "dcsterrain/**"
+      - "rust-toolchain.toml"
+      - ".github/workflows/rust.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch supersedes the one in flight, so a burst of
+# commits costs one run rather than one per commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+defaults:
+  run:
+    working-directory: dcsterrain
+
+jobs:
+  # Formatting, lints and tests are platform-independent, so they run once, on
+  # the cheapest runner. rustup installs the pinned toolchain from
+  # rust-toolchain.toml on the first cargo call; no toolchain action is used,
+  # because that would be a second place the version is written.
+  #
+  # No dependency cache: the workspace has no dependencies yet, so saving and
+  # restoring one costs more than the build it would skip. Add one when C1
+  # lands clap, serde and schemars.
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  # Windows and macOS prove portability only. They wait for Linux, so a broken
+  # commit burns one runner instead of three.
+  platforms:
+    needs: linux
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - run: cargo test --workspace

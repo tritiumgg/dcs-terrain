@@ -1,0 +1,50 @@
+name: lua
+
+# Runs only when the extractor changes. Nothing here needs DCS: these are the
+# offline tests for the encoders, grid arithmetic, the frame budget and
+# injected failures.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "extractor/**"
+      - ".github/workflows/lua.yml"
+  pull_request:
+    paths:
+      - "extractor/**"
+      - ".github/workflows/lua.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      # 5.1 is what the DCS hook state runs, and the tests exist to catch what
+      # 5.1 does differently. Ubuntu ships it, which is cheaper than building
+      # it from source the way the Windows machine has to.
+      - run: sudo apt-get update && sudo apt-get install -y lua5.1
+
+      # Every .lua file directly under extractor/test/ is a test. They run from
+      # the repository root and set their own package.path.
+      - name: Run offline tests
+        run: |
+          shopt -s nullglob
+          files=(extractor/test/*.lua)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "no offline tests yet"
+            exit 0
+          fi
+          for f in "${files[@]}"; do
+            echo "== $f"
+            lua5.1 "$f"
+          done
