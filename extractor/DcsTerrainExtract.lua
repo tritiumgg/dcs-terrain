@@ -1781,4 +1781,69 @@ function M.run_frame(run)
   return frame_pass(run)
 end
 
+--------------------------------------------------------------------------------
+-- DCS callbacks
+--
+-- The four callbacks the run is driven by. onSimulationFrame is the whole
+-- engine; the other three only tell the run things it cannot see from a frame.
+--
+-- Two of them only record that something happened, which is most of what the
+-- progress log has to say about a run nobody is watching.
+--
+-- Nothing here registers itself. Registration needs a config, and reading one
+-- is not built yet, so a DCS that loads this file gets a module and no run.
+--------------------------------------------------------------------------------
+
+-- Makes the next idle frame poll for a terrain rather than waiting out the
+-- rest of the sixty.
+local function poll_next_frame(run)
+  run.idle_frames = 0
+end
+
+function M.callbacks(run)
+  return {
+    onSimulationFrame = function()
+      M.run_frame(run)
+    end,
+
+    -- A mission has finished loading, so there is a terrain now whether or not
+    -- the poll was due. No callback fires during a mission load, so this is
+    -- also the first frame-adjacent event after one.
+    onMissionLoadEnd = function()
+      if run.state == M.STATE_IDLE then
+        poll_next_frame(run)
+      end
+    end,
+
+    -- A mission starting means a terrain too, so this ends the idle wait for
+    -- the same reason a mission load does. It gates nothing: ADR 0010, the
+    -- sweeps need terrain rather than a mission.
+    onSimulationStart = function()
+      M.log("simulation started")
+      if run.state == M.STATE_IDLE then
+        poll_next_frame(run)
+      end
+    end,
+
+    -- Recorded and nothing more. A mission ending may or may not take the
+    -- terrain with it -- back to the menu it goes, back to the editor it stays
+    -- -- and the pass that cares tests for terrain on every frame rather than
+    -- trusting an event to tell it.
+    onSimulationStop = function()
+      M.log("simulation stopped")
+    end,
+  }
+end
+
+-- Returns nil and a reason where there is no DCS around this file, which is
+-- every offline test and is not an error.
+function M.register(run)
+  local dcs = rawget(_G, "DCS")
+  if type(dcs) ~= "table" or type(dcs.setUserCallbacks) ~= "function" then
+    return nil, "DCS.setUserCallbacks is not available"
+  end
+  dcs.setUserCallbacks(M.callbacks(run))
+  return true
+end
+
 return M
