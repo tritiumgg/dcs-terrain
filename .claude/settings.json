@@ -1,5 +1,31 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-frozen-writes.sh"],
+            "timeout": 10,
+            "statusMessage": "Checking the file is not frozen"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-bash.sh"],
+            "timeout": 10,
+            "statusMessage": "Checking the command against the project rules"
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "startup|resume|clear",
