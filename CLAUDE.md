@@ -246,6 +246,49 @@ optional; the phase-`sim` rule exists because that call crashed DCS.
   regenerate its ledger and glossary, re-stamp, and freeze that. Never a side
   effect of another change.
 
+### How changes are delivered
+
+**Every change is a pull request, and no pull request exceeds 400 lines of
+change** — counting tests, and counting the lines it removes. Work larger than
+that becomes a stack of pull requests, each branching off the one before it.
+
+The limit is about review, not tidiness. A 400-line diff gets read; a
+2 000-line one gets approved. Splitting also forces the seams to be named
+before the code is written, which is where most of the design argument
+actually happens.
+
+- **Every pull request in a stack stands on its own.** Its tests pass, so a
+  reviewer can stop after any one of them and the repository still works.
+- **Order a stack by dependency, not by size.** It is reviewed bottom up, so
+  what everything else needs goes first.
+- **Merge fast-forward only, after review.** Merge the bottom of the stack,
+  then rebase what is left onto main.
+- Put a document edit in the pull request whose code changes it, not in a
+  documentation pull request of its own. A `plan.md` row and the code that
+  reshapes it are one reviewable thought.
+
+Splitting a task across pull requests does not split it across sessions.
+`docs/STATE.md` is updated in whichever pull request ends the session, whether
+or not the task it names is finished.
+
+### Subagents
+
+Spawning a subagent is allowed, and worth it for work that fans out: sweeping
+the specs for every place a claim appears, pressure-testing a plan before it is
+executed, or reviewing a change against the frozen documents. Work you can
+finish by reading three files you can already name is faster done directly.
+
+- **A subagent never calls the DCS bridge.** The rules in "The DCS boundary"
+  exist because one of those calls crashed DCS, and a running sim is the
+  scarce resource on the Windows machine. Bridge calls stay in the session
+  that is talking to the user.
+- **A subagent never writes `docs/`.** Not an ADR, not STATE.md, not the plan.
+  Those record decisions, and a decision is agreed with the user before it is
+  written down. Reading all of it and reporting back is fine.
+- **A subagent's report is a claim, not a source.** Check a number, a symbol
+  or a quoted spec line before acting on it, the same as any other second-hand
+  figure.
+
 ## Facts worth having in hand
 
 Cited so they can be checked, not so they replace reading the spec.
