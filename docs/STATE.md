@@ -4,24 +4,26 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-05T00:20Z
+**Last updated:** 2026-09-05T02:40Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **X13 spiked, and three of seven branches open.** Every spike unknown is
-   measured on 2.9.29.27468 with the editor on Caucasus, each step read back by
-   `DCS.makeScreenShot`, so an agent can see the window rather than report it.
-   Every widget the controls need constructs from the hook state; an unskinned
-   one draws nothing. A window refuses to close by overriding `onClose` to
-   re-assert `setVisible(true)`, checked against the real title-bar X.
+1. **X13 spiked, and five PRs open — the window is on screen.** Every spike
+   unknown is measured on 2.9.29.27468 with the editor on Caucasus, each step
+   read back by `DCS.makeScreenShot`, so an agent can see the window rather than
+   report it. Every widget the controls need constructs from the hook state; an
+   unskinned one draws nothing. A window refuses to close because the native
+   side hides it and *then* fires `onClose`, so re-asserting `setVisible(true)`
+   there wins — checked against the real title-bar X.
    `net.dostring_in("gui", ...)` reaches `MapWindow`: `getCurPosition()` matched
    the editor's status bar to the digit, `getMapBounds()` answers in
    **kilometres**, and its Draw layer takes a `Polygon` whose points are
    *relative* to the anchor and whose fill needs the ring closed explicitly.
-   Open: `field_problem` with a `tags` return, the config file under an empty
-   environment, and ADR 0014's stopped state.
+   Open, bottom to top: **37** `field_problem` and a `tags` return, **38** the
+   config file under an empty environment, **39** ADR 0014's stopped state,
+   **40** ADR 0015's widget seam and failure latch, **41** the window chrome.
 2. **X2a, and a change of direction: configuration moves into a window.** Most
    of the frozen config table turned out not to be a question a user can answer,
    so three ADRs came out of planning it — **0011** cuts sixteen fields to
@@ -59,14 +61,14 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
 One task. The thing to pick up immediately.
 
-**X13 branch 4 — the window itself**, on the three open PRs: the seam (`M.gui`,
-`M.ui`, a one-way latch), the chrome, and the bootstrap that reads the config at
-load and registers. First branch a maintainer can install and see. An ADR lands
-with it: a failing widget call abandons the window and never touches the run.
-Then controls, wiring, map pick, crop overlay.
-
-*Verified by:* an agent, offline and by screenshot — except whether
-`require("Skin")` answers at hook-**load** time, which needs a live install.
+**X13 branch 6 — the status line and the bootstrap**, on PR 41. `window_status`
+says "Open a map in the Mission Editor." with no terrain and the run's state
+otherwise; `attach_window` points `on_frame` at build-then-update, writing the
+label only when it changed. Both were written and live-tested, then split out to
+hold 41 under the limit, so write them again. Then the bootstrap: read the config
+at load, set `log_path`, register, stay silent when not enabled. It installs and
+shows something, so it clears both READMEs' "not built yet" notes. *Verified by:*
+an agent, except `require("Skin")` at hook-**load** time, which needs DCS.
 
 ## Then
 
@@ -103,5 +105,4 @@ Things a later task must not lose. Max 10 — `CLAUDE.md` has the rules.
 |---|---|---|
 | 1 | `synth` produces no all-fill tile at any size: the fill margin is 2 km and a tile is 12.8 km, so no tile is fill throughout. Test the absent-fill-tile read against a hand-built manifest, not against a generated extract. The all-sea case is generated, as one interior tile. | C4 |
 | 2 | The `water` sweep's fill and sea skip set does not survive a restart and cannot be rebuilt from the manifest and journal. An all-fill tile is *absent* from the journal, which reads the same as not yet swept; and per-tile `min`/`max` cannot identify an all-sea tile, because they are taken over non-nodata samples only, so a tile that is part fill and part sea also reads `min = max = 2`. Rehydrate the set by re-reading the written `water` tile bytes. Getting it wrong makes `pack` read a fill cell as sea. | X6 |
-| 3 | Measured on 2.9.29.27468: `require` of `dxgui`, `Window`, `Panel`, `Static` and `HorzProgressBar` all answer from the hook state with no `package.path` change, and `HorzProgressBar` carries `new`, `setRange` and `setValue`. The raw calls are `install:dxgui/bind/ProgressBar.lua`: `ProgressBarSetRange(w, min, max)` and `ProgressBarSetValue(w, v)`; the bind classes are thin wrappers over the `Gui.*` globals of the same name, so either layer works from a hook. `Gui.SetTaskbarProgressState` has a measured arity of 2 and would put progress on the taskbar button. Also measured: `Skin` and its seven skins answer, an unskinned widget draws nothing, and every input widget the controls need constructs. Unmeasured: whether `require("Skin")` answers at hook-load time rather than at bridge-eval time. | X13 |
-| 4 | A live run with no sweeps registered writes no output directory and reaches `done` in a few frames: `M.jobs` is three empty lists, the queue finishes at once, and `M.save` returns false with no manifest to write. Say so in X13's live testing steps or a tester will look for the extract and call the hook broken. | X13 |
+| 3 | A live run with no sweeps registered writes no output directory and reaches `done` in a few frames: `M.jobs` is three empty lists, the queue finishes at once, and `M.save` returns false with no manifest to write. Say so in X13's live testing steps or a tester will look for the extract and call the hook broken. | X13 |
