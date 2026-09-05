@@ -1804,6 +1804,136 @@ function M.validate_config(config)
 end
 
 --------------------------------------------------------------------------------
+-- Config file
+--
+-- A Lua chunk in Saved Games returning a table. The window owns it: it fills its
+-- controls from this file and writes it back at Start, which is the whole of
+-- "the window is the only surface the config has" (ADR 0011).
+--
+-- Read through M.read_file and loadstring rather than dofile, so the M.fs seam
+-- every other read already goes through covers this one too and the offline
+-- tests need no disk. What the file is does not change: a chunk returning a
+-- table.
+--
+-- The chunk runs with an empty environment. A config is three values, not a
+-- program, and a file edited into calling os.execute should fail rather than
+-- run. What that buys is exactly the globals: os, io, require, load and
+-- getmetatable are all unreachable, so there is no route back to the hook's own
+-- state.
+--
+-- It is not a sandbox. String methods come from the string metatable, which
+-- setfenv does not touch, so ("x"):rep(1e9) still runs and still exhausts
+-- memory. Closing that needs limits on the interpreter rather than on the
+-- environment, and it buys little: the file lives in the user's own Saved Games,
+-- and anything that can write there can drop a hook beside this one.
+--------------------------------------------------------------------------------
+
+M.CONFIG_NAME = "Config/DcsTerrainExtract.lua"
+
+-- Where the config lives, or nil where there is no Saved Games under this
+-- process -- which is every offline test, and is not an error.
+function M.config_path()
+  local dir = M.saved_games_dir()
+  if not dir then
+    return nil
+  end
+  return M.join(dir, M.CONFIG_NAME)
+end
+
+-- The table the file holds, or nil and one line saying why.
+--
+-- The failures are kept apart because they ask different things of the user: no
+-- file at all is the ordinary state of a fresh install, a chunk that will not
+-- compile is a typo with a line number, a chunk that raises got through the
+-- parser and died anyway, and one returning a non-table is a file missing its
+-- `return`.
+function M.read_config(path)
+  local text, err = M.read_file(path)
+  if not text then
+    return nil, err
+  end
+
+  -- The "@" prefix names the chunk as a file, so a syntax error reads as
+  -- "<path>:12: unexpected symbol" instead of quoting the source back.
+  local chunk, cerr = loadstring(text, "@" .. path)
+  if not chunk then
+    return nil, cerr or (path .. ": will not compile")
+  end
+  setfenv(chunk, {})
+
+  local ok, value = pcall(chunk)
+  if not ok then
+    return nil, format("%s: %s", path, tostring(value))
+  end
+  if type(value) ~= "table" then
+    return nil, format("%s: does not return a table: %s", path, type(value))
+  end
+  return value
+end
+
+-- Written above the table on every save, because the file is generated and a
+-- reader who does not know that will edit it and lose the edit.
+local CONFIG_HEADER = [[
+-- Written by the DCS Terrain Extract window. Anything you add here by hand is
+-- overwritten the next time you press Start -- set the values in the window.
+--
+-- enabled is the one exception. It is read before the window is built, so it
+-- has to be set here once before there is a window to set anything in.
+
+]]
+
+-- Writes the config, or refuses with the one line saying which field stopped it.
+--
+-- Refusing rather than writing what it was given: this file is read back at the
+-- next start, and a value that cannot survive the round trip -- a nil
+-- output_dir, a crop missing its radius -- would come back as a problem the user
+-- did not cause and cannot place. Every field goes through the same checker the
+-- window shows a message from, so what is refused here is exactly what is
+-- already red on screen.
+function M.write_config(path, config)
+  if type(config) ~= "table" then
+    return nil, format("config is not a table: %s", type(config))
+  end
+
+  -- enabled is checked on its own because config_fields does not carry it: it
+  -- is the master switch, read before there is a window to show a control in.
+  -- Checking it anyway matters more here than anywhere else -- enabled is
+  -- written as `config.enabled == true`, so a caller holding 1 or "yes" would
+  -- otherwise have it silently written as false and the hook would not come
+  -- back on the next start.
+  local problem = M.field_problem("enabled", config.enabled)
+  if problem then
+    return nil, problem
+  end
+
+  local fields = M.config_fields()
+  for i = 1, #fields do
+    problem = M.field_problem(fields[i].name, config[fields[i].name])
+    if problem then
+      return nil, problem
+    end
+  end
+
+  local out = { CONFIG_HEADER, "return {\n" }
+  out[#out + 1] = format("  enabled = %s,\n", tostring(config.enabled == true))
+  if config.output_dir ~= nil then
+    out[#out + 1] = format("  output_dir = %q,\n", config.output_dir)
+  end
+
+  -- %.17g throughout, the same as the JSON encoder: a crop centre is a
+  -- six-figure metre coordinate, and %g would round it to six significant
+  -- digits and move the crop by tens of metres on the way through the file.
+  local crop = config.crop
+  if crop ~= nil then
+    out[#out + 1] = format("  crop = { x = %.17g, z = %.17g, radius_m = %.17g },\n",
+      crop.x, crop.z, crop.radius_m)
+  end
+  out[#out + 1] = "}\n"
+
+  return M.write_file(path, concat(out))
+end
+
+--------------------------------------------------------------------------------
 -- State machine
 --
 -- idle -> prepare -> hook -> mission -> done. DCS gives the hook one callback
