@@ -2147,7 +2147,7 @@ function M.on_frame(run) end
 local function phase_change(state)
   M.log("phase " .. state)
   M.dcs_log("INFO", "phase " .. state)
-  M.on_phase(state)
+  M.ui(M.on_phase, state)
 end
 
 -- Moves the run into a state, and is the only place that does. A phase change
@@ -2365,7 +2365,7 @@ function M.callbacks(run)
     -- while it is done, which between them are most of a session.
     onSimulationFrame = function()
       M.run_frame(run)
-      M.on_frame(run)
+      M.ui(M.on_frame, run)
     end,
 
     -- A mission has finished loading, so there is a terrain now whether or not
@@ -2406,6 +2406,130 @@ function M.register(run)
   end
   dcs.setUserCallbacks(M.callbacks(run))
   return true
+end
+
+--------------------------------------------------------------------------------
+-- Widgets
+--
+-- The seam the window is built through, and what happens when a widget call
+-- fails.
+--
+-- M.gui is the same shape as M.fs: everything DCS's widget library provides is
+-- fetched here and nowhere else, at the call rather than at load, so this file
+-- still loads under a plain interpreter with none of it around.
+--
+-- A failure switches the window off for the session and leaves the run alone.
+-- The extract is the point; the window is how somebody watches it, and a
+-- library that has started raising will raise again -- retrying it would put a
+-- pcall and a traceback in the frame budget for as long as DCS is open (ADR
+-- 0015).
+--------------------------------------------------------------------------------
+
+M.gui = {}
+
+-- A widget class by name, or nil where the library is absent. Nil is not a
+-- failure: it is what a plain interpreter answers, and the window simply is
+-- not built there.
+function M.gui.widget(name)
+  local ok, class = pcall(require, name)
+  if not ok or type(class) ~= "table" or type(class.new) ~= "function" then
+    return nil
+  end
+  return class
+end
+
+-- `seen` holds what has been copied: a skin referring back to itself terminates
+-- instead of running the stack out, and one referenced twice stays one table.
+local function deep_copy(value, seen)
+  if type(value) ~= "table" then
+    return value
+  end
+  seen = seen or {}
+  if seen[value] then
+    return seen[value]
+  end
+  local out = {}
+  seen[value] = out
+  for k, v in pairs(value) do
+    out[k] = deep_copy(v, seen)
+  end
+  return out
+end
+
+-- A named skin, deep-copied. The library hands back a fresh outer table but the
+-- nested sub-skins are shared, so mutating one in place restyles the editor's
+-- own dialogs for the rest of the session.
+function M.gui.skin(name)
+  local ok, skins = pcall(require, "Skin")
+  if not ok or type(skins) ~= "table" or type(skins[name]) ~= "function" then
+    return nil
+  end
+  local made, skin = pcall(skins[name])
+  if not made or type(skin) ~= "table" then
+    return nil
+  end
+  return deep_copy(skin)
+end
+
+-- A value rather than a function to swap, so a test reads it the way it reads
+-- any other state.
+M.ui_failed = false
+M.ui_failure = nil
+
+-- One way, and reported once. A second line per frame would bury the log it is
+-- trying to be useful in.
+local function ui_fail(what, err)
+  if M.ui_failed then
+    return
+  end
+  M.ui_failed = true
+  M.ui_failure = tostring(what) .. ": " .. tostring(err)
+  -- Latched before it is reported, and the report guarded: M.log opens a file,
+  -- so a raise here would climb out of the seam into the frame callback.
+  pcall(M.warn, "the extract window has been switched off for this session "
+    .. "after " .. M.ui_failure .. ". The run itself is unaffected.")
+end
+
+-- Calls fn under the latch. nil once the window has been abandoned, which is
+-- what makes a chain of these collapse quietly rather than at the first index.
+function M.ui(fn, ...)
+  if M.ui_failed then
+    return nil
+  end
+  if type(fn) ~= "function" then
+    ui_fail("ui", "not a function: " .. type(fn))
+    return nil
+  end
+  local ok, result = pcall(fn, ...)
+  if not ok then
+    ui_fail("ui", result)
+    return nil
+  end
+  return result
+end
+
+-- Two entry points and not one, because a class constructor is a plain call and
+-- everything afterwards is a method: one wrapper would pass the class as self.
+--
+-- A nil object once the latch is set is a constructor having failed, and says
+-- nothing. Before it is set it is this file's own bug -- a name typed wrong --
+-- and latches, because a window skipping half its widgets would look built.
+function M.ui_method(obj, method, ...)
+  if M.ui_failed then
+    return nil
+  end
+  if obj == nil then
+    ui_fail("ui_method", tostring(method) .. " on nothing")
+    return nil
+  end
+  local ok, result = pcall(function(...)
+    return obj[method](obj, ...)
+  end, ...)
+  if not ok then
+    ui_fail("ui_method " .. tostring(method), result)
+    return nil
+  end
+  return result
 end
 
 return M

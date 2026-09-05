@@ -26,6 +26,7 @@ disagree, the later accepted one wins, and the earlier is marked
 | [0012](0012-a-bad-config-value-falls-back-to-its-default.md) | Accepted | 2026-09-04 | A bad config value is logged and falls back to its default | `extractor-hook.md` "Config table" validation sentence, "Files" `dcs.log` clause; `plan.md` X2a |
 | [0013](0013-the-progress-log-is-append-only.md) | Accepted | 2026-09-04 | The progress log is append-only, and `dcs.log` gets a warning as well as a phase line | `extractor-hook.md` "Files"; `plan.md` X2a, X12, X13 |
 | [0014](0014-a-run-waits-in-a-stopped-state.md) | Accepted | 2026-09-05 | A run waits in a stopped state, and Start always re-enters idle | `extractor-hook.md` "Lifecycle"; `plan.md` X4, X13 |
+| [0015](0015-a-failing-window-is-switched-off-not-retried.md) | Accepted | 2026-09-05 | A failing window is switched off, and never reaches the run | `extractor-hook.md` "Failure handling"; `plan.md` X12, X13 |
 
 Add a row when you add an ADR. This table is the index Claude reads, so an ADR
 missing from it will not be found. Each record's own `Affects` line, at the top
