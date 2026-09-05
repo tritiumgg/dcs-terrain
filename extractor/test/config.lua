@@ -249,4 +249,194 @@ T.eq("every field that left is reported, in a stable order", joined(problems),
 T.eq("and the fields that stayed still came through",
   config.output_dir, "C:/extracts/caucasus-50m")
 
+--------------------------------------------------------------------------------
+T.group("one field can be checked on its own")
+--------------------------------------------------------------------------------
+
+-- The window checks a control the moment it changes, and it must get the same
+-- wording validate_config would have produced from the same value. Anything
+-- else and the message on screen disagrees with the message in the log.
+
+T.eq("a good path is nil", E.field_problem("output_dir", "C:/e"), nil)
+T.eq("an empty one is the field's line",
+  E.field_problem("output_dir", ""), "output_dir is not a non-empty string: ")
+T.eq("an absent one says there is no default",
+  E.field_problem("output_dir", nil),
+  "output_dir is not set, and there is no default for it")
+
+T.eq("an absent crop is nil, because a crop is optional",
+  E.field_problem("crop", nil), nil)
+T.eq("a good crop is nil",
+  E.field_problem("crop", { x = 1, z = 2, radius_m = 3 }), nil)
+T.eq("a crop missing a member is the crop's line",
+  E.field_problem("crop", { x = 1, z = 2 }),
+  "crop.radius_m is not a finite number: nil")
+
+T.eq("an absent enabled is nil", E.field_problem("enabled", nil), nil)
+T.eq("a false enabled is nil, because false is a value",
+  E.field_problem("enabled", false), nil)
+T.eq("a non-boolean enabled is a line",
+  E.field_problem("enabled", "yes"), "enabled is not true or false: yes")
+
+T.eq("a name that is not a field says so",
+  E.field_problem("cell_size", 50), "cell_size is not a config field")
+
+-- Every way a crop can be wrong, asked one field at a time. These already run
+-- through here from validate_config, but the window asks the question this way
+-- round -- one control, one value -- and that is the call being pinned.
+T.eq("a crop that is not a table",
+  E.field_problem("crop", 5), "crop is not a centre and a radius: 5")
+T.eq("a crop missing x",
+  E.field_problem("crop", { z = 2, radius_m = 3 }),
+  "crop.x is not a finite number: nil")
+T.eq("a crop missing z",
+  E.field_problem("crop", { x = 1, radius_m = 3 }),
+  "crop.z is not a finite number: nil")
+T.eq("a crop with a member that is not a number",
+  E.field_problem("crop", { x = "1", z = 2, radius_m = 3 }),
+  "crop.x is not a finite number: 1")
+T.eq("a crop with an unknown key",
+  E.field_problem("crop", { x = 1, z = 2, radius_m = 3, extra = 4 }),
+  "crop has an unknown key: extra")
+T.eq("a crop with no area",
+  E.field_problem("crop", { x = 1, z = 2, radius_m = 0 }),
+  "crop.radius_m is not a positive number: 0")
+
+-- A control character in a path, which is the message that quotes the value.
+--
+-- The tab comes back through %q as a tab, not as \9: Lua 5.1 escapes only the
+-- quote, the backslash, a newline and a zero. So the quoted value is as
+-- invisible as it was in the config, and the words are what tell the user what
+-- they are looking at. That is the reason the message says "control character"
+-- rather than showing one.
+T.eq("a path holding a tab says which",
+  E.field_problem("output_dir", "C:\tmp"),
+  "output_dir contains a control character, which is usually a backslash "
+  .. "escape in a double-quoted path: \"C:\tmp\"")
+
+-- Total: it is public now, so it answers for any name rather than raising on
+-- one the caller got wrong.
+T.eq("a nil name is not a field", E.field_problem(nil, "x"),
+  "nil is not a config field")
+T.eq("a number name is not a field", E.field_problem(7, "x"),
+  "7 is not a config field")
+
+-- The same wording, reached both ways, across every field rather than one.
+-- This is the assertion that would catch someone reintroducing a second copy of
+-- a checker in validate_config, and one input would only catch it for one field.
+local same_line_cases = {
+  { "output_dir", "" },
+  { "output_dir", nil },
+  { "crop", 5 },
+  { "crop", { x = 1, z = 2 } },
+  { "enabled", "yes" },
+}
+for i = 1, #same_line_cases do
+  local name, value = same_line_cases[i][1], same_line_cases[i][2]
+  local config = good()
+  config[name] = value
+  if name == "output_dir" and value == nil then
+    config.output_dir = nil
+  end
+  local _, both = E.validate_config(config)
+  T.eq("both routes agree, case " .. i, E.field_problem(name, value), both[1])
+end
+
+--------------------------------------------------------------------------------
+T.group("every problem names the field it belongs to")
+--------------------------------------------------------------------------------
+
+-- The window puts a message beside the control it is about, so it needs to know
+-- which control. tags is parallel to problems and is read as
+-- `for i = 1, #problems` -- never #tags, which has holes and is undefined.
+
+local _, probs, tags = E.validate_config(good())
+T.eq("a clean config tags nothing", #probs, 0)
+
+_, probs, tags = E.validate_config(with("output_dir", ""))
+T.eq("one problem", #probs, 1)
+T.eq("tagged with its field", tags[1], "output_dir")
+
+_, probs, tags = E.validate_config(with("crop", { x = 1, z = 2 }))
+T.eq("a crop problem", #probs, 1)
+T.eq("is tagged crop", tags[1], "crop")
+
+_, probs, tags = E.validate_config({ enabled = "yes" })
+T.eq("a bad enabled is one problem", #probs, 1)
+T.eq("tagged enabled", tags[1], "enabled")
+
+-- Two fields at once, so the pairing is shown to hold position by position
+-- rather than by accident of there being one of each.
+local both_bad = good()
+both_bad.output_dir = ""
+both_bad.crop = { x = 1, z = 2 }
+_, probs, tags = E.validate_config(both_bad)
+T.eq("two problems", #probs, 2)
+T.eq("first is output_dir", tags[1], "output_dir")
+T.eq("second is crop", tags[2], "crop")
+T.eq("and they are in field order", probs[1]:sub(1, 10), "output_dir")
+
+-- The holes. An unrecognised key belongs to no control, so there is nothing to
+-- put a message beside and the tag is absent rather than invented.
+_, probs, tags = E.validate_config(with("cell_size", 50))
+T.eq("an unknown key is one problem", #probs, 1)
+T.eq("belonging to no control", tags[1], nil)
+
+_, probs, tags = E.validate_config("not a table")
+T.eq("a config that is not a table is one problem", #probs, 1)
+T.eq("belonging to no control either", tags[1], nil)
+
+-- A hole followed by a tag, which is the arrangement that makes #tags wrong:
+-- here #problems is 2 and the last tag is absent.
+local mixed = good()
+mixed.output_dir = ""
+mixed.cell_size = 50
+_, probs, tags = E.validate_config(mixed)
+T.eq("two problems again", #probs, 2)
+T.eq("the field one is tagged", tags[1], "output_dir")
+T.eq("the unknown key is not", tags[2], nil)
+
+-- Four problems with the holes interleaved rather than trailing, which is the
+-- arrangement an index that drifted by one would still line up on by accident
+-- when there are only two.
+local four = { enabled = "yes", crop = { x = 1, z = 2 }, aaa = 1, zzz = 2 }
+_, probs, tags = E.validate_config(four)
+T.eq("a non-boolean enabled stops at one problem", #probs, 1)
+T.eq("tagged enabled", tags[1], "enabled")
+
+four.enabled = true
+_, probs, tags = E.validate_config(four)
+T.eq("four problems", #probs, 4)
+T.eq("output_dir first, tagged", tags[1], "output_dir")
+T.eq("crop second, tagged", tags[2], "crop")
+T.eq("then the sorted unknown keys, untagged", tags[3], nil)
+T.eq("both of them", tags[4], nil)
+T.eq("and the lines are in that order", probs[3], "aaa is not a config field")
+T.eq("sorted", probs[4], "zzz is not a config field")
+
+--------------------------------------------------------------------------------
+T.group("the window is told which controls to build")
+--------------------------------------------------------------------------------
+
+local fields = E.config_fields()
+T.eq("two of them", #fields, 2)
+T.eq("output_dir first", fields[1].name, "output_dir")
+T.eq("and it is a path", fields[1].kind, "path")
+T.eq("and it is required", fields[1].optional, false)
+T.eq("crop second", fields[2].name, "crop")
+T.eq("and it is a crop", fields[2].kind, "crop")
+T.eq("and it is optional", fields[2].optional, true)
+
+-- Fresh tables, like layers() and table_files(): a window that renamed a field
+-- in the list it was handed must not rename it for the next caller.
+local mine = E.config_fields()
+mine[1].name = "clobbered"
+T.eq("editing one does not reach the spec", E.config_fields()[1].name, "output_dir")
+
+-- enabled is not among them. It is read before the list is, and there is no
+-- control for it: a hook that is not enabled has no window to show one in.
+for i = 1, #fields do
+  T.eq("field " .. i .. " is not enabled", fields[i].name ~= "enabled", true)
+end
+
 T.done()
