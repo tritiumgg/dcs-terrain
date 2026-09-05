@@ -2531,5 +2531,89 @@ function M.ui_method(obj, method, ...)
   end
   return result
 end
+--------------------------------------------------------------------------------
+-- Window
+--
+-- The chrome and the status line. The controls hang off this and arrive next.
+--
+-- Built on the first frame rather than at load, because a widget wants the
+-- library warm and load is the one moment nothing else in DCS is ready.
+--
+-- Never closable: the close button fires the window's own onClose after the
+-- native side has already hidden it, so re-asserting visibility there is what
+-- refuses the close. Measured against the title bar's X, not inferred.
+--------------------------------------------------------------------------------
+
+M.WINDOW_TITLE = "DCS Terrain Extract"
+
+-- Hand-placed pixels. There is no layout engine here worth the indirection: the
+-- window is one column of rows and the arithmetic is two additions.
+local WIN = { x = 60, y = 60, w = 420, h = 250, pad = 10, row = 22 }
+
+M.window = { built = false, root = nil, panel = nil, status = nil }
+
+function M.build_window()
+  if M.window.built then
+    return true
+  end
+  -- Asked once. A widget library that is not there will not turn up later, and
+  -- this is called on every frame until it succeeds: a failed lookup costs
+  -- about a tenth of a millisecond, so three of them a frame is a twentieth of
+  -- the frame budget spent forever on an answer that cannot change.
+  if M.window.unavailable then
+    return false
+  end
+  -- Through the latch, like everything else: the seam reaches the widget
+  -- library, and that is exactly the thing that might not be there.
+  local Window = M.ui(M.gui.widget, "Window")
+  local Panel = M.ui(M.gui.widget, "Panel")
+  local Static = M.ui(M.gui.widget, "Static")
+  if not (Window and Panel and Static) then
+    M.window.unavailable = true
+    return false
+  end
+
+  local root = M.ui(Window.new, WIN.x, WIN.y, WIN.w, WIN.h, M.WINDOW_TITLE)
+  -- Hidden until it has been laid out. A widget with the right bounds and a
+  -- true visibility flag still draws before its parent has recomputed, and a
+  -- half-placed window flickering into the editor is worse than a late one.
+  M.ui_method(root, "setVisible", false)
+  M.ui_method(root, "setSkin", M.ui(M.gui.skin, "windowSkin"))
+  M.ui_method(root, "setDraggable", true)
+  M.ui_method(root, "setResizable", false)
+
+  local panel = M.ui(Panel.new)
+  M.ui_method(panel, "setSkin", M.ui(M.gui.skin, "panelSkin"))
+  M.ui_method(panel, "setBounds", 0, 0, WIN.w, WIN.h)
+  M.ui_method(root, "insertWidget", panel, -1)
+
+  local status = M.ui(Static.new, "")
+  M.ui_method(status, "setSkin", M.ui(M.gui.skin, "staticSkin"))
+  M.ui_method(status, "setBounds", WIN.pad, WIN.pad, WIN.w - WIN.pad * 2, WIN.row)
+  M.ui_method(panel, "insertWidget", status, -1)
+
+  if M.ui_failed or root == nil then
+    return false
+  end
+
+  -- Per instance, not on the class: the class is shared with every other window
+  -- in the process, and this one is the only one that must not close.
+  --
+  -- It refuses only while the window is alive. Once the latch is set there is
+  -- nothing left to show and nothing left updating it, so refusing would trap
+  -- dead chrome carrying a stale line on somebody's screen -- and going through
+  -- the seam is what makes that true, because a latched ui_method does nothing
+  -- and the native hide stands.
+  root.onClose = function(self)
+    M.ui_method(self, "setVisible", true)
+  end
+
+  M.ui_method(root, "setVisible", true)
+
+  M.window.root, M.window.panel, M.window.status = root, panel, status
+  M.window.built = true
+  M.log("window built")
+  return true
+end
 
 return M
