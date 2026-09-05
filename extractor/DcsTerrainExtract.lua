@@ -1661,71 +1661,131 @@ end
 -- Two fields, and the window shows both. crop is optional rather than
 -- defaulted, because a crop is a deliberate choice and there is no area to
 -- invent for someone who did not ask for one.
+-- kind is what a control is built from, not which checker runs. A checker is
+-- not a control: two fields could share one and still need different widgets.
 local CONFIG_FIELDS = {
-  { name = "output_dir", check = bad_path, normalise = forward_slashes },
-  { name = "crop", check = bad_crop, optional = true },
+  { name = "output_dir", kind = "path", check = bad_path,
+    normalise = forward_slashes },
+  { name = "crop", kind = "crop", check = bad_crop, optional = true },
 }
 
 local CONFIG_FIELD_BY_NAME = { enabled = true }
+local CONFIG_SPEC_BY_NAME = {}
 for i = 1, #CONFIG_FIELDS do
   CONFIG_FIELD_BY_NAME[CONFIG_FIELDS[i].name] = true
+  CONFIG_SPEC_BY_NAME[CONFIG_FIELDS[i].name] = CONFIG_FIELDS[i]
 end
 
--- Returns the config to run with and one line per problem.
+-- One message for a field, or nil when the value is usable. Total: any name and
+-- any value answer, and a name that is not a field says so.
 --
--- The table comes back whatever went wrong, because the window that will own
--- the config file needs it to fill its controls and the run needs it to start.
--- Two code paths for those would be two chances to disagree about what a
--- defaulted field holds.
+-- This is the only place a config message is produced. Validating a whole table
+-- and validating one control a user just typed into are the same question asked
+-- about a different number of fields, and two implementations of it would be two
+-- wordings to keep in step.
+--
+-- enabled is handled here rather than joining CONFIG_FIELDS, because it is read
+-- before the list is: it decides whether the rest is looked at, and being absent
+-- is not a problem -- an absent config file means a disabled hook, and that is
+-- not an error either.
+function M.field_problem(name, value)
+  if name == "enabled" then
+    if value == nil then
+      return nil
+    end
+    return bad_boolean(value, "enabled")
+  end
+
+  local field = CONFIG_SPEC_BY_NAME[name]
+  if not field then
+    return format("%s is not a config field", tostring(name))
+  end
+
+  if value == nil then
+    if field.optional or field.default ~= nil then
+      return nil
+    end
+    return format("%s is not set, and there is no default for it", field.name)
+  end
+
+  return field.check(value, field.name)
+end
+
+-- The fields a window shows, in the order it shows them. Fresh tables per call,
+-- like M.layers() and M.table_files(): a caller that edits one must not reach
+-- into the spec every other caller reads.
+function M.config_fields()
+  local out = {}
+  for i = 1, #CONFIG_FIELDS do
+    local field = CONFIG_FIELDS[i]
+    out[i] = {
+      name = field.name,
+      kind = field.kind,
+      optional = field.optional or false,
+    }
+  end
+  return out
+end
+
+-- Returns the config to run with, one line per problem, and the field each of
+-- those lines belongs to.
+--
+-- The table comes back whatever went wrong, because the window that owns the
+-- config file needs it to fill its controls and the run needs it to start. Two
+-- code paths for those would be two chances to disagree about what a defaulted
+-- field holds.
+--
+-- tags is parallel to problems: tags[i] is the field problems[i] belongs to, or
+-- nil for a problem that belongs to no control -- an unrecognised key, or a
+-- config that is not a table at all. Parallel arrays rather than a table keyed
+-- by field, because "one line per problem" is the count everything here rests
+-- on, and problems stays the one place it is counted.
+--
+-- tags therefore has holes, and # on a table with holes is undefined in Lua
+-- 5.1. Walk it as `for i = 1, #problems`, never `for i = 1, #tags` and never
+-- with ipairs.
 --
 -- Unknown keys are sorted before they are reported: pairs order is undefined,
 -- and a problem list whose order changes between runs is a log nobody can diff.
 function M.validate_config(config)
   local problems = {}
+  local tags = {}
   local out = {}
 
+  local function report(problem, field)
+    problems[#problems + 1] = problem
+    tags[#problems] = field
+  end
+
   if type(config) ~= "table" then
-    return { enabled = false },
-      { format("config is not a table: %s", type(config)) }
+    report(format("config is not a table: %s", type(config)))
+    return { enabled = false }, problems, tags
   end
 
   -- enabled short-circuits. Not true means the hook does nothing at all, so
-  -- there is nothing to validate and nobody to tell. An absent enabled is a
-  -- disabled hook and not a problem, because an absent config file means the
-  -- same thing and that is not an error either.
-  if config.enabled ~= nil then
-    local bad = bad_boolean(config.enabled, "enabled")
-    if bad then
-      problems[#problems + 1] = bad
-    end
+  -- there is nothing to validate and nobody to tell.
+  local bad = M.field_problem("enabled", config.enabled)
+  if bad then
+    report(bad, "enabled")
   end
   if config.enabled ~= true then
-    return { enabled = false }, problems
+    return { enabled = false }, problems, tags
   end
   out.enabled = true
 
   for i = 1, #CONFIG_FIELDS do
     local field = CONFIG_FIELDS[i]
     local value = config[field.name]
-    if value == nil then
-      if not field.optional then
-        if field.default == nil then
-          problems[#problems + 1] =
-            format("%s is not set, and there is no default for it", field.name)
-        else
-          out[field.name] = field.default
-        end
-      end
+    local problem = M.field_problem(field.name, value)
+    if problem then
+      report(problem, field.name)
+      out[field.name] = field.default
+    elseif value == nil then
+      out[field.name] = field.default
+    elseif field.normalise then
+      out[field.name] = field.normalise(value)
     else
-      local bad = field.check(value, field.name)
-      if bad then
-        problems[#problems + 1] = bad
-        out[field.name] = field.default
-      elseif field.normalise then
-        out[field.name] = field.normalise(value)
-      else
-        out[field.name] = value
-      end
+      out[field.name] = value
     end
   end
 
@@ -1737,10 +1797,10 @@ function M.validate_config(config)
   end
   sort(unknown)
   for i = 1, #unknown do
-    problems[#problems + 1] = format("%s is not a config field", unknown[i])
+    report(M.field_problem(unknown[i]))
   end
 
-  return out, problems
+  return out, problems, tags
 end
 
 --------------------------------------------------------------------------------
