@@ -159,6 +159,7 @@ local run = E.new_run({
   config = { output_dir = "C:/extract", frame_budget_ms = 5 },
   jobs = { prepare = {}, hook = { job("water") }, mission = {} },
 })
+E.start(run)
 E.terrain_id = function() return "Caucasus" end
 for _ = 1, 20 do
   E.run_frame(run)
@@ -167,7 +168,7 @@ end
 
 T.eq("every phase change is one INFO line",
   table.concat(written, " "),
-  "64|phase prepare 64|phase hook 64|phase mission 64|phase done")
+  "64|phase idle 64|phase prepare 64|phase hook 64|phase mission 64|phase done")
 
 T.eq("the tile line reached the progress log",
   fs.files[LOG]:find("water tile 0_0", 1, true) ~= nil, true)
