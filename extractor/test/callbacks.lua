@@ -59,9 +59,13 @@ local function open_output(run)
   })
 end
 
+-- Started before it is handed back. A run now begins stopped and waits for the
+-- window's Start button, and every test below is about what the callbacks do to
+-- a run that is going -- so they press it the way the window does rather than
+-- reaching in and setting the state.
 local function new_run()
   E.fs = FakeFs.new()
-  return E.new_run({
+  local run = E.new_run({
     config = { output_dir = "C:/extract", frame_budget_ms = 5 },
     jobs = {
       prepare = { job("presweep", 1, open_output) },
@@ -69,6 +73,8 @@ local function new_run()
       mission = { job("surface", 40) },
     },
   })
+  E.start(run)
+  return run
 end
 
 --------------------------------------------------------------------------------

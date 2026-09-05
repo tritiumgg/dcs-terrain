@@ -58,7 +58,8 @@ local function open_output(run)
   })
 end
 
-local function new_run(edit)
+-- Unstarted, for the tests that are about the state a run waits in.
+local function new_stopped_run(edit)
   local fs = FakeFs.new()
   E.fs = fs
   local opts = {
@@ -74,6 +75,12 @@ local function new_run(edit)
   end
   local run = E.new_run(opts)
   run.fs = fs
+  return run
+end
+
+local function new_run(edit)
+  local run = new_stopped_run(edit)
+  E.start(run)
   return run
 end
 
@@ -185,8 +192,11 @@ for i = 1, #logged do
     phases[#phases + 1] = state
   end
 end
+-- idle is in the sequence because Start announces it the same way every other
+-- state change is announced. It was absent before only because a run began
+-- there, with nothing to announce.
 T.eq("one line per phase change",
-  table.concat(phases, " "), "prepare hook mission done")
+  table.concat(phases, " "), "idle prepare hook mission done")
 
 --------------------------------------------------------------------------------
 T.group("job registration")
@@ -198,5 +208,170 @@ T.raises("not a phase", function() E.add_job("teardown", job("x", 1)) end,
 local added = E.add_job("hook", job("scratch", 1))
 T.eq("appended to the phase", E.jobs.hook[#E.jobs.hook], added)
 E.jobs.hook[#E.jobs.hook] = nil
+
+--------------------------------------------------------------------------------
+T.group("a run begins stopped and waits for Start")
+--------------------------------------------------------------------------------
+
+run = new_stopped_run()
+T.eq("starts stopped", run.state, E.STATE_STOPPED)
+
+-- A stopped frame is paid sixty times a second for as long as DCS sits there.
+for _ = 1, 100 do E.run_frame(run) end
+T.eq("still stopped after a hundred frames", run.state, E.STATE_STOPPED)
+T.eq("and none of them counted", run.frames, 0)
+T.eq("no terrain was polled for", run.idle_frames, 0)
+T.eq("and nothing was written", next(run.fs.files), nil)
+
+T.eq("Start says it started", E.start(run), true)
+T.eq("and the run is looking for terrain", run.state, E.STATE_IDLE)
+
+-- Pressing it twice is a user pressing it twice, not a bug worth raising over.
+T.eq("Start again does nothing", E.start(run), false)
+T.eq("and leaves the state alone", run.state, E.STATE_IDLE)
+
+--------------------------------------------------------------------------------
+T.group("Stop halts a run, whatever it was doing")
+--------------------------------------------------------------------------------
+
+run = new_stopped_run()
+E.start(run)
+until_past(run, E.STATE_IDLE, 5)
+until_past(run, E.STATE_PREPARE, 5)
+T.eq("sweeping", run.state, E.STATE_HOOK)
+
+local stop_frames = run.frames
+T.eq("Stop says it stopped", E.stop(run), true)
+T.eq("and the run is stopped", run.state, E.STATE_STOPPED)
+T.eq("the queue is dropped", run.queue, nil)
+T.eq("the manifest is on disk", run.fs.files["C:/extract/manifest.json"] ~= nil, true)
+
+for _ = 1, 50 do E.run_frame(run) end
+T.eq("frames do nothing", run.state, E.STATE_STOPPED)
+T.eq("and are not counted", run.frames, stop_frames)
+
+T.eq("Stop again does nothing", E.stop(run), false)
+
+-- A run stopped in idle has nothing to save, and save() saying so by returning
+-- false is not something going wrong: there is no work to come back to.
+run = new_stopped_run()
+E.start(run)
+E.terrain_id = function() return nil end
+E.run_frame(run)
+T.eq("waiting for terrain", run.state, E.STATE_IDLE)
+T.eq("with no manifest", run.manifest, nil)
+T.eq("Stop still stops", E.stop(run), true)
+T.eq("and reaches stopped", run.state, E.STATE_STOPPED)
+T.eq("having written nothing", run.fs.files["C:/extract/manifest.json"], nil)
+E.terrain_id = function() return "Caucasus" end
+
+run = new_stopped_run()
+E.start(run)
+for _ = 1, 40 do
+  E.run_frame(run)
+  if run.state == E.STATE_DONE then break end
+end
+T.eq("done", run.state, E.STATE_DONE)
+T.eq("Stop does nothing to it", E.stop(run), false)
+T.eq("and it stays done", run.state, E.STATE_DONE)
+
+--------------------------------------------------------------------------------
+T.group("Start after Stop goes back the way a restart would")
+--------------------------------------------------------------------------------
+
+-- One route into a run, on every Start and not only after a relaunch. The
+-- journal makes it affordable: written tiles are skipped.
+run = new_stopped_run()
+E.start(run)
+until_past(run, E.STATE_IDLE, 5)
+until_past(run, E.STATE_PREPARE, 5)
+T.eq("in the hook pass", run.state, E.STATE_HOOK)
+E.stop(run)
+
+logged = {}
+T.eq("Start works from stopped again", E.start(run), true)
+T.eq("and goes to idle, not back to the pass", run.state, E.STATE_IDLE)
+
+until_past(run, E.STATE_IDLE, 5)
+T.eq("then prepare, the same as a fresh run", run.state, E.STATE_PREPARE)
+
+local resumed = {}
+for i = 1, #logged do
+  local state = logged[i]:match("^phase (%a+)$")
+  if state then
+    resumed[#resumed + 1] = state
+  end
+end
+T.eq("announced as ordinary phase changes",
+  table.concat(resumed, " "), "idle prepare")
+
+-- Nothing is reset by a Stop: the manifest records the directory, not the try.
+T.eq("frames carry across the stop", run.frames > 0, true)
+
+-- And it has to finish, which is the point of restarting the pipeline.
+for _ = 1, 60 do
+  E.run_frame(run)
+  if run.state == E.STATE_DONE then break end
+end
+T.eq("the restarted run finishes", run.state, E.STATE_DONE)
+
+-- Stamped once, on the first entry: re-stamping would leave a finished pass
+-- saying it started afterwards.
+local stamps = 0
+E.now_iso = function() stamps = stamps + 1 return string.format("T%02d", stamps) end
+run = new_stopped_run()
+E.start(run)
+for _ = 1, 40 do
+  E.run_frame(run)
+  if run.state == E.STATE_DONE then break end
+end
+local first_started = run.manifest.passes.hook.started_at
+local first_finished = run.manifest.passes.hook.finished_at
+E.enter(run, E.STATE_HOOK)
+T.eq("re-entering a pass keeps its first start",
+  run.manifest.passes.hook.started_at, first_started)
+T.eq("so it never starts after it finished",
+  run.manifest.passes.hook.started_at < first_finished, true)
+E.now_iso = function() return "2026-09-04T09:12:44Z" end
+T.eq("both passes complete", run.manifest.passes.hook.complete, true)
+T.eq("including the second", run.manifest.passes.mission.complete, true)
+
+--------------------------------------------------------------------------------
+T.group("the window is told about states and about frames")
+--------------------------------------------------------------------------------
+
+-- Two attachment points: a phase change is rare, and a frame is the tick a
+-- window redraws on, arriving while the run is stopped and after it is done.
+
+local seen_phases = {}
+local frame_ticks = 0
+E.on_phase = function(state) seen_phases[#seen_phases + 1] = state end
+E.on_frame = function() frame_ticks = frame_ticks + 1 end
+
+run = new_stopped_run()
+local cb = E.callbacks(run)
+
+for _ = 1, 5 do cb.onSimulationFrame() end
+T.eq("the window ticks while the run is stopped", frame_ticks, 5)
+T.eq("with no phase change to report", #seen_phases, 0)
+
+E.start(run)
+T.eq("Start is a phase change", seen_phases[1], E.STATE_IDLE)
+
+for _ = 1, 40 do
+  cb.onSimulationFrame()
+  if run.state == E.STATE_DONE then break end
+end
+T.eq("every state was reported",
+  table.concat(seen_phases, " "), "idle prepare hook mission done")
+
+local ticks_at_done = frame_ticks
+for _ = 1, 10 do cb.onSimulationFrame() end
+T.eq("and the window still ticks once the run is done",
+  frame_ticks, ticks_at_done + 10)
+
+
+E.on_phase = function() end
+E.on_frame = function() end
 
 T.done()

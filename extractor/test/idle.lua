@@ -31,10 +31,15 @@ end
 -- Idle reaches no job, so a run needs none to test it.
 local function new_run()
   E.fs = FakeFs.new()
-  return E.new_run({
+  local run = E.new_run({
     config = { output_dir = "C:/extract" },
     jobs = { prepare = {}, hook = {} },
   })
+  E.start(run)
+  -- Start logs a line of its own. Cleared here so every group below reads a log
+  -- that begins where its run does, rather than counting past the press.
+  for i = #logged, 1, -1 do logged[i] = nil end
+  return run
 end
 
 --------------------------------------------------------------------------------

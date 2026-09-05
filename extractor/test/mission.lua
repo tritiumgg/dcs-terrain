@@ -76,6 +76,7 @@ local function new_run(edit)
   end
   local run = E.new_run(opts)
   run.fs = fs
+  E.start(run)
   return run
 end
 

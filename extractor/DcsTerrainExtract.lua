@@ -1946,6 +1946,11 @@ end
 -- and why this section can be tested without a sweep in it.
 --------------------------------------------------------------------------------
 
+-- stopped is where a run begins and waits. A run used to begin at idle and poll
+-- for terrain the moment the hook loaded; the window puts a Start button in
+-- front of that, so there has to be a state that costs nothing and does nothing
+-- until somebody presses it (ADR 0014).
+M.STATE_STOPPED = "stopped"
 M.STATE_IDLE = "idle"
 M.STATE_PREPARE = "prepare"
 M.STATE_HOOK = "hook"
@@ -1956,7 +1961,7 @@ M.STATE_DONE = "done"
 -- lasts for as long as DCS sits at the main menu, which can be hours.
 M.IDLE_POLL_FRAMES = 60
 
--- Only two of the five states are passes the manifest records.
+-- Only two of the six states are passes the manifest records.
 local PASS_OF = { [M.STATE_HOOK] = "hook", [M.STATE_MISSION] = "mission" }
 
 M.jobs = { prepare = {}, hook = {}, mission = {} }
@@ -2077,7 +2082,7 @@ function M.new_run(opts)
   opts = opts or {}
   local config = opts.config or {}
   local run = {
-    state = M.STATE_IDLE,
+    state = M.STATE_STOPPED,
     config = config,
     jobs = opts.jobs or M.jobs,
     dir = config.output_dir,
@@ -2122,11 +2127,27 @@ function M.prepare_jobs(run)
   return run.jobs.prepare or {}
 end
 
--- The one place a phase change is announced, so the window X13 adds has one
--- place to attach rather than two calls to keep in step.
+-- Overridden by the window, and a no-op until something does. Two of them,
+-- because they answer different questions: on_phase is the run reaching a new
+-- state, which is rare, and on_frame is the tick the window redraws on.
+--
+-- on_frame is called from the frame callback rather than from run_frame,
+-- because run_frame does no work in stopped and returns immediately in done --
+-- which between them are most of a session, and are exactly when a window still
+-- has to be on screen and answering.
+function M.on_phase(state) end
+function M.on_frame(run) end
+
+-- The one place a phase change is announced, so the window has one place to
+-- attach rather than two calls to keep in step.
+--
+-- The window observes here rather than replacing this function, because the two
+-- log lines are asserted as they stand and a window that took the function over
+-- would take them with it.
 local function phase_change(state)
   M.log("phase " .. state)
   M.dcs_log("INFO", "phase " .. state)
+  M.on_phase(state)
 end
 
 -- Moves the run into a state, and is the only place that does. A phase change
@@ -2140,8 +2161,21 @@ function M.enter(run, state)
 
   local pass = PASS_OF[state]
   if pass then
+    -- Stamped once, on the first entry into the pass, and left alone on any
+    -- later one. A pass can be entered twice now: Stop during the second pass
+    -- and Start again, and the first pass is re-entered with its work already
+    -- done and journalled. Re-stamping would leave a manifest saying the pass
+    -- started after it finished, which is the state a run killed between the
+    -- two would be found in.
+    --
+    -- Both forms of unstamped are accepted. A fresh manifest holds JSON_NULL,
+    -- and so does one decoded from disk, because the decoder reads null back as
+    -- JSON_NULL rather than as nil.
     if run.manifest then
-      run.manifest.passes[pass].started_at = M.now_iso()
+      local record = run.manifest.passes[pass]
+      if record.started_at == nil or record.started_at == M.JSON_NULL then
+        record.started_at = M.now_iso()
+      end
     end
     -- A phase with nothing registered is legitimate: it is what every phase
     -- looks like before its sweeps are built.
@@ -2249,9 +2283,52 @@ local function frame_pass(run)
   return M.enter(run, next_state(run))
 end
 
+-- Leaves the stopped state and begins looking for terrain. Start always
+-- re-enters idle, whether this is the first press or one after a Stop, so
+-- there is one way back into a run rather than two (ADR 0014).
+--
+-- Nothing is reset. frames and the timings accumulate across a Stop, so what
+-- the manifest records is the whole of the work done in this output directory
+-- rather than the last attempt at it.
+function M.start(run)
+  if run.state ~= M.STATE_STOPPED then
+    return false
+  end
+  -- Straight to idle rather than through enter, because idle is not a pass: it
+  -- builds no queue and stamps nothing. It is still announced the same way, so
+  -- the log carries one kind of line for a state change and not two, and a
+  -- reader watching dcs.log sees the run begin.
+  run.state = M.STATE_IDLE
+  run.idle_frames = 0
+  phase_change(M.STATE_IDLE)
+  return true
+end
+
+-- Halts the run and saves the manifest, so the tiles already written are found
+-- again at the next Start.
+--
+-- A run stopped before prepare has no manifest to write, and M.save says so by
+-- returning false. That is not a failure: there is nothing to resume to, and
+-- the next Start recomputes it.
+function M.stop(run)
+  if run.state == M.STATE_STOPPED or run.state == M.STATE_DONE then
+    return false
+  end
+  M.save(run)
+  run.state = M.STATE_STOPPED
+  run.queue = nil
+  phase_change(M.STATE_STOPPED)
+  return true
+end
+
 -- One simulation frame. Returns the state the run is in after it, which is the
 -- same state on every frame but the ones that change phase.
 function M.run_frame(run)
+  -- Neither of these counts a frame. run.frames measures the work a run cost,
+  -- and a hook sitting stopped at the main menu for an hour did none.
+  if run.state == M.STATE_STOPPED then
+    return M.STATE_STOPPED
+  end
   if run.state == M.STATE_DONE then
     return M.STATE_DONE
   end
@@ -2283,8 +2360,12 @@ end
 
 function M.callbacks(run)
   return {
+    -- The window is ticked after the run, and on every frame rather than only
+    -- the ones the run works on: it has to answer while the run is stopped and
+    -- while it is done, which between them are most of a session.
     onSimulationFrame = function()
       M.run_frame(run)
+      M.on_frame(run)
     end,
 
     -- A mission has finished loading, so there is a terrain now whether or not
