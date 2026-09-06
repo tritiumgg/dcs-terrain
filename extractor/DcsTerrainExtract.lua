@@ -2676,4 +2676,84 @@ function M.attach_window()
   end
 end
 
+--------------------------------------------------------------------------------
+-- Bootstrap
+--
+-- What DCS gets by loading this file from Scripts/Hooks/. Everything above is a
+-- module; this is what turns one into a hook.
+--
+-- Silence is the default, and is most of the behaviour. A user who has not
+-- written a config has not asked for anything, so an installed hook that is not
+-- enabled writes no log, builds no window and registers no callback: it costs
+-- one file read at start and nothing afterwards.
+--------------------------------------------------------------------------------
+
+-- Returns the registered run, or false and the reason there is nothing to do.
+function M.bootstrap()
+  local dir = M.saved_games_dir()
+  if not dir then
+    return false, "no Saved Games directory"
+  end
+  local path = M.join(dir, M.CONFIG_NAME)
+
+  -- The bytes are asked for first because "no config file" and "a config file
+  -- that will not load" come back from read_config looking the same and are not
+  -- the same thing: the first is a fresh install and says nothing, the second is
+  -- a user who tried and is owed the reason. It costs one extra read of a few
+  -- hundred bytes, once, at load.
+  if not M.read_file(path) then
+    return false, "no config file"
+  end
+
+  local config, err = M.read_config(path)
+  if not config then
+    -- To dcs.log alone. The progress log has no path yet and cannot be given
+    -- one, because whether the user enabled anything is exactly what could not
+    -- be read.
+    M.warn(err)
+    return false, err
+  end
+
+  local settings, problems = M.validate_config(config)
+  if settings.enabled then
+    M.log_path = M.join(dir, M.LOG_NAME)
+    M.log("hook loaded")
+  end
+  -- Reported after the path is set, so an enabled run's problems reach both
+  -- destinations. A disabled run's reach dcs.log alone, and that is the point of
+  -- reporting them at all: `enabled = "true"` is a quoted boolean, and the hook
+  -- doing nothing whatever about it would be silence with no window and no clue.
+  for i = 1, #problems do
+    M.warn(problems[i])
+  end
+  if not settings.enabled then
+    return false, "not enabled"
+  end
+
+  local run = M.new_run({ config = settings })
+  M.attach_window()
+  local ok, why = M.register(run)
+  if not ok then
+    M.warn("no callbacks registered: " .. tostring(why))
+    return false, why
+  end
+  return run
+end
+
+-- The one top-level side effect in this file, and the only thing DCS causes by
+-- loading it.
+--
+-- Under pcall because this runs inside DCS's own load of Scripts/Hooks, and what
+-- a raise there costs the hooks loaded after this one has never been measured.
+-- The honest options are to measure it or to not raise, and not raising is free.
+--
+-- Every DCS global it needs is reached through a seam that answers nil without
+-- one, so a plain interpreter loading this file for the offline tests gets false
+-- and no side effect at all.
+local loaded, result = pcall(M.bootstrap)
+if not loaded then
+  M.dcs_log("WARNING", "hook did not load: " .. tostring(result))
+end
+M.run = loaded and result or false
+
 return M

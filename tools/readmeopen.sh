@@ -22,7 +22,7 @@ awk '
     # and "Not usable yet" would otherwise read as unmarked.
     { sub(/\r$/, ""); lower = tolower($0) }
     /^#/ { heading = $0; sub(/^#+ /, "", heading) }
-    lower ~ /not usable|not final|not yet|does not yet|has not started|planned|so far/ {
+    lower ~ /not usable|not final|not yet|not built|does not yet|has not started|planned|so far/ {
         line = $0; sub(/^[ \t]+/, "", line)
         printf "%4d  %-22s %s\n", NR, heading, line
         n++

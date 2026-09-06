@@ -11,7 +11,9 @@ without `seek`.
   Editor: a mission is not needed, and a FARP or heliport placed in one clears
   the scenery around it. Configuration is a window rather than the file — the
   file is what the window reads at start and writes at Start (ADR 0011), and
-  the three fields it holds are in that record. *The window is not built yet.*
+  the three fields it holds are in that record. *The window is built and shows
+  the run's state; its controls are not, so the file is still the only way to
+  set anything.*
   A run writes `Logs/DcsTerrainExtract.log` in the same Saved Games folder, one
   line per tile and per phase change, appended across runs and never rotated;
   `dcs.log` gets a phase change at `INFO` and anything to act on at `WARNING`.

@@ -54,7 +54,9 @@ the theatre in the Mission Editor — a mission is not needed, and one with a FA
 or heliport in it would leave holes in the scenery. A window then asks where to
 write the extract and starts the run: it sweeps across frames, logs to
 `Logs/DcsTerrainExtract.log`, resumes where it left off, and never writes into
-your DCS install. *The window is not built yet; nothing runs today.*
+your DCS install. *The window is on screen and reports where the run has got
+to; its controls and the sweeps that fill an extract are not built yet, so
+nothing is written today.*
 
 **Pack** the extract into a single file, then verify it:
 
