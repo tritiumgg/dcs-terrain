@@ -2616,4 +2616,64 @@ function M.build_window()
   return true
 end
 
+-- What the status line says: a pure function of the run and of whether there is
+-- a terrain under it, so every line the window can show is reachable from a test
+-- with no widget in the process.
+--
+-- The terrain question comes before the state because most of what a user needs
+-- telling is that nothing will happen until a map is open: the hook loads at the
+-- main menu, and DCS can sit there for hours. Done is the exception and is
+-- tested first -- a finished run has something to report, and sending somebody
+-- to the Mission Editor once the work is over is advice pointing at nothing.
+M.STATUS_NO_TERRAIN = "Open a map in the Mission Editor."
+
+local STATUS_OF = {
+  [M.STATE_STOPPED] = "Stopped.",
+  [M.STATE_IDLE] = "Waiting for a theatre.",
+  [M.STATE_PREPARE] = "Preparing.",
+  [M.STATE_HOOK] = "Sweeping the terrain.",
+  [M.STATE_MISSION] = "Sweeping the scenery.",
+  [M.STATE_DONE] = "Finished.",
+}
+
+function M.window_status(run)
+  if run.state == M.STATE_DONE then
+    return STATUS_OF[M.STATE_DONE]
+  end
+  if M.terrain_id() == nil then
+    return M.STATUS_NO_TERRAIN
+  end
+  -- The state's own name for a state with no line of its own. A state added
+  -- later without one would otherwise reach setText as a nil and take the whole
+  -- window down with it, which is a steep price for a missing sentence.
+  return STATUS_OF[run.state] or tostring(run.state)
+end
+
+-- Written only when it changed. The frame callback arrives about sixty times a
+-- second and the line changes a handful of times in a run, so setting it every
+-- frame is a relayout a frame for a string nobody could see change.
+local function update_status(run)
+  local text = M.window_status(run)
+  if text == M.window.status_text then
+    return
+  end
+  M.ui_method(M.window.status, "setText", text)
+  -- After the call, so this records what the label was given rather than what
+  -- it was meant to be given.
+  M.window.status_text = text
+end
+
+-- Points on_frame at the window: build it, then say where the run has got to.
+--
+-- Build first because the window is built on a frame rather than at load, and
+-- this is the frame. Nothing is written when it did not build, so a DCS whose
+-- widget library is not there ticks a no-op rather than indexing a nil label.
+function M.attach_window()
+  M.on_frame = function(run)
+    if M.build_window() then
+      update_status(run)
+    end
+  end
+end
+
 return M
