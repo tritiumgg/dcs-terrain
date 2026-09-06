@@ -895,6 +895,11 @@ end
 -- M.fs is the one seam the offline tests replace. Nothing above it touches io
 -- or os directly, so a test can drive the whole write-and-resume path over a
 -- table of strings and never need a disk.
+--
+-- A write is checked by the bytes that landed and never by what the call
+-- returned, because in DCS a file handle's write and close return no values at
+-- all -- on success and on failure alike (ADR 0016). os.rename and os.remove do
+-- report, and are still checked on their result.
 --------------------------------------------------------------------------------
 
 M.fs = {}
@@ -927,6 +932,17 @@ function M.fs.is_dir(path)
     return false
   end
   return lfs.attributes(path, "mode") == "directory"
+end
+
+-- The size on disk, or nil where there is no file. The only evidence a write
+-- worked, which is why it is a seam rather than a call: a fake that can report
+-- a short size is a fake that can express a full disk.
+function M.fs.size(path)
+  local lfs = rawget(_G, "lfs")
+  if not lfs then
+    return nil, "lfs is not available"
+  end
+  return lfs.attributes(path, "size")
 end
 
 function M.join(dir, name)
@@ -965,15 +981,13 @@ function M.write_file(path, data)
   if not f then
     return nil, err or (tmp .. ": cannot open")
   end
-  local written, werr = f:write(data)
-  -- Checked separately from the write: a buffered write that fills the disk
-  -- fails at the flush, which is here.
-  local closed, cerr = f:close()
-  if not written then
-    return nil, werr or (tmp .. ": write failed")
-  end
-  if not closed then
-    return nil, cerr or (tmp .. ": close failed")
+  f:write(data)
+  -- Closed before the size is taken, because close is what flushes -- whatever
+  -- it says about having done so.
+  f:close()
+  local size = M.fs.size(tmp)
+  if size ~= #data then
+    return nil, format("%s: %s bytes of %d landed", tmp, tostring(size), #data)
   end
   M.fs.remove(path)
   local renamed, rerr = M.fs.rename(tmp, path)
@@ -984,17 +998,19 @@ function M.write_file(path, data)
 end
 
 function M.append_file(path, data)
+  -- Taken before the open, because opening for append creates the file: after
+  -- it, an absent file and an empty one are the same zero.
+  local before = M.fs.size(path) or 0
   local f, err = M.fs.open(path, "ab")
   if not f then
     return nil, err or (path .. ": cannot open")
   end
-  local written, werr = f:write(data)
-  local closed, cerr = f:close()
-  if not written then
-    return nil, werr or (path .. ": write failed")
-  end
-  if not closed then
-    return nil, cerr or (path .. ": close failed")
+  f:write(data)
+  f:close()
+  local after = M.fs.size(path)
+  if after ~= before + #data then
+    return nil, format("%s: %s bytes, expected %d",
+      path, tostring(after), before + #data)
   end
   return true
 end

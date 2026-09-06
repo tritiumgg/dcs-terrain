@@ -29,6 +29,15 @@ strict.files["b"] = "2"
 T.eq("rename onto an existing name is refused", strict.rename("a", "b"), nil)
 T.eq("and the source is untouched", strict.files["a"], "1")
 
+-- And its handles report nothing, which is what DCS's own do. A fake that
+-- returned true here would agree with the assumption that made every live write
+-- fail while the tests stayed green (ADR 0016).
+local handle = strict.open("h", "wb")
+T.eq("write returns nothing", select("#", handle:write("x")), 0)
+T.eq("close returns nothing", select("#", handle:close()), 0)
+T.eq("but the bytes are there", strict.size("h"), 1)
+T.eq("and an absent file has no size", strict.size("nowhere"), nil)
+
 --------------------------------------------------------------------------------
 T.group("join")
 --------------------------------------------------------------------------------
@@ -76,6 +85,33 @@ fs.mkdir("adir")
 T.eq("a write onto a directory fails", E.write_file("adir", "x"), nil)
 T.eq("and the tmp is left as evidence", fs.files["adir.tmp"], "x")
 T.eq("an append onto a directory fails", E.append_file("adir", "x"), nil)
+
+--------------------------------------------------------------------------------
+T.group("a write is judged by what landed")
+--------------------------------------------------------------------------------
+
+-- The failure the size check exists for, and the one no return value can report
+-- here: a write that loses bytes. On a real machine that is a full disk; from
+-- inside the process it is silence and a short file.
+local short = new_fs()
+E.fs = short
+short.lose_bytes(1)
+
+local shorted, why = E.write_file("out.json", "hello")
+T.eq("a short write fails", shorted, nil)
+T.eq("saying how much landed", why:find("4 bytes of 5", 1, true) ~= nil, true)
+T.eq("the name is not taken", short.files["out.json"], nil)
+T.eq("and the tmp is left as evidence", short.files["out.json.tmp"], "hell")
+
+local appended, awhy = E.append_file("tiles.jsonl", "one\n")
+T.eq("a short append fails", appended, nil)
+T.eq("saying what it expected", awhy:find("expected 4", 1, true) ~= nil, true)
+
+-- The append check is against the growth, not against the whole file, so a good
+-- append onto a file a bad one truncated still succeeds.
+short.lose_bytes(0)
+T.eq("a later append succeeds", E.append_file("tiles.jsonl", "two\n"), true)
+T.eq("adding to what was there", E.read_file("tiles.jsonl"), "onetwo\n")
 
 --------------------------------------------------------------------------------
 T.group("mkdir_p")

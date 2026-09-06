@@ -14,6 +14,11 @@
 -- remove refuses a directory, the way os.remove does, so a write onto a
 -- directory reaches the rename and fails there rather than quietly deleting
 -- the directory first.
+--
+-- Handles report nothing from write and close, which is what DCS's own io does
+-- (ADR 0016). A fake that returned true would agree with the assumption that
+-- caused the bug, so this one returns what the real thing returns and the code
+-- has to check the size instead.
 
 local DIR = {}
 
@@ -22,6 +27,9 @@ local FakeFs = { DIR = DIR }
 function FakeFs.new()
   local files = {}
   local fs = { files = files, DIR = DIR }
+  -- Bytes dropped from the end of every write, which is what a full disk looks
+  -- like from inside the process: nothing is reported and only the size differs.
+  local lose = 0
 
   function fs.open(path, mode)
     if mode == "rb" then
@@ -38,7 +46,7 @@ function FakeFs.new()
           done = true
           return data
         end,
-        close = function() return true end,
+        close = function() end,
       }
     end
     if files[path] == DIR then
@@ -52,12 +60,23 @@ function FakeFs.new()
       return nil, "unsupported mode " .. tostring(mode)
     end
     return {
-      write = function(self, s)
+      write = function(_, s)
+        if lose > 0 then s = s:sub(1, -1 - lose) end
         files[path] = files[path] .. s
-        return self
       end,
-      close = function() return true end,
+      close = function() end,
     }
+  end
+
+  -- Every write from here on loses its last n bytes.
+  function fs.lose_bytes(n) lose = n end
+
+  function fs.size(path)
+    local data = files[path]
+    if data == nil or data == DIR then
+      return nil
+    end
+    return #data
   end
 
   function fs.remove(path)
