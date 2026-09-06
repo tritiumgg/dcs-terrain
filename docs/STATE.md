@@ -4,34 +4,49 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-05T02:40Z
+**Last updated:** 2026-09-07T05:37Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **X13 spiked, and five PRs open — the window is on screen.** Every spike
-   unknown is measured on 2.9.29.27468 with the editor on Caucasus, each step
-   read back by `DCS.makeScreenShot`, so an agent can see the window rather than
-   report it. Every widget the controls need constructs from the hook state; an
-   unskinned one draws nothing. A window refuses to close because the native
-   side hides it and *then* fires `onClose`, so re-asserting `setVisible(true)`
-   there wins — checked against the real title-bar X.
-   `net.dostring_in("gui", ...)` reaches `MapWindow`: `getCurPosition()` matched
-   the editor's status bar to the digit, `getMapBounds()` answers in
-   **kilometres**, and its Draw layer takes a `Polygon` whose points are
-   *relative* to the anchor and whose fill needs the ring closed explicitly.
-   Open, bottom to top: **37** `field_problem` and a `tags` return, **38** the
-   config file under an empty environment, **39** ADR 0014's stopped state,
-   **40** ADR 0015's widget seam and failure latch, **41** the window chrome.
-2. **X2a, and a change of direction: configuration moves into a window.** Most
+1. **A write inside DCS never landed, and sixteen green test files could not see
+   it.** In the hook state a handle's `write` and `close` return *no values at
+   all* — on success and on a write to a read-only handle alike — where stock
+   Lua 5.1 returns `true` from both, which is what `write_file` and
+   `append_file` checked. So every write reported failure: `write_file` gave up
+   before its rename and left a `.tmp` holding the right bytes, so no manifest,
+   tile or config file could be written by a live run. It is ED's own C io, not
+   a Lua patch in `Scripts/Hooks` — the `gui` state answers the same. ADR 0016
+   checks the size that landed, and the fake reports nothing now too and can
+   lose bytes. PR **44**, off `main`.
+2. **The hook installs, and the window says where the run has got to.** The X13
+   stack is eight branches and not seven: these two were 444 lines together.
+   `window_status` is a pure function of the run and of whether a terrain is
+   loaded, and the label is written only when it changed. The bootstrap reads
+   the config at load, sets the log path, attaches the window and registers; an
+   installed hook nobody enabled writes nothing, and the two exceptions are a
+   file that will not load and an `enabled` that is a quoted boolean. Both
+   verified live at the menu, window on screen. Open: **42**, **43**.
+3. **X13 spiked, and five PRs open — the window is on screen.** Every unknown is
+   measured on 2.9.29.27468 with the editor on Caucasus, read back by
+   `DCS.makeScreenShot`. Every widget the controls need constructs from the hook
+   state; an unskinned one draws nothing. A window refuses to close because the
+   native side hides it and *then* fires `onClose`. `net.dostring_in("gui", ...)`
+   reaches `MapWindow`: `getCurPosition()` matched the status bar to the digit,
+   `getMapBounds()` answers in **kilometres**, and its Draw layer takes a
+   `Polygon` whose points are *relative* to the anchor, ring closed explicitly.
+   Open, bottom to top: **37** `field_problem` and `tags`, **38** the config file
+   under an empty environment, **39** ADR 0014's stopped state, **40** ADR 0015's
+   seam and latch, **41** the window chrome.
+4. **X2a, and a change of direction: configuration moves into a window.** Most
    of the frozen config table turned out not to be a question a user can answer,
    so three ADRs came out of planning it — **0011** cuts sixteen fields to
    `enabled`, `output_dir` and a crop that is a centre and a radius, deriving or
    fixing the rest; **0012** makes a bad field one log line and its default,
    with `output_dir` alone blocking a run; **0013** makes the progress log
    append-only. A 4-PR stack.
-3. **X4 — the state machine and frame budget.** idle to prepare to hook to
+5. **X4 — the state machine and frame budget.** idle to prepare to hook to
    mission to done, driven by the four DCS callbacks. A phase is a list of jobs
    the sweeps register: a job is `{name, start}`, `start(run)` returns a step,
    and a step returns `MORE` or `DONE`, so X5 onward add a sweep without
@@ -41,34 +56,19 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    phase change and each sweep end, never per tile. **Prepare has no jobs yet.**
    ADR 0010 came out of building it: the server-state pass is gated on loaded
    terrain, not on a mission. A 6-PR stack.
-4. **ADR 0010 — `server`-state calls need terrain, not a mission.** Measured
-   on 2.9.29.27468, editor open on Caucasus, no mission: `land.getHeight`
-   returns the acceptance value at Kutaisi, `land.getSurfaceType` the `RUNWAY`
-   enum, `world.searchObjects` real scenery. The crash the phase-`sim` rule
-   generalised was a call reaching the state with no terrain at all. So a whole
-   extract can be taken from a bare editor map, which also stops a mission
-   altering what is extracted: a heliport static clears scenery within 150 m,
-   into the scene the terrain module reads. `CLAUDE.md` is rewritten with it.
-5. **The project setup, ported from `dcs-bridge`.** A pull request template,
-   `mise` tasks, and five tools: `ledger.sh` retrieves a claim and lints the 18
-   stamps, beside `statecheck.sh`, `nospecrefs.sh`, `readmeopen.sh` and
-   `hooktest.sh`. Seven hooks load this file at session start, refuse an
-   unstamped stop, refuse a write to `docs/spec/`, check every shell command,
-   and check a commit before and after; a `docs` workflow runs the five on
-   every change. The ADRs are reformatted to four headings, cited `ADR NNNN`.
 
 ## Next
 
 One task. The thing to pick up immediately.
 
-**X13 branch 6 — the status line and the bootstrap**, on PR 41. `window_status`
-says "Open a map in the Mission Editor." with no terrain and the run's state
-otherwise; `attach_window` points `on_frame` at build-then-update, writing the
-label only when it changed. Both were written and live-tested, then split out to
-hold 41 under the limit, so write them again. Then the bootstrap: read the config
-at load, set `log_path`, register, stay silent when not enabled. It installs and
-shows something, so it clears both READMEs' "not built yet" notes. *Verified by:*
-an agent, except `require("Skin")` at hook-**load** time, which needs DCS.
+**X13 branch 8 — the controls**, on PR 43: `output_dir`, the crop as a centre and
+a radius, a line per problem against the field it owns, Start writing the config
+and leaving the stopped state, Stop saving the manifest. Last in the stack, so it
+carries the live procedure — install, enable, watch the window appear — where
+`require("Skin")` at hook-**load** time and carry 3 both get answered. Land
+**44** (writes work at all) and **45** (a fresh Windows checkout builds) first,
+then rebase the stack: `docs/decisions/README.md` conflicts. *Verified by:* an
+agent offline; the install and the screen by a maintainer.
 
 ## Then
 
