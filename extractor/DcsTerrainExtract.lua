@@ -1820,6 +1820,112 @@ function M.validate_config(config)
 end
 
 --------------------------------------------------------------------------------
+-- Controls
+--
+-- The config as a window shows it, and back. A control holds a string; a config
+-- holds numbers, a table, and nil for a question nobody answered. These two
+-- functions are that conversion and nothing else, which is what makes the whole
+-- of it testable with no widget in the process -- and that matters more here
+-- than anywhere else in this file, because a widget cannot be constructed
+-- outside DCS at all.
+--
+-- They live here rather than beside the window because the window is where they
+-- cannot be tested.
+--
+-- config_from_text produces no messages. A box that will not parse keeps its own
+-- text, and the checkers above already reject a string and print it, so a box
+-- holding 12abc comes back as "crop.x is not a finite number: 12abc". Turning it
+-- into nil first would report "nil" about a box the user can plainly see
+-- characters in; wording a message here would make a second place a config
+-- problem is phrased, and then two wordings to keep in step.
+--------------------------------------------------------------------------------
+
+-- A box is typed by hand where the config file is written by this program, so
+-- surrounding space is the user's and not a value. A trailing one is invisible
+-- on screen, passes bad_path -- a space is not a control character -- and ends
+-- up as a directory whose name ends in a space.
+local function trim(s)
+  if type(s) ~= "string" then
+    return nil
+  end
+  return (s:gsub("^%s*(.-)%s*$", "%1"))
+end
+
+-- Blank is a question not answered, which is nil rather than "". The difference
+-- is the whole of how an absent crop and an absent output_dir are told from a
+-- bad one.
+local function box_string(s)
+  local text = trim(s)
+  if text == nil or text == "" then
+    return nil
+  end
+  return text
+end
+
+local function box_number(s)
+  local text = box_string(s)
+  if text == nil then
+    return nil
+  end
+  return tonumber(text) or text
+end
+
+-- The shortest form that reads back as the same double. %.17g is exact and
+-- unreadable -- a radius would sit in the box as 5000.0000000000000 -- and
+-- %.14g, which is what tostring writes, moves a six-figure metre coordinate in
+-- its last bits. A centre that came out of the config file has to go back into
+-- it unchanged, or a user who pressed Start without touching anything would have
+-- moved their own crop.
+local function box_text(v)
+  if v == nil then
+    return ""
+  end
+  if not is_finite(v) then
+    return tostring(v)
+  end
+  local short = format("%.14g", v)
+  if tonumber(short) == v then
+    return short
+  end
+  return format("%.17g", v)
+end
+
+-- What the controls hold for a config: four strings and the crop's tick.
+function M.control_text(config)
+  local crop = type(config) == "table" and config.crop or nil
+  local has_crop = type(crop) == "table"
+  return {
+    output_dir = box_text(type(config) == "table" and config.output_dir or nil),
+    crop = has_crop,
+    crop_x = has_crop and box_text(crop.x) or "",
+    crop_z = has_crop and box_text(crop.z) or "",
+    crop_radius_m = has_crop and box_text(crop.radius_m) or "",
+  }
+end
+
+-- The config those controls describe, whatever is in them.
+--
+-- enabled is true and is not read from anything, because the window only exists
+-- when it is: a window writing enabled = false would be a control switching off
+-- the only surface that can switch it back on.
+--
+-- An unticked crop drops the three boxes rather than clearing them, so a user
+-- who unticks and ticks again still has what they typed. A ticked crop with a
+-- blank box is a crop with a nil member, which is a problem and reads as one.
+function M.config_from_text(values)
+  local out = { enabled = true }
+  out.output_dir = box_string(values.output_dir)
+  if values.crop then
+    out.crop = {
+      x = box_number(values.crop_x),
+      z = box_number(values.crop_z),
+      radius_m = box_number(values.crop_radius_m),
+    }
+  end
+  return out
+end
+
+--------------------------------------------------------------------------------
 -- Config file
 --
 -- A Lua chunk in Saved Games returning a table. The window owns it: it fills its
