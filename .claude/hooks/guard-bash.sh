@@ -16,6 +16,8 @@
 #   rustup, mise use rust              the toolchain lives in rust-toolchain.toml
 #   git merge without --ff-only        history is linear
 #   git push --force                   --force-with-lease, on a topic branch
+#   git add -A, git add ., git         stage paths by name and read the
+#     commit -a                          staged diff before writing a message
 #   gh pr create without the           every pull request follows the template
 #     template's four headings
 #   sed -i, grep -P, readlink -f       not portable across the three platforms
@@ -127,6 +129,25 @@ if has "git[[:space:]]+push.*([[:space:]]--force|[[:space:]]-f)([[:space:]]|$)" 
 "Use --force-with-lease, on a topic branch that is yours. Never on main."
 fi
 
+# Blanket staging. A task is one branch of small commits read in order, and a
+# commit that stages whatever the tree happens to hold -- a scratch file, a
+# debug line, half of the next commit -- carries a message describing something
+# other than what landed. The words after the subcommand are walked one at a
+# time so a path or a message that merely contains "." or "-a" is not one.
+WORDS='([[:space:]]+[^[:space:]]+)*[[:space:]]+'
+if has "git[[:space:]]+add${WORDS}(-A|--all|-u|--update|\\.)([[:space:]]|$)"; then
+    refuse "git add with a blanket pathspec." \
+"Stage paths by name, and read the staged diff before writing the message.
+git add -p stages part of a file. -A, -u and . take whatever the tree holds,
+including what the commit is not about."
+fi
+
+if has "git[[:space:]]+commit${WORDS}(--all|-[A-Za-z]*a[A-Za-z]*)([[:space:]]|$)"; then
+    refuse "git commit -a." \
+"It stages every tracked change, so the commit is the working tree rather than
+one thing. Stage the paths by name, read the staged diff, then commit."
+fi
+
 if has "gh[[:space:]]+pr[[:space:]]+create"; then
     body=$cmd
     file=$(printf '%s\n' "$lines" | sed -E -n 's/.*(--body-file|-F)[= ]*([^ ]*).*/\2/p' | head -1)
@@ -194,15 +215,15 @@ if has "git[[:space:]]+push([[:space:]]|$)"; then
     # the base of an open pull request closes that request.
     if has "git[[:space:]]+push.*([[:space:]]--delete|[[:space:]]-d)([[:space:]]|$)" \
         || printf '%s\n' "$args" | grep -q '^:'; then
-        ask "This deletes a remote branch. Deleting the base branch of an open pull request closes it, and a stacked pull request closes as CLOSED rather than MERGED. Say which branch and why, and confirm the work is on main first."
+        ask "This deletes a remote branch. Deleting the base branch of an open pull request closes it, as CLOSED rather than MERGED. Say which branch and why, and confirm the work is on main first."
     fi
 
     if printf '%s\n' "$args" | grep -Eq '^(\+?main|[^:]*:main)$'; then
-        ask "This pushes main. $RULE Retarget every open stacked pull request to main BEFORE this push: afterwards GitHub refuses the retarget, because the head is already contained in main, and those requests can then only close as CLOSED rather than MERGED."
+        ask "This pushes main. $RULE An open pull request whose head main already contains can no longer be merged on GitHub, only closed, so land it before pushing past it."
     fi
     if [ "$n" -le 1 ]; then
         current_branch
-        [ "$branch" = "main" ] && ask "This pushes the current branch, which is main. $RULE Retarget every open stacked pull request to main BEFORE this push, or they can only close as CLOSED rather than MERGED."
+        [ "$branch" = "main" ] && ask "This pushes the current branch, which is main. $RULE An open pull request whose head main already contains can only be closed, not merged."
     fi
 fi
 
