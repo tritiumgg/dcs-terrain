@@ -2670,9 +2670,9 @@ M.WINDOW_TITLE = "DCS Terrain Extract"
 
 -- Hand-placed pixels. There is no layout engine here worth the indirection: the
 -- window is one column of rows and the arithmetic is two additions.
-local WIN = { x = 60, y = 60, w = 420, h = 250, pad = 10, row = 22 }
+local WIN = { x = 60, y = 60, w = 420, h = 250, pad = 10, row = 22, bar = 14 }
 
-M.window = { built = false, root = nil, panel = nil, status = nil }
+M.window = { built = false, root = nil, panel = nil, status = nil, bar = nil }
 
 function M.build_window()
   if M.window.built then
@@ -2690,7 +2690,8 @@ function M.build_window()
   local Window = M.ui(M.gui.widget, "Window")
   local Panel = M.ui(M.gui.widget, "Panel")
   local Static = M.ui(M.gui.widget, "Static")
-  if not (Window and Panel and Static) then
+  local Bar = M.ui(M.gui.widget, "HorzProgressBar")
+  if not (Window and Panel and Static and Bar) then
     M.window.unavailable = true
     return false
   end
@@ -2714,6 +2715,15 @@ function M.build_window()
   M.ui_method(status, "setBounds", WIN.pad, WIN.pad, WIN.w - WIN.pad * 2, WIN.row)
   M.ui_method(panel, "insertWidget", status, -1)
 
+  -- Under the line that names the phase, because it measures the same thing at
+  -- a coarser grain: the line says which phase, the bar says how far through.
+  local bar = M.ui(Bar.new)
+  M.ui_method(bar, "setSkin", M.ui(M.gui.skin, "horzProgressBarSkin"))
+  M.ui_method(bar, "setBounds", WIN.pad, WIN.pad + WIN.row,
+    WIN.w - WIN.pad * 2, WIN.bar)
+  M.ui_method(bar, "setRange", 0, 100)
+  M.ui_method(panel, "insertWidget", bar, -1)
+
   if M.ui_failed or root == nil then
     return false
   end
@@ -2733,6 +2743,7 @@ function M.build_window()
   M.ui_method(root, "setVisible", true)
 
   M.window.root, M.window.panel, M.window.status = root, panel, status
+  M.window.bar = bar
   M.window.built = true
   M.log("window built")
   return true
@@ -2771,6 +2782,30 @@ function M.window_status(run)
   return STATUS_OF[run.state] or tostring(run.state)
 end
 
+-- Where the bar stands, as a percentage.
+--
+-- By phase, because that is all anything here can know yet: a sweep cannot say
+-- how much of its own work is done, so the bar moves at a phase change and
+-- stands still in between. Prepare is left at zero rather than given a slice of
+-- its own -- it is a handful of frames against tens of minutes, and a bar that
+-- jumped before any terrain had been read would be describing nothing.
+--
+-- The two passes are given equal halves, which is wrong and is the honest kind
+-- of wrong: the mission pass is not half the work, and nothing has measured
+-- what it is. A fraction that knows costs a per-sweep measurement.
+local PROGRESS_OF = {
+  [M.STATE_STOPPED] = 0,
+  [M.STATE_IDLE] = 0,
+  [M.STATE_PREPARE] = 0,
+  [M.STATE_HOOK] = 0,
+  [M.STATE_MISSION] = 50,
+  [M.STATE_DONE] = 100,
+}
+
+function M.window_progress(state)
+  return PROGRESS_OF[state] or 0
+end
+
 -- Written only when it changed. The frame callback arrives about sixty times a
 -- second and the line changes a handful of times in a run, so setting it every
 -- frame is a relayout a frame for a string nobody could see change.
@@ -2785,6 +2820,16 @@ local function update_status(run)
   M.window.status_text = text
 end
 
+-- Same rule as the line above it, for the same reason.
+local function update_progress(run)
+  local value = M.window_progress(run.state)
+  if value == M.window.bar_value then
+    return
+  end
+  M.ui_method(M.window.bar, "setValue", value)
+  M.window.bar_value = value
+end
+
 -- Points on_frame at the window: build it, then say where the run has got to.
 --
 -- Build first because the window is built on a frame rather than at load, and
@@ -2794,6 +2839,7 @@ function M.attach_window()
   M.on_frame = function(run)
     if M.build_window() then
       update_status(run)
+      update_progress(run)
     end
   end
 end

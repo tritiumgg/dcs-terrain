@@ -1,11 +1,13 @@
--- Offline tests for the status line and the frame that writes it.
+-- Offline tests for the status line, the bar beneath it, and the frame that
+-- writes them.
 --
 -- Run from the repository root with a plain lua5.1.
 --
--- The line is a pure function of the run and of whether a terrain is loaded, so
--- every line the window can show is reachable here with no widget in the
--- process. What does need a widget is the other half: that the label is written
--- when the line changes and left alone when it has not.
+-- Both are pure functions of the run -- the line of its state and of whether a
+-- terrain is loaded, the bar of its state alone -- so everything the window can
+-- show is reachable here with no widget in the process. What does need a widget
+-- is the other half: that each is written when it changes and left alone when
+-- it has not.
 
 package.path = "extractor/?.lua;extractor/test/support/?.lua;" .. package.path
 
@@ -104,6 +106,50 @@ run.state = E.STATE_HOOK
 E.on_frame(run)
 T.eq("and so does the run moving on", E.gui.find("Static").text, "Sweeping the terrain.")
 T.eq("with one more", writes(), 3)
+
+--------------------------------------------------------------------------------
+T.group("the bar moves at a phase change and stands still between")
+--------------------------------------------------------------------------------
+
+T.eq("stopped is nothing done", E.window_progress(E.STATE_STOPPED), 0)
+T.eq("and so is waiting", E.window_progress(E.STATE_IDLE), 0)
+-- Prepare is a handful of frames against tens of minutes: a bar that jumped
+-- before any terrain had been read would be describing nothing.
+T.eq("preparing has done no work", E.window_progress(E.STATE_PREPARE), 0)
+T.eq("nor has the first pass, starting", E.window_progress(E.STATE_HOOK), 0)
+T.eq("the second pass is half way", E.window_progress(E.STATE_MISSION), 50)
+T.eq("and finished is full", E.window_progress(E.STATE_DONE), 100)
+-- A state added later without a share reads as no progress rather than taking
+-- the bar down with it, the same way the status line handles one.
+T.eq("a state nobody gave a share", E.window_progress("elsewhere"), 0)
+
+local function bar_writes()
+  local n = 0
+  for i = 1, #E.gui.calls do
+    if E.gui.calls[i] == "HorzProgressBar:setValue" then n = n + 1 end
+  end
+  return n
+end
+
+fresh()
+terrain = "Caucasus"
+run = run_in(E.STATE_STOPPED)
+E.on_frame(run)
+local bar = E.gui.find("HorzProgressBar")
+T.eq("the bar is a percentage", bar.range[1] .. ".." .. bar.range[2], "0..100")
+T.eq("and starts empty", bar.value, 0)
+T.eq("written once", bar_writes(), 1)
+
+for _ = 1, 200 do E.on_frame(run) end
+T.eq("and left alone while the phase holds", bar_writes(), 1)
+
+run.state = E.STATE_MISSION
+E.on_frame(run)
+T.eq("the second pass moves it", bar.value, 50)
+run.state = E.STATE_DONE
+E.on_frame(run)
+T.eq("and finishing fills it", bar.value, 100)
+T.eq("one write per change", bar_writes(), 3)
 
 --------------------------------------------------------------------------------
 T.group("a window that cannot be built ticks a no-op")

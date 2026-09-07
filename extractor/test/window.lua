@@ -36,7 +36,7 @@ T.group("the window is built once, in an order that can be drawn")
 fresh()
 T.eq("it builds", E.build_window(), true)
 T.eq("and says so", E.window.built, true)
-T.eq("a window, a panel and a label", #E.gui.made, 3)
+T.eq("a window, a panel, a label and a bar", #E.gui.made, 4)
 
 -- Hidden, skinned, then shown. A widget with correct bounds and a true
 -- visibility flag still draws before its parent has recomputed, so a window

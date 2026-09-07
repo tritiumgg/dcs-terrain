@@ -12,7 +12,7 @@
 
 local FakeGui = {}
 
-local CLASSES = { "Window", "Panel", "Static" }
+local CLASSES = { "Window", "Panel", "Static", "HorzProgressBar" }
 
 -- Every method the window calls. One that is not in this list is a nil index
 -- rather than a silent no-op, so a typo shows up as a failure here rather than
@@ -20,6 +20,7 @@ local CLASSES = { "Window", "Panel", "Static" }
 local METHODS = {
   "setVisible", "getVisible", "setSkin", "setBounds", "setDraggable",
   "setResizable", "insertWidget", "setText", "getText", "close",
+  "setRange", "setValue",
 }
 
 function FakeGui.new()
@@ -31,7 +32,8 @@ function FakeGui.new()
     end
   end
 
-  -- Window.new is (x, y, w, h, text); every other class takes the text alone.
+  -- Window.new is (x, y, w, h, text) and a progress bar takes nothing; every
+  -- other class takes the text alone.
   local function make(class_name, ...)
     refuse(class_name .. ".new")
     local args = { ... }
@@ -53,6 +55,8 @@ function FakeGui.new()
         if name == "setVisible" then self.visible = a end
         if name == "getVisible" then return self.visible end
         if name == "setSkin" then self.skin = a end
+        if name == "setRange" then self.range = { a, b } end
+        if name == "setValue" then self.value = a end
         if name == "insertWidget" then
           self.children[#self.children + 1] = a
         end
