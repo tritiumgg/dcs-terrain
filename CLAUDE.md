@@ -381,11 +381,12 @@ way each take a commit of their own. A preparatory refactor claims no change in
 behaviour: sharing a diff with the feature hides which lines moved among the
 lines that changed.
 
-**Stage paths by name, never `git add -A` or `git commit -a`, and read the
-staged diff before writing the message.** A blanket stage commits whatever the
-tree happens to hold — a scratch file, a debug line, half of the next commit —
-and the message then describes something other than what landed.
-`guard-bash.sh` refuses the blanket forms.
+**Stage paths by name, never `git add -A`, `-u` or `.` and never
+`git commit -a`, and read the staged diff before writing the message.** A
+blanket stage commits whatever the tree happens to hold — a scratch file, a
+debug line, half of the next commit — and the message then describes something
+other than what landed. `git add -p` stages part of a file and `git add -n`
+previews; `guard-bash.sh` refuses the four blanket forms and allows those.
 
 - **History is linear. Rebase, never merge-commit.** Bring a branch up to date
   with `git rebase main`; land it with `git merge --ff-only`. If the

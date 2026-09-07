@@ -147,19 +147,30 @@ allow_bash 'git rebase main'
 allow_bash 'git commit -m \"fix: a thing\"'
 
 # Blanket staging. A commit is one thing a reviewer reads in order, so the
-# paths are named. A path, a flag or a message that merely contains "." or
-# "-a" is not a blanket stage and still passes.
+# paths are named. A global option is stepped over, because git -C dir add -A
+# stages exactly what git add -A does.
 refuse_bash 'git add -A'
 refuse_bash 'git add --all'
 refuse_bash 'git add .'
 refuse_bash 'git add -u'
 refuse_bash 'git commit -a -m x'
 refuse_bash 'git commit -am x'
+refuse_bash 'git -C sub add -A'
+refuse_bash 'git -C sub commit -a -m x'
+refuse_bash 'cd x && git add .'
 allow_bash 'git add CLAUDE.md'
 allow_bash 'git add -p'
 allow_bash 'git add ./tools/hooktest.sh'
 allow_bash 'git add docs/STATE.md docs/plan.md'
 allow_bash 'git commit --amend'
+# A dry run stages nothing, and is a way of not doing this.
+allow_bash 'git add -n .'
+allow_bash 'git add --dry-run .'
+# A message is text, not syntax. The walk from the subcommand to the flag
+# stops at the opening quote, so a message naming the thing it refuses --
+# which the commit adding this rule had to write -- is not that thing.
+allow_bash 'git commit -m \"note: -a is dangerous\"'
+allow_bash 'git commit -m \"git add -A now refuses\"'
 
 ask_bash 'git push origin main'
 ask_bash 'git push origin HEAD:main'

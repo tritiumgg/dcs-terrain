@@ -16,7 +16,7 @@
 #   rustup, mise use rust              the toolchain lives in rust-toolchain.toml
 #   git merge without --ff-only        history is linear
 #   git push --force                   --force-with-lease, on a topic branch
-#   git add -A, git add ., git         stage paths by name and read the
+#   git add -A, -u or ., and git       stage paths by name and read the
 #     commit -a                          staged diff before writing a message
 #   gh pr create without the           every pull request follows the template
 #     template's four headings
@@ -132,17 +132,25 @@ fi
 # Blanket staging. A task is one branch of small commits read in order, and a
 # commit that stages whatever the tree happens to hold -- a scratch file, a
 # debug line, half of the next commit -- carries a message describing something
-# other than what landed. The words after the subcommand are walked one at a
-# time so a path or a message that merely contains "." or "-a" is not one.
-WORDS='([[:space:]]+[^[:space:]]+)*[[:space:]]+'
-if has "git[[:space:]]+add${WORDS}(-A|--all|-u|--update|\\.)([[:space:]]|$)"; then
+# other than what landed.
+#
+# Matched at command position, and the words between the subcommand and the
+# flag are walked one at a time and hold no quote, so a path or a message that
+# merely contains "." or "-a" is not a blanket stage: the walk stops at the
+# opening quote of `git commit -m "note: -a is dangerous"`. A global option is
+# stepped over, because `git -C dir add -A` stages exactly what `git add -A`
+# does. A dry run stages nothing and is a way of not doing this.
+GITOPT="([[:space:]]+(-C|-c|--git-dir|--work-tree|--namespace)([[:space:]]+|=)[^[:space:]]+)*"
+WORDS="([[:space:]]+[^[:space:]\"']+)*[[:space:]]+"
+if has "${START}git${GITOPT}[[:space:]]+add${WORDS}(-A|--all|-u|--update|\\.)([[:space:]]|\$)" \
+    && ! has "git[[:space:]]+add${WORDS}(-n|--dry-run)([[:space:]]|\$)"; then
     refuse "git add with a blanket pathspec." \
 "Stage paths by name, and read the staged diff before writing the message.
 git add -p stages part of a file. -A, -u and . take whatever the tree holds,
 including what the commit is not about."
 fi
 
-if has "git[[:space:]]+commit${WORDS}(--all|-[A-Za-z]*a[A-Za-z]*)([[:space:]]|$)"; then
+if has "${START}git${GITOPT}[[:space:]]+commit${WORDS}(--all|-[A-Za-z]*a[A-Za-z]*)([[:space:]]|\$)"; then
     refuse "git commit -a." \
 "It stages every tracked change, so the commit is the working tree rather than
 one thing. Stage the paths by name, read the staged diff, then commit."
