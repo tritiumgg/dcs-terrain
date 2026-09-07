@@ -4,7 +4,7 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-07T06:47Z
+**Last updated:** 2026-09-07T06:51Z
 
 ## Done
 
@@ -16,8 +16,8 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    and a task is one branch. A push needs an adversarial local review and the
    three check tasks; a mid-task commit needs `mise run check`. Blanket staging
    refuses in `guard-bash.sh`, tested both ways — the adversarial review of the
-   branch is what found the message text and `git -C`. The X13 stack finishes
-   under the old rules. PR **46**.
+   branch is what found the message text and `git -C`. Every earlier stack had
+   landed by then, so nothing is left running on the old rules. PR **46**.
 2. **A write inside DCS never landed, and sixteen green test files could not see
    it.** In the hook state a handle's `write` and `close` return *no values at
    all* — on success and on a write to a read-only handle alike — where stock
@@ -35,8 +35,8 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    the config at load, sets the log path, attaches the window and registers; an
    installed hook nobody enabled writes nothing, and the two exceptions are a
    file that will not load and an `enabled` that is a quoted boolean. Both
-   verified live at the menu, window on screen. Open: **42**, **43**.
-4. **X13 spiked, and five PRs open — the window is on screen.** Every unknown is
+   verified live at the menu, window on screen. PRs **42** and **43**.
+4. **X13 spiked, and five PRs landed — the window is on screen.** Every unknown is
    measured on 2.9.29.27468 with the editor on Caucasus, read back by
    `DCS.makeScreenShot`. Every widget the controls need constructs from the hook
    state; an unskinned one draws nothing. A window refuses to close because the
@@ -44,7 +44,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    reaches `MapWindow`: `getCurPosition()` matched the status bar to the digit,
    `getMapBounds()` answers in **kilometres**, and its Draw layer takes a
    `Polygon` whose points are *relative* to the anchor, ring closed explicitly.
-   Open, bottom to top: **37** `field_problem` and `tags`, **38** the config file
+   Bottom to top: **37** `field_problem` and `tags`, **38** the config file
    under an empty environment, **39** ADR 0014's stopped state, **40** ADR 0015's
    seam and latch, **41** the window chrome.
 5. **X2a, and a change of direction: configuration moves into a window.** Most
@@ -59,14 +59,14 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
 One task. The thing to pick up immediately.
 
-**X13 branch 8 — the controls**, on PR 43: `output_dir`, the crop as a centre and
-a radius, a line per problem against the field it owns, Start writing the config
-and leaving the stopped state, Stop saving the manifest. Last in the stack, so it
-carries the live procedure — install, enable, watch the window appear — where
-`require("Skin")` at hook-**load** time and carry 3 both get answered. Land
-**44** (writes work at all) and **45** (a fresh Windows checkout builds) first,
-then rebase the stack: `docs/decisions/README.md` conflicts. *Verified by:* an
-agent offline; the install and the screen by a maintainer.
+**X13 — the controls**, and X13 is then done: `output_dir`, the crop as a centre
+and a radius, a line per problem against the field it owns, Start writing the
+config and leaving the stopped state, Stop saving the manifest. Everything else
+in X13 has landed, so `build_window` puts up a panel and a status line and no
+widget a user can touch. It carries the live procedure — install, enable, watch
+the window appear — where `require("Skin")` at hook-**load** time and carry 3
+both get answered. *Verified by:* an agent offline; the install and the screen
+by a maintainer.
 
 ## Then
 
