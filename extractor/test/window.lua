@@ -100,8 +100,10 @@ T.eq("and stay that way until something is wrong", E.window.lines.crop.text, "")
 -- Getting this wrong hides a control off the bottom of the frame, and without
 -- this assertion only a screenshot would say so.
 local frame = E.gui.find("Window").bounds
-local last = E.window.lines.crop.bounds
+local last = E.window.buttons.stop.bounds
 T.eq("the last row is inside the window", last[2] + last[4] <= frame[4], true)
+T.eq("and so is the crop line above it",
+  E.window.lines.crop.bounds[2] < last[2], true)
 T.eq("and the panel covers the window", E.gui.find("Panel").bounds[4], frame[4])
 
 --------------------------------------------------------------------------------
@@ -173,6 +175,55 @@ lines = shown_for({ enabled = true, output_dir = "C:/extract", nonsense = 1 })
 T.eq("an unknown key marks no line", lines.output_dir.text, "")
 T.eq("nor the other one", lines.crop.text, "")
 T.eq("and nothing latched", E.ui_failed, false)
+
+--------------------------------------------------------------------------------
+T.group("Stop halts the run, and says so on a line of its own")
+--------------------------------------------------------------------------------
+
+-- The run reaches a press through the frame, so a window has to have been
+-- ticked before its buttons mean anything.
+local function window_on(run)
+  fresh()
+  E.attach_window()
+  E.on_frame(run)
+  return E.window.buttons
+end
+
+E.now_iso = function() return "2026-09-07T00:00:00Z" end
+
+run = E.new_run({ config = { enabled = true, output_dir = "C:/extract" } })
+run.state = E.STATE_HOOK
+local buttons = window_on(run)
+E.gui.press(buttons.stop)
+T.eq("the run halts", run.state, E.STATE_STOPPED)
+T.eq("and the line says what to do next",
+  E.window.message.text:find("Start again", 1, true) ~= nil, true)
+
+-- Pressing it again is not a failure and is not silence: a button that does
+-- nothing and says nothing reads as a broken window.
+E.gui.press(buttons.stop)
+T.eq("nothing to stop twice", E.window.message.text, "Nothing to stop.")
+T.eq("and the run is where it was", run.state, E.STATE_STOPPED)
+
+-- A press arrives on DCS's own stack, from inside the widget library, so a
+-- raise in a handler lands where nothing here catches it. Under the latch it
+-- costs the window and nothing else.
+run.state = E.STATE_HOOK
+buttons = window_on(run)
+local real_stop = E.stop
+E.stop = function() error("the handler is broken", 0) end
+E.gui.press(buttons.stop)
+E.stop = real_stop
+T.eq("a raising handler latches the window", E.ui_failed, true)
+T.eq("and leaves the run alone", run.state, E.STATE_HOOK)
+
+-- And once it has latched, a press does nothing at all rather than trying
+-- again on every click for as long as DCS is open.
+local reached = false
+E.stop = function() reached = true return true end
+E.gui.press(buttons.stop)
+E.stop = real_stop
+T.eq("a press after the latch is not attempted", reached, false)
 
 --------------------------------------------------------------------------------
 T.group("it refuses to close")

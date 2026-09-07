@@ -2683,7 +2683,7 @@ M.WINDOW_TITLE = "DCS Terrain Extract"
 -- still hidden, so nothing is seen resizing.
 local WIN = {
   x = 60, y = 60, w = 520, h = 260,
-  pad = 10, row = 22, bar = 14, gap = 8, label = 62,
+  pad = 10, row = 22, bar = 14, gap = 8, label = 62, button = 130,
 }
 
 -- The text in front of each field. Keyed by field name rather than built from
@@ -2697,6 +2697,12 @@ local FIELD_LABEL = {
 local CROP_LABEL = { crop_x = "X", crop_z = "Z", crop_radius_m = "Radius (m)" }
 local CROP_ORDER = { "crop_x", "crop_z", "crop_radius_m" }
 
+-- The buttons, left to right. A list rather than a placed widget each, so
+-- adding one is an entry here and not another x to work out by hand.
+local BUTTONS = {
+  { name = "stop", text = "Stop" },
+}
+
 M.window = { built = false, root = nil, panel = nil, status = nil, bar = nil }
 
 -- Skin, place, insert -- in that order, for every widget in the window. The
@@ -2708,6 +2714,37 @@ local function place(panel, widget, skin_name, x, y, w, h)
   M.ui_method(widget, "setBounds", x, y, w, h)
   M.ui_method(panel, "insertWidget", widget, -1)
   return widget
+end
+
+local function say(text)
+  M.ui_method(M.window.message, "setText", text)
+end
+
+-- A press arrives on DCS's own stack, called from inside the widget library, so
+-- a raise in a handler lands where nothing this file wrote can catch it. Under
+-- the latch, then, like every other widget call: a handler that fails switches
+-- the window off for the session and leaves the run untouched, which is the
+-- same one-directional failure the rest of the window already has.
+--
+-- It follows that a run under a dead window cannot be stopped from the window.
+-- That is the accepted half of the same coin: the extract is the point, and a
+-- run nobody can watch is still a run.
+local function on_press(fn)
+  return function()
+    M.ui(fn)
+  end
+end
+
+local function stop_pressed()
+  local run = M.window.run
+  if run == nil then
+    return
+  end
+  if M.stop(run) then
+    say("Stopped. Start again to carry on from here.")
+  else
+    say("Nothing to stop.")
+  end
 end
 
 function M.build_window()
@@ -2729,7 +2766,8 @@ function M.build_window()
   local Bar = M.ui(M.gui.widget, "HorzProgressBar")
   local Edit = M.ui(M.gui.widget, "EditBox")
   local Check = M.ui(M.gui.widget, "CheckBox")
-  if not (Window and Panel and Static and Bar and Edit and Check) then
+  local Push = M.ui(M.gui.widget, "Button")
+  if not (Window and Panel and Static and Bar and Edit and Check and Push) then
     M.window.unavailable = true
     return false
   end
@@ -2805,10 +2843,26 @@ function M.build_window()
     y = y + WIN.row + WIN.gap
   end
 
+  -- One line the buttons own, above them. What a press has to say -- that a
+  -- config was written, that it could not be, that there is nothing to stop --
+  -- is neither a field problem nor a phase, so it belongs to neither the lines
+  -- above nor the status line, which the run rewrites whenever it moves.
+  local message = place(panel, M.ui(Static.new, ""), "staticSkin",
+    WIN.pad, y, inner, WIN.row)
+  y = y + WIN.row
+
+  local buttons = {}
+  for i = 1, #BUTTONS do
+    local spec = BUTTONS[i]
+    buttons[spec.name] = place(panel, M.ui(Push.new, spec.text), "buttonSkin",
+      WIN.pad + (i - 1) * (WIN.button + WIN.gap), y, WIN.button, WIN.row)
+  end
+  y = y + WIN.row
+
   -- What the rows came to. Set while the window is still hidden, so the height
   -- is never seen changing, and taken from the same cursor that placed them, so
   -- a row added above cannot leave the last one hanging below the frame.
-  local height = y - WIN.gap + WIN.pad
+  local height = y + WIN.pad
   M.ui_method(root, "setBounds", WIN.x, WIN.y, WIN.w, height)
   M.ui_method(panel, "setBounds", 0, 0, WIN.w, height)
 
@@ -2828,11 +2882,17 @@ function M.build_window()
     M.ui_method(self, "setVisible", true)
   end
 
+  -- Per instance for the same reason, and the same shape: the widget library
+  -- fires onChange on the widget itself, so a press is a field on the object
+  -- rather than a callback registered somewhere.
+  buttons.stop.onChange = on_press(stop_pressed)
+
   M.ui_method(root, "setVisible", true)
 
   M.window.root, M.window.panel, M.window.status = root, panel, status
-  M.window.bar = bar
+  M.window.bar, M.window.message = bar, message
   M.window.controls, M.window.lines = controls, lines
+  M.window.buttons = buttons
   M.window.built = true
   M.log("window built")
   return true
@@ -2984,6 +3044,11 @@ end
 -- widget library is not there ticks a no-op rather than indexing a nil label.
 function M.attach_window()
   M.on_frame = function(run)
+    -- Where a press finds the run. This is the only caller of build_window, so
+    -- no button can exist before a frame has carried one, and taking it from
+    -- here rather than closing over it leaves one place the run comes from
+    -- instead of two that can disagree.
+    M.window.run = run
     if M.build_window() then
       fill_controls(run)
       update_status(run)

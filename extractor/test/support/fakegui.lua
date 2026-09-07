@@ -14,6 +14,7 @@ local FakeGui = {}
 
 local CLASSES = {
   "Window", "Panel", "Static", "HorzProgressBar", "EditBox", "CheckBox",
+  "Button",
 }
 
 -- Every method the window calls. One that is not in this list is a nil index
@@ -130,6 +131,16 @@ function FakeGui.new()
       end
     end
     return nil
+  end
+
+  -- A press. The native side fires a widget's own onChange and no Lua method
+  -- does, which is why this is the test's handle on the event rather than
+  -- another entry in METHODS: a window that could press its own buttons would
+  -- be a shape the real library does not have.
+  function gui.press(widget)
+    if widget and widget.onChange then
+      widget:onChange()
+    end
   end
 
   -- How many times one widget was asked to do something. The window writes a
