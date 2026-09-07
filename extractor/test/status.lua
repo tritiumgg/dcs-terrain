@@ -75,12 +75,11 @@ local function fresh(mode)
   E.attach_window()
 end
 
+-- This label's own writes. The window has several labels now -- a caption and a
+-- problem line per field -- so counting every Static in the window would count
+-- them clearing each other.
 local function writes()
-  local n = 0
-  for i = 1, #E.gui.calls do
-    if E.gui.calls[i] == "Static:setText" then n = n + 1 end
-  end
-  return n
+  return E.gui.count(E.window.status, "setText")
 end
 
 fresh()
@@ -124,11 +123,7 @@ T.eq("and finished is full", E.window_progress(E.STATE_DONE), 100)
 T.eq("a state nobody gave a share", E.window_progress("elsewhere"), 0)
 
 local function bar_writes()
-  local n = 0
-  for i = 1, #E.gui.calls do
-    if E.gui.calls[i] == "HorzProgressBar:setValue" then n = n + 1 end
-  end
-  return n
+  return E.gui.count(E.window.bar, "setValue")
 end
 
 fresh()

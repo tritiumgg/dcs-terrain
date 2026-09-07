@@ -2208,6 +2208,13 @@ function M.new_run(opts)
     config = config,
     jobs = opts.jobs or M.jobs,
     dir = config.output_dir,
+    -- What was wrong with the config this run was made from, carried so the
+    -- window can put each line under the field it belongs to. They are found
+    -- before there is a window to show them in, and a warning in a log is not
+    -- where somebody looking at an empty control will go looking for the
+    -- reason it is empty.
+    config_problems = opts.problems or {},
+    config_tags = opts.tags or {},
     -- A constant, not config (ADR 0011). It stays a field on the run so a test
     -- can drive the budget by hand, which no config file could ever ask for.
     budget_ms = config.frame_budget_ms or M.FRAME_BUDGET_MS,
@@ -2908,16 +2915,41 @@ end
 local CONTROL_ORDER =
   { "output_dir", "crop", "crop_x", "crop_z", "crop_radius_m" }
 
--- Puts a config on screen, once.
+-- Clears every line, then writes one per problem against the field it belongs
+-- to. Clearing first is what makes a problem the user has fixed disappear.
+--
+-- tags is parallel to problems and has holes, because a problem can belong to
+-- no control at all -- an unrecognised key in the config file is one, and there
+-- is no box on screen for a field that does not exist. So this walks problems,
+-- never tags, and a tag with no line is skipped rather than indexed: reaching
+-- setText through a nil would take the whole window down over a typo in a file.
+local function show_problems(problems, tags)
+  local lines = M.window.lines
+  local fields = M.config_fields()
+  for i = 1, #fields do
+    M.ui_method(lines[fields[i].name], "setText", "")
+  end
+  if problems == nil then
+    return
+  end
+  for i = 1, #problems do
+    local line = tags[i] and lines[tags[i]]
+    if line then
+      M.ui_method(line, "setText", problems[i])
+    end
+  end
+end
+
+-- Puts a run's config on screen, once.
 --
 -- Once, because from then on the boxes are the user's. The frame callback
 -- arrives about sixty times a second, and a refill per frame would take a
 -- keystroke back out of the box before the next one could be typed.
-local function fill_controls(config)
+local function fill_controls(run)
   if M.window.filled then
     return
   end
-  local text = M.control_text(config or {})
+  local text = M.control_text(run.config or {})
   for i = 1, #CONTROL_ORDER do
     local name = CONTROL_ORDER[i]
     local widget = M.window.controls[name]
@@ -2927,6 +2959,11 @@ local function fill_controls(config)
       M.ui_method(widget, "setText", text[name])
     end
   end
+  -- What was wrong with the config file, put where the user can act on it. This
+  -- is the only moment those problems can be shown -- they were found before
+  -- there was a window -- and until now the only record of them was a log
+  -- nobody with a blank-looking crop would think to open.
+  show_problems(run.config_problems, run.config_tags)
   M.window.filled = true
 end
 
@@ -2948,7 +2985,7 @@ end
 function M.attach_window()
   M.on_frame = function(run)
     if M.build_window() then
-      fill_controls(run.config)
+      fill_controls(run)
       update_status(run)
       update_progress(run)
     end
@@ -2993,7 +3030,7 @@ function M.bootstrap()
     return false, err
   end
 
-  local settings, problems = M.validate_config(config)
+  local settings, problems, tags = M.validate_config(config)
   if settings.enabled then
     M.log_path = M.join(dir, M.LOG_NAME)
     M.log("hook loaded")
@@ -3009,7 +3046,10 @@ function M.bootstrap()
     return false, "not enabled"
   end
 
-  local run = M.new_run({ config = settings })
+  -- The problems ride the run rather than being dropped here. warn has already
+  -- put them in both logs; the window puts them under the control that caused
+  -- them, which is the only form a user can act on without going to find a file.
+  local run = M.new_run({ config = settings, problems = problems, tags = tags })
   M.attach_window()
   local ok, why = M.register(run)
   if not ok then

@@ -140,6 +140,41 @@ T.eq("no crop, no tick", E.window.controls.crop.state, false)
 T.eq("and no centre", E.window.controls.crop_x.text, "")
 
 --------------------------------------------------------------------------------
+T.group("what was wrong with the config file arrives under its own field")
+--------------------------------------------------------------------------------
+
+-- The problems are found before there is a window, so the first frame is the
+-- only moment they can be shown. Until this, the sole record of a broken crop
+-- was a log line nobody staring at an empty control would go and read.
+local function shown_for(bad_config)
+  fresh()
+  E.attach_window()
+  local settings, problems, tags = E.validate_config(bad_config)
+  E.on_frame(E.new_run({ config = settings, problems = problems, tags = tags }))
+  return E.window.lines
+end
+
+local bad = { enabled = true, output_dir = "C:/extract", crop = { x = 1 } }
+local lines = shown_for(bad)
+-- Compared against the checker rather than a pasted sentence: the assertion is
+-- that the window shows the one wording there is, not what that wording says.
+T.eq("the crop line carries the crop's problem", lines.crop.text,
+  E.field_problem("crop", bad.crop))
+T.eq("and the directory, which was fine, says nothing", lines.output_dir.text, "")
+
+lines = shown_for({ enabled = true })
+T.eq("a missing directory is its own line", lines.output_dir.text,
+  E.field_problem("output_dir", nil))
+
+-- A problem belonging to no control: there is no box for a field that does not
+-- exist. It is worth a log line and nothing on screen, and reaching setText
+-- through the nil it tags would take the window down over a typo in a file.
+lines = shown_for({ enabled = true, output_dir = "C:/extract", nonsense = 1 })
+T.eq("an unknown key marks no line", lines.output_dir.text, "")
+T.eq("nor the other one", lines.crop.text, "")
+T.eq("and nothing latched", E.ui_failed, false)
+
+--------------------------------------------------------------------------------
 T.group("it refuses to close")
 --------------------------------------------------------------------------------
 

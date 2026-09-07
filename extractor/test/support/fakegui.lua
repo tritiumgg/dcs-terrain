@@ -46,12 +46,18 @@ function FakeGui.new()
       visible = nil,
       skin = nil,
       children = {},
+      -- This widget's own calls, beside gui.calls which holds the window's.
+      -- Several widgets of a class share a class name, so counting
+      -- "Static:setText" across the window stopped meaning anything once there
+      -- was more than one label in it.
+      calls = {},
     }
     for i = 1, #METHODS do
       local name = METHODS[i]
       widget[name] = function(self, a, b, c, d)
         refuse(name)
         gui.calls[#gui.calls + 1] = class_name .. ":" .. name
+        self.calls[#self.calls + 1] = name
         if name == "setText" then self.text = a end
         if name == "getText" then return self.text end
         if name == "setVisible" then self.visible = a end
@@ -124,6 +130,21 @@ function FakeGui.new()
       end
     end
     return nil
+  end
+
+  -- How many times one widget was asked to do something. The window writes a
+  -- label only when its text changed, and that is the property this counts.
+  function gui.count(widget, method)
+    if widget == nil then
+      return 0
+    end
+    local n = 0
+    for i = 1, #widget.calls do
+      if widget.calls[i] == method then
+        n = n + 1
+      end
+    end
+    return n
   end
 
   -- Every widget of a class, in the order they were made. The controls are
