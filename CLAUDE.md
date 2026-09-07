@@ -366,25 +366,27 @@ after the commit; the fix is `git commit --amend`.
 `task/X4-frame-budget`. Work that belongs to no task takes the `type` it would
 commit under: `fix/`, `docs/`, `build/`, `ci/`.
 
-**Every change is a pull request, and no pull request exceeds 400 lines of
-change** — counting tests, and counting the lines it removes. Work larger than
-that becomes a stack of branches, each branching off the one before it:
-`task/X3-11-resume`, then `task/X3-12-bitmask`, landing in order.
+**Every change is a pull request, and there is one pull request per task,
+reviewed commit by commit.** A large task is a long series of small commits on
+one branch rather than a stack of branches. Commit each slice as soon as its
+test passes, so there is always a working state to return to. Each commit does
+one thing and leaves the tree passing `mise run check`, because the reviewer
+reads them in order and each one is a recovery point.
 
-The limit is about review, not tidiness. A 400-line diff gets read; a
-2 000-line one gets approved. Splitting also forces the seams to be named
-before the code is written, which is where most of the design argument actually
-happens. A preparatory refactor always takes its own branch, claiming no change
-in behaviour: sharing a diff with the feature hides which lines moved among the
+The size that matters is the commit's, not the branch's. About 100 changed
+lines is easy to review and revert, about 300 is fine for one logical change,
+and 1 000 is split before committing, with tests counted as code. Formatting
+and behaviour, a refactor and a feature, and an unrelated fix found along the
+way each take a commit of their own. A preparatory refactor claims no change in
+behaviour: sharing a diff with the feature hides which lines moved among the
 lines that changed.
 
-- **Every pull request in a stack stands on its own.** Its tests pass, so a
-  reviewer can stop after any one of them and the repository still works.
-- **Order a stack by dependency, not by size.** It is reviewed bottom up, so
-  what everything else needs goes first.
-- **The last branch in a stack carries the testing steps.** An intermediate
-  branch names it instead. One procedure copied onto five branches becomes five
-  procedures that drift.
+**Stage paths by name, never `git add -A` or `git commit -a`, and read the
+staged diff before writing the message.** A blanket stage commits whatever the
+tree happens to hold — a scratch file, a debug line, half of the next commit —
+and the message then describes something other than what landed.
+`guard-bash.sh` refuses the blanket forms.
+
 - **History is linear. Rebase, never merge-commit.** Bring a branch up to date
   with `git rebase main`; land it with `git merge --ff-only`. If the
   fast-forward is refused, fix the branch. Git enforces this once
@@ -396,11 +398,6 @@ lines that changed.
   git config --global pull.ff only
   ```
 
-- **A stack lands as one fast-forward, and the pull requests are retargeted
-  first.** Merge each branch locally bottom-up, then push `main` once. Retarget
-  every stacked pull request to `main` **before** that push: afterwards GitHub
-  refuses, because the head is already contained in `main` and there is nothing
-  to diff, and those requests can then only be closed rather than merged.
 - **Deleting a remote branch is a prompt, not a reflex.** A local branch is
   cheap to restore from the reflog; a remote one is shared, and deleting the
   base of an open pull request closes it.
@@ -408,16 +405,25 @@ lines that changed.
   documentation pull request of its own. A `plan.md` row and the code that
   reshapes it are one reviewable thought.
 
-Splitting a task across pull requests does not split it across sessions.
-`docs/STATE.md` is updated in whichever pull request ends the session, whether
-or not the task it names is finished.
+**Review the branch locally, then push.** A fix found after the push costs a CI
+round trip, so a branch is finished on the machine first: one adversarial
+reviewer, on Sonnet, read-only, told the claim the branch makes and asked to
+break it; every finding fixed in a commit of its own, or squashed into the
+commit that introduced it while nothing is pushed; then the checks CI gates on
+— `mise run check`, `mise run lua-test` and `mise run docs`. Only then is the
+branch pushed and the pull request opened. `mise run check` alone is what a
+mid-task commit needs; it is not what a push needs.
+
+`docs/STATE.md` is updated in the task's own pull request, in whichever session
+ends. A session that stops mid-task still updates it, and that commit rides the
+branch like any other.
 
 **Every pull request body follows `.github/PULL_REQUEST_TEMPLATE.md`.** `gh pr
 create --body` does not read the template, so write the body to its headings;
 `guard-bash.sh` refuses one that is missing them. Summary ends with what the
-change is reviewed against: the plan task, the ADR, or for a stacked branch the
-claim that branch alone makes. Testing says how a reader runs the tests, not
-that they were run. Its steps are numbered, start from a clean checkout, and
+change is reviewed against: the plan task or the ADR. Testing says how a reader
+runs the tests, not that they were run, and covers the task as it lands, not
+one slice of it. Its steps are numbered, start from a clean checkout, and
 are grouped by phase (without DCS, then with DCS) and by platform (PowerShell
 on Windows, bash on macOS and Linux). Each step is an imperative sentence: an
 action, or a `Verify ...` naming what the tester sees when the steps before it
