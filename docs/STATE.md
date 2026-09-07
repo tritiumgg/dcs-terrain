@@ -4,13 +4,20 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-07T05:37Z
+**Last updated:** 2026-09-07T06:26Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **A write inside DCS never landed, and sixteen green test files could not see
+1. **One pull request per task, reviewed commit by commit.** The 400-line cap
+   and the stack of branches are gone: the size limit is on the commit now —
+   about 100 lines, 300 for one logical change, 1 000 split before committing —
+   and a task is one branch. A push needs an adversarial local review and the
+   three check tasks; a mid-task commit needs `mise run check`. Blanket staging
+   refuses in `guard-bash.sh`, tested both ways. The X13 stack finishes under
+   the old rules.
+2. **A write inside DCS never landed, and sixteen green test files could not see
    it.** In the hook state a handle's `write` and `close` return *no values at
    all* — on success and on a write to a read-only handle alike — where stock
    Lua 5.1 returns `true` from both, which is what `write_file` and
@@ -20,7 +27,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    a Lua patch in `Scripts/Hooks` — the `gui` state answers the same. ADR 0016
    checks the size that landed, and the fake reports nothing now too and can
    lose bytes. PR **44**, off `main`.
-2. **The hook installs, and the window says where the run has got to.** The X13
+3. **The hook installs, and the window says where the run has got to.** The X13
    stack is eight branches and not seven: these two were 444 lines together.
    `window_status` is a pure function of the run and of whether a terrain is
    loaded, and the label is written only when it changed. The bootstrap reads
@@ -28,7 +35,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    installed hook nobody enabled writes nothing, and the two exceptions are a
    file that will not load and an `enabled` that is a quoted boolean. Both
    verified live at the menu, window on screen. Open: **42**, **43**.
-3. **X13 spiked, and five PRs open — the window is on screen.** Every unknown is
+4. **X13 spiked, and five PRs open — the window is on screen.** Every unknown is
    measured on 2.9.29.27468 with the editor on Caucasus, read back by
    `DCS.makeScreenShot`. Every widget the controls need constructs from the hook
    state; an unskinned one draws nothing. A window refuses to close because the
@@ -39,23 +46,13 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    Open, bottom to top: **37** `field_problem` and `tags`, **38** the config file
    under an empty environment, **39** ADR 0014's stopped state, **40** ADR 0015's
    seam and latch, **41** the window chrome.
-4. **X2a, and a change of direction: configuration moves into a window.** Most
+5. **X2a, and a change of direction: configuration moves into a window.** Most
    of the frozen config table turned out not to be a question a user can answer,
    so three ADRs came out of planning it — **0011** cuts sixteen fields to
    `enabled`, `output_dir` and a crop that is a centre and a radius, deriving or
    fixing the rest; **0012** makes a bad field one log line and its default,
    with `output_dir` alone blocking a run; **0013** makes the progress log
    append-only. A 4-PR stack.
-5. **X4 — the state machine and frame budget.** idle to prepare to hook to
-   mission to done, driven by the four DCS callbacks. A phase is a list of jobs
-   the sweeps register: a job is `{name, start}`, `start(run)` returns a step,
-   and a step returns `MORE` or `DONE`, so X5 onward add a sweep without
-   touching the machine. A frame runs steps until `frame_budget_ms` is spent,
-   checked between steps and never inside one, and always runs at least one, so
-   a budget smaller than a step still finishes. The manifest is saved at each
-   phase change and each sweep end, never per tile. **Prepare has no jobs yet.**
-   ADR 0010 came out of building it: the server-state pass is gated on loaded
-   terrain, not on a mission. A 6-PR stack.
 
 ## Next
 
