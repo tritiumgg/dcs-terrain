@@ -2,8 +2,8 @@
 
 <!--
 A paragraph a reader can stop after: what the change does and why, ending
-with what it is reviewed against — the task id in docs/plan.md, the decision
-record, or for a stacked branch the claim this branch alone makes.
+with what it is reviewed against — the task id in docs/plan.md, or the
+decision record.
 -->
 
 ## Details
@@ -30,12 +30,8 @@ How anyone tests this change, not a record of who has. Start from a clean
 checkout. Write "none" under a heading with nothing in it, rather than
 removing the heading.
 
-The last branch in a stack carries the steps. An intermediate branch writes
-"Covered by <the last branch>" here and names it, because one procedure
-copied onto five branches drifts into five procedures. That does not weaken
-the rule that every branch stands on its own: its own tests still pass and CI
-still gates it. What moves is the procedure a human follows, which is only
-meaningful against the stack as merged.
+The steps cover the task as this pull request lands it, not one commit of it.
+A reviewer reads the commits in order; a tester runs the branch.
 
 Every step is one of two kinds, each an imperative sentence:
 
