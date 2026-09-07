@@ -146,6 +146,21 @@ allow_bash 'git status'
 allow_bash 'git rebase main'
 allow_bash 'git commit -m \"fix: a thing\"'
 
+# Blanket staging. A commit is one thing a reviewer reads in order, so the
+# paths are named. A path, a flag or a message that merely contains "." or
+# "-a" is not a blanket stage and still passes.
+refuse_bash 'git add -A'
+refuse_bash 'git add --all'
+refuse_bash 'git add .'
+refuse_bash 'git add -u'
+refuse_bash 'git commit -a -m x'
+refuse_bash 'git commit -am x'
+allow_bash 'git add CLAUDE.md'
+allow_bash 'git add -p'
+allow_bash 'git add ./tools/hooktest.sh'
+allow_bash 'git add docs/STATE.md docs/plan.md'
+allow_bash 'git commit --amend'
+
 ask_bash 'git push origin main'
 ask_bash 'git push origin HEAD:main'
 ask_bash 'git tag v0.1.0'
@@ -156,7 +171,7 @@ allow_bash 'git tag --list'
 
 # Deleting a remote branch, in all three spellings. A remote branch is shared,
 # restoring one means knowing the sha it pointed at, and deleting the base of
-# an open pull request closes that request.
+# an open pull request closes it as CLOSED rather than MERGED.
 ask_bash 'git push origin --delete build/guards'
 ask_bash 'git push origin -d build/guards'
 ask_bash 'git push origin :build/guards'
