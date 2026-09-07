@@ -1,10 +1,11 @@
--- Offline tests for the window's chrome.
+-- Offline tests for the window's chrome and its controls.
 --
 -- Run from the repository root with a plain lua5.1.
 --
--- Nothing drives the window yet: these call build_window directly, because what
--- is being asserted is that a window gets built, gets built once, and cannot be
--- closed. What ticks it is the next branch's problem.
+-- Most of these call build_window directly, because what is being asserted is
+-- that a window gets built, gets built once, cannot be closed, and comes up
+-- with a control for every field a config has. Filling those controls needs a
+-- frame, so the group that asserts it drives on_frame instead.
 
 package.path = "extractor/?.lua;extractor/test/support/?.lua;" .. package.path
 
@@ -36,7 +37,9 @@ T.group("the window is built once, in an order that can be drawn")
 fresh()
 T.eq("it builds", E.build_window(), true)
 T.eq("and says so", E.window.built, true)
-T.eq("a window, a panel, a label and a bar", #E.gui.made, 4)
+T.eq("one window", #E.gui.all("Window"), 1)
+T.eq("one panel", #E.gui.all("Panel"), 1)
+T.eq("one bar", #E.gui.all("HorzProgressBar"), 1)
 
 -- Hidden, skinned, then shown. A widget with correct bounds and a true
 -- visibility flag still draws before its parent has recomputed, so a window
@@ -67,6 +70,74 @@ local calls_after_first = #E.gui.calls
 for _ = 1, 50 do E.build_window() end
 T.eq("and never built twice", #E.gui.made, made_after_first)
 T.eq("nor asked the library anything again", #E.gui.calls, calls_after_first)
+
+--------------------------------------------------------------------------------
+T.group("every config field gets a control and a line of its own")
+--------------------------------------------------------------------------------
+
+fresh()
+E.build_window()
+
+-- Through the names, not through positions: what matters is that the field the
+-- config section names has a control, whatever order the rows came out in.
+local controls = E.window.controls
+T.eq("a box for the directory", controls.output_dir.class, "EditBox")
+T.eq("a tick for the crop", controls.crop.class, "CheckBox")
+T.eq("and a box for each half of the centre", controls.crop_x.class, "EditBox")
+T.eq("the other half", controls.crop_z.class, "EditBox")
+T.eq("and the radius", controls.crop_radius_m.class, "EditBox")
+T.eq("four boxes and no more", #E.gui.all("EditBox"), 4)
+T.eq("one tick", #E.gui.all("CheckBox"), 1)
+
+-- One line per field, not per box: a crop reports the first thing wrong with
+-- it, so three boxes share one line.
+T.eq("a line for the directory", E.window.lines.output_dir.class, "Static")
+T.eq("a line for the crop", E.window.lines.crop.class, "Static")
+T.eq("both start empty", E.window.lines.output_dir.text, "")
+T.eq("and stay that way until something is wrong", E.window.lines.crop.text, "")
+
+-- The rows decide the height, so the last of them has to be inside the window.
+-- Getting this wrong hides a control off the bottom of the frame, and without
+-- this assertion only a screenshot would say so.
+local frame = E.gui.find("Window").bounds
+local last = E.window.lines.crop.bounds
+T.eq("the last row is inside the window", last[2] + last[4] <= frame[4], true)
+T.eq("and the panel covers the window", E.gui.find("Panel").bounds[4], frame[4])
+
+--------------------------------------------------------------------------------
+T.group("the first frame puts the config in the boxes, and then leaves them")
+--------------------------------------------------------------------------------
+
+fresh()
+E.attach_window()
+local run = E.new_run({ config = {
+  enabled = true,
+  output_dir = "C:/extract",
+  crop = { x = -290000, z = 617000, radius_m = 5000 },
+} })
+E.on_frame(run)
+
+controls = E.window.controls
+T.eq("the directory is on screen", controls.output_dir.text, "C:/extract")
+T.eq("the crop is ticked", controls.crop.state, true)
+T.eq("with its centre", controls.crop_x.text, "-290000")
+T.eq("both halves", controls.crop_z.text, "617000")
+T.eq("and its radius", controls.crop_radius_m.text, "5000")
+
+-- From here the boxes are the user's. A refill per frame would take a keystroke
+-- back out of the box before the next one could be typed.
+controls.output_dir.text = "C:/somewhere-else"
+for _ = 1, 200 do E.on_frame(run) end
+T.eq("what was typed survives the frames", controls.output_dir.text,
+  "C:/somewhere-else")
+
+-- A run whose config has no crop comes up unticked, with the boxes empty rather
+-- than holding a centre nobody asked for.
+fresh()
+E.attach_window()
+E.on_frame(E.new_run({ config = { enabled = true, output_dir = "C:/extract" } }))
+T.eq("no crop, no tick", E.window.controls.crop.state, false)
+T.eq("and no centre", E.window.controls.crop_x.text, "")
 
 --------------------------------------------------------------------------------
 T.group("it refuses to close")

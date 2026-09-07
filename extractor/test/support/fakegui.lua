@@ -12,15 +12,17 @@
 
 local FakeGui = {}
 
-local CLASSES = { "Window", "Panel", "Static", "HorzProgressBar" }
+local CLASSES = {
+  "Window", "Panel", "Static", "HorzProgressBar", "EditBox", "CheckBox",
+}
 
 -- Every method the window calls. One that is not in this list is a nil index
 -- rather than a silent no-op, so a typo shows up as a failure here rather than
--- as a widget that quietly does nothing. The controls branch extends both lists.
+-- as a widget that quietly does nothing.
 local METHODS = {
   "setVisible", "getVisible", "setSkin", "setBounds", "setDraggable",
   "setResizable", "insertWidget", "setText", "getText", "close",
-  "setRange", "setValue",
+  "setRange", "setValue", "setState", "getState",
 }
 
 function FakeGui.new()
@@ -57,6 +59,13 @@ function FakeGui.new()
         if name == "setSkin" then self.skin = a end
         if name == "setRange" then self.range = { a, b } end
         if name == "setValue" then self.value = a end
+        -- The real one takes a boolean and stores 0 or 1; getState turns it
+        -- back into a boolean, so a boolean is what a caller sees either way.
+        if name == "setState" then self.state = a and true or false end
+        if name == "getState" then return self.state and true or false end
+        -- Kept so a row that runs off the bottom of the window can be caught
+        -- without a screenshot.
+        if name == "setBounds" then self.bounds = { a, b, c, d } end
         if name == "insertWidget" then
           self.children[#self.children + 1] = a
         end
@@ -105,8 +114,9 @@ function FakeGui.new()
   function gui.fail_every() gui.mode = "failing" end
   function gui.no_library() gui.mode = "absent" end
 
-  -- The widget of a class, or nil. Every class the window builds is built once,
-  -- so this is enough to reach any of them without counting positions.
+  -- The first widget of a class, or nil. The window, the panel, the status line
+  -- and the bar are each built once, so this reaches any of them without
+  -- counting positions.
   function gui.find(class_name)
     for i = 1, #gui.made do
       if gui.made[i].class == class_name then
@@ -114,6 +124,19 @@ function FakeGui.new()
       end
     end
     return nil
+  end
+
+  -- Every widget of a class, in the order they were made. The controls are
+  -- several of a kind, and counting them is how a missing row is caught without
+  -- pinning a total that changes whenever a row is added.
+  function gui.all(class_name)
+    local out = {}
+    for i = 1, #gui.made do
+      if gui.made[i].class == class_name then
+        out[#out + 1] = gui.made[i]
+      end
+    end
+    return out
   end
 
   return gui

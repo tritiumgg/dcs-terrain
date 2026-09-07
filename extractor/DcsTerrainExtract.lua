@@ -2669,10 +2669,39 @@ end
 M.WINDOW_TITLE = "DCS Terrain Extract"
 
 -- Hand-placed pixels. There is no layout engine here worth the indirection: the
--- window is one column of rows and the arithmetic is two additions.
-local WIN = { x = 60, y = 60, w = 420, h = 250, pad = 10, row = 22, bar = 14 }
+-- window is one column of rows and the arithmetic is an addition per row.
+--
+-- h is where the window starts rather than where it ends. The rows decide the
+-- height, and it is set once they have all been placed -- while the window is
+-- still hidden, so nothing is seen resizing.
+local WIN = {
+  x = 60, y = 60, w = 520, h = 260,
+  pad = 10, row = 22, bar = 14, gap = 8, label = 62,
+}
+
+-- The text in front of each field. Keyed by field name rather than built from
+-- it: "output_dir" is what the config file calls it and not what a user should
+-- have to read.
+local FIELD_LABEL = {
+  output_dir = "Output directory",
+  crop = "Crop to a centre and a radius",
+}
+
+local CROP_LABEL = { crop_x = "X", crop_z = "Z", crop_radius_m = "Radius (m)" }
+local CROP_ORDER = { "crop_x", "crop_z", "crop_radius_m" }
 
 M.window = { built = false, root = nil, panel = nil, status = nil, bar = nil }
+
+-- Skin, place, insert -- in that order, for every widget in the window. The
+-- order is the one the chrome already used and the reason is the same: a widget
+-- draws as soon as its parent has it, so it is finished before it is handed
+-- over. An unskinned one draws nothing at all.
+local function place(panel, widget, skin_name, x, y, w, h)
+  M.ui_method(widget, "setSkin", M.ui(M.gui.skin, skin_name))
+  M.ui_method(widget, "setBounds", x, y, w, h)
+  M.ui_method(panel, "insertWidget", widget, -1)
+  return widget
+end
 
 function M.build_window()
   if M.window.built then
@@ -2691,7 +2720,9 @@ function M.build_window()
   local Panel = M.ui(M.gui.widget, "Panel")
   local Static = M.ui(M.gui.widget, "Static")
   local Bar = M.ui(M.gui.widget, "HorzProgressBar")
-  if not (Window and Panel and Static and Bar) then
+  local Edit = M.ui(M.gui.widget, "EditBox")
+  local Check = M.ui(M.gui.widget, "CheckBox")
+  if not (Window and Panel and Static and Bar and Edit and Check) then
     M.window.unavailable = true
     return false
   end
@@ -2710,19 +2741,69 @@ function M.build_window()
   M.ui_method(panel, "setBounds", 0, 0, WIN.w, WIN.h)
   M.ui_method(root, "insertWidget", panel, -1)
 
-  local status = M.ui(Static.new, "")
-  M.ui_method(status, "setSkin", M.ui(M.gui.skin, "staticSkin"))
-  M.ui_method(status, "setBounds", WIN.pad, WIN.pad, WIN.w - WIN.pad * 2, WIN.row)
-  M.ui_method(panel, "insertWidget", status, -1)
+  local inner = WIN.w - WIN.pad * 2
+  local y = WIN.pad
+
+  local status = place(panel, M.ui(Static.new, ""), "staticSkin",
+    WIN.pad, y, inner, WIN.row)
+  y = y + WIN.row
 
   -- Under the line that names the phase, because it measures the same thing at
   -- a coarser grain: the line says which phase, the bar says how far through.
-  local bar = M.ui(Bar.new)
-  M.ui_method(bar, "setSkin", M.ui(M.gui.skin, "horzProgressBarSkin"))
-  M.ui_method(bar, "setBounds", WIN.pad, WIN.pad + WIN.row,
-    WIN.w - WIN.pad * 2, WIN.bar)
+  local bar = place(panel, M.ui(Bar.new), "horzProgressBarSkin",
+    WIN.pad, y, inner, WIN.bar)
   M.ui_method(bar, "setRange", 0, 100)
-  M.ui_method(panel, "insertWidget", bar, -1)
+  y = y + WIN.bar + WIN.gap
+
+  -- In the order config_fields hands them over, which is the order the config
+  -- section says a window shows them in. A field added there appears here
+  -- without this loop changing, so long as its kind has a shape below.
+  local controls, lines = {}, {}
+  local fields = M.config_fields()
+  for i = 1, #fields do
+    local field = fields[i]
+    local caption = FIELD_LABEL[field.name] or field.name
+
+    if field.kind == "crop" then
+      -- The tick is the field's own label, because what it switches on is the
+      -- field: three boxes with no way to mean "no crop" would make an empty
+      -- crop and a crop nobody asked for the same thing.
+      controls[field.name] = place(panel, M.ui(Check.new, caption),
+        "checkBoxSkin", WIN.pad, y, inner, WIN.row)
+      y = y + WIN.row
+
+      local cell = floor(inner / #CROP_ORDER)
+      for c = 1, #CROP_ORDER do
+        local name = CROP_ORDER[c]
+        local x = WIN.pad + (c - 1) * cell
+        place(panel, M.ui(Static.new, CROP_LABEL[name]), "staticSkin",
+          x, y, WIN.label, WIN.row)
+        controls[name] = place(panel, M.ui(Edit.new, ""), "editBoxSkin",
+          x + WIN.label, y, cell - WIN.label - WIN.gap, WIN.row)
+      end
+      y = y + WIN.row
+    else
+      place(panel, M.ui(Static.new, caption), "staticSkin",
+        WIN.pad, y, inner, WIN.row)
+      y = y + WIN.row
+      controls[field.name] = place(panel, M.ui(Edit.new, ""), "editBoxSkin",
+        WIN.pad, y, inner, WIN.row)
+      y = y + WIN.row
+    end
+
+    -- One line per field, under the field it belongs to, empty until there is
+    -- something wrong with that field.
+    lines[field.name] = place(panel, M.ui(Static.new, ""), "staticSkin",
+      WIN.pad, y, inner, WIN.row)
+    y = y + WIN.row + WIN.gap
+  end
+
+  -- What the rows came to. Set while the window is still hidden, so the height
+  -- is never seen changing, and taken from the same cursor that placed them, so
+  -- a row added above cannot leave the last one hanging below the frame.
+  local height = y - WIN.gap + WIN.pad
+  M.ui_method(root, "setBounds", WIN.x, WIN.y, WIN.w, height)
+  M.ui_method(panel, "setBounds", 0, 0, WIN.w, height)
 
   if M.ui_failed or root == nil then
     return false
@@ -2744,6 +2825,7 @@ function M.build_window()
 
   M.window.root, M.window.panel, M.window.status = root, panel, status
   M.window.bar = bar
+  M.window.controls, M.window.lines = controls, lines
   M.window.built = true
   M.log("window built")
   return true
@@ -2820,6 +2902,34 @@ local function update_status(run)
   M.window.status_text = text
 end
 
+-- Every control, in a fixed order. pairs order is undefined in 5.1, and a
+-- window whose boxes filled in a different order each session could not be
+-- tested for having filled them at all.
+local CONTROL_ORDER =
+  { "output_dir", "crop", "crop_x", "crop_z", "crop_radius_m" }
+
+-- Puts a config on screen, once.
+--
+-- Once, because from then on the boxes are the user's. The frame callback
+-- arrives about sixty times a second, and a refill per frame would take a
+-- keystroke back out of the box before the next one could be typed.
+local function fill_controls(config)
+  if M.window.filled then
+    return
+  end
+  local text = M.control_text(config or {})
+  for i = 1, #CONTROL_ORDER do
+    local name = CONTROL_ORDER[i]
+    local widget = M.window.controls[name]
+    if name == "crop" then
+      M.ui_method(widget, "setState", text.crop)
+    else
+      M.ui_method(widget, "setText", text[name])
+    end
+  end
+  M.window.filled = true
+end
+
 -- Same rule as the line above it, for the same reason.
 local function update_progress(run)
   local value = M.window_progress(run.state)
@@ -2838,6 +2948,7 @@ end
 function M.attach_window()
   M.on_frame = function(run)
     if M.build_window() then
+      fill_controls(run.config)
       update_status(run)
       update_progress(run)
     end
