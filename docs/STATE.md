@@ -4,7 +4,7 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-07T06:26Z
+**Last updated:** 2026-09-07T06:47Z
 
 ## Done
 
@@ -15,8 +15,9 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    about 100 lines, 300 for one logical change, 1 000 split before committing —
    and a task is one branch. A push needs an adversarial local review and the
    three check tasks; a mid-task commit needs `mise run check`. Blanket staging
-   refuses in `guard-bash.sh`, tested both ways. The X13 stack finishes under
-   the old rules.
+   refuses in `guard-bash.sh`, tested both ways — the adversarial review of the
+   branch is what found the message text and `git -C`. The X13 stack finishes
+   under the old rules. PR **46**.
 2. **A write inside DCS never landed, and sixteen green test files could not see
    it.** In the hook state a handle's `write` and `close` return *no values at
    all* — on success and on a write to a read-only handle alike — where stock
