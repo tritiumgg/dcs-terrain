@@ -303,9 +303,16 @@ Rust has one pin rather than two that can disagree; `mise use` writes a second
 version into `[tools]` and mise stops reading it. Edit `channel`, then
 `mise install`.
 
-On a fresh checkout, run `mise install` before anything else. On Windows,
-`mise run lua51` builds the Lua 5.1.5 interpreter into `.tools/bin`, which
-needs Visual Studio Build Tools with the C++ workload.
+On a fresh checkout, run `mise trust` and then `mise install` before anything
+else. mise refuses an untrusted `mise.toml` and does nothing until it is
+trusted, so a checkout that skips it fails at the first command.
+
+**On Windows, run mise tasks from Git Bash.** A task body is `sh
+tools/<name>.sh`, mise runs it through `cmd`, and `cmd` finds `sh` only on a
+PATH that Git Bash has already put it on: from a plain PowerShell every task
+fails with `'sh' is not recognized`. `mise run lua51`, which builds the Lua
+5.1.5 interpreter into `.tools/bin` and needs Visual Studio Build Tools with
+the C++ workload, runs the same from either shell.
 
 ## Portability
 

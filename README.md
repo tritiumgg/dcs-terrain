@@ -36,6 +36,7 @@ attached to tags. To build instead:
 ```bash
 git clone https://github.com/tritiumgg/dcs-terrain
 cd dcs-terrain
+mise trust
 mise install
 cargo build --release --manifest-path dcsterrain/Cargo.toml
 ```

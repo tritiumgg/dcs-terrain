@@ -15,7 +15,8 @@
     script covers the Windows case.
 
     Requires Visual Studio Build Tools with the C++ workload, found through
-    vswhere, and tar.exe, which ships with Windows 10 and later.
+    vswhere, and System32\tar.exe, which ships with Windows 10 and later. It
+    runs the same from PowerShell and from Git Bash.
 
 .PARAMETER OutputDirectory
     Directory to write lua.exe into. Defaults to .tools\bin at the repository
@@ -108,6 +109,15 @@ Set-Variable -Name LuaUrl -Option Constant -WhatIf:$false `
 Set-Variable -Name NonInterpreterObjects -Option Constant -WhatIf:$false `
     -Value @('luac.obj', 'print.obj')
 
+# By full path, never by name. Windows ships bsdtar as System32\tar.exe, but Git
+# for Windows ships GNU tar as its own tar.exe, and a PATH inherited from Git
+# Bash puts that one first. GNU tar reads "C:\dir" as host "C" and path "\dir",
+# so it tries to resolve a hostname and the extraction fails with "Cannot
+# connect to C". Which shell launched this script is then what decides whether
+# it works, which is not a thing a build should depend on.
+Set-Variable -Name TarPath -Option Constant -WhatIf:$false `
+    -Value (Join-Path $env:SystemRoot 'System32\tar.exe')
+
 $script:LogLevel = 1
 $script:TempDir = $null
 
@@ -198,8 +208,9 @@ function Get-LuaSource {
     }
     Write-LogDebug "SHA-256 verified: $actual"
 
-    # -x extract, -z gzip, -f archive, -C into. Windows tar.exe is bsdtar.
-    Invoke-NativeCommand -FilePath 'tar.exe' -ArgumentList @('-xzf', $archive, '-C', $WorkingDirectory)
+    # -x extract, -z gzip, -f archive, -C into. $TarPath is bsdtar by full path,
+    # because the name alone can resolve to GNU tar.
+    Invoke-NativeCommand -FilePath $TarPath -ArgumentList @('-xzf', $archive, '-C', $WorkingDirectory)
 
     $sourceDir = Join-Path $WorkingDirectory "lua-$LuaVersion" 'src'
     if (-not (Test-Path -LiteralPath $sourceDir -PathType Container)) {
@@ -324,11 +335,15 @@ try {
         exit 0
     }
 
-    foreach ($tool in @('tar.exe', 'cmd.exe')) {
-        if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
-            Write-LogError "$tool not found on PATH"
-            exit 2
-        }
+    # tar is checked where it will be run from rather than on PATH, so a Windows
+    # without bsdtar is reported here instead of failing mid-extraction.
+    if (-not (Test-Path -LiteralPath $TarPath -PathType Leaf)) {
+        Write-LogError "$TarPath not found"
+        exit 2
+    }
+    if (-not (Get-Command 'cmd.exe' -ErrorAction SilentlyContinue)) {
+        Write-LogError 'cmd.exe not found on PATH'
+        exit 2
     }
 
     $vcvars = Get-VcVarsPath
