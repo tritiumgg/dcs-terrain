@@ -231,6 +231,34 @@ T.eq("Start again does nothing", E.start(run), false)
 T.eq("and leaves the state alone", run.state, E.STATE_IDLE)
 
 --------------------------------------------------------------------------------
+T.group("a crop outside the map stops the run when the terrain appears")
+--------------------------------------------------------------------------------
+
+-- The check needs a theatre, so a config written at the menu is held against
+-- the map the first time idle finds one, before prepare has written anything.
+-- The reason stays on the run for the window, and Start clears it.
+local real_bounds = E.terrain_bounds
+E.terrain_bounds = function()
+  return { min_x = -600000, min_z = -560000, max_x = 380000, max_z = 1130000 }
+end
+run = new_stopped_run({ config = { output_dir = "C:/extract",
+  frame_budget_ms = 5, crop = { x = 0, z = 1125000, radius_m = 10000 } } })
+E.start(run)
+E.run_frame(run)
+T.eq("the run stops itself", run.state, E.STATE_STOPPED)
+T.eq("saying why", run.refusal,
+  "crop reaches past the map, z above 1130000: box edge 1135000")
+T.eq("and nothing was written", next(run.fs.files), nil)
+E.start(run)
+T.eq("Start clears the reason", run.refusal, nil)
+
+-- Inside, the same run goes on to prepare.
+run.config.crop = { x = 0, z = 600000, radius_m = 10000 }
+E.run_frame(run)
+T.eq("a crop inside goes to prepare", run.state, E.STATE_PREPARE)
+E.terrain_bounds = real_bounds
+
+--------------------------------------------------------------------------------
 T.group("Stop halts a run, whatever it was doing")
 --------------------------------------------------------------------------------
 

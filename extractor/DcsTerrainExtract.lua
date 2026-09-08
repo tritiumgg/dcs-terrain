@@ -2561,6 +2561,19 @@ local function frame_idle(run)
   -- reached in idle is the only evidence the hook has that it was given frames
   -- at the menu at all.
   M.log(format("terrain %s after %d idle frames", tostring(id), run.idle_frames))
+
+  -- The first moment there is a theatre to hold the crop against. A config
+  -- written at the main menu could not be checked when Start was pressed, so
+  -- it is checked here, and a crop that reaches outside the map stops the run
+  -- before prepare writes anything: the reason is kept on the run for the
+  -- window to show and warned to the log (ADR 0019).
+  local outside = M.crop_outside(run.config.crop, M.terrain_bounds())
+  if outside then
+    run.refusal = outside
+    M.warn(outside)
+    M.stop(run)
+    return M.STATE_STOPPED
+  end
   return M.enter(run, M.STATE_PREPARE)
 end
 
@@ -2613,6 +2626,8 @@ function M.start(run)
   -- reader watching dcs.log sees the run begin.
   run.state = M.STATE_IDLE
   run.idle_frames = 0
+  -- A refusal belongs to the attempt it stopped; this is the next one.
+  run.refusal = nil
   phase_change(M.STATE_IDLE)
   return true
 end
