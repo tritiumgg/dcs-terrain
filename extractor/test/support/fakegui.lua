@@ -23,8 +23,15 @@ local CLASSES = {
 local METHODS = {
   "setVisible", "getVisible", "setSkin", "setBounds", "setDraggable",
   "setResizable", "insertWidget", "setText", "getText", "close",
-  "setRange", "setValue", "setState", "getState",
+  "setRange", "setValue", "setState", "getState", "getViewBounds",
 }
+
+-- What a window's frame costs it: DCS grants a client area shorter than the
+-- window by the header, measured at 20 pixels on 2.9.29.27468. Rows are laid
+-- out in client coordinates, so a window sized to its content is too small for
+-- it and the last row falls off the bottom. Modelled here so the correction can
+-- be tested, and named so the test does not repeat the number.
+local HEADER = 20
 
 function FakeGui.new()
   local gui = { calls = {}, made = {}, mode = "working" }
@@ -86,6 +93,12 @@ function FakeGui.new()
         -- Kept so a row that runs off the bottom of the window can be caught
         -- without a screenshot.
         if name == "setBounds" then self.bounds = { a, b, c, d } end
+        -- x, y, w, h of the client rectangle, inset by the header. A window
+        -- with no bounds yet has no client area to report.
+        if name == "getViewBounds" then
+          if not self.bounds then return nil end
+          return 0, HEADER, self.bounds[3], self.bounds[4] - HEADER
+        end
         if name == "insertWidget" then
           self.children[#self.children + 1] = a
         end

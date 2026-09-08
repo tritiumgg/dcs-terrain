@@ -97,15 +97,22 @@ T.eq("a line for the crop", E.window.lines.crop.class, "Static")
 T.eq("both start empty", E.window.lines.output_dir.text, "")
 T.eq("and stay that way until something is wrong", E.window.lines.crop.text, "")
 
--- The rows decide the height, so the last of them has to be inside the window.
--- Getting this wrong hides a control off the bottom of the frame, and without
--- this assertion only a screenshot would say so.
-local frame = E.gui.find("Window").bounds
+-- Rows are placed in client coordinates, and a window's own bounds are the
+-- frame. DCS grants a client area shorter than the frame by the header, so
+-- measuring the rows against the frame is what put the buttons off the bottom
+-- edge on screen while every assertion here passed.
+local win = E.gui.find("Window")
+local frame = win.bounds
+local panel = E.gui.find("Panel").bounds
+local _, _, client_w, client_h = win:getViewBounds()
+T.eq("the panel fills the client area",
+  panel[3] .. "x" .. panel[4], client_w .. "x" .. client_h)
+T.eq("the frame is taller than the client area it grants", frame[4] > client_h, true)
+
 local last = E.window.buttons.stop.bounds
-T.eq("the last row is inside the window", last[2] + last[4] <= frame[4], true)
+T.eq("the last row is inside the client area", last[2] + last[4] <= client_h, true)
 T.eq("and so is the crop line above it",
   E.window.lines.crop.bounds[2] < last[2], true)
-T.eq("and the panel covers the window", E.gui.find("Panel").bounds[4], frame[4])
 
 -- The buttons run left to right off one list, so a button added to it is the
 -- way this overflows, and it would do so silently.

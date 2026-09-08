@@ -3139,9 +3139,41 @@ function M.build_window()
   -- What the rows came to. Set while the window is still hidden, so the height
   -- is never seen changing, and taken from the same cursor that placed them, so
   -- a row added above cannot leave the last one hanging below the frame.
-  local height = y + WIN.pad
-  M.ui_method(root, "setBounds", WIN.x, WIN.y, WIN.w, height)
-  M.ui_method(panel, "setBounds", 0, 0, WIN.w, height)
+  -- The rows above were placed in client coordinates, and a window's own bounds
+  -- are the frame: a 400 x 200 window is granted a client area of 400 x 180, the
+  -- other twenty pixels being its header. Sizing the frame to the content is
+  -- what put the buttons off the bottom edge on screen while every assertion
+  -- here passed.
+  --
+  -- The inset is measured rather than assumed, because it belongs to the skin
+  -- and not to this file: size the frame to the content, ask what client area
+  -- that bought, and grow the frame by the shortfall. Asked again afterwards,
+  -- because the answer to the second call is the one the panel has to fill.
+  --
+  -- Through M.ui rather than M.ui_method, and returning a table, because the
+  -- seam hands back one value and getViewBounds answers four.
+  local function client_of(window)
+    return M.ui(function()
+      local x, y, w, h = window:getViewBounds()
+      return { x = x, y = y, w = w, h = h }
+    end)
+  end
+
+  local content = y + WIN.pad
+  local width = WIN.w
+  M.ui_method(root, "setBounds", WIN.x, WIN.y, width, content)
+  local view = client_of(root)
+  if view and view.w and view.h then
+    local dw, dh = width - view.w, content - view.h
+    if dw ~= 0 or dh ~= 0 then
+      M.ui_method(root, "setBounds", WIN.x, WIN.y, width + dw, content + dh)
+      view = client_of(root) or view
+    end
+  end
+  -- No client rectangle is a widget library that does not answer it, which the
+  -- seam reports as nil. The frame is then the best measurement there is.
+  M.ui_method(panel, "setBounds", 0, 0,
+    (view and view.w) or width, (view and view.h) or content)
 
   if M.ui_failed or root == nil then
     return false
