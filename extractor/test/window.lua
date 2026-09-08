@@ -80,6 +80,40 @@ T.eq("and never built twice", #E.gui.made, made_after_first)
 T.eq("nor asked the library anything again", #E.gui.calls, calls_after_first)
 
 --------------------------------------------------------------------------------
+T.group("a build that breaks anywhere reports that it broke")
+--------------------------------------------------------------------------------
+
+-- Whichever call the library gives up on, the answer has to be the same: no
+-- window, and build_window saying so. The failure this is written for is a
+-- break in the tail -- the callbacks, the mouse hook, or the setVisible that
+-- reveals the window -- because the layout is already done by then and it is
+-- tempting to call the job finished. A window marked built after a failed show
+-- stays hidden by the setVisible(false) it was laid out under, for the whole
+-- session, with this function short-circuiting on every later frame.
+--
+-- Every budget rather than one: pinning the call number would pin the number of
+-- calls a build happens to make today.
+local inconsistent_at = nil
+for budget = 0, 200 do
+  fresh()
+  E.gui.fail_after(budget)
+  local ok = E.build_window()
+  local sound
+  if ok then
+    local w = E.gui.find("Window")
+    sound = not E.ui_failed and E.window.built == true
+      and w ~= nil and w.visible == true
+  else
+    sound = E.window.built ~= true
+  end
+  if not sound then
+    inconsistent_at = budget
+    break
+  end
+end
+T.eq("built is true only when the window is up", inconsistent_at, nil)
+
+--------------------------------------------------------------------------------
 T.group("every config field gets a control and a line of its own")
 --------------------------------------------------------------------------------
 

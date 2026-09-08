@@ -3310,6 +3310,19 @@ function M.build_window()
 
   M.ui_method(root, "setVisible", true)
 
+  -- Asked again, because the check above covers the layout and nothing since:
+  -- the callbacks, the mouse hook and the show itself can all latch. A window
+  -- that failed on any of them is still hidden by the setVisible(false) it was
+  -- laid out under, and calling it built would leave it invisible for the rest
+  -- of the session with this function short-circuiting on every later frame.
+  --
+  -- Returning false costs nothing to retry: the next frame's first lookup goes
+  -- through a latched M.ui, answers nil, and marks the library unavailable, so
+  -- no second window is ever made.
+  if M.ui_failed then
+    return false
+  end
+
   M.window.root, M.window.panel, M.window.status = root, panel, status
   M.window.bar, M.window.message = bar, message
   M.window.controls, M.window.lines = controls, lines
