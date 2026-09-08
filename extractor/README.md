@@ -11,14 +11,21 @@ without `seek`.
   Editor: a mission is not needed, and a FARP or heliport placed in one clears
   the scenery around it. Configuration is a window rather than the file — the
   file is what the window reads at start and writes at Start (ADR 0011), and
-  the three fields it holds are in that record. The window carries a box for
-  the output directory, a tick and three boxes for the crop with a button that
-  picks the centre off the map, a line under each field for whatever is wrong
-  with it, and Start and Stop. Start re-points the run at whatever the boxes now
-  say (ADR 0017), and the window is raised above DCS's own chrome so it stays on
-  screen (ADR 0018). *The sweeps that
-  fill an extract are not built yet, so a run reaches `done` in a few frames
-  and writes nothing.*
+  the three fields it holds are in that record. The window is drawn with the
+  Mission Editor's own skins and opens centered. It carries a box for the
+  output directory; a tick for the crop that, on, shows three boxes for the
+  center and the radius and a button that picks the center off the map in
+  whole meters; one line that shows whatever was said last — what to do, what
+  is wrong, what a press came to, which phase the run is in; and one button,
+  Start or Stop, whichever the run can take. A progress bar appears under
+  them once there is progress. The directory has to be an absolute path on a
+  drive that exists, and is created if absent (ADR 0020); a crop is refused
+  under a 1 km radius or where its box reaches outside the map (ADR 0019).
+  Start re-points the run at
+  whatever the boxes now say (ADR 0017), and the window is raised above DCS's
+  own chrome so it stays on screen (ADR 0018). *The sweeps that fill an
+  extract are not built yet, so a run reaches `done` in a few frames and
+  writes nothing.*
   A run writes `Logs/DcsTerrainExtract.log` in the same Saved Games folder, one
   line per tile and per phase change, appended across runs and never rotated;
   `dcs.log` gets a phase change at `INFO` and anything to act on at `WARNING`.

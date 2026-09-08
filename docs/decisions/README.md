@@ -30,6 +30,8 @@ disagree, the later accepted one wins, and the earlier is marked
 | [0016](0016-a-write-is-checked-by-what-landed.md) | Accepted | 2026-09-06 | A write is checked by what landed, because DCS's file handles report nothing | `design-and-facts.md` "Sources you have" hook-state facts; `plan.md` X3, X5–X9, X10, X13 |
 | [0017](0017-start-re-points-a-run-at-the-window-s-directory.md) | Accepted | 2026-09-08 | Start re-points a run at the directory the window names | `extractor-hook.md` "Lifecycle"; ADR 0014's "Start resets nothing"; `plan.md` X10, X13 |
 | [0018](0018-the-window-is-raised-above-dcs-chrome.md) | Accepted | 2026-09-08 | The window is raised above DCS's own chrome | `plan.md` X13, X14 |
+| [0019](0019-a-crop-is-refused-under-a-kilometer-and-outside-the-map.md) | Accepted | 2026-09-08 | A crop is refused under a kilometer of radius and outside the map | `extractor-hook.md` "Config table"; ADR 0011's crop; `plan.md` X10, X13, X14 |
+| [0020](0020-the-output-directory-is-an-absolute-path-on-a-drive-that-exists.md) | Accepted | 2026-09-08 | The output directory is an absolute path on a drive that exists | `extractor-hook.md` "Config table"; ADR 0012; `plan.md` X10, X13, X14 |
 
 Add a row when you add an ADR. This table is the index Claude reads, so an ADR
 missing from it will not be found. Each record's own `Affects` line, at the top
