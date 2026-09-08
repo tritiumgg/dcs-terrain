@@ -34,8 +34,8 @@ T.group("with a map open the line is the state the run is in")
 --------------------------------------------------------------------------------
 
 terrain = "Caucasus"
-T.eq("stopped", E.window_status(run_in(E.STATE_STOPPED)), "Stopped.")
-T.eq("idle", E.window_status(run_in(E.STATE_IDLE)), "Waiting for a theatre.")
+T.eq("stopped has nothing to say", E.window_status(run_in(E.STATE_STOPPED)), nil)
+T.eq("idle", E.window_status(run_in(E.STATE_IDLE)), "Waiting for a theater.")
 T.eq("prepare", E.window_status(run_in(E.STATE_PREPARE)), "Preparing.")
 T.eq("hook", E.window_status(run_in(E.STATE_HOOK)), "Sweeping the terrain.")
 T.eq("mission", E.window_status(run_in(E.STATE_MISSION)), "Sweeping the scenery.")
@@ -54,7 +54,7 @@ T.group("with no map the line says which one to open")
 -- Which is where the hook spends the start of every session: it loads at the
 -- main menu, and DCS can sit there for hours.
 terrain = nil
-T.eq("stopped", E.window_status(run_in(E.STATE_STOPPED)), E.STATUS_NO_TERRAIN)
+T.eq("stopped still has nothing to say", E.window_status(run_in(E.STATE_STOPPED)), nil)
 T.eq("idle", E.window_status(run_in(E.STATE_IDLE)), E.STATUS_NO_TERRAIN)
 T.eq("hook", E.window_status(run_in(E.STATE_HOOK)), E.STATUS_NO_TERRAIN)
 
@@ -75,19 +75,22 @@ local function fresh(mode)
   E.attach_window()
 end
 
--- This label's own writes. The window has several labels now -- a caption and a
--- problem line per field -- so counting every Static in the window would count
--- them clearing each other.
+-- The one line's own writes. The window has other labels -- a caption per
+-- field -- so counting every Static in the window would count those.
 local function writes()
-  return E.gui.count(E.window.status, "setText")
+  return E.gui.count(E.window.message, "setText")
 end
 
+-- A stopped run at load says nothing of its own, so the first frame leaves
+-- the instruction on the line: a map opening under a stopped run would
+-- otherwise write "Stopped." over it.
 fresh()
 terrain = nil
 local run = run_in(E.STATE_STOPPED)
 E.on_frame(run)
 T.eq("the window is built on the first frame", E.window.built, true)
-T.eq("and carries the line", E.gui.find("Static").text, E.STATUS_NO_TERRAIN)
+T.eq("and carries the instruction, which is a map", E.window.message.text,
+  E.INSTRUCTION_MAP)
 T.eq("written once", writes(), 1)
 
 -- The callback arrives about sixty times a second for the length of a session
@@ -96,15 +99,40 @@ T.eq("written once", writes(), 1)
 for _ = 1, 200 do E.on_frame(run) end
 T.eq("and not written again while it is the same", writes(), 1)
 
+-- A map opening under a stopped run moves the instruction on, and says no
+-- phase: "Stopped." would be news about nothing.
 terrain = "Caucasus"
 E.on_frame(run)
-T.eq("a map opening changes it", E.gui.find("Static").text, "Stopped.")
+T.eq("a map opening moves the instruction on", E.window.message.text,
+  E.INSTRUCTION_DIRECTORY)
 T.eq("with one write", writes(), 2)
 
 run.state = E.STATE_HOOK
 E.on_frame(run)
-T.eq("and so does the run moving on", E.gui.find("Static").text, "Sweeping the terrain.")
-T.eq("with one more", writes(), 3)
+T.eq("the run moving on is said", E.window.message.text, "Sweeping the terrain.")
+T.eq("with one write", writes(), 3)
+for _ = 1, 200 do E.on_frame(run) end
+T.eq("and once only", writes(), 3)
+
+-- Without a map, a run that is going is told what it is waiting for.
+terrain = nil
+run.state = E.STATE_IDLE
+E.on_frame(run)
+T.eq("no map is said", E.window.message.text, E.STATUS_NO_TERRAIN)
+T.eq("with one write", writes(), 4)
+
+-- Something else said on the line -- a press -- is not written over by the
+-- phase it was said under, and the phase is said again once it changes.
+E.window.message:setText("Stopped. Start carries on from here.")
+E.window.status_text = nil
+run.state = E.STATE_STOPPED
+E.on_frame(run)
+T.eq("a stopped run leaves the press's words", E.window.message.text,
+  "Stopped. Start carries on from here.")
+run.state = E.STATE_IDLE
+E.on_frame(run)
+T.eq("and the next phase replaces them", E.window.message.text,
+  E.STATUS_NO_TERRAIN)
 
 --------------------------------------------------------------------------------
 T.group("the bar moves at a phase change and stands still between")
@@ -133,6 +161,7 @@ E.on_frame(run)
 local bar = E.gui.find("HorzProgressBar")
 T.eq("the bar is a percentage", bar.range[1] .. ".." .. bar.range[2], "0..100")
 T.eq("and starts empty", bar.value, 0)
+T.eq("and hidden, with nothing on it to show", bar.visible, false)
 T.eq("written once", bar_writes(), 1)
 
 for _ = 1, 200 do E.on_frame(run) end
@@ -141,6 +170,7 @@ T.eq("and left alone while the phase holds", bar_writes(), 1)
 run.state = E.STATE_MISSION
 E.on_frame(run)
 T.eq("the second pass moves it", bar.value, 50)
+T.eq("and puts it on screen", bar.visible, true)
 run.state = E.STATE_DONE
 E.on_frame(run)
 T.eq("and finishing fills it", bar.value, 100)

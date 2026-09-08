@@ -21,6 +21,13 @@ local warned = {}
 local real_warn = E.warn
 E.warn = function(message) warned[#warned + 1] = message end
 
+-- A disk with the one drive these configs name, because the drive has to be
+-- there before Start will take a path on it. Groups that read what Start
+-- wrote make a disk of their own.
+local disk = FakeFs.new()
+disk.mkdir("C:/")
+E.fs = disk
+
 -- The latch and the window are module state and survive between groups, so a
 -- group that did not clear them would be testing the previous group's failure.
 local function fresh(mode)
@@ -55,7 +62,8 @@ T.eq("hidden before it is skinned", at_hide < at_skin, true)
 local root = E.gui.find("Window")
 T.eq("and visible at the end", root.visible, true)
 T.eq("it carries the title", root.text, E.WINDOW_TITLE)
-T.eq("it is skinned", root.skin.skinData.params.name, "windowSkin")
+T.eq("it is skinned with the editor's own", root.skin.skinData.params.name,
+  "windowSkinME")
 T.eq("the panel is in the window", root.children[1], E.gui.find("Panel"))
 T.eq("and the label in the panel",
   E.gui.find("Panel").children[1], E.gui.find("Static"))
@@ -125,18 +133,16 @@ E.build_window()
 local controls = E.window.controls
 T.eq("a box for the directory", controls.output_dir.class, "EditBox")
 T.eq("a tick for the crop", controls.crop.class, "CheckBox")
-T.eq("and a box for each half of the centre", controls.crop_x.class, "EditBox")
+T.eq("and a box for each half of the center", controls.crop_x.class, "EditBox")
 T.eq("the other half", controls.crop_z.class, "EditBox")
 T.eq("and the radius", controls.crop_radius_m.class, "EditBox")
 T.eq("four boxes and no more", #E.gui.all("EditBox"), 4)
 T.eq("one tick", #E.gui.all("CheckBox"), 1)
 
--- One line per field, not per box: a crop reports the first thing wrong with
--- it, so three boxes share one line.
-T.eq("a line for the directory", E.window.lines.output_dir.class, "Static")
-T.eq("a line for the crop", E.window.lines.crop.class, "Static")
-T.eq("both start empty", E.window.lines.output_dir.text, "")
-T.eq("and stay that way until something is wrong", E.window.lines.crop.text, "")
+-- No line per field: what is wrong with any of them goes on the one line over
+-- the bar, which starts empty until a frame has filled the boxes.
+T.eq("one line for what is wrong", E.window.message.class, "Static")
+T.eq("empty until there is something to say", E.window.message.text, "")
 
 -- Rows are placed in client coordinates, and a window's own bounds are the
 -- frame. DCS grants a client area shorter than the frame by the header, so
@@ -152,8 +158,8 @@ T.eq("the frame is taller than the client area it grants", frame[4] > client_h, 
 
 local last = E.window.buttons.stop.bounds
 T.eq("the last row is inside the client area", last[2] + last[4] <= client_h, true)
-T.eq("and so is the crop line above it",
-  E.window.lines.crop.bounds[2] < last[2], true)
+T.eq("and so is the pick button above it",
+  E.window.controls.crop_pick.bounds[2] < last[2], true)
 
 -- The buttons run left to right off one list, so a button added to it is the
 -- way this overflows, and it would do so silently.
@@ -162,12 +168,17 @@ T.eq("the last button is inside the window",
   rightmost[1] + rightmost[3] <= frame[3], true)
 
 -- The pick button belongs with the crop it fills in, not with the buttons that
--- act on the run: it sits between the crop's boxes and the crop's problem line.
+-- act on the run: it sits under the boxes it fills, at their left edge.
 T.eq("picking is a crop control", E.window.controls.crop_pick.class, "Button")
 T.eq("below the crop boxes",
   E.window.controls.crop_pick.bounds[2] > E.window.controls.crop_x.bounds[2], true)
-T.eq("and above the crop's own problem line",
-  E.window.controls.crop_pick.bounds[2] < E.window.lines.crop.bounds[2], true)
+T.eq("starting where their row starts",
+  E.window.controls.crop_pick.bounds[1], E.window.crop_labels[1].bounds[1])
+
+-- No close button. The window refuses to close, so it does not offer to; the
+-- refusal in onClose stays underneath for a skin that draws one anyway.
+T.eq("the close button is off",
+  win.skin.skinData.skins.header.skinData.params.hasCloseButton, false)
 T.eq("well above the run's buttons",
   E.window.controls.crop_pick.bounds[2] < E.window.buttons.start.bounds[2], true)
 
@@ -187,7 +198,7 @@ E.on_frame(run)
 controls = E.window.controls
 T.eq("the directory is on screen", controls.output_dir.text, "C:/extract")
 T.eq("the crop is ticked", controls.crop.state, true)
-T.eq("with its centre", controls.crop_x.text, "-290000")
+T.eq("with its center", controls.crop_x.text, "-290000")
 T.eq("both halves", controls.crop_z.text, "617000")
 T.eq("and its radius", controls.crop_radius_m.text, "5000")
 
@@ -199,15 +210,103 @@ T.eq("what was typed survives the frames", controls.output_dir.text,
   "C:/somewhere-else")
 
 -- A run whose config has no crop comes up unticked, with the boxes empty rather
--- than holding a centre nobody asked for.
+-- than holding a center nobody asked for.
 fresh()
 E.attach_window()
 E.on_frame(E.new_run({ config = { enabled = true, output_dir = "C:/extract" } }))
 T.eq("no crop, no tick", E.window.controls.crop.state, false)
-T.eq("and no centre", E.window.controls.crop_x.text, "")
+T.eq("and no center", E.window.controls.crop_x.text, "")
+
+-- The line opens with the one thing to do next. At the main menu that is a
+-- map, whatever the config holds; with one open it is the directory where
+-- there is none and the button where there is. An instruction is kept current
+-- while the run is stopped and nothing else has been said, so a map opening
+-- moves it on; a press's words are not moved on.
+T.eq("at the menu the line says to open a map",
+  E.window.message.text, E.INSTRUCTION_MAP)
+local real_terrain = E.terrain_id
+E.terrain_id = function() return "Caucasus" end
+local frame_run = E.window.run
+E.on_frame(frame_run)
+T.eq("with a map, a config with a directory says where the button is",
+  E.window.message.text, E.INSTRUCTION_START)
+fresh()
+E.attach_window()
+E.on_frame(E.new_run({ config = { enabled = true } }))
+T.eq("and one without says to set it",
+  E.window.message.text, E.INSTRUCTION_DIRECTORY)
+E.terrain_id = real_terrain
+
+-- A directory the run will make is fine; a drive it cannot is a problem from
+-- the first frame, whether or not there is a map yet.
+fresh()
+E.attach_window()
+E.on_frame(E.new_run({ config = { enabled = true, output_dir = "C:/gone" } }))
+T.eq("a directory that is not there yet is not a problem",
+  E.window.message.text, E.INSTRUCTION_MAP)
+fresh()
+E.attach_window()
+E.on_frame(E.new_run({ config = { enabled = true, output_dir = "Q:/gone" } }))
+T.eq("a drive that is not there is said at load",
+  E.window.message.text, "Output directory's drive Q:/ does not exist.")
 
 --------------------------------------------------------------------------------
-T.group("what was wrong with the config file arrives under its own field")
+T.group("the crop's boxes are on screen only while the tick is")
+--------------------------------------------------------------------------------
+
+-- Unticked, there is nothing to type into: the three boxes, their labels and
+-- the pick button are hidden, and the tick stays, because it is how they come
+-- back. Ticked from the config, they are there from the first frame.
+local function crop_shown()
+  local shown = {}
+  for i = 1, 3 do
+    shown[#shown + 1] = tostring(E.window.crop_labels[i].visible)
+  end
+  for _, name in ipairs({ "crop_x", "crop_z", "crop_radius_m", "crop_pick" }) do
+    shown[#shown + 1] = tostring(E.window.controls[name].visible)
+  end
+  return table.concat(shown, " ")
+end
+local hidden = "false false false false false false false"
+local visible = "true true true true true true true"
+
+T.eq("unticked from the config hides them", crop_shown(), hidden)
+T.eq("and leaves the tick", E.window.controls.crop.visible ~= false, true)
+
+-- Hidden, the block leaves no blank space: the rows under it move up by its
+-- height and the window shrinks by the same, where it stands.
+local frame_h = E.window.frame.h
+local block_h = E.window.crop_block_h
+local bar_h = E.window.bar_block_h
+local start_y = E.window.buttons.start.bounds[2]
+local win = E.gui.find("Window")
+T.eq("the block has a height", block_h > 0, true)
+T.eq("the window is shorter by it", win.bounds[4], frame_h - block_h - bar_h)
+T.eq("and the button moved up by it",
+  E.window.buttons.start.bounds[2], start_y)
+
+-- A tick from the user. The library toggles the state and then reports the
+-- change, so the handler reads the state back rather than tracking it.
+E.window.controls.crop.state = true
+E.gui.press(E.window.controls.crop)
+T.eq("ticking shows them", crop_shown(), visible)
+T.eq("and the window is its full height again", win.bounds[4], frame_h - bar_h)
+T.eq("with the button back under the block",
+  E.window.buttons.start.bounds[2], start_y + block_h)
+E.window.controls.crop.state = false
+E.gui.press(E.window.controls.crop)
+T.eq("and unticking hides them again", crop_shown(), hidden)
+T.eq("without moving anything twice", win.bounds[4], frame_h - block_h - bar_h)
+
+fresh()
+E.attach_window()
+E.on_frame(E.new_run({ config = { enabled = true, output_dir = "C:/extract",
+  crop = { x = 1, z = 2, radius_m = 3 } } }))
+T.eq("a crop in the config shows them from the first frame", crop_shown(),
+  visible)
+
+--------------------------------------------------------------------------------
+T.group("what was wrong with the config file arrives on the line over the bar")
 --------------------------------------------------------------------------------
 
 -- The problems are found before there is a window, so the first frame is the
@@ -218,27 +317,45 @@ local function shown_for(bad_config)
   E.attach_window()
   local settings, problems, tags = E.validate_config(bad_config)
   E.on_frame(E.new_run({ config = settings, problems = problems, tags = tags }))
-  return E.window.lines
+  return E.window.message.text
 end
 
 local bad = { enabled = true, output_dir = "C:/extract", crop = { x = 1 } }
-local lines = shown_for(bad)
 -- Compared against the checker rather than a pasted sentence: the assertion is
 -- that the window shows the one wording there is, not what that wording says.
-T.eq("the crop line carries the crop's problem", lines.crop.text,
-  E.field_problem("crop", bad.crop))
-T.eq("and the directory, which was fine, says nothing", lines.output_dir.text, "")
+T.eq("the line carries the crop's problem", shown_for(bad),
+  E.problem_for_screen(E.field_problem("crop", bad.crop)))
+-- A missing directory is what a fresh install has, and the instruction already
+-- says to set one; the checker's line would say the same thing as an error.
+-- So at load that one problem is left to the instruction, and the next shows.
+T.eq("a missing directory is left to the instruction",
+  shown_for({ enabled = true }), E.INSTRUCTION_MAP)
+T.eq("and the problem after it is shown",
+  shown_for({ enabled = true, crop = { x = 1 } }),
+  E.problem_for_screen(E.field_problem("crop", { x = 1 })))
 
-lines = shown_for({ enabled = true })
-T.eq("a missing directory is its own line", lines.output_dir.text,
-  E.field_problem("output_dir", nil))
+-- The screen's wording: the field's label for its key, and the explanation
+-- after the comma dropped, because the line beside the button has room for
+-- the finding and not for the reason. The log keeps both.
+T.eq("the key becomes the label and the explanation goes",
+  E.problem_for_screen("output_dir is not set, and there is no default for it"),
+  "Output directory is not set.")
+T.eq("for the escape explanation too",
+  E.problem_for_screen("output_dir contains a control character, which is "
+    .. "usually a backslash escape in a double-quoted path: \"C:\\x\""),
+  "Output directory contains a control character.")
+T.eq("a crop key becomes its box's label",
+  E.problem_for_screen("crop.radius_m is not a positive number: -5"),
+  "Radius is not a positive number.")
+T.eq("and a message with no key is left alone",
+  E.problem_for_screen("nonsense is not a config field"),
+  "nonsense is not a config field.")
 
--- A problem belonging to no control: there is no box for a field that does not
--- exist. It is worth a log line and nothing on screen, and reaching setText
--- through the nil it tags would take the window down over a typo in a file.
-lines = shown_for({ enabled = true, output_dir = "C:/extract", nonsense = 1 })
-T.eq("an unknown key marks no line", lines.output_dir.text, "")
-T.eq("nor the other one", lines.crop.text, "")
+-- A problem belonging to no control is still a problem, and the line does not
+-- need a box to point at.
+T.eq("an unknown key is shown too",
+  shown_for({ enabled = true, output_dir = "C:/extract", nonsense = 1 }),
+  "nonsense is not a config field.")
 T.eq("and nothing latched", E.ui_failed, false)
 
 --------------------------------------------------------------------------------
@@ -262,7 +379,7 @@ local buttons = window_on(run)
 E.gui.press(buttons.stop)
 T.eq("the run halts", run.state, E.STATE_STOPPED)
 T.eq("and the line says what to do next",
-  E.window.message.text:find("Start again", 1, true) ~= nil, true)
+  E.window.message.text:find("Start carries on", 1, true) ~= nil, true)
 
 -- Pressing it again is not a failure and is not silence: a button that does
 -- nothing and says nothing reads as a broken window.
@@ -300,6 +417,7 @@ E.config_path = function() return CONFIG end
 -- A window with a run in it, its own filesystem, and whatever was typed.
 local function typed(values)
   local fs = FakeFs.new()
+  fs.mkdir("C:/")
   E.fs = fs
   local r = E.new_run({ config = { enabled = true } })
   local b = window_on(r)
@@ -333,11 +451,10 @@ T.eq("and it is pointed where the box says", started.dir, "C:/extract")
 -- file says next session what the boxes said this one.
 local saved = E.read_config(CONFIG)
 T.eq("the directory survives the file", saved.output_dir, "C:/extract")
-T.eq("and the crop centre", saved.crop.x, -290000)
+T.eq("and the crop center", saved.crop.x, -290000)
 T.eq("both halves of it", saved.crop.z, 617000)
 T.eq("and the radius", saved.crop.radius_m, 5000)
 T.eq("with the hook still switched on", saved.enabled, true)
-T.eq("and it says so", E.window.message.text:find("next time", 1, true) ~= nil, true)
 
 -- The boxes are refilled from the validated table, so a pasted Windows path
 -- comes back as the one that was actually saved.
@@ -366,23 +483,61 @@ E.gui.press(press.start)
 T.eq("the run stays put", refused.state, E.STATE_STOPPED)
 T.eq("nothing was written", fs.files[CONFIG], nil)
 T.eq("the line names what is in the box",
-  E.window.lines.crop.text:find("12abc", 1, true) ~= nil, true)
-T.eq("and the message points at it",
-  E.window.message.text, "Not started: see the lines above.")
+  E.window.message.text, "X is not a finite number.")
+
+-- The run makes the directory, so one that is not there yet starts; a drive
+-- that is not there cannot be made, and stops it. A relative path and a
+-- character Windows refuses are caught by the checker before the disk is
+-- asked.
+refused, press, fs = typed({ output_dir = "C:/nowhere", crop = false })
+E.gui.press(press.start)
+T.eq("a directory that is not there yet starts", refused.state, E.STATE_IDLE)
+refused, press, fs = typed({ output_dir = "Q:/extract", crop = false })
+E.gui.press(press.start)
+T.eq("a drive that is not there stops it", refused.state, E.STATE_STOPPED)
+T.eq("with nothing written", fs.files[CONFIG], nil)
+T.eq("and the line says so", E.window.message.text,
+  "Output directory's drive Q:/ does not exist.")
+refused, press, fs = typed({ output_dir = "extract", crop = false })
+E.gui.press(press.start)
+T.eq("a relative path stops it", refused.state, E.STATE_STOPPED)
+T.eq("and says so", E.window.message.text,
+  "Output directory is not an absolute path.")
+refused, press, fs = typed({ output_dir = "C:/ex?tract", crop = false })
+E.gui.press(press.start)
+T.eq("a forbidden character stops it", refused.state, E.STATE_STOPPED)
+T.eq("and says so", E.window.message.text,
+  "Output directory has a character Windows forbids.")
+
+-- A finished run is refused the same way, and the refusal stays: the phase
+-- has not changed, so "Finished." is not said again over it a frame later.
+refused, press, fs = typed({ output_dir = "C:/extract", crop = false })
+refused.state = E.STATE_DONE
+E.on_frame(refused)
+T.eq("a finished run says so", E.window.message.text, "Finished.")
+E.window.controls.output_dir.text = "extract"
+E.gui.press(press.start)
+T.eq("Start after done is refused the same way", refused.state, E.STATE_DONE)
+for _ = 1, 50 do E.on_frame(refused) end
+T.eq("and the refusal stays up", E.window.message.text,
+  "Output directory is not an absolute path.")
 
 -- The one field with no default stops it the same way.
 refused, press, fs = typed({ output_dir = "", crop = false })
 E.gui.press(press.start)
 T.eq("a blank directory stops it", refused.state, E.STATE_STOPPED)
 T.eq("with nothing written", fs.files[CONFIG], nil)
-T.eq("and its own line", E.window.lines.output_dir.text,
-  E.field_problem("output_dir", nil))
+T.eq("and the line says so", E.window.message.text,
+  E.problem_for_screen(E.field_problem("output_dir", nil)))
 
--- Fixing it and pressing again clears the line rather than leaving the old
--- complaint under a field that is now fine.
+-- Fixing it and pressing again replaces the complaint with the phase the run
+-- moves into, on the next frame, rather than leaving it over a field that is
+-- now fine.
 E.window.controls.output_dir.text = "C:/extract"
 E.gui.press(press.start)
-T.eq("the line clears", E.window.lines.output_dir.text, "")
+E.on_frame(refused)
+T.eq("the complaint goes",
+  E.window.message.text:find("not set", 1, true), nil)
 T.eq("and it runs", refused.state, E.STATE_IDLE)
 
 -- Pressing Start during a run must not write either. The state is checked
@@ -404,7 +559,7 @@ anyway, press, fs = typed({ output_dir = "C:/extract", crop = false })
 E.gui.press(press.start)
 T.eq("it starts regardless", anyway.state, E.STATE_IDLE)
 T.eq("saying what was lost",
-  E.window.message.text:find("were not saved", 1, true) ~= nil, true)
+  E.window.message.text:find("not saved", 1, true) ~= nil, true)
 T.eq("and warning once", #warned > 0, true)
 E.config_path = function() return CONFIG end
 
@@ -442,7 +597,7 @@ T.eq("the log says the press was abandoned",
   warned[#warned]:find("no run was started", 1, true) ~= nil, true)
 
 --------------------------------------------------------------------------------
-T.group("the crop centre is picked by arming, then clicking the map")
+T.group("the crop center is picked by arming, then clicking the map")
 --------------------------------------------------------------------------------
 
 -- The map is in another Lua state and cannot be reached from here, so the
@@ -468,8 +623,6 @@ T.eq("and leaves the crop alone", E.window.controls.crop.state, false)
 E.gui.press(E.window.controls.crop_pick)
 T.eq("arming says so on the button", E.window.controls.crop_pick.text,
   E.PICK_ARMED)
-T.eq("and on the message line",
-  E.window.message.text:find("Click a point on the map", 1, true) ~= nil, true)
 
 -- Armed, but the click was on the toolbar, or on this window. It stays armed:
 -- disarming here would make a stray click cancel a thing the user just asked
@@ -478,19 +631,20 @@ E.on_map_click(10, 10)
 T.eq("a click off the map takes nothing", E.window.controls.crop_x.text, "")
 T.eq("and stays armed", E.window.controls.crop_pick.text, E.PICK_ARMED)
 
+-- To whole meters, the way the editor's status bar shows the cursor: the
+-- fraction is a pixel's worth of noise, and a box holding it is harder to
+-- read and to retype.
 E.on_map_click(500, 500)
-T.eq("a click on the map fills the centre", E.window.controls.crop_x.text,
-  "-545142.85714286")
+T.eq("a click on the map fills the center, in whole meters",
+  E.window.controls.crop_x.text, "-545143")
 T.eq("both halves of it", E.window.controls.crop_z.text, "682000")
--- Ticked, because picking a centre is the deliberate act the tick records.
+-- Ticked, because picking a center is the deliberate act the tick records.
 -- Left unticked, this followed by Start would sweep the whole theatre having
 -- just been told where the user wanted to extract.
 T.eq("and switches the crop on", E.window.controls.crop.state, true)
 T.eq("and disarms", E.window.controls.crop_pick.text, E.PICK_IDLE)
-T.eq("saying what is still missing",
-  E.window.message.text:find("radius", 1, true) ~= nil, true)
 
--- A second click now that it is disarmed must not move the centre again.
+-- A second click now that it is disarmed must not move the center again.
 E.window.controls.crop_x.text = "left alone"
 E.on_map_click(500, 500)
 T.eq("and a later click is ignored", E.window.controls.crop_x.text, "left alone")
@@ -504,12 +658,12 @@ E.on_map_click(500, 500)
 T.eq("a click after cancelling takes nothing",
   E.window.controls.crop_x.text, "left alone")
 
--- A radius away from a run, which is what the crop's own line then says.
+-- A radius away from a run, which is what the line over the bar then says.
 E.window.controls.crop_x.text = "-545142.85714286"
 E.gui.press(press.start)
 T.eq("Start refuses without one", picked.state, E.STATE_STOPPED)
 T.eq("naming the radius",
-  E.window.lines.crop.text:find("radius_m", 1, true) ~= nil, true)
+  E.window.message.text:find("Radius", 1, true) ~= nil, true)
 E.window.controls.crop_radius_m.text = "5000"
 E.gui.press(press.start)
 T.eq("and takes it with one", picked.state, E.STATE_IDLE)
@@ -582,6 +736,66 @@ T.eq("and said so once", #warned, 1)
 for _ = 1, 100 do E.build_window() end
 T.eq("still no window", E.window.built, false)
 T.eq("and still one line", #warned, 1)
+
+--------------------------------------------------------------------------------
+T.group("a crop is held against the map, where there is one")
+--------------------------------------------------------------------------------
+
+-- The theatre's bounds rectangle in meters, as the seam answers it with a map
+-- open. Caucasus's, because those are the numbers anybody checking by hand
+-- will reach for.
+local real_bounds = E.terrain_bounds
+E.terrain_bounds = function()
+  return { min_x = -600000, min_z = -560000, max_x = 380000, max_z = 1130000 }
+end
+
+local held, hold = typed({ output_dir = "C:/extract", crop = true,
+  crop_x = "-595000", crop_z = "0", crop_radius_m = "10000" })
+E.gui.press(hold.start)
+T.eq("a box past the edge is refused", held.state, E.STATE_STOPPED)
+T.eq("naming the edge and the number that crossed it", E.window.message.text,
+  "Crop reaches past the map, x below -600000.")
+
+E.window.controls.crop_x.text = "-500000"
+E.gui.press(hold.start)
+T.eq("moved inside, it starts", held.state, E.STATE_IDLE)
+
+-- The pick ignores a click off the theatre and stays armed for one on it.
+E.stop(held)
+local real_point_here = E.map_point_at
+E.map_point_at = function(x, y)
+  if x < 50 then return -700000, 0 end
+  return -300000, 600000
+end
+E.gui.press(E.window.controls.crop_pick)
+E.on_map_click(10, 500)
+T.eq("a point off the map is not taken",
+  E.window.controls.crop_x.text, "-500000")
+T.eq("and the pick stays armed",
+  E.window.controls.crop_pick.text, E.PICK_ARMED)
+E.on_map_click(500, 500)
+T.eq("one on it is", E.window.controls.crop_x.text, "-300000")
+E.map_point_at = real_point_here
+
+-- Without a map there is nothing to hold it against, so Start goes ahead and
+-- the run does the check itself when the terrain appears.
+E.terrain_bounds = function() return nil end
+held, hold = typed({ output_dir = "C:/extract", crop = true,
+  crop_x = "-595000", crop_z = "0", crop_radius_m = "10000" })
+E.gui.press(hold.start)
+T.eq("at the menu the check waits for the map", held.state, E.STATE_IDLE)
+
+-- The run's own refusal reaches the line, once.
+E.stop(held)
+held.refusal = "crop reaches past the map, z above 1130000: box edge 1135000"
+E.on_frame(held)
+T.eq("the run's refusal is shown", E.window.message.text,
+  "Crop reaches past the map, z above 1130000.")
+local before = E.gui.count(E.window.message, "setText")
+for _ = 1, 50 do E.on_frame(held) end
+T.eq("and not again", E.gui.count(E.window.message, "setText"), before)
+
+E.terrain_bounds = real_bounds
 
 E.warn = real_warn
 

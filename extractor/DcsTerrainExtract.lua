@@ -3150,21 +3150,55 @@ local CONTROL_ORDER =
 -- is no box on screen for a field that does not exist. So this walks problems,
 -- never tags, and a tag with no line is skipped rather than indexed: reaching
 -- setText through a nil would take the whole window down over a typo in a file.
-local function show_problems(problems, tags)
-  local lines = M.window.lines
-  local fields = M.config_fields()
-  for i = 1, #fields do
-    M.ui_method(lines[fields[i].name], "setText", "")
-  end
-  if problems == nil then
-    return
-  end
-  for i = 1, #problems do
-    local line = tags[i] and lines[tags[i]]
-    if line then
-      M.ui_method(line, "setText", problems[i])
+-- The screen name of the field a problem starts with. A problem is phrased
+-- once, in the config file's own words -- `output_dir`, `crop.x` -- because the
+-- log reads it too and a log line has to be matched to a key in a file. Under a
+-- box labelled "Output directory" those words are somebody else's, so the line
+-- swaps the leading key for the label the box carries and changes nothing else.
+-- Longest key first, so that `crop.x` is not read as `crop` followed by `.x`.
+local SCREEN_NAME = {
+  { "output_dir", "Output directory" },
+  { "crop.radius_m", "Radius" },
+  { "crop.x", "X" },
+  { "crop.z", "Z" },
+  { "crop", "Crop" },
+}
+
+-- Two problems carry an explanation after a comma that the log has room for
+-- and the line beside the button has not. The screen keeps the finding and
+-- drops the explanation; the log keeps both.
+local SCREEN_TRIM = {
+  ", and there is no default for it",
+  ", which is usually a backslash escape in a double-quoted path",
+}
+
+-- A problem for the line beside the button: the field's label for its key,
+-- the explanations above dropped, and the value the log echoes after the
+-- colon dropped too -- the box the problem is about already shows it, and a
+-- path or a number can be any length. What is left is the finding, as a
+-- sentence. Every message is written so that what matters is before the
+-- colon: the drive, the map edge.
+function M.problem_for_screen(problem)
+  for i = 1, #SCREEN_TRIM do
+    local at = problem:find(SCREEN_TRIM[i], 1, true)
+    if at then
+      problem = problem:sub(1, at - 1) .. problem:sub(at + #SCREEN_TRIM[i])
     end
   end
+  local colon = problem:find(": ", 1, true)
+  if colon then
+    problem = problem:sub(1, colon - 1)
+  end
+  if problem:sub(-1) ~= "." then
+    problem = problem .. "."
+  end
+  for i = 1, #SCREEN_NAME do
+    local key, label = SCREEN_NAME[i][1], SCREEN_NAME[i][2]
+    if problem:sub(1, #key) == key then
+      return label .. problem:sub(#key + 1)
+    end
+  end
+  return problem
 end
 
 local function set_controls(config)
@@ -3180,40 +3214,6 @@ local function set_controls(config)
   end
 end
 
--- What the controls hold, in the shape config_from_text takes, or nil where the
--- window failed part-way through being read.
---
--- Nil and not a partial answer, because every failure here reads as a legal
--- value rather than as an error. A getState that raises answers nil, and
--- `nil and true or false` is false -- which is an unticked crop, indistinguishable
--- from a user who does not want one. A getText that raises answers nil, which is
--- a blank box. So a widget library that starts raising during the read hands
--- back settings that look complete, validate clean, and are somebody else's: the
--- config file would be overwritten with the crop dropped and a full theatre
--- swept in its place, with the window dark and unable to say so.
---
--- The latch is the signal. It is false on entry, because a press cannot reach a
--- handler once it is set, so finding it true here means one of these calls set
--- it.
-local function read_controls()
-  local values = {}
-  local controls = M.window.controls
-  for i = 1, #CONTROL_ORDER do
-    local name = CONTROL_ORDER[i]
-    if name == "crop" then
-      values.crop = M.ui_method(controls.crop, "getState") and true or false
-    else
-      values[name] = M.ui_method(controls[name], "getText")
-    end
-  end
-  if M.ui_failed then
-    return nil
-  end
-  return values
-end
-
-local function say(text)
-  M.ui_method(M.window.message, "setText", text)
 -- Closes up the space of whichever blocks are hidden. The rows under a hidden
 -- block move up by its height and the window shrinks by the same, so a hidden
 -- block costs no blank space. A row moves from where the full layout put it
@@ -3282,6 +3282,56 @@ local function crop_toggled()
   show_crop(crop_ticked())
 end
 
+-- What the controls hold, in the shape config_from_text takes, or nil where the
+-- window failed part-way through being read.
+--
+-- Nil and not a partial answer, because every failure here reads as a legal
+-- value rather than as an error. A getState that raises answers nil, and
+-- `nil and true or false` is false -- which is an unticked crop, indistinguishable
+-- from a user who does not want one. A getText that raises answers nil, which is
+-- a blank box. So a widget library that starts raising during the read hands
+-- back settings that look complete, validate clean, and are somebody else's: the
+-- config file would be overwritten with the crop dropped and a full theatre
+-- swept in its place, with the window dark and unable to say so.
+--
+-- The latch is the signal. It is false on entry, because a press cannot reach a
+-- handler once it is set, so finding it true here means one of these calls set
+-- it.
+local function read_controls()
+  local values = {}
+  local controls = M.window.controls
+  for i = 1, #CONTROL_ORDER do
+    local name = CONTROL_ORDER[i]
+    if name == "crop" then
+      values.crop = M.ui_method(controls.crop, "getState") and true or false
+    else
+      values[name] = M.ui_method(controls[name], "getText")
+    end
+  end
+  if M.ui_failed then
+    return nil
+  end
+  return values
+end
+
+-- The line beside the button, which shows whatever was said last.
+local function say(text)
+  M.ui_method(M.window.message, "setText", text)
+  -- Whatever this was, it was not an instruction; instruct sets that back.
+  M.window.instructing = false
+end
+
+-- The first problem, on the same line. There is one line and the problems
+-- come in the order the fields are shown, so the one shown is the first thing
+-- to fix; fixing it and pressing Start brings the next. Every problem has
+-- already gone to the log, which is where the whole list is. Nothing is
+-- written when there is nothing wrong, so the instruction or the last press's
+-- outcome stays where it was.
+local function show_problems(problems)
+  if problems == nil or problems[1] == nil then
+    return
+  end
+  say(M.problem_for_screen(problems[1]))
 end
 
 -- A press arrives on DCS's own stack, called from inside the widget library, so
@@ -3338,10 +3388,23 @@ local function start_pressed()
     return
   end
 
-  local settings, problems, tags = M.validate_config(M.config_from_text(values))
-  show_problems(problems, tags)
+  local settings, problems = M.validate_config(M.config_from_text(values))
   if #problems > 0 then
-    say("Not started: see the lines above.")
+    show_problems(problems)
+    return
+  end
+  -- Against the disk: the drive has to be there, since the rest is made.
+  local missing = M.drive_problem(settings.output_dir)
+  if missing then
+    show_problems({ missing })
+    return
+  end
+  -- Against the map, where there is one. At the main menu there is nothing to
+  -- check against, and the run does this check itself when the terrain
+  -- appears, so nothing is lost by pressing Start there.
+  local outside = M.crop_outside(settings.crop, M.terrain_bounds())
+  if outside then
+    show_problems({ outside })
     return
   end
 
@@ -3354,10 +3417,11 @@ local function start_pressed()
   end
   set_controls(settings)
 
-  if saved then
-    say("Started. These settings will be here next time.")
-  else
-    say("Started, but the settings were not saved: " .. tostring(why))
+  -- Nothing is said about a start that went well: the run moves on within a
+  -- frame and the phase it moves into is the news. A save that failed is said,
+  -- for the frame it lasts, and warned to the log, where it keeps.
+  if not saved then
+    say("Started. Settings not saved.")
     M.warn("could not save the config: " .. tostring(why))
   end
 
@@ -3367,9 +3431,9 @@ local function start_pressed()
   M.start(run)
 end
 
--- The crop centre, off the map instead of out of the keyboard.
+-- The crop center, off the map instead of out of the keyboard.
 --
--- It ticks the crop as well as filling the two boxes. Reading a centre off the
+-- It ticks the crop as well as filling the two boxes. Reading a center off the
 -- map is the deliberate act the tick is meant to record, and leaving it unticked
 -- would let somebody press this, press Start, and sweep the whole theatre --
 -- forty minutes on Caucasus -- having just told the window where they wanted to
@@ -3384,8 +3448,8 @@ end
 --
 -- Pressing it again disarms, because an armed handler with no way out would
 -- leave the next click somewhere else doing something unexpected.
-M.PICK_IDLE = "Pick centre on map"
-M.PICK_ARMED = "Click the map..."
+M.PICK_IDLE = "PICK ON MAP"
+M.PICK_ARMED = "CLICK THE MAP..."
 
 local function set_pick_label()
   M.ui_method(M.window.controls.crop_pick, "setText",
@@ -3395,11 +3459,6 @@ end
 local function pick_pressed()
   M.window.arming = not M.window.arming
   set_pick_label()
-  if M.window.arming then
-    say("Click a point on the map. Press again to cancel.")
-  else
-    say("Cancelled.")
-  end
 end
 
 -- Every press in DCS arrives here. It does nothing at all unless the button
@@ -3414,12 +3473,24 @@ local function clicked(x, y)
   if mx == nil then
     return
   end
+  -- A point off the edge of the theatre is not a center anybody wants, and
+  -- the next Start would refuse it. Ignored like a click off the map view,
+  -- with the pick left armed for the click that lands.
+  local bounds = M.terrain_bounds()
+  if bounds and (mx < bounds.min_x or mx > bounds.max_x
+      or mz < bounds.min_z or mz > bounds.max_z) then
+    return
+  end
   M.window.arming = false
   set_pick_label()
-  M.ui_method(M.window.controls.crop_x, "setText", M.box_text(mx))
-  M.ui_method(M.window.controls.crop_z, "setText", M.box_text(mz))
+  -- Whole meters, as the editor's own status bar shows the cursor. The point
+  -- is the editor's answer for a pixel, and a pixel is tens of meters at any
+  -- zoom the map is picked at, so the fraction is noise that would only make
+  -- the box harder to read and to retype.
+  M.ui_method(M.window.controls.crop_x, "setText", M.box_text(floor(mx + 0.5)))
+  M.ui_method(M.window.controls.crop_z, "setText", M.box_text(floor(mz + 0.5)))
   M.ui_method(M.window.controls.crop, "setState", true)
-  say("Centre taken from the map. Set a radius, then Start.")
+  show_crop(true)
 end
 
 -- The seam the click arrives through, so a test can deliver one.
@@ -3433,7 +3504,7 @@ local function stop_pressed()
     return
   end
   if M.stop(run) then
-    say("Stopped. Start again to carry on from here.")
+    say("Stopped. Start carries on from here.")
   else
     say("Nothing to stop.")
   end
@@ -3596,6 +3667,7 @@ function M.build_window()
   M.ui_method(message, "setWrapping", true)
   below_crop[#below_crop + 1] = message
   local buttons = {}
+  local by = y + floor((WIN.line_h - WIN.button_h) / 2)
   for i = 1, #BUTTONS do
     local spec = BUTTONS[i]
     buttons[spec.name] = place(panel, M.ui(Push.new, spec.text), SKIN.button,
@@ -3709,9 +3781,9 @@ function M.build_window()
   -- fires onChange on the widget itself, so a press is a field on the object
   -- rather than a callback registered somewhere.
   buttons.start.onChange = on_press(start_pressed)
-  local by = y + floor((WIN.line_h - WIN.button_h) / 2)
   buttons.stop.onChange = on_press(stop_pressed)
   controls.crop_pick.onChange = on_press(pick_pressed)
+  controls.crop.onChange = on_press(crop_toggled)
 
   -- Once, for the life of the session. The handler does nothing until the pick
   -- button arms it, so the cost of every other click in DCS is one comparison.
@@ -3759,17 +3831,23 @@ end
 M.STATUS_NO_TERRAIN = "Open a map in the Mission Editor."
 
 local STATUS_OF = {
-  [M.STATE_STOPPED] = "Stopped.",
-  [M.STATE_IDLE] = "Waiting for a theatre.",
+  [M.STATE_IDLE] = "Waiting for a theater.",
   [M.STATE_PREPARE] = "Preparing.",
   [M.STATE_HOOK] = "Sweeping the terrain.",
   [M.STATE_MISSION] = "Sweeping the scenery.",
   [M.STATE_DONE] = "Finished.",
 }
 
+-- Nil for a stopped run: there is nothing to say about one. The line is then
+-- left with what put the run there -- the instruction at load, or the Stop
+-- press's own words -- rather than replacing either with "Stopped.", which a
+-- map opening under a stopped run would otherwise write over the instruction.
 function M.window_status(run)
   if run.state == M.STATE_DONE then
     return STATUS_OF[M.STATE_DONE]
+  end
+  if run.state == M.STATE_STOPPED then
+    return nil
   end
   if M.terrain_id() == nil then
     return M.STATUS_NO_TERRAIN
@@ -3787,7 +3865,6 @@ end
 -- stands still in between. Prepare is left at zero rather than given a slice of
 -- its own -- it is a handful of frames against tens of minutes, and a bar that
 -- jumped before any terrain had been read would be describing nothing.
-  controls.crop.onChange = on_press(crop_toggled)
 --
 -- The two passes are given equal halves, which is wrong and is the honest kind
 -- of wrong: the mission pass is not half the work, and nothing has measured
@@ -3813,10 +3890,53 @@ local function update_status(run)
   if text == M.window.status_text then
     return
   end
-  M.ui_method(M.window.status, "setText", text)
-  -- After the call, so this records what the label was given rather than what
-  -- it was meant to be given.
+  -- The phase the window has seen, which is not the text the line shows: a
+  -- press can say something over a phase that has not changed, and a phase
+  -- that has not changed must not say itself again over it -- at done, that
+  -- wrote "Finished." over every refusal one frame after it was shown. Nil is
+  -- seen too, so a Stop and a Start back into the same phase say it again.
   M.window.status_text = text
+  if text ~= nil then
+    say(text)
+  end
+end
+
+-- What the line says before any press has had anything to say: the one thing
+-- to do next. Without a map that is opening one, because nothing can run
+-- until it is; then a fresh install has no directory, and that is the thing;
+-- one with a config has only to be told where the button is.
+M.INSTRUCTION_MAP = "Open a map in the Mission Editor."
+M.INSTRUCTION_DIRECTORY = "Set an output directory, then press Start."
+M.INSTRUCTION_START = "Press Start to begin."
+
+function M.instruction(config, has_terrain)
+  if not has_terrain then
+    return M.INSTRUCTION_MAP
+  end
+  local dir = type(config) == "table" and config.output_dir
+  if type(dir) ~= "string" or dir == "" then
+    return M.INSTRUCTION_DIRECTORY
+  end
+  return M.INSTRUCTION_START
+end
+
+-- An instruction on the line, marked as one: an instruction is kept current
+-- while the run is stopped and nothing else has been said -- a map opening
+-- moves it on -- where anything else said stays until the next thing is.
+local function instruct(text)
+  say(text)
+  M.window.instructing = true
+  M.window.instruction_text = text
+end
+
+local function update_instruction(run)
+  if run.state ~= M.STATE_STOPPED or not M.window.instructing then
+    return
+  end
+  local text = M.instruction(run.config, M.terrain_id() ~= nil)
+  if text ~= M.window.instruction_text then
+    instruct(text)
+  end
 end
 
 -- Puts a run's config on screen, once.
@@ -3830,11 +3950,34 @@ local function fill_controls(run)
     return
   end
   set_controls(run.config)
+  show_crop(crop_ticked())
+  instruct(M.instruction(run.config, M.terrain_id() ~= nil))
   -- What was wrong with the config file, put where the user can act on it. This
   -- is the only moment those problems can be shown -- they were found before
   -- there was a window -- and until now the only record of them was a log
   -- nobody with a blank-looking crop would think to open.
-  show_problems(run.config_problems, run.config_tags)
+  --
+  -- All but one: a missing directory is what a fresh install has, and the
+  -- instruction just written already says to set one. The checker's line for
+  -- it would say the same thing as an error, so that problem is left to the
+  -- instruction here, and the next one, if any, is shown. Start shows it
+  -- like any other, because by then the user has asked.
+  local problems = run.config_problems
+  if problems and problems[1] == M.field_problem("output_dir", nil) then
+    local rest = {}
+    for i = 2, #problems do
+      rest[#rest + 1] = problems[i]
+    end
+    problems = rest
+  end
+  -- And one the checker cannot find, because it has no disk: a drive in the
+  -- file that is not there.
+  local missing = M.drive_problem(run.config.output_dir)
+  if missing then
+    problems = problems or {}
+    problems[#problems + 1] = missing
+  end
+  show_problems(problems)
   M.window.filled = true
 end
 
@@ -3846,6 +3989,49 @@ local function update_progress(run)
   end
   M.ui_method(M.window.bar, "setValue", value)
   M.window.bar_value = value
+  -- Nil before the first frame, so the first frame settles it either way.
+  local shown = value > 0
+  if shown ~= M.window.bar_shown then
+    show_bar(shown)
+  end
+end
+
+-- Why the run stopped itself, where it did. The run cannot reach the line, so
+-- it leaves the reason on itself and the window shows it once, when it
+-- appears; Start clears it, and the line moves on with the next press.
+local function update_refusal(run)
+  if run.refusal == M.window.refusal_shown then
+    return
+  end
+  if run.refusal ~= nil then
+    say(M.problem_for_screen(run.refusal))
+  end
+  M.window.refusal_shown = run.refusal
+end
+
+-- Which controls answer, by whether the run is working. Written only when that
+-- changed, for the same reason as the lines above it.
+--
+-- Working is everything between Start and Stop, the wait for a theatre
+-- included: Start refuses while a run is going and retarget refuses to move
+-- one, so a box that could be typed into then would take a value the run is
+-- not going to use. Greying it says so before the typing rather than after.
+--
+-- The two buttons share one slot, and the one shown is the one that would not
+-- refuse: Start while the run is stopped or done, Stop while it is going.
+local function update_run_controls(run)
+  local working = run.state ~= M.STATE_STOPPED and run.state ~= M.STATE_DONE
+  if working == M.window.working then
+    return
+  end
+  local controls = M.window.controls
+  for i = 1, #CONTROL_ORDER do
+    M.ui_method(controls[CONTROL_ORDER[i]], "setEnabled", not working)
+  end
+  M.ui_method(controls.crop_pick, "setEnabled", not working)
+  M.ui_method(M.window.buttons.start, "setVisible", not working)
+  M.ui_method(M.window.buttons.stop, "setVisible", working)
+  M.window.working = working
 end
 
 -- Points on_frame at the window: build it, then say where the run has got to.
@@ -3862,8 +4048,11 @@ function M.attach_window()
     M.window.run = run
     if M.build_window() then
       fill_controls(run)
+      update_instruction(run)
       update_status(run)
       update_progress(run)
+      update_refusal(run)
+      update_run_controls(run)
     end
   end
 end
