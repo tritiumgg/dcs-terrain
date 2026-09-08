@@ -22,7 +22,7 @@ T.group("a config becomes the strings a window shows")
 local text = E.control_text({ enabled = true, output_dir = "C:/extract" })
 T.eq("the path is the path", text.output_dir, "C:/extract")
 T.eq("no crop leaves the tick off", text.crop, false)
-T.eq("and the centre blank", text.crop_x, "")
+T.eq("and the center blank", text.crop_x, "")
 T.eq("and the other half of it", text.crop_z, "")
 T.eq("and the radius", text.crop_radius_m, "")
 
@@ -32,7 +32,7 @@ text = E.control_text({
   crop = { x = -290000, z = 617000, radius_m = 5000 },
 })
 T.eq("a crop ticks the box", text.crop, true)
-T.eq("the centre reads as it was typed", text.crop_x, "-290000")
+T.eq("the center reads as it was typed", text.crop_x, "-290000")
 T.eq("both halves of it", text.crop_z, "617000")
 -- 5000 and not 5000.0000000000000, which is what an exact format would put in
 -- front of somebody about to read the number back off the screen.

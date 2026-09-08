@@ -41,7 +41,7 @@ T.group("lattice")
 
 -- 25 km by 15 km at 5 km cells: 5 rows north, 3 columns east.
 local lattice = E.presweep_lattice({ min_x = 0, min_z = 0, max_x = 25000, max_z = 15000 }, 5)
-T.eq("cell size in metres", lattice.cell_m, 5000)
+T.eq("cell size in meters", lattice.cell_m, 5000)
 T.eq("rows", lattice.rows, 5)
 T.eq("columns", lattice.cols, 3)
 
@@ -55,12 +55,12 @@ T.eq("last column of the first row", E.presweep_index(lattice, 0, 2), 3)
 T.eq("first column of the second row", E.presweep_index(lattice, 1, 0), 4)
 T.eq("last index", E.presweep_index(lattice, 4, 2), 15)
 
-local cx, cz = E.presweep_centre(lattice, 0, 0)
-T.eq("first centre x", cx, 2500)
-T.eq("first centre z", cz, 2500)
-local lx, lz = E.presweep_centre(lattice, 4, 2)
-T.eq("last centre x", lx, 22500)
-T.eq("last centre z", lz, 12500)
+local cx, cz = E.presweep_center(lattice, 0, 0)
+T.eq("first center x", cx, 2500)
+T.eq("first center z", cz, 2500)
+local lx, lz = E.presweep_center(lattice, 4, 2)
+T.eq("last center x", lx, 22500)
+T.eq("last center z", lz, 12500)
 
 T.raises("a lattice needs a rectangle",
   function() return E.presweep_lattice(7, 5) end, "not a rectangle")
@@ -78,7 +78,7 @@ authored[E.presweep_index(lattice, 1, 1)] = true
 authored[E.presweep_index(lattice, 3, 2)] = true
 
 -- The rectangle bounds the cells' squares: it starts at row 1's low edge and
--- ends at row 3's high edge, which is row 4's low edge. Bounding the centres
+-- ends at row 3's high edge, which is row 4's low edge. Bounding the centers
 -- instead would lose 2 500 m at every side.
 local bare = E.presweep_bounds(lattice, authored, 0)
 T.eq("low edge of the first authored row", bare.min_x, 5000)
@@ -148,7 +148,7 @@ T.group("record")
 --------------------------------------------------------------------------------
 
 local record = E.presweep_record(lattice, authored, { breakpoint_min = 60, road_max_m = 5000 })
-T.eq("cell size in kilometres", record.cell_km, 5)
+T.eq("cell size in kilometers", record.cell_km, 5)
 T.eq("breakpoint threshold", record.breakpoint_min, 60)
 T.eq("road distance", record.road_max_m, 5000)
 T.eq("authored cells", record.authored_cells, 2)

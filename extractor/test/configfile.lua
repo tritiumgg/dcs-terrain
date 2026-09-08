@@ -5,8 +5,8 @@
 -- The property that matters is the round trip. The window fills its controls
 -- from this file and writes it back, so a value that does not survive being
 -- written and read comes back at the next start as a problem the user did not
--- cause: a crop centre rounded on the way through the file moves the extract by
--- tens of metres, and nothing downstream can tell that from a crop they meant.
+-- cause: a crop center rounded on the way through the file moves the extract by
+-- tens of meters, and nothing downstream can tell that from a crop they meant.
 
 package.path = "extractor/?.lua;extractor/test/support/?.lua;" .. package.path
 
@@ -135,25 +135,25 @@ T.eq("and no temporary either", fs.files[PATH .. ".tmp"], nil)
 T.group("a config survives the round trip")
 --------------------------------------------------------------------------------
 
--- The centre is the measured Caucasus reading the Mission Editor shows under
+-- The center is the measured Caucasus reading the Mission Editor shows under
 -- the cursor, kept to the digit it arrives with. %g would round it to six
--- significant figures and move the crop about forty metres east.
-local CENTRE_X = -549428.57142857
-local CENTRE_Z = 715714.28571429
+-- significant figures and move the crop about forty meters east.
+local CENTER_X = -549428.57142857
+local CENTER_Z = 715714.28571429
 
 with_fs()
 local wrote = {
   enabled = true,
   output_dir = "C:/extracts/caucasus-50m",
-  crop = { x = CENTRE_X, z = CENTRE_Z, radius_m = 5000 },
+  crop = { x = CENTER_X, z = CENTER_Z, radius_m = 5000 },
 }
 T.eq("the write succeeds", E.write_config(PATH, wrote), true)
 
 local read = E.read_config(PATH)
 T.eq("enabled round trips", read.enabled, true)
 T.eq("output_dir round trips", read.output_dir, "C:/extracts/caucasus-50m")
-T.eq("the crop centre x is exact", read.crop.x, CENTRE_X)
-T.eq("the crop centre z is exact", read.crop.z, CENTRE_Z)
+T.eq("the crop center x is exact", read.crop.x, CENTER_X)
+T.eq("the crop center z is exact", read.crop.z, CENTER_Z)
 T.eq("the radius round trips", read.crop.radius_m, 5000)
 
 -- And the written table is still what the run validates against, so the window

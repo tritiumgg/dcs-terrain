@@ -574,7 +574,7 @@ end
 --
 -- The grid covers [origin_x, origin_x + height * cell_size) by [origin_z,
 -- origin_z + width * cell_size). Rows run north with DCS x and columns run
--- east with DCS z, and every sample is taken at a cell centre.
+-- east with DCS z, and every sample is taken at a cell center.
 --------------------------------------------------------------------------------
 
 local RECT_KEYS = { "min_x", "min_z", "max_x", "max_z" }
@@ -678,7 +678,7 @@ end
 -- that pass. This section is the lattice, the derivation and the record; what
 -- makes a cell authored is a terrain question and belongs with the sweeps.
 --
--- The lattice takes metres. The theatre's own bounds are kilometres, so the
+-- The lattice takes meters. The theatre's own bounds are kilometers, so the
 -- caller multiplies, and the argument name says which unit it wanted.
 --------------------------------------------------------------------------------
 
@@ -708,16 +708,16 @@ function M.presweep_index(lattice, row, col)
   return row * lattice.cols + col + 1
 end
 
-function M.presweep_centre(lattice, row, col)
+function M.presweep_center(lattice, row, col)
   return lattice.min_x + (row + 0.5) * lattice.cell_m,
          lattice.min_z + (col + 0.5) * lattice.cell_m
 end
 
 -- The bounding rectangle of the authored cells, grown by margin_m.
 --
--- It bounds the cells' squares and not their centres, because a cell is
--- authored as a whole: bounding the centres would lose half a cell at each
--- edge, and a lattice cell is kilometres wide.
+-- It bounds the cells' squares and not their centers, because a cell is
+-- authored as a whole: bounding the centers would lose half a cell at each
+-- edge, and a lattice cell is kilometers wide.
 --
 -- It is not clipped back to the theatre bounds. The margin can push it
 -- outside, where the engine returns fill and the per-cell fill test writes
@@ -861,7 +861,7 @@ function M.each_tile(grid)
   end
 end
 
-function M.cell_centre(grid, row, col)
+function M.cell_center(grid, row, col)
   return grid.origin_x + (row + 0.5) * grid.cell_size,
          grid.origin_z + (col + 0.5) * grid.cell_size
 end
@@ -1592,9 +1592,9 @@ local function bad_boolean(v, name)
   end
 end
 
--- The crop is a centre and a radius, not the box the format records. A box is
+-- The crop is a center and a radius, not the box the format records. A box is
 -- four coordinates nobody can produce from knowing where they want to extract;
--- the Mission Editor shows the X and Z under the cursor, so a centre read off
+-- the Mission Editor shows the X and Z under the cursor, so a center read off
 -- the map plus a radius is three numbers a user actually has.
 local CROP_KEYS = { "x", "z", "radius_m" }
 local CROP_BY_NAME = { x = true, z = true, radius_m = true }
@@ -1873,12 +1873,12 @@ end
 -- The shortest form that reads back as the same double. %.17g is exact and
 -- unreadable -- a radius would sit in the box as 5000.0000000000000 -- and
 -- %.14g, which is what tostring writes, moves a six-figure metre coordinate in
--- its last bits. A centre that came out of the config file has to go back into
+-- its last bits. A center that came out of the config file has to go back into
 -- it unchanged, or a user who pressed Start without touching anything would have
 -- moved their own crop.
 --
 -- Public because the window puts numbers into boxes from somewhere other than a
--- config too: a centre read off the map has to be written the same way, or the
+-- config too: a center read off the map has to be written the same way, or the
 -- same digit would go missing by a different route.
 function M.box_text(v)
   if v == nil then
@@ -2046,9 +2046,9 @@ function M.write_config(path, config)
     out[#out + 1] = format("  output_dir = %q,\n", config.output_dir)
   end
 
-  -- %.17g throughout, the same as the JSON encoder: a crop centre is a
+  -- %.17g throughout, the same as the JSON encoder: a crop center is a
   -- six-figure metre coordinate, and %g would round it to six significant
-  -- digits and move the crop by tens of metres on the way through the file.
+  -- digits and move the crop by tens of meters on the way through the file.
   local crop = config.crop
   if crop ~= nil then
     out[#out + 1] = format("  crop = { x = %.17g, z = %.17g, radius_m = %.17g },\n",
@@ -2597,7 +2597,7 @@ function M.callbacks(run)
   }
 end
 
--- Where a screen point falls on the Mission Editor's map, in DCS metres, or nil
+-- Where a screen point falls on the Mission Editor's map, in DCS meters, or nil
 -- when it is not on the map at all.
 --
 -- The editor's map lives in the gui state and this file runs in the hook state,

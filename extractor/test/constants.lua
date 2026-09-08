@@ -34,7 +34,7 @@ T.eq("height is i16", E.layers().height.dtype, "i16")
 T.eq("water is u8", E.layers().water.dtype, "u8")
 T.eq("surface is u8", E.layers().surface.dtype, "u8")
 
-T.eq("height is metres", E.layers().height.unit, "m")
+T.eq("height is meters", E.layers().height.unit, "m")
 T.eq("water is a class", E.layers().water.unit, "class")
 T.eq("surface is an enum", E.layers().surface.unit, "enum")
 
