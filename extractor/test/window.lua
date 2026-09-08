@@ -12,6 +12,7 @@ package.path = "extractor/?.lua;extractor/test/support/?.lua;" .. package.path
 local T = require("testing")
 local E = require("DcsTerrainExtract")
 local FakeGui = require("fakegui")
+local FakeFs = require("fakefs")
 
 local logged = {}
 E.log = function(message) logged[#logged + 1] = message end
@@ -224,6 +225,119 @@ E.stop = function() reached = true return true end
 E.gui.press(buttons.stop)
 E.stop = real_stop
 T.eq("a press after the latch is not attempted", reached, false)
+
+--------------------------------------------------------------------------------
+T.group("Start writes what is in the boxes and begins the run")
+--------------------------------------------------------------------------------
+
+local CONFIG = "C:/saved/Config/DcsTerrainExtract.lua"
+E.config_path = function() return CONFIG end
+
+-- A window with a run in it, its own filesystem, and whatever was typed.
+local function typed(values)
+  local fs = FakeFs.new()
+  E.fs = fs
+  local r = E.new_run({ config = { enabled = true } })
+  local b = window_on(r)
+  for name, value in pairs(values) do
+    if name == "crop" then
+      E.window.controls.crop.state = value
+    else
+      E.window.controls[name].text = value
+    end
+  end
+  return r, b, fs
+end
+
+local started, press, fs = typed({
+  output_dir = "C:/extract",
+  crop = true,
+  crop_x = "-290000",
+  crop_z = "617000",
+  crop_radius_m = "5000",
+})
+E.gui.press(press.start)
+T.eq("the run leaves the stopped state", started.state, E.STATE_IDLE)
+T.eq("and the settings were written", fs.files[CONFIG] ~= nil, true)
+
+-- Read back rather than compared against the bytes: what matters is that the
+-- file says next session what the boxes said this one.
+local saved = E.read_config(CONFIG)
+T.eq("the directory survives the file", saved.output_dir, "C:/extract")
+T.eq("and the crop centre", saved.crop.x, -290000)
+T.eq("both halves of it", saved.crop.z, 617000)
+T.eq("and the radius", saved.crop.radius_m, 5000)
+T.eq("with the hook still switched on", saved.enabled, true)
+T.eq("and it says so", E.window.message.text:find("next time", 1, true) ~= nil, true)
+
+-- The boxes are refilled from the validated table, so a pasted Windows path
+-- comes back as the one that was actually saved.
+started, press, fs = typed({ output_dir = "C:\\extracts\\caucasus", crop = false })
+E.gui.press(press.start)
+T.eq("a pasted path is normalised on screen", E.window.controls.output_dir.text,
+  "C:/extracts/caucasus")
+T.eq("and in the file", E.read_config(CONFIG).output_dir, "C:/extracts/caucasus")
+
+--------------------------------------------------------------------------------
+T.group("Start refuses before it writes anything")
+--------------------------------------------------------------------------------
+
+-- A bad box stops it where the user can see why, and nothing is written: a
+-- config file holding a value already red on screen would come back next
+-- session as a problem nobody caused.
+local refused
+refused, press, fs = typed({
+  output_dir = "C:/extract",
+  crop = true,
+  crop_x = "12abc",
+  crop_z = "617000",
+  crop_radius_m = "5000",
+})
+E.gui.press(press.start)
+T.eq("the run stays put", refused.state, E.STATE_STOPPED)
+T.eq("nothing was written", fs.files[CONFIG], nil)
+T.eq("the line names what is in the box",
+  E.window.lines.crop.text:find("12abc", 1, true) ~= nil, true)
+T.eq("and the message points at it",
+  E.window.message.text, "Not started: see the lines above.")
+
+-- The one field with no default stops it the same way.
+refused, press, fs = typed({ output_dir = "", crop = false })
+E.gui.press(press.start)
+T.eq("a blank directory stops it", refused.state, E.STATE_STOPPED)
+T.eq("with nothing written", fs.files[CONFIG], nil)
+T.eq("and its own line", E.window.lines.output_dir.text,
+  E.field_problem("output_dir", nil))
+
+-- Fixing it and pressing again clears the line rather than leaving the old
+-- complaint under a field that is now fine.
+E.window.controls.output_dir.text = "C:/extract"
+E.gui.press(press.start)
+T.eq("the line clears", E.window.lines.output_dir.text, "")
+T.eq("and it runs", refused.state, E.STATE_IDLE)
+
+-- Pressing Start during a run must not write either. The state is checked
+-- first, so the next DCS start cannot come up pointed at a directory this run
+-- never used.
+local going
+going, press, fs = typed({ output_dir = "C:/extract", crop = false })
+going.state = E.STATE_HOOK
+E.gui.press(press.start)
+T.eq("the run is untouched", going.state, E.STATE_HOOK)
+T.eq("and nothing was written", fs.files[CONFIG], nil)
+T.eq("but it says why", E.window.message.text, "A run is already going. Stop it first.")
+
+-- A config that cannot be saved does not cost the run. The extract is the
+-- point; the file is only how the settings come back next time.
+E.config_path = function() return nil end
+local anyway
+anyway, press, fs = typed({ output_dir = "C:/extract", crop = false })
+E.gui.press(press.start)
+T.eq("it starts regardless", anyway.state, E.STATE_IDLE)
+T.eq("saying what was lost",
+  E.window.message.text:find("were not saved", 1, true) ~= nil, true)
+T.eq("and warning once", #warned > 0, true)
+E.config_path = function() return CONFIG end
 
 --------------------------------------------------------------------------------
 T.group("it refuses to close")

@@ -2700,6 +2700,7 @@ local CROP_ORDER = { "crop_x", "crop_z", "crop_radius_m" }
 -- The buttons, left to right. A list rather than a placed widget each, so
 -- adding one is an entry here and not another x to work out by hand.
 local BUTTONS = {
+  { name = "start", text = "Start" },
   { name = "stop", text = "Stop" },
 }
 
@@ -2716,6 +2717,7 @@ local function place(panel, widget, skin_name, x, y, w, h)
   return widget
 end
 
+-- Every control, in a fixed order. pairs order is undefined in 5.1, and a
 -- window whose boxes filled in a different order each session could not be
 -- tested for having filled them at all.
 local CONTROL_ORDER =
@@ -2746,6 +2748,33 @@ local function show_problems(problems, tags)
   end
 end
 
+local function set_controls(config)
+  local text = M.control_text(config or {})
+  for i = 1, #CONTROL_ORDER do
+    local name = CONTROL_ORDER[i]
+    local widget = M.window.controls[name]
+    if name == "crop" then
+      M.ui_method(widget, "setState", text.crop)
+    else
+      M.ui_method(widget, "setText", text[name])
+    end
+  end
+end
+
+-- What the controls hold, in the shape config_from_text takes.
+local function read_controls()
+  local values = {}
+  local controls = M.window.controls
+  for i = 1, #CONTROL_ORDER do
+    local name = CONTROL_ORDER[i]
+    if name == "crop" then
+      values.crop = M.ui_method(controls.crop, "getState") and true or false
+    else
+      values[name] = M.ui_method(controls[name], "getText")
+    end
+  end
+  return values
+end
 
 local function say(text)
   M.ui_method(M.window.message, "setText", text)
@@ -2764,6 +2793,60 @@ local function on_press(fn)
   return function()
     M.ui(fn)
   end
+end
+
+-- Start, and the order of it is the design.
+--
+-- The state is checked before anything is written, because a press during a run
+-- that went on to write the file would leave the next DCS start using a
+-- directory this run never used, with nothing on screen having said so.
+--
+-- Then the boxes are validated, and a problem stops it there: nothing is
+-- written and nothing begins, so what is refused is exactly what is on the
+-- lines above.
+--
+-- The file is written before the run is told anything, and a failure to write
+-- it does not refuse the press. The extract is the point; the config file is
+-- only how the settings come back next time, and a user who cannot save them
+-- would rather have the run than the file. It is written from the validated
+-- table rather than the boxes, and the boxes are then filled from that same
+-- table, so what is on screen is what was saved -- a pasted path with
+-- backslashes in it comes back with forward slashes.
+local function start_pressed()
+  local run = M.window.run
+  if run == nil then
+    return
+  end
+  if run.state ~= M.STATE_STOPPED then
+    say("A run is already going. Stop it first.")
+    return
+  end
+
+  local settings, problems, tags = M.validate_config(
+    M.config_from_text(read_controls()))
+  show_problems(problems, tags)
+  if #problems > 0 then
+    say("Not started: see the lines above.")
+    return
+  end
+
+  local path = M.config_path()
+  local saved, why
+  if path == nil then
+    why = "there is no Saved Games directory to write it to"
+  else
+    saved, why = M.write_config(path, settings)
+  end
+  set_controls(settings)
+
+  if saved then
+    say("Started. These settings will be here next time.")
+  else
+    say("Started, but the settings were not saved: " .. tostring(why))
+    M.warn("could not save the config: " .. tostring(why))
+  end
+
+  M.start(run)
 end
 
 local function stop_pressed()
@@ -2916,6 +2999,7 @@ function M.build_window()
   -- Per instance for the same reason, and the same shape: the widget library
   -- fires onChange on the widget itself, so a press is a field on the object
   -- rather than a callback registered somewhere.
+  buttons.start.onChange = on_press(start_pressed)
   buttons.stop.onChange = on_press(stop_pressed)
 
   M.ui_method(root, "setVisible", true)
@@ -3004,21 +3088,13 @@ end
 --
 -- Once, because from then on the boxes are the user's. The frame callback
 -- arrives about sixty times a second, and a refill per frame would take a
--- keystroke back out of the box before the next one could be typed.
+-- keystroke back out of the box before the next one could be typed. Start
+-- writes them again, which is a different thing: that is the user asking.
 local function fill_controls(run)
   if M.window.filled then
     return
   end
-  local text = M.control_text(run.config or {})
-  for i = 1, #CONTROL_ORDER do
-    local name = CONTROL_ORDER[i]
-    local widget = M.window.controls[name]
-    if name == "crop" then
-      M.ui_method(widget, "setState", text.crop)
-    else
-      M.ui_method(widget, "setText", text[name])
-    end
-  end
+  set_controls(run.config)
   -- What was wrong with the config file, put where the user can act on it. This
   -- is the only moment those problems can be shown -- they were found before
   -- there was a window -- and until now the only record of them was a log
