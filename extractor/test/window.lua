@@ -351,6 +351,39 @@ T.eq("and warning once", #warned > 0, true)
 E.config_path = function() return CONFIG end
 
 --------------------------------------------------------------------------------
+T.group("a window that breaks while Start reads it starts nothing")
+--------------------------------------------------------------------------------
+
+-- The failure the latch does not catch on its own. Every widget call answers
+-- nil once it has raised, and nil is a legal answer here rather than an error:
+-- a failed getState on the tick reads as an unticked crop, and a failed getText
+-- reads as a blank box. So a library that starts raising during the read hands
+-- back settings that look complete and validate clean -- and the run would be
+-- started on them, the config file overwritten with the crop dropped, and a
+-- whole theatre swept in place of the 10 km somebody asked for, with the window
+-- dark and unable to say a word about it.
+local broken
+broken, press, fs = typed({
+  output_dir = "C:/extract",
+  crop = true,
+  crop_x = "-290000",
+  crop_z = "617000",
+  crop_radius_m = "5000",
+})
+-- One more call, then everything raises. read_controls takes the directory
+-- first and the tick second, so the tick is what breaks.
+E.gui.fail_after(1)
+E.gui.press(press.start)
+T.eq("the window latched", E.ui_failed, true)
+T.eq("no run was started", broken.state, E.STATE_STOPPED)
+T.eq("and nothing was written", fs.files[CONFIG], nil)
+-- The message line cannot carry this -- a latched window writes no text -- so
+-- the log has to, and a user who pressed Start is owed more than a line saying
+-- the window switched itself off.
+T.eq("the log says the press was abandoned",
+  warned[#warned]:find("no run was started", 1, true) ~= nil, true)
+
+--------------------------------------------------------------------------------
 T.group("the crop centre can come off the map")
 --------------------------------------------------------------------------------
 

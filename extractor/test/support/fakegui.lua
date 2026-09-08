@@ -29,9 +29,22 @@ local METHODS = {
 function FakeGui.new()
   local gui = { calls = {}, made = {}, mode = "working" }
 
+  -- Calls left before this library starts raising, or nil for one that does
+  -- not. A library breaking part-way through a sequence is a different failure
+  -- from one that was broken before the window was built, and the difference
+  -- matters: a widget call that fails answers nil, and nil reads as a legal
+  -- answer -- an unticked box, a blank field -- rather than as an error.
+  local budget = nil
+
   local function refuse(what)
     if gui.mode == "failing" then
       error(what .. " refused", 0)
+    end
+    if budget then
+      if budget <= 0 then
+        error(what .. " refused", 0)
+      end
+      budget = budget - 1
     end
   end
 
@@ -120,6 +133,10 @@ function FakeGui.new()
 
   function gui.fail_every() gui.mode = "failing" end
   function gui.no_library() gui.mode = "absent" end
+
+  -- Let n more calls through, then raise on every one after them. For the
+  -- library that breaks in the middle of something rather than before it.
+  function gui.fail_after(n) budget = n end
 
   -- The first widget of a class, or nil. The window, the panel, the status line
   -- and the bar are each built once, so this reaches any of them without

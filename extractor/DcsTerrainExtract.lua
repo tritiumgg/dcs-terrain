@@ -2863,7 +2863,21 @@ local function set_controls(config)
   end
 end
 
--- What the controls hold, in the shape config_from_text takes.
+-- What the controls hold, in the shape config_from_text takes, or nil where the
+-- window failed part-way through being read.
+--
+-- Nil and not a partial answer, because every failure here reads as a legal
+-- value rather than as an error. A getState that raises answers nil, and
+-- `nil and true or false` is false -- which is an unticked crop, indistinguishable
+-- from a user who does not want one. A getText that raises answers nil, which is
+-- a blank box. So a widget library that starts raising during the read hands
+-- back settings that look complete, validate clean, and are somebody else's: the
+-- config file would be overwritten with the crop dropped and a full theatre
+-- swept in its place, with the window dark and unable to say so.
+--
+-- The latch is the signal. It is false on entry, because a press cannot reach a
+-- handler once it is set, so finding it true here means one of these calls set
+-- it.
 local function read_controls()
   local values = {}
   local controls = M.window.controls
@@ -2874,6 +2888,9 @@ local function read_controls()
     else
       values[name] = M.ui_method(controls[name], "getText")
     end
+  end
+  if M.ui_failed then
+    return nil
   end
   return values
 end
@@ -2924,8 +2941,19 @@ local function start_pressed()
     return
   end
 
-  local settings, problems, tags = M.validate_config(
-    M.config_from_text(read_controls()))
+  -- Nothing is written and nothing begins when the window broke while being
+  -- read. Saying so on the message line is not possible -- a latched window
+  -- writes no text -- so the log is the only place it can go, and it has to go
+  -- somewhere: the user pressed Start and is owed more than a line about the
+  -- window having switched itself off.
+  local values = read_controls()
+  if values == nil then
+    M.warn("Start was pressed, but the window failed while it was being read. "
+      .. "Nothing was saved and no run was started.")
+    return
+  end
+
+  local settings, problems, tags = M.validate_config(M.config_from_text(values))
   show_problems(problems, tags)
   if #problems > 0 then
     say("Not started: see the lines above.")
