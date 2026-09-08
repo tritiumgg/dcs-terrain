@@ -2859,6 +2859,21 @@ function M.gui.skin(name)
   return deep_copy(skin)
 end
 
+-- The screen, in pixels, or nil where the library is absent or will not say.
+-- Nil rather than a guess: the caller has a place to put the window without
+-- one, and a guessed screen would put it somewhere on a screen it is not on.
+function M.gui.screen_size()
+  local ok, Gui = pcall(require, "dxgui")
+  if not ok or type(Gui) ~= "table" or type(Gui.GetWindowSize) ~= "function" then
+    return nil
+  end
+  local got, w, h = pcall(Gui.GetWindowSize)
+  if not got or type(w) ~= "number" or type(h) ~= "number" or w <= 0 or h <= 0 then
+    return nil
+  end
+  return w, h
+end
+
 -- Every mouse press anywhere in DCS, handed to fn(x, y, button).
 --
 -- Registered once and never removed: taking one off needs the same function
@@ -2954,7 +2969,7 @@ end
 -- refuses the close. Measured against the title bar's X, not inferred.
 --------------------------------------------------------------------------------
 
-M.WINDOW_TITLE = "DCS Terrain Extract"
+M.WINDOW_TITLE = "DCS TERRAIN EXTRACT"
 
 -- Above DCS's own chrome (ADR 0018). A window at the default zero is drawn
 -- underneath the menu, the Mission Editor and the map view, which looks exactly
@@ -2972,27 +2987,87 @@ M.WINDOW_Z_ORDER = 10001
 -- h is where the window starts rather than where it ends. The rows decide the
 -- height, and it is set once they have all been placed -- while the window is
 -- still hidden, so nothing is seen resizing.
+--
+-- x and y are where the window opens when the screen cannot be measured. When
+-- it can, the window opens centerd along the top, because the top-left corner
+-- is the Mission Editor's own toolbar and a window raised above everything
+-- (ADR 0018) would sit on it until it was dragged away.
+--
+-- The heights are the Mission Editor's: its own dialogs place a label and a box
+-- at 20 pixels and a button at 24, and a control drawn taller than its skin
+-- expects gets a stretched border rather than a bigger control.
+--
+-- w is set by the widest row, which is the tick and the pick button beside it;
+-- everything else is stacked to fit under it rather than spread to fill it.
+--
+-- button is the pick button, whose label is four words; run_button is Start
+-- and Stop, one word each, at the width the editor gives its own OK.
 local WIN = {
-  x = 60, y = 60, w = 520, h = 260,
-  pad = 10, row = 22, bar = 14, gap = 8, label = 62, button = 130,
+  x = 60, y = 40, w = 360, h = 260,
+  pad = 10, row = 20, button_h = 24, bar = 12, gap = 6, button = 130,
+  run_button = 90, radius_box = 70,
+  -- Two lines of the label font, measured with calcSize on a wrapped label.
+  line_h = 32,
+}
+
+-- The Mission Editor's own skins, so the window is drawn with what the editor
+-- draws itself with -- and the editor is not one set of skins but several,
+-- so these are the ones its group panel is built from, read off that panel's
+-- dialog file: the window with the 30-pixel header and the cyan title, the
+-- gray labels, the dark boxes, the square ticks and the flat buttons. The bar
+-- has no editor variant; the one here is what ED's own loading dialog draws
+-- its bar with, and the stock `horzProgressBarSkin` is a pale green that
+-- belongs to no screen the editor has.
+local SKIN = {
+  window = "windowSkinME",
+  panel = "panelSkin",
+  static = "staticSkin_ME",
+  edit = "editBoxNew",
+  check = "checkBoxSkin_MENew",
+  button = "buttonSkin_MENew2",
+  bar = "horzProgressBarStartDialogSkin",
 }
 
 -- The text in front of each field. Keyed by field name rather than built from
 -- it: "output_dir" is what the config file calls it and not what a user should
 -- have to read.
+--
+-- Upper case, because that is how the editor's own panels label a box: the
+-- skin does not do it, the text does.
 local FIELD_LABEL = {
-  output_dir = "Output directory",
-  crop = "Crop to a centre and a radius",
+  output_dir = "OUTPUT DIRECTORY",
+  crop = "CROP TO A CENTER AND A RADIUS",
 }
 
-local CROP_LABEL = { crop_x = "X", crop_z = "Z", crop_radius_m = "Radius (m)" }
+local CROP_LABEL = { crop_x = "X", crop_z = "Z", crop_radius_m = "RADIUS (M)" }
 local CROP_ORDER = { "crop_x", "crop_z", "crop_radius_m" }
+-- As wide as the label's text, so the boxes get the room.
+local CROP_LABEL_W = { crop_x = 14, crop_z = 14, crop_radius_m = 68 }
+
+-- What a control says when the cursor rests on it. The box is where the value
+-- goes; the tooltip is the one place there is room to say what the value means.
+local TOOLTIP = {
+  output_dir = "The directory the extract is written to. "
+    .. "Start again in the same directory to carry on from where it stopped.",
+  crop = "Extract a circle around a center. Unticked, the whole theatre is swept.",
+  crop_x = "The center's DCS x, in meters. North is positive.",
+  crop_z = "The center's DCS z, in meters. East is positive.",
+  crop_radius_m = "How far from the center to extract, in meters.",
+  crop_pick = "Press, then click a point on the map to take it as the center.",
+  start = "Save these settings and start, or carry on from where the run stopped.",
+  stop = "Stop the run. Start carries on from where it stopped.",
+}
+
+-- The keyboard order between the boxes: the directory, then the center, then
+-- the radius. The tick and the buttons are not in it, because Tab is for
+-- moving between things that are typed into.
+local TAB_ORDER = { "output_dir", "crop_x", "crop_z", "crop_radius_m" }
 
 -- The buttons, left to right. A list rather than a placed widget each, so
 -- adding one is an entry here and not another x to work out by hand.
 local BUTTONS = {
-  { name = "start", text = "Start" },
-  { name = "stop", text = "Stop" },
+  { name = "start", text = "START" },
+  { name = "stop", text = "STOP" },
 }
 
 M.window = { built = false, root = nil, panel = nil, status = nil, bar = nil }
@@ -3001,11 +3076,64 @@ M.window = { built = false, root = nil, panel = nil, status = nil, bar = nil }
 -- order is the one the chrome already used and the reason is the same: a widget
 -- draws as soon as its parent has it, so it is finished before it is handed
 -- over. An unskinned one draws nothing at all.
+--
+-- Where each widget was placed is kept, because the rows under the crop move
+-- up when it is hidden and back down when it is shown, and their place in the
+-- full layout is what they move from. Weak keys, so a window that is dropped
+-- takes its bounds with it.
+local PLACED = setmetatable({}, { __mode = "k" })
+
 local function place(panel, widget, skin_name, x, y, w, h)
   M.ui_method(widget, "setSkin", M.ui(M.gui.skin, skin_name))
   M.ui_method(widget, "setBounds", x, y, w, h)
   M.ui_method(panel, "insertWidget", widget, -1)
+  if widget ~= nil then
+    PLACED[widget] = { x = x, y = y, w = w, h = h }
+  end
   return widget
+end
+
+-- The window skin with its close button taken off. A window that refuses to
+-- close should not offer to, and the refusal in onClose stays underneath as
+-- the guard for a skin that draws the button anyway.
+--
+-- The path is the editor skin's own: the header is a sub-skin, and the button
+-- is a parameter of it. Every hop is checked, because the skin is a deep copy
+-- of whatever the library handed over, and a skin shaped differently is left
+-- as it is rather than reached into.
+local function without_close_button(skin)
+  local data = type(skin) == "table" and skin.skinData
+  local skins = type(data) == "table" and data.skins
+  local header = type(skins) == "table" and skins.header
+  local hdata = type(header) == "table" and header.skinData
+  local params = type(hdata) == "table" and hdata.params
+  if type(params) == "table" then
+    params.hasCloseButton = false
+  end
+  return skin
+end
+
+-- A label skin with its text centered vertically. The editor's label skin
+-- puts text at the top of the label, which is right for a label over a box
+-- and wrong for one that shares a row with a button, whose skin centers its
+-- own text: the two would sit a few pixels apart. The skin is this window's
+-- copy, so the change reaches nothing else. Every state is walked, and one
+-- without text alignment is left alone rather than given some.
+local function vertically_centered(skin)
+  local data = type(skin) == "table" and skin.skinData
+  local states = type(data) == "table" and data.states
+  if type(states) ~= "table" then
+    return skin
+  end
+  for _, state in pairs(states) do
+    local first = type(state) == "table" and state[1]
+    local text = type(first) == "table" and first.text
+    local align = type(text) == "table" and text.vertAlign
+    if type(align) == "table" then
+      align.type = "middle"
+    end
+  end
+  return skin
 end
 
 -- Every control, in a fixed order. pairs order is undefined in 5.1, and a
@@ -3086,6 +3214,74 @@ end
 
 local function say(text)
   M.ui_method(M.window.message, "setText", text)
+-- Closes up the space of whichever blocks are hidden. The rows under a hidden
+-- block move up by its height and the window shrinks by the same, so a hidden
+-- block costs no blank space. A row moves from where the full layout put it
+-- rather than from where it is, so being laid out twice does not move it
+-- twice; a row under both blocks moves by both. The window keeps the position
+-- it has, which is wherever it was dragged to.
+local function relayout()
+  local w = M.window
+  local crop_dy = w.crop_shown and 0 or w.crop_block_h
+  local bar_dy = w.bar_shown and 0 or w.bar_block_h
+  local shift = {}
+  for i = 1, #w.below_crop do
+    shift[w.below_crop[i]] = (shift[w.below_crop[i]] or 0) + crop_dy
+  end
+  for i = 1, #w.below_bar do
+    shift[w.below_bar[i]] = (shift[w.below_bar[i]] or 0) + bar_dy
+  end
+  for widget, dy in pairs(shift) do
+    local at = PLACED[widget]
+    if at then
+      M.ui_method(widget, "setBounds", at.x, at.y - dy, at.w, at.h)
+    end
+  end
+  local dy = crop_dy + bar_dy
+  local pos = M.ui(function()
+    local x, y = w.root:getBounds()
+    return { x = x, y = y }
+  end)
+  if pos then
+    M.ui_method(w.root, "setBounds", pos.x, pos.y, w.frame.w, w.frame.h - dy)
+  end
+  M.ui_method(w.panel, "setBounds", 0, 0, w.client.w, w.client.h - dy)
+end
+
+-- The crop's boxes, their labels and the pick button, shown only while the tick
+-- is on. An unticked crop has nothing to type into, and three empty boxes under
+-- a tick that is off read as three things still to be filled in.
+local function show_crop(on)
+  local w = M.window
+  for i = 1, #CROP_ORDER do
+    M.ui_method(w.controls[CROP_ORDER[i]], "setVisible", on)
+    M.ui_method(w.crop_labels[i], "setVisible", on)
+  end
+  M.ui_method(w.controls.crop_pick, "setVisible", on)
+  w.crop_shown = on
+  relayout()
+end
+
+-- The bar, shown only once there is progress on it. A bar standing at nothing
+-- says nothing the line beside the button does not, and takes a row to say it.
+local function show_bar(on)
+  local w = M.window
+  M.ui_method(w.bar, "setVisible", on)
+  w.bar_shown = on
+  relayout()
+end
+
+-- The tick's own state, read back rather than remembered: the widget library
+-- has already toggled it by the time the change is reported, which is the
+-- order ED's own handlers rely on.
+local function crop_ticked()
+  return M.ui_method(M.window.controls.crop, "getState") and true or false
+end
+
+local function crop_toggled()
+  show_crop(crop_ticked())
+end
+
 end
 
 -- A press arrives on DCS's own stack, called from inside the widget library, so
@@ -3268,39 +3464,41 @@ function M.build_window()
     return false
   end
 
-  local root = M.ui(Window.new, WIN.x, WIN.y, WIN.w, WIN.h, M.WINDOW_TITLE)
+  -- Where the window is built. It is moved to the center of the screen once
+  -- its size is known, below; this is only where it waits, hidden, until then.
+  local wx, wy = WIN.x, WIN.y
+  local root = M.ui(Window.new, wx, wy, WIN.w, WIN.h, M.WINDOW_TITLE)
   -- Hidden until it has been laid out. A widget with the right bounds and a
   -- true visibility flag still draws before its parent has recomputed, and a
   -- half-placed window flickering into the editor is worse than a late one.
   M.ui_method(root, "setVisible", false)
-  M.ui_method(root, "setSkin", M.ui(M.gui.skin, "windowSkin"))
+  M.ui_method(root, "setSkin", without_close_button(M.ui(M.gui.skin, SKIN.window)))
   M.ui_method(root, "setDraggable", true)
   M.ui_method(root, "setResizable", false)
   M.ui_method(root, "setZOrder", M.WINDOW_Z_ORDER)
 
   local panel = M.ui(Panel.new)
-  M.ui_method(panel, "setSkin", M.ui(M.gui.skin, "panelSkin"))
+  M.ui_method(panel, "setSkin", M.ui(M.gui.skin, SKIN.panel))
   M.ui_method(panel, "setBounds", 0, 0, WIN.w, WIN.h)
   M.ui_method(root, "insertWidget", panel, -1)
 
   local inner = WIN.w - WIN.pad * 2
   local y = WIN.pad
 
-  local status = place(panel, M.ui(Static.new, ""), "staticSkin",
-    WIN.pad, y, inner, WIN.row)
-  y = y + WIN.row
-
-  -- Under the line that names the phase, because it measures the same thing at
-  -- a coarser grain: the line says which phase, the bar says how far through.
-  local bar = place(panel, M.ui(Bar.new), "horzProgressBarSkin",
-    WIN.pad, y, inner, WIN.bar)
-  M.ui_method(bar, "setRange", 0, 100)
-  y = y + WIN.bar + WIN.gap
-
+  -- The settings first and the run under them, which is the order they are
+  -- used in: fill the boxes, then press, then watch.
+  --
   -- In the order config_fields hands them over, which is the order the config
   -- section says a window shows them in. A field added there appears here
   -- without this loop changing, so long as its kind has a shape below.
-  local controls, lines = {}, {}
+  local controls, crop_labels = {}, {}
+  -- Two blocks come and go: the crop's, with the tick, and the bar's, with
+  -- progress. The rows under each move up by its height while it is hidden,
+  -- so each block has its height and the list of what is under it. The bar
+  -- is last, so nothing is under it and hiding it only shortens the window;
+  -- the list is kept so that a row added under it later moves like the rest.
+  local below_crop, crop_block_h = {}, 0
+  local below_bar, bar_block_h = {}, 0
   local fields = M.config_fields()
   for i = 1, #fields do
     local field = fields[i]
@@ -3311,57 +3509,121 @@ function M.build_window()
       -- field: three boxes with no way to mean "no crop" would make an empty
       -- crop and a crop nobody asked for the same thing.
       controls[field.name] = place(panel, M.ui(Check.new, caption),
-        "checkBoxSkin", WIN.pad, y, inner, WIN.row)
-      y = y + WIN.row
+        SKIN.check, WIN.pad, y, inner, WIN.row)
+      y = y + WIN.row + WIN.gap
 
-      local cell = floor(inner / #CROP_ORDER)
+      -- Everything from here to the crop's own line is the block the tick
+      -- switches on. It is hidden with the tick off, and the rows under it
+      -- move up into its place, so its height is what they move by.
+      local block_top = y
+
+      -- One row: label, box, label, box, label, box. Each label is as wide as
+      -- its text and no wider, the radius box is the narrow one, and the two
+      -- halves of the center share what is left: a radius is a few digits of
+      -- meters, and a coordinate is a sign and six digits.
+      --
+      -- The labels are kept, because they are hidden and shown with their
+      -- boxes.
+      local labels_w = 0
+      for c = 1, #CROP_ORDER do
+        labels_w = labels_w + CROP_LABEL_W[CROP_ORDER[c]]
+      end
+      local wide = floor((inner - labels_w - WIN.radius_box - WIN.gap * 4) / 2)
+      local x = WIN.pad
       for c = 1, #CROP_ORDER do
         local name = CROP_ORDER[c]
-        local x = WIN.pad + (c - 1) * cell
-        place(panel, M.ui(Static.new, CROP_LABEL[name]), "staticSkin",
-          x, y, WIN.label, WIN.row)
-        controls[name] = place(panel, M.ui(Edit.new, ""), "editBoxSkin",
-          x + WIN.label, y, cell - WIN.label - WIN.gap, WIN.row)
+        local box = (name == "crop_radius_m") and WIN.radius_box or wide
+        crop_labels[c] = place(panel, M.ui(Static.new, CROP_LABEL[name]),
+          SKIN.static, x, y, CROP_LABEL_W[name], WIN.row)
+        x = x + CROP_LABEL_W[name]
+        controls[name] = place(panel, M.ui(Edit.new, ""), SKIN.edit,
+          x, y, box, WIN.row)
+        x = x + box + WIN.gap * 2
       end
-      y = y + WIN.row
+      y = y + WIN.row + WIN.gap
 
-      -- With the crop, not with Start and Stop. It fills two of the boxes
-      -- directly above it, and a control belongs beside what it changes rather
-      -- than in a row of buttons that act on the run.
+      -- Under the two boxes it fills, at the left where they start. It ticks
+      -- the crop as well, so it belongs to the crop rather than to the row of
+      -- buttons that act on the run.
+      --
+      -- Nothing is written beside it: the button's own label changes while it
+      -- is armed, the tooltip says the rest, and what is wrong with the crop
+      -- goes on the line over the bar with every other problem.
       controls.crop_pick = place(panel, M.ui(Push.new, M.PICK_IDLE),
-        "buttonSkin", WIN.pad + WIN.label, y, WIN.button, WIN.row)
-      y = y + WIN.row
-    else
-      place(panel, M.ui(Static.new, caption), "staticSkin",
-        WIN.pad, y, inner, WIN.row)
-      y = y + WIN.row
-      controls[field.name] = place(panel, M.ui(Edit.new, ""), "editBoxSkin",
-        WIN.pad, y, inner, WIN.row)
-      y = y + WIN.row
-    end
+        SKIN.button, WIN.pad, y, WIN.button, WIN.button_h)
+      y = y + WIN.button_h + WIN.gap
 
-    -- One line per field, under the field it belongs to, empty until there is
-    -- something wrong with that field.
-    lines[field.name] = place(panel, M.ui(Static.new, ""), "staticSkin",
-      WIN.pad, y, inner, WIN.row)
-    y = y + WIN.row + WIN.gap
+      crop_block_h = y - block_top
+    else
+      -- The label above the box, and the box the full width: a path is long,
+      -- and beside its label it was the width of the window that was wrong.
+      place(panel, M.ui(Static.new, caption), SKIN.static,
+        WIN.pad, y, inner, WIN.row)
+      y = y + WIN.row
+      controls[field.name] = place(panel, M.ui(Edit.new, ""), SKIN.edit,
+        WIN.pad, y, inner, WIN.row)
+      y = y + WIN.row + WIN.gap
+    end
   end
 
-  -- One line the buttons own, above them. What a press has to say -- that a
-  -- config was written, that it could not be, that there is nothing to stop --
-  -- is neither a field problem nor a phase, so it belongs to neither the lines
-  -- above nor the status line, which the run rewrites whenever it moves.
-  local message = place(panel, M.ui(Static.new, ""), "staticSkin",
-    WIN.pad, y, inner, WIN.row)
-  y = y + WIN.row
-
+  -- The run: the one line and the one button, and under them the bar.
+  --
+  -- The line is the latest thing there is to say: the
+  -- instruction at load, what is wrong with a field, what a press came to,
+  -- which phase the run has moved into, and later the progress and errors of
+  -- a sweep. Each replaces the one before, which is the whole of the rule. It
+  -- is the button's height so the text sits level with the button's label,
+  -- and it is as wide as what the button leaves, which is about forty-five
+  -- characters -- the reason every line is short, and the reason the two
+  -- problems with an explanation attached lose it for the screen.
+  --
+  -- The button for the next press is at the right, where the Mission Editor's
+  -- own dialogs keep the button that acts on the whole of one. The two are
+  -- placed on top of one another in that one slot, and only one is ever
+  -- shown: Start while the run is stopped, Stop while it is going, because the
+  -- other one would refuse the press anyway, and a button that cannot do
+  -- anything is one more thing to read.
+  --
+  -- The line wraps, and the row is two lines tall with the button centered
+  -- in it: a line that fits stays one line in the middle of the row, and a
+  -- line that does not gets a second rather than a cut.
+  local message = place(panel, M.ui(Static.new, ""), SKIN.static,
+    WIN.pad, y, inner - WIN.run_button - WIN.gap, WIN.line_h)
+  -- Skinned again with the text centered, so it sits level with the button's
+  -- label rather than at the top of the row.
+  M.ui_method(message, "setSkin",
+    vertically_centered(M.ui(M.gui.skin, SKIN.static)))
+  M.ui_method(message, "setWrapping", true)
+  below_crop[#below_crop + 1] = message
   local buttons = {}
   for i = 1, #BUTTONS do
     local spec = BUTTONS[i]
-    buttons[spec.name] = place(panel, M.ui(Push.new, spec.text), "buttonSkin",
-      WIN.pad + (i - 1) * (WIN.button + WIN.gap), y, WIN.button, WIN.row)
+    buttons[spec.name] = place(panel, M.ui(Push.new, spec.text), SKIN.button,
+      WIN.pad + inner - WIN.run_button, by, WIN.run_button, WIN.button_h)
+    below_crop[#below_crop + 1] = buttons[spec.name]
   end
-  y = y + WIN.row
+  y = y + WIN.line_h
+
+  -- The bar, a row under the button and the line, saying how far through the
+  -- run is. On screen only once there is progress to show on it; until then
+  -- the window ends at the button. Nothing is under it, so its block is the
+  -- gap above it and itself.
+  y = y + WIN.gap
+  local bar = place(panel, M.ui(Bar.new), SKIN.bar,
+    WIN.pad, y, inner, WIN.bar)
+  M.ui_method(bar, "setRange", 0, 100)
+  y = y + WIN.bar
+  below_crop[#below_crop + 1] = bar
+  bar_block_h = WIN.gap + WIN.bar
+
+  -- What each control is for, where the cursor rests on it, and the order Tab
+  -- moves between the boxes. Both are per widget and both are set once.
+  for name, text in pairs(TOOLTIP) do
+    M.ui_method(controls[name] or buttons[name], "setTooltipText", text)
+  end
+  for i = 1, #TAB_ORDER do
+    M.ui_method(controls[TAB_ORDER[i]], "setTabOrder", i)
+  end
 
   -- What the rows came to. Set while the window is still hidden, so the height
   -- is never seen changing, and taken from the same cursor that placed them, so
@@ -3385,27 +3647,47 @@ function M.build_window()
   end
 
   local content = y + WIN.pad
-  local width = WIN.w
-  M.ui_method(root, "setBounds", WIN.x, WIN.y, width, content)
+  local width, height = WIN.w, content
+  M.ui_method(root, "setBounds", wx, wy, width, height)
   local view = client_of(root)
   -- A measurement of nothing is not a measurement. Zero or negative would drive
   -- a correction the size of the whole window, so it is left alone instead.
   if view and (view.w or 0) > 0 and (view.h or 0) > 0 then
     local dw, dh = width - view.w, content - view.h
     if dw ~= 0 or dh ~= 0 then
-      M.ui_method(root, "setBounds", WIN.x, WIN.y, width + dw, content + dh)
+      width, height = width + dw, content + dh
+      M.ui_method(root, "setBounds", wx, wy, width, height)
       -- What was asked for, where the second measurement fails -- never the
       -- first one. The frame has already grown by the inset, so falling back to
       -- the pre-correction reading would put an undersized panel inside a
       -- correctly sized window and clip the bottom row all over again, one call
       -- deeper than the bug this is here to fix.
-      view = client_of(root) or { w = width, h = content }
+      view = client_of(root) or { w = WIN.w, h = content }
     end
   end
   -- No client rectangle is a widget library that does not answer it, which the
   -- seam reports as nil. The frame is then the best measurement there is.
   M.ui_method(panel, "setBounds", 0, 0,
-    (view and view.w) or width, (view and view.h) or content)
+    (view and view.w) or WIN.w, (view and view.h) or content)
+
+  -- The center of the screen, now that the frame has its size, and the fixed
+  -- corner where the screen cannot be measured. The center rather than a
+  -- corner because every corner is somebody's: the top-left is the Mission
+  -- Editor's toolbar, and a window raised above everything (ADR 0018) would
+  -- sit on it until it was dragged away. Through M.ui and returning a table,
+  -- because the seam hands back one value and the screen is two.
+  local screen = M.ui(function()
+    local w, h = M.gui.screen_size()
+    if w == nil then
+      return nil
+    end
+    return { w = w, h = h }
+  end)
+  if screen then
+    M.ui_method(root, "setBounds",
+      floor((screen.w - width) / 2), floor((screen.h - height) / 2),
+      width, height)
+  end
 
   if M.ui_failed or root == nil then
     return false
@@ -3427,6 +3709,7 @@ function M.build_window()
   -- fires onChange on the widget itself, so a press is a field on the object
   -- rather than a callback registered somewhere.
   buttons.start.onChange = on_press(start_pressed)
+  local by = y + floor((WIN.line_h - WIN.button_h) / 2)
   buttons.stop.onChange = on_press(stop_pressed)
   controls.crop_pick.onChange = on_press(pick_pressed)
 
@@ -3451,9 +3734,13 @@ function M.build_window()
     return false
   end
 
-  M.window.root, M.window.panel, M.window.status = root, panel, status
+  M.window.root, M.window.panel = root, panel
   M.window.bar, M.window.message = bar, message
-  M.window.controls, M.window.lines = controls, lines
+  M.window.controls, M.window.crop_labels = controls, crop_labels
+  M.window.below_crop, M.window.crop_block_h = below_crop, crop_block_h
+  M.window.below_bar, M.window.bar_block_h = below_bar, bar_block_h
+  M.window.frame = { w = width, h = height }
+  M.window.client = { w = (view and view.w) or WIN.w, h = (view and view.h) or content }
   M.window.buttons = buttons
   M.window.built = true
   M.log("window built")
@@ -3500,6 +3787,7 @@ end
 -- stands still in between. Prepare is left at zero rather than given a slice of
 -- its own -- it is a handful of frames against tens of minutes, and a bar that
 -- jumped before any terrain had been read would be describing nothing.
+  controls.crop.onChange = on_press(crop_toggled)
 --
 -- The two passes are given equal halves, which is wrong and is the honest kind
 -- of wrong: the mission pass is not half the work, and nothing has measured

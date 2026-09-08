@@ -24,7 +24,8 @@ local METHODS = {
   "setVisible", "getVisible", "setSkin", "setBounds", "setDraggable",
   "setResizable", "insertWidget", "setText", "getText", "close",
   "setRange", "setValue", "setState", "getState", "getViewBounds", "getBounds",
-  "setZOrder", "getZOrder", "kill",
+  "setZOrder", "getZOrder", "kill", "setTooltipText", "setTabOrder",
+  "setEnabled", "setWrapping",
 }
 
 -- What a window's frame costs it: DCS grants a client area shorter than the
@@ -110,6 +111,10 @@ function FakeGui.new()
         if name == "setZOrder" then self.zorder = a end
         if name == "getZOrder" then return self.zorder or 0 end
         if name == "kill" then self.killed = true end
+        if name == "setTooltipText" then self.tooltip = a end
+        if name == "setTabOrder" then self.tab_order = a end
+        -- Nil until asked, so a test can tell "never set" from "set false".
+        if name == "setEnabled" then self.enabled = a and true or false end
         if name == "insertWidget" then
           self.children[#self.children + 1] = a
         end
@@ -152,7 +157,27 @@ function FakeGui.new()
     if gui.mode == "absent" then
       return nil
     end
-    return { skinData = { params = { name = name } } }
+    local skin = { skinData = { params = { name = name } } }
+    -- The editor's window skin carries its close button as a parameter of
+    -- the header sub-skin, which is the path the window reaches in to switch
+    -- it off. Modelled for that skin alone, so the reach is tested against
+    -- the shape it is written for.
+    if name == "windowSkinME" then
+      skin.skinData.skins = {
+        header = { skinData = { params = { hasCloseButton = true } } },
+      }
+    end
+    return skin
+  end
+
+  -- A screen, so the window has something to centre on. Any size will do for
+  -- the tests, and this one is the size the pass was measured on.
+  function gui.screen_size()
+    refuse("screen_size")
+    if gui.mode == "absent" then
+      return nil
+    end
+    return 2560, 1440
   end
 
   -- The global mouse hook. Kept rather than called, so a test can see that one
