@@ -4,7 +4,7 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-08T21:05Z
+**Last updated:** 2026-09-08T21:30Z
 
 ## Done
 
@@ -61,29 +61,30 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
 One task. The thing to pick up immediately.
 
-**X2b** — `dcs_build` from `autoupdate.cfg`, `terrain_dir` by scanning
-`Mods/terrains/*/entry.lua` for the id (ADR 0011), and the
-`terrain_fingerprint`; ADR 0007 carries the Caucasus head hashes and digest as
-its vector. The install reads 2.9.29.27468 / 20260902-093323, the build ADR 0007
-measured. *Verified by:* an agent offline against fixture files; the live digest
-by a maintainer at the install.
+**X14** — the window's style and usability pass, ahead of X2b by choice rather
+than by dependency: it works and it looks like a debug panel. The stock skins
+are the generic defaults; the `_ME` family is what the Mission Editor draws
+itself with. Built as variants through the bridge with a maintainer reacting
+live, only the settled result committed. *Verified by:* a maintainer looking at
+it, which is the only test there is for "belongs in the Mission Editor".
 
 ## Then
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **X12** — progress reporting: `progress()` on a sweep, a wall-clock
-   heartbeat, and the weighted fraction that replaces `window_progress`'s
-   equal halves. The bar and its write-on-change are already there.
-2. **X5 / X6 / X7** — the tables, `water` and `height`, then roads, each an
-   `add_job("hook", ...)` written against X12's contract. Verified through the
-   bridge.
-3. **X8a / X8b / X8c / X9** — the mission pass, scenery, the model catalogue
+1. **X2b** — `dcs_build` from `autoupdate.cfg`, `terrain_dir` by scanning
+   `Mods/terrains/*/entry.lua` for the id (ADR 0011), and the
+   `terrain_fingerprint`; ADR 0007 has the Caucasus vector. The install reads
+   2.9.29.27468 / 20260902-093323.
+2. **X12** — progress reporting: `progress()` on a sweep, a heartbeat, and the
+   weighted fraction replacing `window_progress`'s equal halves. The bar is
+   already there.
+3. **X5 / X6 / X7** — the tables, `water` and `height`, then roads, each an
+   `add_job("hook", ...)` against X12's contract. Verified through the bridge.
+4. **X8a / X8b / X8c / X9** — the mission pass, scenery, the model catalogue
    and failure handling. X ends here until `check-extract` exists.
-4. **C1 / C2 / C3** — the Rust interlude X10 needs and no more: scaffold,
-   `synth` on the F2 constants, `check-extract`. Closes P2 and MS0 past.
-5. **X10** — the live cropped run, once C3 exists. Its crop is typed into the
-   window rather than written into a file (ADR 0017).
+5. **C1 / C2 / C3** — the Rust interlude X10 needs: scaffold, `synth` on the F2
+   constants, `check-extract`. Closes P2 and MS0 past; X10 follows it.
 
 Milestone in view: **MS0 Contract** (P1, P2, F1, F2, C1, C2, C3, X1, X3).
 Proof is `check-extract` accepting the Rust synthetic extract and the hook's
