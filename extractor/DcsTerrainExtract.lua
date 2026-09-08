@@ -2259,7 +2259,17 @@ end
 --
 -- Only legal from stopped or done. They are the two states with no queue, and
 -- so the two in which no job is holding a directory it read at its own start.
+-- It checks that itself rather than trusting whoever called it, and the reason
+-- is where the raise would land: run_frame is called straight from
+-- onSimulationFrame and is not under the window's latch, so a queue dropped
+-- mid-pass would index a nil on the next frame and climb out into DCS's own
+-- stack -- the one failure this file is built never to produce.
 function M.retarget(run, config)
+  if run.state ~= M.STATE_STOPPED and run.state ~= M.STATE_DONE then
+    M.warn("the settings were not applied: a run in " .. tostring(run.state)
+      .. " cannot be pointed somewhere else")
+    return false
+  end
   -- Through the encoder, which sorts keys, so two crops that encode the same
   -- hold the same numbers. Absent has to differ from present, and nil is not a
   -- value M.json takes.

@@ -451,7 +451,17 @@ local function keys_of(t)
   table.sort(out)
   return table.concat(out, " ")
 end
+-- Driven to done first, and that is the whole point of the assertion. A run
+-- that never ran has no manifest and no queue because it never made one, so
+-- comparing it proves nothing: a table constructor drops a nil-valued key, so a
+-- field new_run leaves nil is invisible to this comparison whether or not
+-- retarget remembers to clear it. Only a populated run can show a leftover.
 run = new_stopped_run()
+E.start(run)
+for _ = 1, 40 do
+  E.run_frame(run)
+  if run.state == E.STATE_DONE then break end
+end
 E.retarget(run, { output_dir = "C:/elsewhere" })
 -- Against a run built the same way, so the helper's own fs field is on both
 -- sides and what is being compared is new_run's shape.
@@ -459,6 +469,33 @@ T.eq("a retargeted run has a fresh run's fields", keys_of(run),
   keys_of(new_stopped_run()))
 T.eq("including the budget it did not ask for",
   run.budget_ms, E.FRAME_BUDGET_MS)
+
+--------------------------------------------------------------------------------
+T.group("retargeting refuses a run that is working")
+--------------------------------------------------------------------------------
+
+-- It checks this itself rather than trusting its caller, because of where the
+-- raise would land: run_frame is called straight from onSimulationFrame and is
+-- not under the window's latch, so a queue dropped mid-pass would index a nil
+-- on the next frame and climb out into DCS.
+run = new_stopped_run()
+E.start(run)
+until_past(run, E.STATE_IDLE, 5)
+until_past(run, E.STATE_PREPARE, 5)
+T.eq("it is working", run.state, E.STATE_HOOK)
+
+local held = run.queue
+T.eq("retargeting refuses",
+  E.retarget(run, { output_dir = "C:/elsewhere" }), false)
+T.eq("the queue is still there", run.queue, held)
+T.eq("and the directory is untouched", run.dir, "C:/extract")
+
+-- And the frame after it is an ordinary frame rather than a raise. Which pass
+-- it is in afterwards is not the point -- these fake jobs finish in a frame or
+-- two -- only that it is still sweeping.
+local after = E.run_frame(run)
+T.eq("the run carries on",
+  after == E.STATE_HOOK or after == E.STATE_MISSION, true)
 
 -- What the whole record is for: the old directory's manifest must never be
 -- written into the new one. It would be, without this: Start saves nothing, but
