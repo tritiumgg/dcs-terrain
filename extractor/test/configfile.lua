@@ -215,7 +215,7 @@ T.eq("the return survives the header", text:find("\nreturn {\n", 1, true) ~= nil
 -- order the fields are declared in.
 fs = with_fs()
 E.write_config(PATH,
-  { enabled = true, output_dir = "C:/e", crop = { x = 1, z = 2, radius_m = 3 } })
+  { enabled = true, output_dir = "C:/e", crop = { x = 1, z = 2, radius_m = 3000 } })
 text = fs.files[PATH]
 local at_enabled = text:find("enabled = ", 1, true)
 local at_output = text:find("output_dir = ", 1, true)

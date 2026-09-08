@@ -1597,6 +1597,11 @@ end
 -- the Mission Editor shows the X and Z under the cursor, so a center read off
 -- the map plus a radius is three numbers a user actually has.
 local CROP_KEYS = { "x", "z", "radius_m" }
+
+-- The smallest crop worth extracting: a 2 km box. The cell is 50 m, and the
+-- derived layers want windows of 300 m and 2 km, so anything smaller packs
+-- to cells with no usable layer over them (ADR 0019).
+M.MIN_RADIUS_M = 1000
 local CROP_BY_NAME = { x = true, z = true, radius_m = true }
 
 -- One line for the whole crop, naming the first thing wrong with it, so a crop
@@ -1604,7 +1609,7 @@ local CROP_BY_NAME = { x = true, z = true, radius_m = true }
 -- "one line per bad field" a count nobody can rely on.
 local function bad_crop(v, name)
   if type(v) ~= "table" then
-    return format("%s is not a centre and a radius: %s", name, tostring(v))
+    return format("%s is not a center and a radius: %s", name, tostring(v))
   end
   for i = 1, #CROP_KEYS do
     local key = CROP_KEYS[i]
@@ -1622,6 +1627,10 @@ local function bad_crop(v, name)
     return format("%s.radius_m is not a positive number: %s",
       name, tostring(v.radius_m))
   end
+  if v.radius_m < M.MIN_RADIUS_M then
+    return format("%s.radius_m is under %d m: %s",
+      name, M.MIN_RADIUS_M, tostring(v.radius_m))
+  end
 end
 
 -- The box the grid is planned from and the manifest records. A radius of r is
@@ -1629,8 +1638,67 @@ end
 --
 -- Converted here rather than in validate_config, so a validated config keeps
 -- the user's own vocabulary: the window fills its controls from the same table
--- the run starts from, and a centre that had to be recovered from a box would
+-- the run starts from, and a center that had to be recovered from a box would
 -- be a round trip waiting to lose a digit.
+-- Why a crop's box reaches outside the theatre, or nil where it does not or
+-- where there is nothing to check it against. The box is the center plus and
+-- minus the radius on each axis, so one rule covers a radius too big for the
+-- map and a center too near an edge: whichever edge the box crosses first is
+-- named, with the number that crossed it, in whole meters.
+--
+-- The bounds are the theatre's raster rectangle, which every theatre
+-- publishes. On Caucasus it is larger than the authored land, and a crop in
+-- the sea outside the coast passes here and extracts sea, which is what it
+-- asked for; the authored hull is only known for one theatre and costs a
+-- pre-sweep to find for the rest (ADR 0019).
+function M.crop_outside(crop, bounds)
+  if crop == nil or bounds == nil then
+    return nil
+  end
+  local box = M.crop_box(crop)
+  local edges = {
+    { box.min_x, bounds.min_x, "x", "below" },
+    { box.min_z, bounds.min_z, "z", "below" },
+    { box.max_x, bounds.max_x, "x", "above" },
+    { box.max_z, bounds.max_z, "z", "above" },
+  }
+  for i = 1, #edges do
+    local value, limit, axis, side = edges[i][1], edges[i][2], edges[i][3], edges[i][4]
+    local crossed
+    if side == "below" then
+      crossed = value < limit
+    else
+      crossed = value > limit
+    end
+    if crossed then
+      -- The edge first and the box's own number after the colon, because
+      -- the screen keeps what is before the colon and the box already shows
+      -- the center and the radius the number came from.
+      return format("crop reaches past the map, %s %s %d: box edge %d",
+        axis, side, floor(limit + 0.5), floor(value + 0.5))
+    end
+  end
+  return nil
+end
+
+-- Why the output directory cannot be made, or nil where it can. The run makes
+-- every missing component of the path, so the directory need not exist; its
+-- root must, because a drive letter cannot be made and a share that is not
+-- there fails at the first component (ADR 0020). One `lfs.attributes` on the
+-- root, through the seam the tests fake. A path that fails the shape check
+-- is not asked about, because the checker has already said what is wrong.
+function M.drive_problem(path)
+  if type(path) ~= "string" or path == "" then
+    return nil
+  end
+  local root = path:match("^(%a:/)") or path:match("^(//[^/]+/[^/]+)")
+  if root == nil or M.fs.is_dir(root) then
+    return nil
+  end
+  -- The drive is the finding, so it stays in front of the colon.
+  return format("output_dir's drive %s does not exist", root)
+end
+
 function M.crop_box(crop)
   if crop == nil then
     return nil
@@ -1661,6 +1729,19 @@ local function bad_path(v, name)
   if v:find("[%z\1-\31]") then
     return format("%s contains a control character, which is usually a "
       .. "backslash escape in a double-quoted path: %s", name, format("%q", v))
+  end
+  -- Absolute, as a drive letter or a UNC root, with either separator: the
+  -- value is checked before it is normalised. A relative path would be made
+  -- under whatever DCS's working directory happens to be, which is the
+  -- install, and the install is never written into.
+  if not (v:find("^%a:[/\\]") or v:find("^[/\\][/\\][^/\\]+[/\\][^/\\]+")) then
+    return format("%s is not an absolute path: %s", name, v)
+  end
+  -- The characters Windows refuses in a path, and a colon anywhere but after
+  -- the drive letter. Refused here rather than by the mkdir that would fail
+  -- on them at prepare, so the box is told before a run is spent.
+  if v:find('[<>"|?*]') or v:sub(3):find(":") then
+    return format("%s has a character Windows forbids: %s", name, v)
   end
 end
 
@@ -2126,6 +2207,38 @@ function M.terrain_id()
     return nil
   end
   return id
+end
+
+-- The theatre's bounds rectangle in meters, or nil with no terrain loaded or
+-- a config that does not carry one. `SW_bound` and `NE_bound` are
+-- `{x_km, 0, z_km}`; ED reads [1] as x and [3] as z and multiplies by a
+-- thousand, and so does this.
+function M.terrain_bounds()
+  local ok, mod = pcall(require, "terrain")
+  if not ok then
+    return nil
+  end
+  local terrain = type(mod) == "table" and mod or rawget(_G, "terrain")
+  if type(terrain) ~= "table" or type(terrain.GetTerrainConfig) ~= "function" then
+    return nil
+  end
+  local got_sw, sw = pcall(terrain.GetTerrainConfig, "SW_bound")
+  local got_ne, ne = pcall(terrain.GetTerrainConfig, "NE_bound")
+  if not (got_sw and got_ne and type(sw) == "table" and type(ne) == "table") then
+    return nil
+  end
+  local min_x, min_z, max_x, max_z = sw[1], sw[3], ne[1], ne[3]
+  if not (is_finite(min_x) and is_finite(min_z)
+      and is_finite(max_x) and is_finite(max_z)) then
+    return nil
+  end
+  if min_x >= max_x or min_z >= max_z then
+    return nil
+  end
+  return {
+    min_x = min_x * 1000, min_z = min_z * 1000,
+    max_x = max_x * 1000, max_z = max_z * 1000,
+  }
 end
 
 --------------------------------------------------------------------------------

@@ -126,15 +126,15 @@ T.eq("road_seed_spacing is a constant", E.ROAD_SEED_SPACING, 1000)
 T.eq("road_seed_neighbours is a constant", E.ROAD_SEED_NEIGHBOURS, 4)
 
 --------------------------------------------------------------------------------
-T.group("the crop is a centre and a radius")
+T.group("the crop is a center and a radius")
 --------------------------------------------------------------------------------
 
 -- Optional, so absent stays absent instead of gaining an area nobody asked for.
 T.eq("an absent crop stays absent", config.crop, nil)
 
 local CROPS = {
-  { false, "crop is not a centre and a radius" },
-  { 5, "crop is not a centre and a radius" },
+  { false, "crop is not a center and a radius" },
+  { 5, "crop is not a center and a radius" },
   { { x = 0, z = 0 }, "crop.radius_m is not a finite" },
   { { x = 0, z = 0, radius_m = "5000" }, "crop.radius_m is not a finite" },
   { { x = 0, radius_m = 5000 }, "crop.z is not a finite" },
@@ -165,7 +165,7 @@ T.eq("a good crop validates", joined(problems), "")
 T.eq("and is kept as it was written", config.crop, crop)
 
 --------------------------------------------------------------------------------
-T.group("crop_box converts a centre and a radius to the box the grid wants")
+T.group("crop_box converts a center and a radius to the box the grid wants")
 --------------------------------------------------------------------------------
 
 T.eq("no crop, no box", E.crop_box(nil), nil)
@@ -173,22 +173,22 @@ T.eq("no crop, no box", E.crop_box(nil), nil)
 -- The radius is half the side, so 5000 is the 10 x 10 km crop X10 asks for
 -- around the Kutaisi reference point.
 local box = E.crop_box(crop)
-T.eq("the box is the centre plus and minus the radius on both axes",
+T.eq("the box is the center plus and minus the radius on both axes",
   E.json(box),
   E.json({ min_x = -289887, min_z = 678859, max_x = -279887, max_z = 688859 }))
-T.eq("which is ten kilometres on a side", box.max_x - box.min_x, 10000)
+T.eq("which is ten kilometers on a side", box.max_x - box.min_x, 10000)
 T.eq("on both axes", box.max_z - box.min_z, 10000)
 
 -- The box is what grid_from_rect takes, so the two have to fit without a shim
 -- between them. 201 and not 200: the crop's edges do not land on cell
 -- boundaries, and the grid snaps outward, so a cell the crop reaches partway
--- into is inside. A centre read off the map will almost never be a multiple of
+-- into is inside. A center read off the map will almost never be a multiple of
 -- 50, so this is the normal case rather than an edge one.
 local grid = E.grid_from_rect(box, E.CELL_SIZE, E.TILE_SIZE)
 T.eq("and the grid it plans covers the crop, snapped outward",
   grid.height .. "x" .. grid.width, "201x201")
 
--- A centre and radius that do land on cell boundaries give the exact extent,
+-- A center and radius that do land on cell boundaries give the exact extent,
 -- which is what says the extra cell above is the snapping and not an off-by-one.
 local aligned = E.crop_box({ x = 100000, z = 200000, radius_m = 5000 })
 local exact = E.grid_from_rect(aligned, E.CELL_SIZE, E.TILE_SIZE)
@@ -228,7 +228,7 @@ old.crop_m = { min_x = 0, min_z = 0, max_x = 1, max_z = 1 }
 
 -- Fourteen at once, which is also what shows that problems accumulate across
 -- fields rather than stopping at the first. crop_m is in here because the crop
--- survives under a different name and a different shape: a centre and a radius,
+-- survives under a different name and a different shape: a center and a radius,
 -- not a box.
 config, problems = E.validate_config(old)
 T.eq("every field that left is reported, in a stable order", joined(problems),
@@ -264,10 +264,29 @@ T.eq("an absent one says there is no default",
   E.field_problem("output_dir", nil),
   "output_dir is not set, and there is no default for it")
 
+-- The shape of a path: absolute, on a drive or a share, with either
+-- separator, and none of the characters Windows refuses. A relative path
+-- would land under DCS's working directory, which is the install.
+T.eq("a relative path is refused",
+  E.field_problem("output_dir", "extracts/caucasus"),
+  "output_dir is not an absolute path: extracts/caucasus")
+T.eq("a bare drive letter is not a path either",
+  E.field_problem("output_dir", "C:"), "output_dir is not an absolute path: C:")
+T.eq("a drive path is fine", E.field_problem("output_dir", "C:/extracts"), nil)
+T.eq("with backslashes too", E.field_problem("output_dir", "D:\\extracts"), nil)
+T.eq("and a share",
+  E.field_problem("output_dir", "\\\\nas\\extracts\\caucasus"), nil)
+T.eq("a character Windows refuses is refused",
+  E.field_problem("output_dir", "C:/ex*tracts"),
+  "output_dir has a character Windows forbids: C:/ex*tracts")
+T.eq("and so is a second colon",
+  E.field_problem("output_dir", "C:/ex:tracts"),
+  "output_dir has a character Windows forbids: C:/ex:tracts")
+
 T.eq("an absent crop is nil, because a crop is optional",
   E.field_problem("crop", nil), nil)
 T.eq("a good crop is nil",
-  E.field_problem("crop", { x = 1, z = 2, radius_m = 3 }), nil)
+  E.field_problem("crop", { x = 1, z = 2, radius_m = 3000 }), nil)
 T.eq("a crop missing a member is the crop's line",
   E.field_problem("crop", { x = 1, z = 2 }),
   "crop.radius_m is not a finite number: nil")
@@ -285,7 +304,7 @@ T.eq("a name that is not a field says so",
 -- through here from validate_config, but the window asks the question this way
 -- round -- one control, one value -- and that is the call being pinned.
 T.eq("a crop that is not a table",
-  E.field_problem("crop", 5), "crop is not a centre and a radius: 5")
+  E.field_problem("crop", 5), "crop is not a center and a radius: 5")
 T.eq("a crop missing x",
   E.field_problem("crop", { z = 2, radius_m = 3 }),
   "crop.x is not a finite number: nil")
@@ -301,6 +320,13 @@ T.eq("a crop with an unknown key",
 T.eq("a crop with no area",
   E.field_problem("crop", { x = 1, z = 2, radius_m = 0 }),
   "crop.radius_m is not a positive number: 0")
+-- A 2 km box is the smallest crop worth extracting: below it there are cells
+-- and no usable derived layer over them.
+T.eq("a crop too small to use",
+  E.field_problem("crop", { x = 1, z = 2, radius_m = 999 }),
+  "crop.radius_m is under 1000 m: 999")
+T.eq("and the smallest that is",
+  E.field_problem("crop", { x = 1, z = 2, radius_m = E.MIN_RADIUS_M }), nil)
 
 -- A control character in a path, which is the message that quotes the value.
 --
