@@ -123,9 +123,19 @@ T.eq("and so is the crop line above it",
 
 -- The buttons run left to right off one list, so a button added to it is the
 -- way this overflows, and it would do so silently.
-local rightmost = E.window.buttons.map.bounds
+local rightmost = E.window.buttons.stop.bounds
 T.eq("the last button is inside the window",
   rightmost[1] + rightmost[3] <= frame[3], true)
+
+-- The pick button belongs with the crop it fills in, not with the buttons that
+-- act on the run: it sits between the crop's boxes and the crop's problem line.
+T.eq("picking is a crop control", E.window.controls.crop_pick.class, "Button")
+T.eq("below the crop boxes",
+  E.window.controls.crop_pick.bounds[2] > E.window.controls.crop_x.bounds[2], true)
+T.eq("and above the crop's own problem line",
+  E.window.controls.crop_pick.bounds[2] < E.window.lines.crop.bounds[2], true)
+T.eq("well above the run's buttons",
+  E.window.controls.crop_pick.bounds[2] < E.window.buttons.start.bounds[2], true)
 
 --------------------------------------------------------------------------------
 T.group("the first frame puts the config in the boxes, and then leaves them")
@@ -398,49 +408,83 @@ T.eq("the log says the press was abandoned",
   warned[#warned]:find("no run was started", 1, true) ~= nil, true)
 
 --------------------------------------------------------------------------------
-T.group("the crop centre can come off the map")
+T.group("the crop centre is picked by arming, then clicking the map")
 --------------------------------------------------------------------------------
 
--- The map lives in another Lua state and this file cannot reach it here, so the
--- seam is stubbed and what is asserted is what the window does with an answer.
-local real_map = E.map_position
+-- The map is in another Lua state and cannot be reached from here, so the
+-- conversion is stubbed and what is asserted is the arming: that a click does
+-- nothing until the button says so, that a click somewhere other than the map
+-- neither takes a coordinate nor disarms, and that one on the map does both.
+local real_point = E.map_point_at
 
 local picked
 picked, press = typed({ output_dir = "C:/extract", crop = false })
-E.map_position = function() return -545142.85714286, 682000 end
-E.gui.press(press.map)
-T.eq("the centre lands in the boxes", E.window.controls.crop_x.text,
+E.map_point_at = function(x, y)
+  -- Stands in for the map's own rectangle: inside it a click converts, outside
+  -- it there is no map under the point and nothing comes back.
+  if x >= 100 and y >= 100 then return -545142.85714286, 682000 end
+  return nil
+end
+
+-- Unarmed, a click on the map is somebody using DCS.
+E.on_map_click(500, 500)
+T.eq("an unarmed click takes nothing", E.window.controls.crop_x.text, "")
+T.eq("and leaves the crop alone", E.window.controls.crop.state, false)
+
+E.gui.press(E.window.controls.crop_pick)
+T.eq("arming says so on the button", E.window.controls.crop_pick.text,
+  E.PICK_ARMED)
+T.eq("and on the message line",
+  E.window.message.text:find("Click a point on the map", 1, true) ~= nil, true)
+
+-- Armed, but the click was on the toolbar, or on this window. It stays armed:
+-- disarming here would make a stray click cancel a thing the user just asked
+-- for, with the only clue a button quietly changing back.
+E.on_map_click(10, 10)
+T.eq("a click off the map takes nothing", E.window.controls.crop_x.text, "")
+T.eq("and stays armed", E.window.controls.crop_pick.text, E.PICK_ARMED)
+
+E.on_map_click(500, 500)
+T.eq("a click on the map fills the centre", E.window.controls.crop_x.text,
   "-545142.85714286")
 T.eq("both halves of it", E.window.controls.crop_z.text, "682000")
--- Ticked, because reading a centre off the map is the deliberate act the tick
--- records. Left unticked, a press here followed by Start would sweep the whole
--- theatre having just been told where the user wanted to extract.
-T.eq("and the crop is switched on", E.window.controls.crop.state, true)
-T.eq("with a line saying what is still missing",
+-- Ticked, because picking a centre is the deliberate act the tick records.
+-- Left unticked, this followed by Start would sweep the whole theatre having
+-- just been told where the user wanted to extract.
+T.eq("and switches the crop on", E.window.controls.crop.state, true)
+T.eq("and disarms", E.window.controls.crop_pick.text, E.PICK_IDLE)
+T.eq("saying what is still missing",
   E.window.message.text:find("radius", 1, true) ~= nil, true)
 
+-- A second click now that it is disarmed must not move the centre again.
+E.window.controls.crop_x.text = "left alone"
+E.on_map_click(500, 500)
+T.eq("and a later click is ignored", E.window.controls.crop_x.text, "left alone")
+
+-- Pressing it twice is the way out, so an armed window is never a trap.
+E.gui.press(E.window.controls.crop_pick)
+T.eq("armed again", E.window.controls.crop_pick.text, E.PICK_ARMED)
+E.gui.press(E.window.controls.crop_pick)
+T.eq("and cancelled", E.window.controls.crop_pick.text, E.PICK_IDLE)
+E.on_map_click(500, 500)
+T.eq("a click after cancelling takes nothing",
+  E.window.controls.crop_x.text, "left alone")
+
 -- A radius away from a run, which is what the crop's own line then says.
+E.window.controls.crop_x.text = "-545142.85714286"
 E.gui.press(press.start)
 T.eq("Start refuses without one", picked.state, E.STATE_STOPPED)
-T.eq("naming the radius", E.window.lines.crop.text:find("radius_m", 1, true) ~= nil,
-  true)
+T.eq("naming the radius",
+  E.window.lines.crop.text:find("radius_m", 1, true) ~= nil, true)
 E.window.controls.crop_radius_m.text = "5000"
 E.gui.press(press.start)
 T.eq("and takes it with one", picked.state, E.STATE_IDLE)
 
--- No map is the main menu, and no net at all is this interpreter. Both are the
--- same nil, and neither touches what is in the boxes.
-picked, press = typed({ output_dir = "C:/extract", crop = false, crop_x = "1" })
-E.map_position = function() return nil end
-E.gui.press(press.map)
-T.eq("nothing was taken", E.window.controls.crop_x.text, "1")
-T.eq("the crop is left alone", E.window.controls.crop.state, false)
-T.eq("and it says where to look",
-  E.window.message.text:find("Mission Editor", 1, true) ~= nil, true)
+-- The seam itself, with no DCS in the process: no net global, so nil, and a
+-- click that cannot be converted changes nothing.
+E.map_point_at = real_point
+T.eq("no net answers nothing", E.map_point_at(500, 500), nil)
 
--- The seam itself, with no DCS in the process: no net global, so nil.
-E.map_position = real_map
-T.eq("no net answers nothing", E.map_position(), nil)
 --------------------------------------------------------------------------------
 T.group("it refuses to close")
 --------------------------------------------------------------------------------

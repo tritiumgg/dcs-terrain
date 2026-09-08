@@ -2597,40 +2597,60 @@ function M.callbacks(run)
   }
 end
 
--- Where the cursor last was on the Mission Editor's map, in DCS metres, or nil.
+-- Where a screen point falls on the Mission Editor's map, in DCS metres, or nil
+-- when it is not on the map at all.
 --
 -- The editor's map lives in the gui state and this file runs in the hook state,
 -- so the only way across is net.dostring_in, and the only thing that comes back
--- is a string. Measured on 2.9.29.27468 with Caucasus open: MapWindow's
--- getCurPosition is getMapPoint(MOUSE_STATE.x, MOUSE_STATE.y), which is the last
--- position the cursor was over the map -- so it survives the mouse moving onto
--- this window to press the button, which is the only reason a button can use it
--- at all. It answered -545142.86, 682000.00 against a status bar reading
--- X-00545143 Z+00682000, so the two numbers are DCS x and z in metres.
+-- is a string.
 --
--- Formatted at seventeen digits on the way back rather than tostring'd, because
--- tostring is %.14g and a metre coordinate reaches fourteen significant digits.
+-- Two questions, and both have to be asked. Whether the point is on the map is
+-- not answered by getPointInMap, which sounds like it and is not: it tests
+-- whether the coordinates land inside the theatre, so a click on the toolbar
+-- above the map answers true. What does answer it is the widget painted at the
+-- point -- if its root is the map's own window, the click was on the map.
+-- Measured on 2.9.29.27468 with Caucasus in the editor: a click on the map gave
+-- root == MapWindow.window, and one in the toolbar at y = 13 did not, while
+-- getPointInMap called both of them inside.
 --
--- Everything is guarded and every failure is the same nil: no net at all is an
--- offline test, and no map view is the main menu, where getMapPoint indexes a
--- newMapView_ that does not exist yet.
-local MAP_POSITION_CHUNK = [[
-local ok, x, z = pcall(function() return MapWindow.getCurPosition() end)
-if not ok or type(x) ~= "number" or type(z) ~= "number" then return "" end
-return string.format("%.17g %.17g", x, z)
+-- Then getMapPoint converts, the same call getCurPosition uses. Formatted at
+-- seventeen digits rather than tostring'd, because tostring is %.14g and a metre
+-- coordinate reaches fourteen significant figures.
+--
+-- Everything is guarded and every failure is the same nil: no net is an offline
+-- test, and no map is the main menu, where MapWindow has no view to ask.
+local MAP_POINT_CHUNK = [[
+local G = (type(Gui) == "table" and Gui.FindWidgetAtScreenPoint) and Gui
+  or require("dxgui")
+local ok, widget = pcall(G.FindWidgetAtScreenPoint, %d, %d)
+if not ok or type(widget) ~= "userdata" then return "" end
+local rooted, root = pcall(G.WidgetGetRoot, widget)
+if not rooted then return "" end
+local same, is_map = pcall(function()
+  return root == MapWindow.window.widget
+end)
+if not same or not is_map then return "" end
+local got, x, z = pcall(MapWindow.getMapPoint, %d, %d)
+if not got or type(x) ~= "number" or type(z) ~= "number" then return "" end
+return string.format("%%.17g %%.17g", x, z)
 ]]
 
-function M.map_position()
+function M.map_point_at(sx, sy)
   local net = rawget(_G, "net")
   if type(net) ~= "table" or type(net.dostring_in) ~= "function" then
     return nil
   end
-  local ok, answer = pcall(net.dostring_in, "gui", MAP_POSITION_CHUNK)
+  if not (is_finite(sx) and is_finite(sy)) then
+    return nil
+  end
+  sx, sy = floor(sx), floor(sy)
+  local ok, answer = pcall(net.dostring_in, "gui",
+    format(MAP_POINT_CHUNK, sx, sy, sx, sy))
   if not ok or type(answer) ~= "string" then
     return nil
   end
-  local sx, sz = answer:match("^(%S+) (%S+)$")
-  local x, z = tonumber(sx or ""), tonumber(sz or "")
+  local mx, mz = answer:match("^(%S+) (%S+)$")
+  local x, z = tonumber(mx or ""), tonumber(mz or "")
   if not (is_finite(x) and is_finite(z)) then
     return nil
   end
@@ -2709,6 +2729,28 @@ function M.gui.skin(name)
     return nil
   end
   return deep_copy(skin)
+end
+
+-- Every mouse press anywhere in DCS, handed to fn(x, y, button).
+--
+-- Registered once and never removed: taking one off needs the same function
+-- reference back, and the window has one handler for the life of the session
+-- anyway. It is the callback's own business to do nothing when nothing has
+-- asked it to listen, which is most of the time.
+--
+-- Gui or dxgui, whichever this build put it in -- the same fallback MarkPresets
+-- uses, and for the same reason: the toolkit answers to both names depending on
+-- the state.
+function M.gui.on_mouse_down(fn)
+  local lib = rawget(_G, "Gui")
+  if type(lib) ~= "table" or type(lib.AddMouseCallback) ~= "function" then
+    local ok, required = pcall(require, "dxgui")
+    lib = ok and required or nil
+  end
+  if type(lib) ~= "table" or type(lib.AddMouseCallback) ~= "function" then
+    return false
+  end
+  return pcall(lib.AddMouseCallback, "down", fn) and true or false
 end
 
 -- A value rather than a function to swap, so a test reads it the way it reads
@@ -2823,7 +2865,6 @@ local CROP_ORDER = { "crop_x", "crop_z", "crop_radius_m" }
 local BUTTONS = {
   { name = "start", text = "Start" },
   { name = "stop", text = "Stop" },
-  { name = "map", text = "Read from map" },
 }
 
 M.window = { built = false, root = nil, panel = nil, status = nil, bar = nil }
@@ -3010,16 +3051,56 @@ end
 -- forty minutes on Caucasus -- having just told the window where they wanted to
 -- extract. A ticked crop with no radius is refused on the crop's own line, which
 -- is the right way to be told what is still missing.
-local function map_pressed()
-  local x, z = M.map_position()
-  if x == nil then
-    say("No map answered. Open one in the Mission Editor, then hover the point.")
+-- Arms the next click on the map, and the button says which state it is in.
+--
+-- Arming rather than reading where the cursor happens to be: a button that took
+-- the last hovered position needs the user to know that hovering comes before
+-- pressing, and nothing on screen says so. Pressing, then clicking the point, is
+-- the order somebody would guess.
+--
+-- Pressing it again disarms, because an armed handler with no way out would
+-- leave the next click somewhere else doing something unexpected.
+M.PICK_IDLE = "Pick centre on map"
+M.PICK_ARMED = "Click the map..."
+
+local function set_pick_label()
+  M.ui_method(M.window.controls.crop_pick, "setText",
+    M.window.arming and M.PICK_ARMED or M.PICK_IDLE)
+end
+
+local function pick_pressed()
+  M.window.arming = not M.window.arming
+  set_pick_label()
+  if M.window.arming then
+    say("Click a point on the map. Press again to cancel.")
+  else
+    say("Cancelled.")
+  end
+end
+
+-- Every press in DCS arrives here. It does nothing at all unless the button
+-- above has armed it, which is the usual case, and nothing when the press was
+-- not on the map -- so a click on the toolbar, or on this window, neither takes
+-- a coordinate nor disarms.
+local function clicked(x, y)
+  if not M.window.arming then
     return
   end
-  M.ui_method(M.window.controls.crop_x, "setText", M.box_text(x))
-  M.ui_method(M.window.controls.crop_z, "setText", M.box_text(z))
+  local mx, mz = M.map_point_at(x, y)
+  if mx == nil then
+    return
+  end
+  M.window.arming = false
+  set_pick_label()
+  M.ui_method(M.window.controls.crop_x, "setText", M.box_text(mx))
+  M.ui_method(M.window.controls.crop_z, "setText", M.box_text(mz))
   M.ui_method(M.window.controls.crop, "setState", true)
   say("Centre taken from the map. Set a radius, then Start.")
+end
+
+-- The seam the click arrives through, so a test can deliver one.
+function M.on_map_click(x, y)
+  M.ui(clicked, x, y)
 end
 
 local function stop_pressed()
@@ -3114,6 +3195,13 @@ function M.build_window()
         controls[name] = place(panel, M.ui(Edit.new, ""), "editBoxSkin",
           x + WIN.label, y, cell - WIN.label - WIN.gap, WIN.row)
       end
+      y = y + WIN.row
+
+      -- With the crop, not with Start and Stop. It fills two of the boxes
+      -- directly above it, and a control belongs beside what it changes rather
+      -- than in a row of buttons that act on the run.
+      controls.crop_pick = place(panel, M.ui(Push.new, M.PICK_IDLE),
+        "buttonSkin", WIN.pad + WIN.label, y, WIN.button, WIN.row)
       y = y + WIN.row
     else
       place(panel, M.ui(Static.new, caption), "staticSkin",
@@ -3212,7 +3300,13 @@ function M.build_window()
   -- rather than a callback registered somewhere.
   buttons.start.onChange = on_press(start_pressed)
   buttons.stop.onChange = on_press(stop_pressed)
-  buttons.map.onChange = on_press(map_pressed)
+  controls.crop_pick.onChange = on_press(pick_pressed)
+
+  -- Once, for the life of the session. The handler does nothing until the pick
+  -- button arms it, so the cost of every other click in DCS is one comparison.
+  M.ui(M.gui.on_mouse_down, function(x, y)
+    M.on_map_click(x, y)
+  end)
 
   M.ui_method(root, "setVisible", true)
 

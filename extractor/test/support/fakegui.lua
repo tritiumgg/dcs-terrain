@@ -155,6 +155,15 @@ function FakeGui.new()
     return { skinData = { params = { name = name } } }
   end
 
+  -- The global mouse hook. Kept rather than called, so a test can see that one
+  -- was installed; clicks are delivered through the module's own entry point.
+  function gui.on_mouse_down(fn)
+    refuse("on_mouse_down")
+    if gui.mode == "absent" then return false end
+    gui.mouse_handler = fn
+    return true
+  end
+
   function gui.fail_every() gui.mode = "failing" end
   function gui.no_library() gui.mode = "absent" end
 
