@@ -2716,6 +2716,37 @@ local function place(panel, widget, skin_name, x, y, w, h)
   return widget
 end
 
+-- window whose boxes filled in a different order each session could not be
+-- tested for having filled them at all.
+local CONTROL_ORDER =
+  { "output_dir", "crop", "crop_x", "crop_z", "crop_radius_m" }
+
+-- Clears every line, then writes one per problem against the field it belongs
+-- to. Clearing first is what makes a problem the user has fixed disappear.
+--
+-- tags is parallel to problems and has holes, because a problem can belong to
+-- no control at all -- an unrecognised key in the config file is one, and there
+-- is no box on screen for a field that does not exist. So this walks problems,
+-- never tags, and a tag with no line is skipped rather than indexed: reaching
+-- setText through a nil would take the whole window down over a typo in a file.
+local function show_problems(problems, tags)
+  local lines = M.window.lines
+  local fields = M.config_fields()
+  for i = 1, #fields do
+    M.ui_method(lines[fields[i].name], "setText", "")
+  end
+  if problems == nil then
+    return
+  end
+  for i = 1, #problems do
+    local line = tags[i] and lines[tags[i]]
+    if line then
+      M.ui_method(line, "setText", problems[i])
+    end
+  end
+end
+
+
 local function say(text)
   M.ui_method(M.window.message, "setText", text)
 end
@@ -2967,37 +2998,6 @@ local function update_status(run)
   -- After the call, so this records what the label was given rather than what
   -- it was meant to be given.
   M.window.status_text = text
-end
-
--- Every control, in a fixed order. pairs order is undefined in 5.1, and a
--- window whose boxes filled in a different order each session could not be
--- tested for having filled them at all.
-local CONTROL_ORDER =
-  { "output_dir", "crop", "crop_x", "crop_z", "crop_radius_m" }
-
--- Clears every line, then writes one per problem against the field it belongs
--- to. Clearing first is what makes a problem the user has fixed disappear.
---
--- tags is parallel to problems and has holes, because a problem can belong to
--- no control at all -- an unrecognised key in the config file is one, and there
--- is no box on screen for a field that does not exist. So this walks problems,
--- never tags, and a tag with no line is skipped rather than indexed: reaching
--- setText through a nil would take the whole window down over a typo in a file.
-local function show_problems(problems, tags)
-  local lines = M.window.lines
-  local fields = M.config_fields()
-  for i = 1, #fields do
-    M.ui_method(lines[fields[i].name], "setText", "")
-  end
-  if problems == nil then
-    return
-  end
-  for i = 1, #problems do
-    local line = tags[i] and lines[tags[i]]
-    if line then
-      M.ui_method(line, "setText", problems[i])
-    end
-  end
 end
 
 -- Puts a run's config on screen, once.
