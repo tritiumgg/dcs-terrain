@@ -63,6 +63,13 @@ T.eq("it is draggable", calls:find("Window:setDraggable", 1, true) ~= nil, true)
 T.eq("and not resizable",
   calls:find("Window:setResizable", 1, true) ~= nil, true)
 
+-- Raised above DCS's own chrome, which is the whole of staying on screen. At
+-- the default zero the window is drawn underneath the menu, the Mission Editor
+-- and the map view -- invisible, while answering every question put to it, so
+-- that it reads exactly like a window that has been destroyed.
+T.eq("and raised above the chrome", root.zorder, E.WINDOW_Z_ORDER)
+T.eq("which is not the default it would have had", root.zorder ~= 0, true)
+
 -- Built once. The caller asks on every frame, which is sixty times a second for
 -- the length of a session, and a second window a frame would be a new one every
 -- frame.
@@ -434,127 +441,6 @@ T.eq("and it says where to look",
 -- The seam itself, with no DCS in the process: no net global, so nil.
 E.map_position = real_map
 T.eq("no net answers nothing", E.map_position(), nil)
-
---------------------------------------------------------------------------------
-T.group("a screen change is noticed and the window is rebuilt onto the new one")
---------------------------------------------------------------------------------
-
--- A window is drawn only on the screen that was current when it was made, and
--- goes on answering every question -- getVisible included -- once that screen
--- has gone. So the window cannot be asked about itself; the screen is asked
--- what it is drawing instead.
-local function ticks(run, n)
-  for _ = 1, n do E.on_frame(run) end
-end
-
-local moved
-moved, press, fs = typed({ output_dir = "C:/extract", crop = false })
-E.window.controls.output_dir.text = "C:/typed-by-hand"
-local first = E.window.root
-T.eq("a window to start with", first ~= nil, true)
-
--- Poll every 60 frames and act on the second miss, so two polls have to pass.
-E.gui.change_screen()
-ticks(moved, E.WINDOW_POLL_FRAMES)
-T.eq("one miss rebuilds nothing", E.window.root, first)
-T.eq("and the old window still claims to be visible", first.visible, true)
-
-ticks(moved, E.WINDOW_POLL_FRAMES)
-T.eq("the second builds a new one", E.window.root ~= first, true)
-T.eq("on the screen that is current now",
-  E.window.root.screen, E.gui.screen)
-T.eq("carrying what was typed", E.window.controls.output_dir.text,
-  "C:/typed-by-hand")
-T.eq("the old one is kept, not killed", E.window.orphans[1], first)
-T.eq("and not killed", first.killed, nil)
-T.eq("counted", E.window.rebuilds, 1)
-
--- Settled again: no further rebuilds while the screen holds, which is the
--- assertion that a poll firing every second does not churn.
-local second = E.window.root
-ticks(moved, E.WINDOW_POLL_FRAMES * 4)
-T.eq("no rebuild while it is drawn", E.window.root, second)
-T.eq("still one", E.window.rebuilds, 1)
-
--- The frame after a rebuild must not refill the boxes from the run's config,
--- which would take back the very text the rebuild just carried across.
-ticks(moved, 1)
-T.eq("and the typed value survives the frame after",
-  E.window.controls.output_dir.text, "C:/typed-by-hand")
-
--- The status line and the bar are written only when they change, and a rebuilt
--- window starts with neither cache. They come back because the frame writes them
--- before it polls -- an ordering this pins, since nothing else would notice it
--- being swapped.
-T.eq("the status line is filled in again",
-  E.window.status.text, E.window_status(moved))
-T.eq("and so is the bar", E.window.bar.value, E.window_progress(moved.state))
-
--- Dragged, then the screen changes: it comes back where it was left.
-E.window.root.bounds = { 400, 300, E.window.root.bounds[3], E.window.root.bounds[4] }
-E.gui.change_screen()
-ticks(moved, E.WINDOW_POLL_FRAMES * 2)
-T.eq("rebuilt where it was dragged to", E.window.root.bounds[1], 400)
-T.eq("both axes", E.window.root.bounds[2], 300)
-
--- Dragged off the edge, with the screen never changing. Nothing is painted off
--- the screen, so the probe answers nothing whether the window is fine or gone --
--- and rebuilding on that would put it back in the same off-screen place, fail
--- the same probe, and do it again every couple of seconds for the session,
--- leaking a window tree and taking the keyboard each time.
-local before_drag = E.window.rebuilds
-local orphans_before = #E.window.orphans
-E.window.root.bounds = { -600, -400, E.window.root.bounds[3], E.window.root.bounds[4] }
-ticks(moved, E.WINDOW_POLL_FRAMES * 6)
-T.eq("a window dragged off the edge is left alone", E.window.rebuilds, before_drag)
-T.eq("and no orphan was made", #E.window.orphans, orphans_before)
-
--- Dragged back on, the screen change it missed is noticed as normal.
-E.window.root.bounds = { 400, 300, E.window.root.bounds[3], E.window.root.bounds[4] }
-E.gui.change_screen()
-ticks(moved, E.WINDOW_POLL_FRAMES * 2)
-T.eq("and it works again once it is back on screen",
-  E.window.rebuilds, before_drag + 1)
-
--- What the window was saying comes back with it.
-E.gui.press(press.stop)
-local said = E.window.message.text
-T.eq("there is something to carry", said ~= "" and said ~= nil, true)
-E.gui.change_screen()
-ticks(moved, E.WINDOW_POLL_FRAMES * 2)
-T.eq("the message line is restored", E.window.message.text, said)
-
---------------------------------------------------------------------------------
-T.group("the run is untouched by any of it")
---------------------------------------------------------------------------------
-
--- The point of the whole window: it may cost itself and never the extract.
-local guarded = E.new_run({ config = { enabled = true, output_dir = "C:/extract" } })
-guarded.state = E.STATE_HOOK
-window_on(guarded)
-local frames_before = guarded.frames
-for _ = 1, 5 do
-  E.gui.change_screen()
-  ticks(guarded, E.WINDOW_POLL_FRAMES * 2)
-end
-T.eq("the run did not move", guarded.state, E.STATE_HOOK)
-T.eq("nor count a frame of its own", guarded.frames, frames_before)
-T.eq("five screen changes, five rebuilds", E.window.rebuilds, 5)
-T.eq("and nothing latched", E.ui_failed, false)
-
--- A library that cannot answer what is drawn is never polled, so it behaves the
--- way it did before it could be asked: built once and left alone.
-fresh()
-E.attach_window()
-E.gui.can_probe = function() return false end
-local unpolled = E.new_run({ config = { enabled = true, output_dir = "C:/e" } })
-E.on_frame(unpolled)
-local only = E.window.root
-E.gui.change_screen()
-ticks(unpolled, E.WINDOW_POLL_FRAMES * 4)
-T.eq("no probing, no rebuild", E.window.root, only)
-T.eq("and nothing latched", E.ui_failed, false)
-
 --------------------------------------------------------------------------------
 T.group("it refuses to close")
 --------------------------------------------------------------------------------

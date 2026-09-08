@@ -2711,66 +2711,6 @@ function M.gui.skin(name)
   return deep_copy(skin)
 end
 
--- The raw widget behind a bind object, or nil. The library's own lookups answer
--- in raw handles and the window holds bind objects, so one of them has to be
--- converted before they can be compared.
-function M.gui.handle(widget)
-  if type(widget) ~= "table" then
-    return nil
-  end
-  return rawget(widget, "widget")
-end
-
--- Whether this library can be asked what is drawn at a pixel. Asked once, like
--- the widget classes: where it cannot, the window is built and left alone, which
--- is what it did before it could be asked at all.
-function M.gui.can_probe()
-  local ok, lib = pcall(require, "dxgui")
-  return ok and type(lib) == "table"
-    and type(lib.FindWidgetAtScreenPoint) == "function"
-    and type(lib.WidgetGetRoot) == "function"
-end
-
--- How big the screen is, or nil where the library cannot say. Needed because a
--- point outside it cannot be probed: nothing is painted off the edge, and a
--- window dragged half out of view would otherwise read as one that is not there.
-function M.gui.screen_size()
-  local ok, lib = pcall(require, "dxgui")
-  if not ok or type(lib) ~= "table" or type(lib.GetScreenSize) ~= "function" then
-    return nil
-  end
-  local got, w, h = pcall(lib.GetScreenSize)
-  if got and type(w) == "number" and type(h) == "number" then
-    return { w = w, h = h }
-  end
-  return nil
-end
-
--- The top-level window that owns whatever is painted at a screen point, or nil.
---
--- This is the only way to ask whether a window is on screen. getVisible answers
--- true for a window whose screen has been torn down underneath it, so the widget
--- cannot be asked about itself -- but the screen can be asked what it is
--- drawing, and ED does exactly this pair of calls to turn a click into a dialog.
---
--- Floored, because the point is arithmetic on widget bounds and the call takes
--- pixels. Guarded like every other lookup here: absent is nil, not a failure.
-function M.gui.root_at(x, y)
-  local ok, lib = pcall(require, "dxgui")
-  if not ok or type(lib) ~= "table" then
-    return nil
-  end
-  local found, widget = pcall(lib.FindWidgetAtScreenPoint, floor(x), floor(y))
-  if not found or type(widget) ~= "userdata" then
-    return nil
-  end
-  local rooted, root = pcall(lib.WidgetGetRoot, widget)
-  if rooted and type(root) == "userdata" then
-    return root
-  end
-  return nil
-end
-
 -- A value rather than a function to swap, so a test reads it the way it reads
 -- any other state.
 M.ui_failed = false
@@ -2846,6 +2786,16 @@ end
 
 M.WINDOW_TITLE = "DCS Terrain Extract"
 
+-- Above DCS's own chrome (ADR 0018). A window at the default zero is drawn
+-- underneath the menu, the Mission Editor and the map view, which looks exactly
+-- like a window that has been destroyed: it goes on answering every question put
+-- to it, getVisible included, while nobody can see it. Raised, it stays up
+-- across every screen DCS puts in front of the user and through a map click.
+--
+-- 10001 is the number ED uses for its own window that has to stay up, and there
+-- is no map of this space to pick a smaller one from.
+M.WINDOW_Z_ORDER = 10001
+
 -- Hand-placed pixels. There is no layout engine here worth the indirection: the
 -- window is one column of rows and the arithmetic is an addition per row.
 --
@@ -2904,7 +2854,6 @@ local CONTROL_ORDER =
 -- never tags, and a tag with no line is skipped rather than indexed: reaching
 -- setText through a nil would take the whole window down over a typo in a file.
 local function show_problems(problems, tags)
-  M.window.problems, M.window.tags = problems, tags
   local lines = M.window.lines
   local fields = M.config_fields()
   for i = 1, #fields do
@@ -2966,12 +2915,7 @@ local function read_controls()
   return values
 end
 
--- Kept as well as written, because a window rebuilt onto a new screen has to
--- come back saying what the old one said. The same goes for the problem lines
--- below: they are the answer to the last thing the user did, and a rebuild is
--- not an answer to anything.
 local function say(text)
-  M.window.message_text = text
   M.ui_method(M.window.message, "setText", text)
 end
 
@@ -3123,6 +3067,7 @@ function M.build_window()
   M.ui_method(root, "setSkin", M.ui(M.gui.skin, "windowSkin"))
   M.ui_method(root, "setDraggable", true)
   M.ui_method(root, "setResizable", false)
+  M.ui_method(root, "setZOrder", M.WINDOW_Z_ORDER)
 
   local panel = M.ui(Panel.new)
   M.ui_method(panel, "setSkin", M.ui(M.gui.skin, "panelSkin"))
@@ -3225,17 +3170,14 @@ function M.build_window()
 
   local content = y + WIN.pad
   local width = WIN.w
-  -- Where the last one was, so a window rebuilt onto a new screen comes back
-  -- where it was left rather than jumping home.
-  local at = M.window.at or { x = WIN.x, y = WIN.y }
-  M.ui_method(root, "setBounds", at.x, at.y, width, content)
+  M.ui_method(root, "setBounds", WIN.x, WIN.y, width, content)
   local view = client_of(root)
   -- A measurement of nothing is not a measurement. Zero or negative would drive
   -- a correction the size of the whole window, so it is left alone instead.
   if view and (view.w or 0) > 0 and (view.h or 0) > 0 then
     local dw, dh = width - view.w, content - view.h
     if dw ~= 0 or dh ~= 0 then
-      M.ui_method(root, "setBounds", at.x, at.y, width + dw, content + dh)
+      M.ui_method(root, "setBounds", WIN.x, WIN.y, width + dw, content + dh)
       -- What was asked for, where the second measurement fails -- never the
       -- first one. The frame has already grown by the inset, so falling back to
       -- the pre-correction reading would put an undersized panel inside a
@@ -3274,11 +3216,6 @@ function M.build_window()
 
   M.ui_method(root, "setVisible", true)
 
-  -- Where the client rectangle sits inside the frame, kept so a probe point in
-  -- client coordinates can be turned into a screen one.
-  M.window.view = view or { x = 0, y = 0, w = width, h = content }
-  M.window.at = at
-  M.window.probe = M.ui(M.gui.can_probe) and true or false
   M.window.root, M.window.panel, M.window.status = root, panel, status
   M.window.bar, M.window.message = bar, message
   M.window.controls, M.window.lines = controls, lines
@@ -3388,128 +3325,6 @@ local function update_progress(run)
   M.window.bar_value = value
 end
 
---------------------------------------------------------------------------------
--- Staying on screen (ADR 0018)
---
--- A window is drawn only on the screen that was current when it was made, and
--- DCS builds a new screen for the main menu, the Mission Editor and a running
--- mission. Leave the screen the window was made on and it stops being drawn --
--- while the object goes on answering, and getVisible goes on saying true. So
--- the window cannot be asked about itself, and there is no callback that
--- announces the change.
---
--- What can be asked is the screen: which window owns the pixel at this point.
--- If it is not ours, ours is not being drawn, and the only way back is a new
--- window built on the screen that is current now.
---------------------------------------------------------------------------------
-
-M.WINDOW_POLL_FRAMES = 60
-
--- Two consecutive misses, not one. A dialog sitting over the probe point reads
--- exactly like a torn-down screen on a single look, and rebuilding under one is
--- a window that jumps to the front and takes the keyboard with it.
-local WINDOW_MISSES = 2
-
--- The middle of the status line, in screen pixels: a point this window owns
--- whenever it is drawn at all.
---
--- The window's own position is read rather than remembered, because it is
--- draggable and the user may have moved it since it was built.
-local function probe_point()
-  local view = M.window.view
-  if not (view and M.window.root) then
-    return nil
-  end
-  local at = M.ui(function()
-    local x, y = M.window.root:getBounds()
-    return { x = x, y = y }
-  end)
-  if not (at and at.x and at.y) then
-    return nil
-  end
-  M.window.at = at
-  return at.x + (view.x or 0) + WIN.pad + 4,
-    at.y + (view.y or 0) + WIN.pad + floor(WIN.row / 2)
-end
-
--- Builds a new window on whatever screen is current, carrying across everything
--- the old one was holding: what the user had typed, where they had dragged it,
--- and the lines it was showing. An orphaned widget still answers, which is what
--- makes that possible.
---
--- The old window is kept rather than killed. It is already invisible, so
--- destroying it buys only memory, and destroying widgets is the one call ADR
--- 0015 found could take DCS down without raising anything catchable.
-local function rebuild_window()
-  local carried = read_controls()
-  if carried == nil then
-    return false
-  end
-  local problems, tags = M.window.problems, M.window.tags
-  local message = M.window.message_text
-
-  local orphans = M.window.orphans or {}
-  orphans[#orphans + 1] = M.window.root
-
-  M.window = {
-    built = false,
-    run = M.window.run,
-    at = M.window.at,
-    orphans = orphans,
-    rebuilds = (M.window.rebuilds or 0) + 1,
-  }
-  if not M.build_window() then
-    return false
-  end
-
-  set_controls(M.config_from_text(carried))
-  -- Filled by hand, so the frame that follows does not fill it again from the
-  -- run's config and take back what the user typed.
-  M.window.filled = true
-  show_problems(problems, tags)
-  if message then
-    say(message)
-  end
-  M.log("window rebuilt after a screen change")
-  return true
-end
-
--- One look per M.WINDOW_POLL_FRAMES frames, which is twice a second at sixty.
--- Two native calls each time, both inside the latch, so a library that starts
--- raising switches the window off and stops probing with it.
-local function poll_drawn()
-  if not M.window.probe then
-    return
-  end
-  M.window.frames = (M.window.frames or 0) + 1
-  if M.window.frames % M.WINDOW_POLL_FRAMES ~= 0 then
-    return
-  end
-  local px, py = probe_point()
-  if px == nil then
-    return
-  end
-  -- A window dragged past the edge cannot be probed at all: nothing is painted
-  -- off the screen, so the point answers nothing whether the window is fine or
-  -- gone. Counting that as a miss would rebuild it at the same off-screen
-  -- position, fail the same probe, and do it again every two seconds for the
-  -- rest of the session -- leaking a window tree and stealing the keyboard each
-  -- time. A window nobody can see is left alone instead.
-  local screen = M.ui(M.gui.screen_size)
-  if screen and (px < 0 or py < 0 or px >= screen.w or py >= screen.h) then
-    return
-  end
-  if M.ui(M.gui.root_at, px, py) == M.ui(M.gui.handle, M.window.root) then
-    M.window.misses = 0
-    return
-  end
-  M.window.misses = (M.window.misses or 0) + 1
-  if M.window.misses < WINDOW_MISSES then
-    return
-  end
-  rebuild_window()
-end
-
 -- Points on_frame at the window: build it, then say where the run has got to.
 --
 -- Build first because the window is built on a frame rather than at load, and
@@ -3526,9 +3341,6 @@ function M.attach_window()
       fill_controls(run)
       update_status(run)
       update_progress(run)
-      -- Last, so a window rebuilt this frame is filled and up to date before
-      -- anything looks at whether it is on screen.
-      poll_drawn()
     end
   end
 end
