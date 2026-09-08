@@ -23,18 +23,24 @@ local CLASSES = {
 local METHODS = {
   "setVisible", "getVisible", "setSkin", "setBounds", "setDraggable",
   "setResizable", "insertWidget", "setText", "getText", "close",
-  "setRange", "setValue", "setState", "getState", "getViewBounds",
+  "setRange", "setValue", "setState", "getState", "getViewBounds", "getBounds",
+  "kill",
 }
 
 -- What a window's frame costs it: DCS grants a client area shorter than the
 -- window by the header, measured at 20 pixels on 2.9.29.27468. Rows are laid
 -- out in client coordinates, so a window sized to its content is too small for
--- it and the last row falls off the bottom. Modelled here so the correction can
--- be tested, and named so the test does not repeat the number.
+-- it, and the last row falls off the bottom. Modelled here so the correction
+-- can be tested, and named so the test does not repeat the number.
 local HEADER = 20
 
 function FakeGui.new()
-  local gui = { calls = {}, made = {}, mode = "working" }
+  -- `screen` is the DCS screen the library is currently drawing: the main menu,
+  -- the Mission Editor, a running mission. A widget belongs to the screen that
+  -- was current when it was made, and stops being drawn when that screen goes --
+  -- while still answering every question put to it, getVisible included. That is
+  -- measured behaviour and it is the whole reason the window has to be rebuilt.
+  local gui = { calls = {}, made = {}, mode = "working", screen = 1 }
 
   -- Calls left before this library starts raising, or nil for one that does
   -- not. A library breaking part-way through a sequence is a different failure
@@ -67,6 +73,7 @@ function FakeGui.new()
       visible = nil,
       skin = nil,
       children = {},
+      screen = gui.screen,
       -- This widget's own calls, beside gui.calls which holds the window's.
       -- Several widgets of a class share a class name, so counting
       -- "Static:setText" across the window stopped meaning anything once there
@@ -99,6 +106,11 @@ function FakeGui.new()
           if not self.bounds then return nil end
           return 0, HEADER, self.bounds[3], self.bounds[4] - HEADER
         end
+        if name == "getBounds" then
+          if not self.bounds then return nil end
+          return self.bounds[1], self.bounds[2], self.bounds[3], self.bounds[4]
+        end
+        if name == "kill" then self.killed = true end
         if name == "insertWidget" then
           self.children[#self.children + 1] = a
         end
@@ -143,6 +155,41 @@ function FakeGui.new()
     end
     return { skinData = { params = { name = name } } }
   end
+
+  -- The raw widget behind a bind object. There is no C pointer here, so a
+  -- widget is its own handle -- which is enough, because all the caller does
+  -- with it is compare.
+  function gui.handle(widget)
+    refuse("handle")
+    return widget
+  end
+
+  function gui.can_probe()
+    refuse("can_probe")
+    return gui.mode ~= "absent"
+  end
+
+  -- The window drawn at a point: the newest one on the CURRENT screen whose
+  -- bounds contain it. A window from an earlier screen is skipped however
+  -- perfectly it still answers, which is the behaviour being modelled.
+  function gui.root_at(x, y)
+    refuse("root_at")
+    if gui.mode == "absent" then return nil end
+    for i = #gui.made, 1, -1 do
+      local w = gui.made[i]
+      if w.class == "Window" and w.screen == gui.screen and w.bounds then
+        local b = w.bounds
+        if x >= b[1] and y >= b[2] and x < b[1] + b[3] and y < b[2] + b[4] then
+          return w
+        end
+      end
+    end
+    return nil
+  end
+
+  -- DCS moving to another screen. Everything already made stays alive and
+  -- answering; none of it is drawn any more.
+  function gui.change_screen() gui.screen = gui.screen + 1 end
 
   function gui.fail_every() gui.mode = "failing" end
   function gui.no_library() gui.mode = "absent" end
