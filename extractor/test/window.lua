@@ -256,9 +256,14 @@ local started, press, fs = typed({
   crop_z = "617000",
   crop_radius_m = "5000",
 })
+T.eq("the run has nowhere to write yet", started.dir, nil)
 E.gui.press(press.start)
 T.eq("the run leaves the stopped state", started.state, E.STATE_IDLE)
 T.eq("and the settings were written", fs.files[CONFIG] ~= nil, true)
+-- The run was built at load from a config with no directory in it, because
+-- there was no window to type one into. Without this it would run with nowhere
+-- to write, which is the whole first-use case.
+T.eq("and it is pointed where the box says", started.dir, "C:/extract")
 
 -- Read back rather than compared against the bytes: what matters is that the
 -- file says next session what the boxes said this one.

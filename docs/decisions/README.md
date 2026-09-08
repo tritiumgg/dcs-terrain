@@ -28,6 +28,7 @@ disagree, the later accepted one wins, and the earlier is marked
 | [0014](0014-a-run-waits-in-a-stopped-state.md) | Accepted | 2026-09-05 | A run waits in a stopped state, and Start always re-enters idle | `extractor-hook.md` "Lifecycle"; `plan.md` X4, X13 |
 | [0015](0015-a-failing-window-is-switched-off-not-retried.md) | Accepted | 2026-09-05 | A failing window is switched off, and never reaches the run | `extractor-hook.md` "Failure handling"; `plan.md` X12, X13 |
 | [0016](0016-a-write-is-checked-by-what-landed.md) | Accepted | 2026-09-06 | A write is checked by what landed, because DCS's file handles report nothing | `design-and-facts.md` "Sources you have" hook-state facts; `plan.md` X3, X5–X9, X10, X13 |
+| [0017](0017-start-re-points-a-run-at-the-window-s-directory.md) | Accepted | 2026-09-08 | Start re-points a run at the directory the window names | `extractor-hook.md` "Lifecycle"; ADR 0014's "Start resets nothing"; `plan.md` X10, X13 |
 
 Add a row when you add an ADR. This table is the index Claude reads, so an ADR
 missing from it will not be found. Each record's own `Affects` line, at the top

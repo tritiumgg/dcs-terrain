@@ -374,4 +374,120 @@ T.eq("and the window still ticks once the run is done",
 E.on_phase = function() end
 E.on_frame = function() end
 
+--------------------------------------------------------------------------------
+T.group("a finished run can be started again")
+--------------------------------------------------------------------------------
+
+-- Without this the window is a single-use control. With no sweeps registered a
+-- run reaches done within a few frames of the first press, and both buttons
+-- were then inert until DCS was restarted.
+run = new_stopped_run()
+E.start(run)
+for _ = 1, 40 do
+  E.run_frame(run)
+  if run.state == E.STATE_DONE then break end
+end
+T.eq("it finished", run.state, E.STATE_DONE)
+T.eq("Start says it started", E.start(run), true)
+T.eq("and it is looking for terrain again", run.state, E.STATE_IDLE)
+
+-- Stop still refuses from done, which is the other half: there is nothing to
+-- halt and nothing to save that the finish did not already save.
+run.state = E.STATE_DONE
+T.eq("Stop from done still refuses", E.stop(run), false)
+T.eq("and a running run still refuses Start", (function()
+  run.state = E.STATE_HOOK
+  return E.start(run)
+end)(), false)
+
+--------------------------------------------------------------------------------
+T.group("retargeting drops what described the old directory")
+--------------------------------------------------------------------------------
+
+-- Everything a run accumulates is about an output directory rather than about
+-- the run: the manifest carries the identity and the grid, entries is the tile
+-- list rebuilt into it at every save, and the timings are the work done there.
+run = new_stopped_run()
+E.start(run)
+for _ = 1, 40 do
+  E.run_frame(run)
+  if run.state == E.STATE_DONE then break end
+end
+T.eq("there is a manifest to lose", run.manifest ~= nil, true)
+T.eq("and timings", next(run.timing_ms) ~= nil, true)
+
+local same = { output_dir = "C:/extract", frame_budget_ms = 5 }
+T.eq("the same settings change nothing", E.retarget(run, same), false)
+T.eq("so the manifest survives", run.manifest ~= nil, true)
+T.eq("and so do the timings", next(run.timing_ms) ~= nil, true)
+
+T.eq("a new directory is a change",
+  E.retarget(run, { output_dir = "C:/elsewhere", frame_budget_ms = 5 }), true)
+T.eq("it is pointed at the new one", run.dir, "C:/elsewhere")
+T.eq("the manifest is gone", run.manifest, nil)
+T.eq("the tile list with it", #run.entries, 0)
+T.eq("and the timings", next(run.timing_ms), nil)
+T.eq("the identity too", next(run.identity), nil)
+T.eq("frames back to none", run.frames, 0)
+T.eq("and the state is left alone", run.state, E.STATE_DONE)
+
+-- A changed crop is the same failure wearing different clothes: the grid is
+-- planned from it, so the manifest would disagree with the one on disk.
+run = new_stopped_run({ config = { output_dir = "C:/extract" } })
+T.eq("adding a crop is a change", E.retarget(run,
+  { output_dir = "C:/extract", crop = { x = 0, z = 0, radius_m = 5000 } }), true)
+T.eq("the same crop is not", E.retarget(run,
+  { output_dir = "C:/extract", crop = { radius_m = 5000, z = 0, x = 0 } }), false)
+T.eq("a moved crop is", E.retarget(run,
+  { output_dir = "C:/extract", crop = { x = 1, z = 0, radius_m = 5000 } }), true)
+T.eq("and taking it away is", E.retarget(run, { output_dir = "C:/extract" }), true)
+
+-- The one that will drift: a field added to new_run and forgotten here would
+-- survive a retarget as a stale value describing the old directory, which is
+-- the whole class of bug this exists to prevent.
+local function keys_of(t)
+  local out = {}
+  for k in pairs(t) do out[#out + 1] = k end
+  table.sort(out)
+  return table.concat(out, " ")
+end
+run = new_stopped_run()
+E.retarget(run, { output_dir = "C:/elsewhere" })
+-- Against a run built the same way, so the helper's own fs field is on both
+-- sides and what is being compared is new_run's shape.
+T.eq("a retargeted run has a fresh run's fields", keys_of(run),
+  keys_of(new_stopped_run()))
+T.eq("including the budget it did not ask for",
+  run.budget_ms, E.FRAME_BUDGET_MS)
+
+-- What the whole record is for: the old directory's manifest must never be
+-- written into the new one. It would be, without this: Start saves nothing, but
+-- entering prepare does, before any prepare job has run.
+run = new_stopped_run()
+E.start(run)
+until_past(run, E.STATE_IDLE, 5)
+until_past(run, E.STATE_PREPARE, 5)
+E.stop(run)
+T.eq("the first directory has its manifest",
+  run.fs.files["C:/extract/manifest.json"] ~= nil, true)
+
+local was = run.fs.files["C:/extract/manifest.json"]
+
+E.retarget(run, { output_dir = "C:/elsewhere", frame_budget_ms = 5 })
+E.start(run)
+-- Frames until the run has just entered prepare. That entry is the save in
+-- question: it happens before any prepare job has run, so a manifest in the new
+-- directory at this moment can only be the old run's.
+until_past(run, E.STATE_IDLE, 5)
+T.eq("entering prepare wrote nothing into the new directory",
+  run.fs.files["C:/elsewhere/manifest.json"], nil)
+T.eq("and left the old directory's alone",
+  run.fs.files["C:/extract/manifest.json"], was)
+
+-- The prepare job then builds one of its own, which is the manifest that
+-- belongs there: no tiles, and the timings of this run rather than the last.
+E.run_frame(run)
+local written = E.decode(run.fs.files["C:/elsewhere/manifest.json"])
+T.eq("the manifest it does get is the new run's", #written.tiles, 0)
+
 T.done()

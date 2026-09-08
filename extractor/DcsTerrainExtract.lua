@@ -2234,6 +2234,57 @@ function M.new_run(opts)
   return run
 end
 
+-- Points a run at the settings the window now holds (ADR 0017).
+--
+-- Where the output directory and the crop are unchanged, only the config is
+-- replaced and the run carries on where it left off, which is what makes a Stop
+-- and a Start resume rather than restart.
+--
+-- Where either changed, everything the run accumulated goes. All of it
+-- describes an output directory rather than a run: the manifest carries the
+-- identity, the grid and the pass record, entries is the tile list rebuilt into
+-- it at every save, and the timings are the work done in that directory. Kept
+-- across a change, they would be written into the new directory by the save
+-- that happens on entering prepare -- before any prepare job runs, so before
+-- anything can notice they describe somewhere else, and a manifest naming tiles
+-- that are not there fails validation permanently.
+--
+-- In place, never a fresh table: the callbacks closed over this run when the
+-- bootstrap registered them, so a replacement would be invisible to the frames
+-- that drive it.
+--
+-- Only legal from stopped or done. They are the two states with no queue, and
+-- so the two in which no job is holding a directory it read at its own start.
+function M.retarget(run, config)
+  -- Through the encoder, which sorts keys, so two crops that encode the same
+  -- hold the same numbers. Absent has to differ from present, and nil is not a
+  -- value M.json takes.
+  local function crop_text(crop)
+    return crop ~= nil and M.json(crop) or "absent"
+  end
+  local same = run.config.output_dir == config.output_dir
+    and crop_text(run.config.crop) == crop_text(config.crop)
+
+  run.config = config
+  run.dir = config.output_dir
+  run.budget_ms = config.frame_budget_ms or M.FRAME_BUDGET_MS
+  if same then
+    return false
+  end
+
+  local fresh = M.new_run({ config = config, jobs = run.jobs })
+  for key, value in pairs(fresh) do
+    if key ~= "state" then
+      run[key] = value
+    end
+  end
+  -- pairs skips what new_run left nil, and those are exactly the fields that
+  -- have to go: a manifest and a queue built for the old directory.
+  run.manifest = nil
+  run.queue = nil
+  return true
+end
+
 -- Every manifest write goes through here, so the tile list and the timings are
 -- never stale: the sweeps append to run.entries and the manifest copies are
 -- rebuilt from the run.
@@ -2420,7 +2471,13 @@ end
 -- the manifest records is the whole of the work done in this output directory
 -- rather than the last attempt at it.
 function M.start(run)
-  if run.state ~= M.STATE_STOPPED then
+  -- From done as well as from stopped (ADR 0017). A finished run is not a
+  -- running one, and refusing here made the window a single-use control: with
+  -- no sweeps registered a run reaches done within a few frames of the first
+  -- press, and both buttons were then inert until DCS was restarted. Restarted
+  -- unchanged it resumes, finds every tile journalled, and returns to done --
+  -- which looks like a button that did nothing, and is correct.
+  if run.state ~= M.STATE_STOPPED and run.state ~= M.STATE_DONE then
     return false
   end
   -- Straight to idle rather than through enter, because idle is not a pass: it
@@ -2817,7 +2874,7 @@ local function start_pressed()
   if run == nil then
     return
   end
-  if run.state ~= M.STATE_STOPPED then
+  if run.state ~= M.STATE_STOPPED and run.state ~= M.STATE_DONE then
     say("A run is already going. Stop it first.")
     return
   end
@@ -2846,6 +2903,9 @@ local function start_pressed()
     M.warn("could not save the config: " .. tostring(why))
   end
 
+  -- Before the run is told to go, and after the file is written, so what is on
+  -- disk and what the run is about to use are the same settings (ADR 0017).
+  M.retarget(run, settings)
   M.start(run)
 end
 
