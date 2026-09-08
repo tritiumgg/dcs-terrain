@@ -4,21 +4,21 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-08T02:40Z
+**Last updated:** 2026-09-08T21:05Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **X13 is done: the window has controls, and the config file is no longer the
-   way in.** A box for `output_dir`, a tick and three boxes for the crop, a line
-   per field for what is wrong with it, Start, Stop, Read from map, and a bar
-   X12 fills in. Every widget name was measured rather than remembered — a press
-   is `onChange` on the instance, and `getCurPosition` answered -545142.86,
-   682000.00 against a status bar reading X-00545143 Z+00682000, so it is DCS x
-   and z in metres. ADR **0017**: Start re-points a run at the directory the
-   boxes name and accepts a finished one, because the save on entering prepare
-   would otherwise write the old directory's manifest into the new one. PR **47**.
+1. **X13: the window has controls, and the live pass found two bugs the offline
+   tests could not.** A box for `output_dir`, a tick and three boxes for the
+   crop, a line per field, Start, Stop, Read from map, a bar X12 fills in. Widget
+   names measured, not remembered: a press is `onChange` on the instance. ADR
+   **0017**, Start re-points a run at the directory the boxes name and accepts a
+   finished one. Then, on screen: buttons cut off, because rows go in client
+   coordinates and a frame is a header taller; and **a window is drawn only on
+   the screen it was made on**, while `getVisible` keeps saying true — ADR
+   **0018** polls `FindWidgetAtScreenPoint` and rebuilds. X14 added. PR **47**.
 2. **One pull request per task, reviewed commit by commit.** The 400-line cap
    and the stack of branches are gone: the size limit is on the commit now —
    about 100 lines, 300 for one logical change, 1 000 split before committing —
@@ -45,17 +45,16 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    installed hook nobody enabled writes nothing, and the two exceptions are a
    file that will not load and an `enabled` that is a quoted boolean. Both
    verified live at the menu, window on screen. PRs **42** and **43**.
-5. **X13 spiked, and five PRs landed — the window is on screen.** Every unknown is
-   measured on 2.9.29.27468 with the editor on Caucasus, read back by
-   `DCS.makeScreenShot`. Every widget the controls need constructs from the hook
-   state; an unskinned one draws nothing. A window refuses to close because the
-   native side hides it and *then* fires `onClose`. `net.dostring_in("gui", ...)`
-   reaches `MapWindow`: `getCurPosition()` matched the status bar to the digit,
-   `getMapBounds()` answers in **kilometres**, and its Draw layer takes a
-   `Polygon` whose points are *relative* to the anchor, ring closed explicitly.
-   Bottom to top: **37** `field_problem` and `tags`, **38** the config file
-   under an empty environment, **39** ADR 0014's stopped state, **40** ADR 0015's
-   seam and latch, **41** the window chrome.
+5. **X13 spiked, and five PRs landed — the window is on screen.** Measured on
+   2.9.29.27468 with the editor on Caucasus. Every widget the controls need
+   constructs from the hook state; an unskinned one draws nothing. A window
+   refuses to close because the native side hides it and *then* fires `onClose`.
+   `net.dostring_in("gui", ...)` reaches `MapWindow`, whose `getMapBounds()`
+   answers in **kilometres** and whose Draw layer takes a `Polygon` with points
+   *relative* to the anchor, ring closed explicitly. Bottom to top: **37**
+   `field_problem` and `tags`, **38** the config file under an empty environment,
+   **39** ADR 0014's stopped state, **40** ADR 0015's seam and latch, **41** the
+   window chrome.
 
 ## Next
 
