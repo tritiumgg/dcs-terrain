@@ -12,9 +12,11 @@ without `seek`.
   the scenery around it. Configuration is a window rather than the file — the
   file is what the window reads at start and writes at Start (ADR 0011), and
   the three fields it holds are in that record. The window carries a box for
-  the output directory, a tick and three boxes for the crop, a line under each
-  field for whatever is wrong with it, and Start, Stop and Read from map. Start
-  re-points the run at whatever the boxes now say (ADR 0017). *The sweeps that
+  the output directory, a tick and three boxes for the crop with a button that
+  picks the centre off the map, a line under each field for whatever is wrong
+  with it, and Start and Stop. Start re-points the run at whatever the boxes now
+  say (ADR 0017), and the window is raised above DCS's own chrome so it stays on
+  screen (ADR 0018). *The sweeps that
   fill an extract are not built yet, so a run reaches `done` in a few frames
   and writes nothing.*
   A run writes `Logs/DcsTerrainExtract.log` in the same Saved Games folder, one

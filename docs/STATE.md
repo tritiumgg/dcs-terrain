@@ -12,13 +12,14 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
 1. **X13: the window has controls, and the live pass found two bugs the offline
    tests could not.** A box for `output_dir`, a tick and three boxes for the
-   crop, a line per field, Start, Stop, Read from map, a bar X12 fills in. Widget
-   names measured, not remembered: a press is `onChange` on the instance. ADR
-   **0017**, Start re-points a run at the directory the boxes name and accepts a
-   finished one. Then, on screen: buttons cut off, because rows go in client
-   coordinates and a frame is a header taller; and **a window is drawn only on
-   the screen it was made on**, while `getVisible` keeps saying true — ADR
-   **0018** polls `FindWidgetAtScreenPoint` and rebuilds. X14 added. PR **47**.
+   crop, a line per field, Start, Stop, a bar X12 fills in, and a pick button
+   that arms the next click on the map. ADR **0017**, Start re-points a run at
+   the directory the boxes name. Then, on screen: buttons cut off, because rows
+   go in client coordinates and a frame is a header taller; and the window
+   vanishing on every screen change and map click, which looked like it being
+   destroyed and was **z-order** — it was underneath all along, and `getVisible`
+   says true either way. ADR **0018** raises it once at build. X14 added.
+   PR **47**.
 2. **One pull request per task, reviewed commit by commit.** The 400-line cap
    and the stack of branches are gone: the size limit is on the commit now —
    about 100 lines, 300 for one logical change, 1 000 split before committing —
