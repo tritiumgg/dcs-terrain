@@ -53,11 +53,12 @@ Saved Games folder and put `enabled = true` in a config at
 `Config/DcsTerrainExtract.lua`; without that it does nothing. Start DCS and open
 the theatre in the Mission Editor — a mission is not needed, and one with a FARP
 or heliport in it would leave holes in the scenery. A window then asks where to
-write the extract and starts the run: it sweeps across frames, logs to
-`Logs/DcsTerrainExtract.log`, resumes where it left off, and never writes into
-your DCS install. *The window is on screen and reports where the run has got
-to; its controls and the sweeps that fill an extract are not built yet, so
-nothing is written today.*
+write the extract and, optionally, a crop — a centre and a radius, with **Read
+from map** filling the centre from wherever the cursor last was on the map.
+**Start** begins the run, which sweeps across frames, shows how far it has got,
+logs to `Logs/DcsTerrainExtract.log`, resumes after **Stop**, and never writes
+into your DCS install. *The window and its controls work; the sweeps that fill
+an extract are not built yet, so a run finishes in seconds and writes nothing.*
 
 **Pack** the extract into a single file, then verify it:
 
