@@ -1876,7 +1876,11 @@ end
 -- its last bits. A centre that came out of the config file has to go back into
 -- it unchanged, or a user who pressed Start without touching anything would have
 -- moved their own crop.
-local function box_text(v)
+--
+-- Public because the window puts numbers into boxes from somewhere other than a
+-- config too: a centre read off the map has to be written the same way, or the
+-- same digit would go missing by a different route.
+function M.box_text(v)
   if v == nil then
     return ""
   end
@@ -1895,11 +1899,11 @@ function M.control_text(config)
   local crop = type(config) == "table" and config.crop or nil
   local has_crop = type(crop) == "table"
   return {
-    output_dir = box_text(type(config) == "table" and config.output_dir or nil),
+    output_dir = M.box_text(type(config) == "table" and config.output_dir or nil),
     crop = has_crop,
-    crop_x = has_crop and box_text(crop.x) or "",
-    crop_z = has_crop and box_text(crop.z) or "",
-    crop_radius_m = has_crop and box_text(crop.radius_m) or "",
+    crop_x = has_crop and M.box_text(crop.x) or "",
+    crop_z = has_crop and M.box_text(crop.z) or "",
+    crop_radius_m = has_crop and M.box_text(crop.radius_m) or "",
   }
 end
 
@@ -2583,6 +2587,46 @@ function M.callbacks(run)
   }
 end
 
+-- Where the cursor last was on the Mission Editor's map, in DCS metres, or nil.
+--
+-- The editor's map lives in the gui state and this file runs in the hook state,
+-- so the only way across is net.dostring_in, and the only thing that comes back
+-- is a string. Measured on 2.9.29.27468 with Caucasus open: MapWindow's
+-- getCurPosition is getMapPoint(MOUSE_STATE.x, MOUSE_STATE.y), which is the last
+-- position the cursor was over the map -- so it survives the mouse moving onto
+-- this window to press the button, which is the only reason a button can use it
+-- at all. It answered -545142.86, 682000.00 against a status bar reading
+-- X-00545143 Z+00682000, so the two numbers are DCS x and z in metres.
+--
+-- Formatted at seventeen digits on the way back rather than tostring'd, because
+-- tostring is %.14g and a metre coordinate reaches fourteen significant digits.
+--
+-- Everything is guarded and every failure is the same nil: no net at all is an
+-- offline test, and no map view is the main menu, where getMapPoint indexes a
+-- newMapView_ that does not exist yet.
+local MAP_POSITION_CHUNK = [[
+local ok, x, z = pcall(function() return MapWindow.getCurPosition() end)
+if not ok or type(x) ~= "number" or type(z) ~= "number" then return "" end
+return string.format("%.17g %.17g", x, z)
+]]
+
+function M.map_position()
+  local net = rawget(_G, "net")
+  if type(net) ~= "table" or type(net.dostring_in) ~= "function" then
+    return nil
+  end
+  local ok, answer = pcall(net.dostring_in, "gui", MAP_POSITION_CHUNK)
+  if not ok or type(answer) ~= "string" then
+    return nil
+  end
+  local sx, sz = answer:match("^(%S+) (%S+)$")
+  local x, z = tonumber(sx or ""), tonumber(sz or "")
+  if not (is_finite(x) and is_finite(z)) then
+    return nil
+  end
+  return x, z
+end
+
 -- Returns nil and a reason where there is no DCS around this file, which is
 -- every offline test and is not an error.
 function M.register(run)
@@ -2759,6 +2803,7 @@ local CROP_ORDER = { "crop_x", "crop_z", "crop_radius_m" }
 local BUTTONS = {
   { name = "start", text = "Start" },
   { name = "stop", text = "Stop" },
+  { name = "map", text = "Read from map" },
 }
 
 M.window = { built = false, root = nil, panel = nil, status = nil, bar = nil }
@@ -2907,6 +2952,26 @@ local function start_pressed()
   -- disk and what the run is about to use are the same settings (ADR 0017).
   M.retarget(run, settings)
   M.start(run)
+end
+
+-- The crop centre, off the map instead of out of the keyboard.
+--
+-- It ticks the crop as well as filling the two boxes. Reading a centre off the
+-- map is the deliberate act the tick is meant to record, and leaving it unticked
+-- would let somebody press this, press Start, and sweep the whole theatre --
+-- forty minutes on Caucasus -- having just told the window where they wanted to
+-- extract. A ticked crop with no radius is refused on the crop's own line, which
+-- is the right way to be told what is still missing.
+local function map_pressed()
+  local x, z = M.map_position()
+  if x == nil then
+    say("No map answered. Open one in the Mission Editor, then hover the point.")
+    return
+  end
+  M.ui_method(M.window.controls.crop_x, "setText", M.box_text(x))
+  M.ui_method(M.window.controls.crop_z, "setText", M.box_text(z))
+  M.ui_method(M.window.controls.crop, "setState", true)
+  say("Centre taken from the map. Set a radius, then Start.")
 end
 
 local function stop_pressed()
@@ -3061,6 +3126,7 @@ function M.build_window()
   -- rather than a callback registered somewhere.
   buttons.start.onChange = on_press(start_pressed)
   buttons.stop.onChange = on_press(stop_pressed)
+  buttons.map.onChange = on_press(map_pressed)
 
   M.ui_method(root, "setVisible", true)
 

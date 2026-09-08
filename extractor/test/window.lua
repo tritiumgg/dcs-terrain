@@ -107,6 +107,12 @@ T.eq("and so is the crop line above it",
   E.window.lines.crop.bounds[2] < last[2], true)
 T.eq("and the panel covers the window", E.gui.find("Panel").bounds[4], frame[4])
 
+-- The buttons run left to right off one list, so a button added to it is the
+-- way this overflows, and it would do so silently.
+local rightmost = E.window.buttons.map.bounds
+T.eq("the last button is inside the window",
+  rightmost[1] + rightmost[3] <= frame[3], true)
+
 --------------------------------------------------------------------------------
 T.group("the first frame puts the config in the boxes, and then leaves them")
 --------------------------------------------------------------------------------
@@ -343,6 +349,51 @@ T.eq("saying what was lost",
   E.window.message.text:find("were not saved", 1, true) ~= nil, true)
 T.eq("and warning once", #warned > 0, true)
 E.config_path = function() return CONFIG end
+
+--------------------------------------------------------------------------------
+T.group("the crop centre can come off the map")
+--------------------------------------------------------------------------------
+
+-- The map lives in another Lua state and this file cannot reach it here, so the
+-- seam is stubbed and what is asserted is what the window does with an answer.
+local real_map = E.map_position
+
+local picked
+picked, press = typed({ output_dir = "C:/extract", crop = false })
+E.map_position = function() return -545142.85714286, 682000 end
+E.gui.press(press.map)
+T.eq("the centre lands in the boxes", E.window.controls.crop_x.text,
+  "-545142.85714286")
+T.eq("both halves of it", E.window.controls.crop_z.text, "682000")
+-- Ticked, because reading a centre off the map is the deliberate act the tick
+-- records. Left unticked, a press here followed by Start would sweep the whole
+-- theatre having just been told where the user wanted to extract.
+T.eq("and the crop is switched on", E.window.controls.crop.state, true)
+T.eq("with a line saying what is still missing",
+  E.window.message.text:find("radius", 1, true) ~= nil, true)
+
+-- A radius away from a run, which is what the crop's own line then says.
+E.gui.press(press.start)
+T.eq("Start refuses without one", picked.state, E.STATE_STOPPED)
+T.eq("naming the radius", E.window.lines.crop.text:find("radius_m", 1, true) ~= nil,
+  true)
+E.window.controls.crop_radius_m.text = "5000"
+E.gui.press(press.start)
+T.eq("and takes it with one", picked.state, E.STATE_IDLE)
+
+-- No map is the main menu, and no net at all is this interpreter. Both are the
+-- same nil, and neither touches what is in the boxes.
+picked, press = typed({ output_dir = "C:/extract", crop = false, crop_x = "1" })
+E.map_position = function() return nil end
+E.gui.press(press.map)
+T.eq("nothing was taken", E.window.controls.crop_x.text, "1")
+T.eq("the crop is left alone", E.window.controls.crop.state, false)
+T.eq("and it says where to look",
+  E.window.message.text:find("Mission Editor", 1, true) ~= nil, true)
+
+-- The seam itself, with no DCS in the process: no net global, so nil.
+E.map_position = real_map
+T.eq("no net answers nothing", E.map_position(), nil)
 
 --------------------------------------------------------------------------------
 T.group("it refuses to close")
