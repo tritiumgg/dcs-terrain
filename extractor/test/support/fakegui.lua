@@ -169,12 +169,27 @@ function FakeGui.new()
     return gui.mode ~= "absent"
   end
 
+  -- The screen has edges, and a window can be dragged past them. Modelled
+  -- because a point off the edge is painted by nothing at all, which reads
+  -- exactly like a window whose screen has gone.
+  gui.screen_w, gui.screen_h = 2560, 1440
+
+  function gui.screen_size()
+    refuse("screen_size")
+    if gui.mode == "absent" then return nil end
+    return { w = gui.screen_w, h = gui.screen_h }
+  end
+
   -- The window drawn at a point: the newest one on the CURRENT screen whose
   -- bounds contain it. A window from an earlier screen is skipped however
   -- perfectly it still answers, which is the behaviour being modelled.
   function gui.root_at(x, y)
     refuse("root_at")
     if gui.mode == "absent" then return nil end
+    -- Off the edge nothing is painted, whatever a window's bounds say.
+    if x < 0 or y < 0 or x >= gui.screen_w or y >= gui.screen_h then
+      return nil
+    end
     for i = #gui.made, 1, -1 do
       local w = gui.made[i]
       if w.class == "Window" and w.screen == gui.screen and w.bounds then

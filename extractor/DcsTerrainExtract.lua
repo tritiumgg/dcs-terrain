@@ -2731,6 +2731,21 @@ function M.gui.can_probe()
     and type(lib.WidgetGetRoot) == "function"
 end
 
+-- How big the screen is, or nil where the library cannot say. Needed because a
+-- point outside it cannot be probed: nothing is painted off the edge, and a
+-- window dragged half out of view would otherwise read as one that is not there.
+function M.gui.screen_size()
+  local ok, lib = pcall(require, "dxgui")
+  if not ok or type(lib) ~= "table" or type(lib.GetScreenSize) ~= "function" then
+    return nil
+  end
+  local got, w, h = pcall(lib.GetScreenSize)
+  if got and type(w) == "number" and type(h) == "number" then
+    return { w = w, h = h }
+  end
+  return nil
+end
+
 -- The top-level window that owns whatever is painted at a screen point, or nil.
 --
 -- This is the only way to ask whether a window is on screen. getVisible answers
@@ -3215,11 +3230,18 @@ function M.build_window()
   local at = M.window.at or { x = WIN.x, y = WIN.y }
   M.ui_method(root, "setBounds", at.x, at.y, width, content)
   local view = client_of(root)
-  if view and view.w and view.h then
+  -- A measurement of nothing is not a measurement. Zero or negative would drive
+  -- a correction the size of the whole window, so it is left alone instead.
+  if view and (view.w or 0) > 0 and (view.h or 0) > 0 then
     local dw, dh = width - view.w, content - view.h
     if dw ~= 0 or dh ~= 0 then
       M.ui_method(root, "setBounds", at.x, at.y, width + dw, content + dh)
-      view = client_of(root) or view
+      -- What was asked for, where the second measurement fails -- never the
+      -- first one. The frame has already grown by the inset, so falling back to
+      -- the pre-correction reading would put an undersized panel inside a
+      -- correctly sized window and clip the bottom row all over again, one call
+      -- deeper than the bug this is here to fix.
+      view = client_of(root) or { w = width, h = content }
     end
   end
   -- No client rectangle is a widget library that does not answer it, which the
@@ -3465,6 +3487,16 @@ local function poll_drawn()
   end
   local px, py = probe_point()
   if px == nil then
+    return
+  end
+  -- A window dragged past the edge cannot be probed at all: nothing is painted
+  -- off the screen, so the point answers nothing whether the window is fine or
+  -- gone. Counting that as a miss would rebuild it at the same off-screen
+  -- position, fail the same probe, and do it again every two seconds for the
+  -- rest of the session -- leaking a window tree and stealing the keyboard each
+  -- time. A window nobody can see is left alone instead.
+  local screen = M.ui(M.gui.screen_size)
+  if screen and (px < 0 or py < 0 or px >= screen.w or py >= screen.h) then
     return
   end
   if M.ui(M.gui.root_at, px, py) == M.ui(M.gui.handle, M.window.root) then

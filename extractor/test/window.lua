@@ -482,12 +482,39 @@ ticks(moved, 1)
 T.eq("and the typed value survives the frame after",
   E.window.controls.output_dir.text, "C:/typed-by-hand")
 
+-- The status line and the bar are written only when they change, and a rebuilt
+-- window starts with neither cache. They come back because the frame writes them
+-- before it polls -- an ordering this pins, since nothing else would notice it
+-- being swapped.
+T.eq("the status line is filled in again",
+  E.window.status.text, E.window_status(moved))
+T.eq("and so is the bar", E.window.bar.value, E.window_progress(moved.state))
+
 -- Dragged, then the screen changes: it comes back where it was left.
 E.window.root.bounds = { 400, 300, E.window.root.bounds[3], E.window.root.bounds[4] }
 E.gui.change_screen()
 ticks(moved, E.WINDOW_POLL_FRAMES * 2)
 T.eq("rebuilt where it was dragged to", E.window.root.bounds[1], 400)
 T.eq("both axes", E.window.root.bounds[2], 300)
+
+-- Dragged off the edge, with the screen never changing. Nothing is painted off
+-- the screen, so the probe answers nothing whether the window is fine or gone --
+-- and rebuilding on that would put it back in the same off-screen place, fail
+-- the same probe, and do it again every couple of seconds for the session,
+-- leaking a window tree and taking the keyboard each time.
+local before_drag = E.window.rebuilds
+local orphans_before = #E.window.orphans
+E.window.root.bounds = { -600, -400, E.window.root.bounds[3], E.window.root.bounds[4] }
+ticks(moved, E.WINDOW_POLL_FRAMES * 6)
+T.eq("a window dragged off the edge is left alone", E.window.rebuilds, before_drag)
+T.eq("and no orphan was made", #E.window.orphans, orphans_before)
+
+-- Dragged back on, the screen change it missed is noticed as normal.
+E.window.root.bounds = { 400, 300, E.window.root.bounds[3], E.window.root.bounds[4] }
+E.gui.change_screen()
+ticks(moved, E.WINDOW_POLL_FRAMES * 2)
+T.eq("and it works again once it is back on screen",
+  E.window.rebuilds, before_drag + 1)
 
 -- What the window was saying comes back with it.
 E.gui.press(press.stop)

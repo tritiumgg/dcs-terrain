@@ -43,6 +43,13 @@ window. ED pairs exactly those two calls, at
 pointer back through a table keyed by pointer. Measured here: a pixel over a
 label returned that label's pointer.
 
+**The handles compare.** The whole mechanism rests on `==` between a handle
+`WidgetGetRoot` returns and the one the window's bind object holds, and Lua
+compares userdata by identity. Measured rather than assumed: the prototype's
+`root_at(point) == window.widget` answered true for a drawn window and false for
+an orphaned one, in the same session, so the library hands back the same handle
+across independent calls.
+
 **A rebuild loses nothing**, because an orphaned widget still returns its text.
 
 **The frame is not the client area.** `getViewBounds` on a window created at
@@ -78,6 +85,12 @@ latch. A root that is our window means it is drawn and the miss count resets. Tw
 **consecutive** misses mean it is not, and one miss alone is ignored, because
 another window sitting over the probe point is indistinguishable from a screen
 change on a single reading.
+
+A probe point outside the screen is not a reading and is not a miss. Nothing is
+painted off the edge, so a window dragged half out of view answers exactly like
+one whose screen has gone — and because a rebuild puts the window back where it
+was, acting on that would rebuild it off-screen, fail the same probe, and repeat
+every two seconds for the session. A window nobody can see is left alone.
 
 On the second miss the run reads every control's value off the orphaned widgets,
 keeps the old window in a list, builds a new one on the current screen through
