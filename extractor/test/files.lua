@@ -19,6 +19,19 @@ local FakeFs = require("fakefs")
 local new_fs = FakeFs.new
 
 --------------------------------------------------------------------------------
+T.group("the real seams answer nil with no lfs around them")
+--------------------------------------------------------------------------------
+
+-- Before the fake replaces them. These run in a plain interpreter, where the
+-- lfs global is absent, and a hook that raised here would take the GameGUI
+-- state down on a machine where the module has moved.
+local nodir, nodir_err = E.fs.dir("anywhere")
+T.eq("no directory listing", nodir, nil)
+T.eq("with a message", type(nodir_err), "string")
+T.eq("no current directory", E.fs.currentdir(), nil)
+T.eq("no modification time", E.fs.modified("anywhere"), nil)
+
+--------------------------------------------------------------------------------
 T.group("the fake is strict")
 --------------------------------------------------------------------------------
 
@@ -112,6 +125,69 @@ T.eq("saying what it expected", awhy:find("expected 4", 1, true) ~= nil, true)
 short.lose_bytes(0)
 T.eq("a later append succeeds", E.append_file("tiles.jsonl", "two\n"), true)
 T.eq("adding to what was there", E.read_file("tiles.jsonl"), "onetwo\n")
+
+--------------------------------------------------------------------------------
+T.group("a head is one counted read of the first bytes")
+--------------------------------------------------------------------------------
+
+local heads = new_fs()
+E.fs = heads
+heads.files["big.bin"] = string.rep("x", 100) .. "tail"
+
+-- The fake's handle honors the count, as a real one does. What the hook reads
+-- from a six gigabyte file is sixteen bytes, and a fake that answered every
+-- read with the whole file would let a read of "*a" pass for that.
+local h = heads.open("big.bin", "rb")
+T.eq("a counted read returns that many", #h:read(16), 16)
+T.eq("and the next continues after them", h:read(4), "xxxx")
+T.eq("the rest is the rest", #h:read("*a"), 84)
+T.eq("a counted read at the end is nil", h:read(1), nil)
+T.eq("the rest at the end is empty", h:read("*a"), "")
+
+T.eq("read_head takes the first bytes", E.read_head("big.bin", 16), string.rep("x", 16))
+T.eq("a short file gives what there is", E.read_head("big.bin", 1000), heads.files["big.bin"])
+heads.files["empty.bin"] = ""
+T.eq("an empty file gives an empty head", E.read_head("empty.bin", 16), "")
+local nohead, herr = E.read_head("absent.bin", 16)
+T.eq("an absent file is nil", nohead, nil)
+T.eq("with a message", type(herr), "string")
+T.eq("read_file still reads whole", E.read_file("big.bin"), heads.files["big.bin"])
+
+--------------------------------------------------------------------------------
+T.group("a directory lists its children")
+--------------------------------------------------------------------------------
+
+local tree = new_fs()
+E.fs = tree
+tree.mkdir("C:/DCS")
+tree.mkdir("C:/DCS/Mods")
+tree.mkdir("C:/DCS/Mods/terrains")
+tree.mkdir("C:/DCS/Mods/terrains/Sinai")
+tree.files["C:/DCS/Mods/terrains/Sinai/entry.lua"] = "x"
+tree.files["C:/DCS/Mods/terrains/Sinai/surface/SinaiMap.surface5"] = "x"
+tree.mkdir("C:/DCS/Mods/terrains/Caucasus")
+tree.files["C:/DCS/autoupdate.cfg"] = "{}"
+
+T.eq("children, sorted, files and directories alike",
+  table.concat(tree.dir("C:/DCS/Mods/terrains"), " "), "Caucasus Sinai")
+T.eq("one level only",
+  table.concat(tree.dir("C:/DCS/Mods/terrains/Sinai"), " "), "entry.lua surface")
+T.eq("a trailing slash is the same directory",
+  table.concat(tree.dir("C:/DCS/"), " "), "Mods autoupdate.cfg")
+T.eq("an empty directory is an empty list", #tree.dir("C:/DCS/Mods/terrains/Caucasus"), 0)
+local nowhere, derr = tree.dir("C:/DCS/Mods/nowhere")
+T.eq("not a directory is nil", nowhere, nil)
+T.eq("with a message", type(derr), "string")
+
+T.eq("no current directory until the test sets one", tree.currentdir(), nil)
+tree.cwd = "C:\\DCS"
+T.eq("then the one it set", tree.currentdir(), "C:\\DCS")
+
+T.eq("a file with no time set reads as zero", tree.modified("C:/DCS/autoupdate.cfg"), 0)
+tree.mtimes["C:/DCS/autoupdate.cfg"] = 1756800000
+T.eq("a set time is reported", tree.modified("C:/DCS/autoupdate.cfg"), 1756800000)
+T.eq("a directory has no time", tree.modified("C:/DCS/Mods"), nil)
+T.eq("nor does an absent file", tree.modified("C:/DCS/nothing"), nil)
 
 --------------------------------------------------------------------------------
 T.group("mkdir_p")

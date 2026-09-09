@@ -945,6 +945,54 @@ function M.fs.size(path)
   return lfs.attributes(path, "size")
 end
 
+-- When the file was last written, in whole seconds since the epoch, or nil
+-- where there is no file. Whole seconds because that is what lfs reports;
+-- anything comparing against it from outside has to truncate the same way.
+function M.fs.modified(path)
+  local lfs = rawget(_G, "lfs")
+  if not lfs then
+    return nil, "lfs is not available"
+  end
+  return lfs.attributes(path, "modification")
+end
+
+-- The directory DCS runs from, which is the install root. Discovered, never
+-- recorded: no install path belongs in this file.
+function M.fs.currentdir()
+  local lfs = rawget(_G, "lfs")
+  if not lfs or type(lfs.currentdir) ~= "function" then
+    return nil, "lfs is not available"
+  end
+  local ok, dir = pcall(lfs.currentdir)
+  if not ok or type(dir) ~= "string" or dir == "" then
+    return nil, "lfs.currentdir gave no directory"
+  end
+  return dir
+end
+
+-- The names in a directory, sorted, without the two dot entries, or nil and a
+-- message where there is no directory to list. lfs.dir raises on a path that
+-- is not one rather than returning nil, so the walk is under pcall.
+function M.fs.dir(path)
+  local lfs = rawget(_G, "lfs")
+  if not lfs or type(lfs.dir) ~= "function" then
+    return nil, "lfs is not available"
+  end
+  local names = {}
+  local ok, err = pcall(function()
+    for name in lfs.dir(path) do
+      if name ~= "." and name ~= ".." then
+        names[#names + 1] = name
+      end
+    end
+  end)
+  if not ok then
+    return nil, path .. ": " .. tostring(err)
+  end
+  sort(names)
+  return names
+end
+
 function M.join(dir, name)
   if dir == nil or dir == "" then
     return name
@@ -966,6 +1014,22 @@ function M.read_file(path)
     return nil, path .. ": read failed"
   end
   return data
+end
+
+-- The first n bytes of a file, fewer where the file is shorter, or nil and a
+-- message where it cannot be opened. The handles here have no seek, so a head
+-- is one counted read from a fresh handle and nothing else: the fingerprint
+-- wants sixteen bytes of a six gigabyte file, and this is how it gets them
+-- without reading the rest.
+function M.read_head(path, n)
+  local f, err = M.fs.open(path, "rb")
+  if not f then
+    return nil, err or (path .. ": cannot open")
+  end
+  local data = f:read(n)
+  f:close()
+  -- A counted read of an empty file is nil, and an empty head is not a failure.
+  return data or ""
 end
 
 -- Writes whole, then renames, so a reader never sees half a file.
