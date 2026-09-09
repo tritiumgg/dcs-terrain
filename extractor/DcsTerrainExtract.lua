@@ -971,12 +971,18 @@ function M.fs.currentdir()
 end
 
 -- The names in a directory, sorted, without the two dot entries, or nil and a
--- message where there is no directory to list. lfs.dir raises on a path that
--- is not one rather than returning nil, so the walk is under pcall.
+-- message where there is no directory to list. The mode is checked first
+-- because DCS's lfs.dir walks nothing for a missing directory, measured at the
+-- menu on 2.9.29.27468, where the standard library raises: without the check a
+-- missing directory and an empty one would read the same. The walk stays under
+-- pcall for the raising kind.
 function M.fs.dir(path)
   local lfs = rawget(_G, "lfs")
   if not lfs or type(lfs.dir) ~= "function" then
     return nil, "lfs is not available"
+  end
+  if lfs.attributes(path, "mode") ~= "directory" then
+    return nil, path .. ": not a directory"
   end
   local names = {}
   local ok, err = pcall(function()
