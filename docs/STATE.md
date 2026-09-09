@@ -4,21 +4,21 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-09T22:34Z
+**Last updated:** 2026-09-09T23:09Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **X2b: the run knows what it is extracting, and hashes nothing to find
-   out.** The first prepare job reads `dcs_build` off `autoupdate.cfg`, finds
-   `terrain_dir` by the shallowest id in an `entry.lua` (a directory without
-   one is skipped), and fingerprints the three data files by size, payload
-   field and modification time, each found by extension; the digest is the
-   newest time in hex. A step may return `M.REFUSED`, which stops the run
-   with the reason on it. ADRs **0021** and **0022**. *Verified by:* an agent,
-   offline; the parser read all eight installed ids. *Not yet observed:* DCS
-   was closed, so the `lfs` calls and the log lines wait for a Start on Caucasus, then Sinai.
+1. **X2b: the run knows what it is extracting, and the build is the terrain's
+   version.** The first prepare job reads `dcs_build` off `autoupdate.cfg`,
+   finds `terrain_dir` by the shallowest id in an `entry.lua` (a directory
+   without one is skipped), and records the three data files by path, size
+   and payload field, each found by extension; no hash, no time, no digest,
+   since terrain data ships only inside a DCS update. A step may return
+   `M.REFUSED`, which stops the run with the reason on it. ADRs **0022** and
+   **0023** (0021 superseded the same day). *Verified by:* an agent, offline and
+   through the bridge at the menu. *Not yet observed:* a Start in the editor on Caucasus, then Sinai.
 2. **X14: the window belongs in the editor, and says one thing at a time.**
    Skins read off `me_aircraft_group.dlg`, not the `_ME` family; 360 wide,
    centered; the crop block and the bar hide and the rows close up; one line
