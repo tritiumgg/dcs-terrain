@@ -1467,9 +1467,14 @@ end
 --
 -- A job is one sweep: a name, and a `start` that is called once, when the job
 -- first gets a frame, and returns the step function. The step returns M.MORE
--- while work remains and M.DONE when the sweep is finished; anything else
+-- while work remains, M.DONE when the sweep is finished, or M.REFUSED when the
+-- job cannot go on and has left the reason in run.refusal; anything else
 -- raises, because a step that returned nil by accident would otherwise read as
 -- "not finished" and the sweep would never end.
+--
+-- A refusal ends the frame at once, so no job later in the queue starts
+-- against work that did not happen. The queue only relays it: what a refusal
+-- does to the run is the state machine's business.
 --
 -- Splitting `start` from the step is what lets a job be built against the run
 -- it will sweep -- the grid, the skip set, the journal -- at the moment the
@@ -1482,6 +1487,7 @@ end
 
 M.MORE = "more"
 M.DONE = "done"
+M.REFUSED = "refused"
 
 function M.new_queue(jobs)
   if type(jobs) ~= "table" then
@@ -1521,6 +1527,9 @@ function M.queue_frame(queue, run, spent)
       end
     end
     local status = queue.step()
+    if status == M.REFUSED then
+      return M.REFUSED
+    end
     if status == M.DONE then
       queue.finished[#queue.finished + 1] = {
         name = job.name, ms = elapsed_ms(queue.started),
@@ -2594,6 +2603,19 @@ local function frame_pass(run)
 
   local status = M.queue_frame(run.queue, run, M.budget(run.budget_ms))
   record_finished(run)
+  -- A job that cannot go on has left its reason on the run, the same place the
+  -- crop check leaves one: the window shows it and the next Start clears it.
+  -- The finished jobs were recorded first, because stop drops the queue they
+  -- are reported in. A refusal with no reason is a bug in the job, and is
+  -- still reported rather than left as a run that stopped for nothing.
+  if status == M.REFUSED then
+    if run.refusal == nil then
+      run.refusal = "a job refused without saying why"
+    end
+    M.warn(run.refusal)
+    M.stop(run)
+    return M.STATE_STOPPED
+  end
   if status == M.MORE then
     return run.state
   end

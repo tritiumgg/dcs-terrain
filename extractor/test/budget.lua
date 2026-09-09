@@ -187,6 +187,39 @@ T.eq("reported in order",
   "beacons,radio,towns")
 
 --------------------------------------------------------------------------------
+T.group("a step can refuse, and the frame ends there")
+--------------------------------------------------------------------------------
+
+-- A job that finds it cannot go on says so through its status. The queue does
+-- not read the run -- it is handed nil here -- so what it proves is only that
+-- the frame ends at the refusal and no later job is started against work that
+-- did not happen.
+local function refusing(name, order)
+  return {
+    name = name,
+    start = function()
+      order[#order + 1] = name
+      return function()
+        advance_ms(1)
+        return E.REFUSED
+      end
+    end,
+  }
+end
+
+order = {}
+queue = E.new_queue({
+  counted("build", 1, 1, order),
+  refusing("terrain", order),
+  counted("water", 1, 1, order),
+})
+T.eq("the frame reports the refusal", E.queue_frame(queue, nil, E.budget(5)), E.REFUSED)
+T.eq("the job before it finished", #queue.finished, 1)
+T.eq("and is the one reported", queue.finished[1].name, "build")
+T.eq("the job after it never started", order[3], nil)
+T.eq("two jobs started", #order, 2)
+
+--------------------------------------------------------------------------------
 T.group("an empty queue is done")
 --------------------------------------------------------------------------------
 

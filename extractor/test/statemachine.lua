@@ -555,4 +555,69 @@ E.run_frame(run)
 local written = E.decode(run.fs.files["C:/elsewhere/manifest.json"])
 T.eq("the manifest it does get is the new run's", #written.tiles, 0)
 
+--------------------------------------------------------------------------------
+T.group("a job that refuses stops the run with the reason on it")
+--------------------------------------------------------------------------------
+
+-- What a prepare job does when the install does not hold what it needs: the
+-- reason goes on the run, where the crop check already leaves one, so the
+-- window shows it and the log records it, and the run stops before anything
+-- is written.
+local function refusing(name, reason)
+  return {
+    name = name,
+    start = function(r)
+      return function()
+        r.refusal = reason
+        return E.REFUSED
+      end
+    end,
+  }
+end
+
+logged = {}
+run = new_stopped_run({
+  jobs = {
+    prepare = {
+      job("build", 1),
+      refusing("terrain", "no theatre under Mods/terrains has id Nowhere: scanned Caucasus=Caucasus"),
+    },
+    hook = { job("water", 1) },
+    mission = {},
+  },
+})
+E.start(run)
+until_past(run, E.STATE_IDLE, 5)
+T.eq("prepare was entered", run.state, E.STATE_PREPARE)
+T.eq("the refusing frame stops the run", E.run_frame(run), E.STATE_STOPPED)
+T.eq("and the run agrees", run.state, E.STATE_STOPPED)
+T.eq("the reason is on the run",
+  run.refusal, "no theatre under Mods/terrains has id Nowhere: scanned Caucasus=Caucasus")
+T.eq("and in the log", logged[#logged - 1], run.refusal)
+T.eq("followed by the stop", logged[#logged], "phase stopped")
+T.eq("nothing was written", next(run.fs.files), nil)
+
+-- The job before it finished in the same frame, and its time is not lost to
+-- the stop: the finished list is read before the queue goes.
+T.eq("the job before it is timed", run.timing_ms.build, 1)
+T.eq("the refusing job is not", run.timing_ms.terrain, nil)
+
+-- The next press is a new attempt, and the reason belonged to the old one.
+T.eq("Start is accepted again", E.start(run), true)
+T.eq("and clears the reason", run.refusal, nil)
+
+-- A step that refuses and says nothing is a bug in the job, and the run still
+-- stops with a line saying so rather than for no visible reason.
+run = new_stopped_run({
+  jobs = {
+    prepare = { { name = "mute", start = function() return function() return E.REFUSED end end } },
+    hook = {},
+    mission = {},
+  },
+})
+E.start(run)
+until_past(run, E.STATE_IDLE, 5)
+T.eq("a mute refusal still stops the run", E.run_frame(run), E.STATE_STOPPED)
+T.eq("and says so", run.refusal, "a job refused without saying why")
+
 T.done()
