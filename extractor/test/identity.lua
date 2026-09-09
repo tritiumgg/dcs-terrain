@@ -132,8 +132,18 @@ T.eq("double-quoted key", E.entry_id('["id"] = "Syria",'), "Syria")
 T.eq("single-quoted value", E.entry_id("['id'] = 'Kola';"), "Kola")
 T.eq("spaces inside the brackets", E.entry_id("[ 'id' ]  =  \"Nevada\""), "Nevada")
 T.eq("a bare assignment as a last resort", E.entry_id("theatre = {\n  id = \"Falklands\",\n}"), "Falklands")
-T.eq("a bracketed key wins over a bare one",
+T.eq("a bracketed key wins over a bare one at the same depth",
   E.entry_id("skins = { id = \"Theme\" }\n['id'] = \"Afghanistan\";"), "Afghanistan")
+
+-- A skin or a node table can carry an id of its own, bracketed like the
+-- theatre's and written before it. The theatre's is the shallower one.
+T.eq("the shallowest id wins over an earlier nested one",
+  E.entry_id("theatre =\n{\n\t['Skins'] = {\n\t\t{ ['id'] = \"Theme\", dir = \"x\" },\n\t};\n\t['id'] = \"Afghanistan\";\n}"),
+  "Afghanistan")
+T.eq("even when the nested one is bare and the theatre's comes last",
+  E.entry_id("theatre = {\n  nodes = { { id = \"n1\" } },\n  id = \"Kola\",\n}"), "Kola")
+T.eq("and a nested id alone is still an id",
+  E.entry_id("theatre = { skins = { { ['id'] = \"Theme\" } } }"), "Theme")
 T.eq("an empty id is none", E.entry_id("['id'] = \"\";"), nil)
 T.eq("no id is none", E.entry_id("theatre = {}"), nil)
 T.eq("not a string is none", E.entry_id(nil), nil)

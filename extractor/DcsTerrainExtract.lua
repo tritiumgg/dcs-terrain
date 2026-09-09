@@ -2826,9 +2826,11 @@ function M.read_build(install)
 end
 
 -- The id an entry.lua declares. ED writes `['id'] = "SinaiMap";` inside the
--- theatre table. The bracketed forms are tried first and a bare `id = "..."`
--- only after them, so an `update_id` or a nested table's key cannot be taken
--- for it. nil where the file declares none.
+-- theatre table, one brace deep. Of every assignment to an `id` key in the
+-- file, the shallowest wins, so a skin or a node table carrying its own `id`
+-- further in cannot be taken for the theatre's; at equal depth the bracketed
+-- forms beat a bare `id = "..."`, and the frontier keeps `update_id` out of
+-- the bare form. nil where the file declares none.
 local ID_PATTERNS = {
   "%[%s*'id'%s*%]%s*=%s*\"([^\"]*)\"",
   "%[%s*\"id\"%s*%]%s*=%s*\"([^\"]*)\"",
@@ -2838,17 +2840,37 @@ local ID_PATTERNS = {
   "%f[%w_]id%s*=%s*'([^']*)'",
 }
 
+-- Braces opened and not closed before position `at`. Braces inside strings
+-- and comments count too, which is wrong in general and right for entry.lua,
+-- where the strings are names and paths.
+local function brace_depth(text, at)
+  local _, opened = text:sub(1, at - 1):gsub("{", "")
+  local _, closed = text:sub(1, at - 1):gsub("}", "")
+  return opened - closed
+end
+
 function M.entry_id(text)
   if type(text) ~= "string" then
     return nil
   end
+  local best, best_depth
   for i = 1, #ID_PATTERNS do
-    local id = text:match(ID_PATTERNS[i])
-    if id ~= nil and id ~= "" then
-      return id
+    local init = 1
+    while true do
+      local from, to, id = text:find(ID_PATTERNS[i], init)
+      if not from then
+        break
+      end
+      if id ~= "" then
+        local depth = brace_depth(text, from)
+        if best == nil or depth < best_depth then
+          best, best_depth = id, depth
+        end
+      end
+      init = to + 1
     end
   end
-  return nil
+  return best
 end
 
 -- The directory under Mods/terrains whose entry.lua declares `id`. A directory
