@@ -945,17 +945,6 @@ function M.fs.size(path)
   return lfs.attributes(path, "size")
 end
 
--- When the file was last written, in whole seconds since the epoch, or nil
--- where there is no file. Whole seconds because that is what lfs reports;
--- anything comparing against it from outside has to truncate the same way.
-function M.fs.modified(path)
-  local lfs = rawget(_G, "lfs")
-  if not lfs then
-    return nil, "lfs is not available"
-  end
-  return lfs.attributes(path, "modification")
-end
-
 -- The directory DCS runs from, which is the install root. Discovered, never
 -- recorded: no install path belongs in this file.
 function M.fs.currentdir()
@@ -2766,13 +2755,13 @@ end
 -- under the install, and a fingerprint of the three terrain data files. All of
 -- it is read from the install and none of it from the user (ADR 0011).
 --
--- The fingerprint is sizes and modification times, not a hash (ADR 0021). It
--- has to change when ED rebuilds a terrain, and nothing else is asked of it: a
--- rebuilt file is a new file, with a new payload field and a new time. Hashing
--- three files inside DCS's Lua, which has no bit library, would have cost
--- minutes of frame time on every Start for a label nobody is attacking. The
--- price is that a repair or reinstall re-stamps the files and refuses a resume
--- of an extract that was fine.
+-- The fingerprint is a record of the three files -- where each was, how big,
+-- and what its container said it held -- and not a version (ADR 0023). The
+-- version of a theatre's data is the DCS build: ED ships terrain data only
+-- inside a DCS update, and every update carries a new build string, so a
+-- resume keys on the build and the fingerprint only catches an install that
+-- is damaged or incomplete. Nothing is hashed, and no time is recorded: a
+-- repair or reinstall leaves the record as it was.
 --
 -- Every function here returns its value, or nil and one message with the
 -- finding before the colon, because the message ends up on the run as a
@@ -2973,35 +2962,13 @@ function M.u64le(s, pos)
   return value
 end
 
--- Eight lowercase hex digits of a whole number below 2^32, by arithmetic:
--- string.format("%x") on this Lua goes through a 32-bit long, and the digest
--- has to stay right for a modification time past 2038.
-local HEX_DIGITS = "0123456789abcdef"
-
-function M.hex32(n)
-  if not is_finite(n) or n < 0 or n >= 4294967296 or floor(n) ~= n then
-    error("hex32: not a whole number below 2^32: " .. tostring(n), 2)
-  end
-  local out = {}
-  for i = 8, 1, -1 do
-    local d = n % 16
-    out[i] = HEX_DIGITS:sub(d + 1, d + 1)
-    n = (n - d) / 16
-  end
-  return concat(out)
-end
-
--- One file's entry in the fingerprint: its size and time from the file system,
--- and the container's own payload size from a sixteen-byte read of its head.
+-- One file's entry in the fingerprint: its size from the file system and the
+-- container's own payload size from a sixteen-byte read of its head.
 function M.fingerprint_file(install, relpath)
   local path = M.join(install, relpath)
   local size = M.fs.size(path)
   if not is_finite(size) then
     return nil, relpath .. " has no size: " .. tostring(size)
-  end
-  local modified = M.fs.modified(path)
-  if not is_finite(modified) then
-    return nil, relpath .. " has no modification time: " .. tostring(modified)
   end
   local head, err = M.read_head(path, M.HEAD_BYTES)
   if not head then
@@ -3011,28 +2978,11 @@ function M.fingerprint_file(install, relpath)
   if payload == nil then
     return nil, format("%s has no container header: %d bytes read", relpath, #head)
   end
-  return { path = relpath, size = size, payload_size = payload, modified = floor(modified) }
+  return { path = relpath, size = size, payload_size = payload }
 end
 
--- The short id that file names carry: the newest of the three modification
--- times as eight hex digits. It moves whenever any of the three files is
--- rebuilt, and it is a time a reader can decode rather than a code they cannot.
-function M.fingerprint_digest(fingerprint)
-  local newest
-  for i = 1, #M.FINGERPRINT_FILES do
-    local key = M.FINGERPRINT_FILES[i].key
-    local entry = fingerprint[key]
-    if type(entry) ~= "table" or not is_finite(entry.modified) then
-      error("fingerprint_digest: " .. key .. " has no modification time", 2)
-    end
-    if newest == nil or entry.modified > newest then
-      newest = entry.modified
-    end
-  end
-  return M.hex32(newest)
-end
-
--- The whole fingerprint of a theatre directory, as the manifest records it.
+-- The whole fingerprint of a theatre directory, as the manifest records it:
+-- one entry per file and nothing else.
 function M.terrain_fingerprint(install, dir)
   local fingerprint = {}
   for i = 1, #M.FINGERPRINT_FILES do
@@ -3047,7 +2997,6 @@ function M.terrain_fingerprint(install, dir)
     end
     fingerprint[file.key] = entry
   end
-  fingerprint.digest = M.fingerprint_digest(fingerprint)
   return fingerprint
 end
 
@@ -3102,10 +3051,9 @@ M.identity_job = {
     for i = 1, #M.FINGERPRINT_FILES do
       local key = M.FINGERPRINT_FILES[i].key
       local entry = fingerprint[key]
-      M.log(format("%s %s size %s payload %s modified %s", key, entry.path,
-        tostring(entry.size), tostring(entry.payload_size), tostring(entry.modified)))
+      M.log(format("%s %s size %s payload %s", key, entry.path,
+        tostring(entry.size), tostring(entry.payload_size)))
     end
-    M.log("terrain_fingerprint " .. fingerprint.digest)
 
     return function()
       return M.DONE

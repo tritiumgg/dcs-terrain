@@ -52,7 +52,7 @@ local function open_output(run)
     theatre = "Caucasus",
     dcs_build = "2.9.29.27468",
     dcs_build_timestamp = "20250101-120000",
-    terrain_fingerprint = { digest = "6553f102" },
+    terrain_fingerprint = { surface5 = { size = 4194304 } },
     bounds_km = { sw = { -30, -45 }, ne = { 40, 25 } },
     grid = grid,
     omit_sea_tiles = true,

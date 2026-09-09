@@ -62,9 +62,6 @@ local function new_install()
   fs.files[sinai .. "/roads/SinaiMap.rn4"] = header(200) .. string.rep("r", 184)
   fs.files[sinai .. "/roads/SinaiMap.routes"] = "x"
   fs.files[sinai .. "/Scenes/SinaiMap.scn5"] = header(11888248) .. string.rep("c", 100)
-  fs.mtimes[sinai .. "/surface/SinaiMap.surface5"] = 1756800001
-  fs.mtimes[sinai .. "/roads/SinaiMap.rn4"] = 1756800003
-  fs.mtimes[sinai .. "/Scenes/SinaiMap.scn5"] = 1756800002
 
   -- Cold War Germany: id GermanyCW, files named after the directory.
   local germany = TERRAINS .. "/GermanyColdWar"
@@ -225,19 +222,7 @@ T.eq("the largest exact value", E.u64le(header(9007199254740991), 9), 9007199254
 T.eq("past exactness is nil", E.u64le(header(9007199254740992), 9), nil)
 
 --------------------------------------------------------------------------------
-T.group("eight hex digits by arithmetic")
---------------------------------------------------------------------------------
-
-T.eq("zero", E.hex32(0), "00000000")
-T.eq("a time", E.hex32(1700000002), "6553f102")
-T.eq("past the signed range", E.hex32(2147483648), "80000000")
-T.eq("the largest", E.hex32(4294967295), "ffffffff")
-T.raises("too large", function() E.hex32(4294967296) end, "not a whole number below 2^32")
-T.raises("negative", function() E.hex32(-1) end, "not a whole number below 2^32")
-T.raises("fractional", function() E.hex32(1.5) end, "not a whole number below 2^32")
-
---------------------------------------------------------------------------------
-T.group("a file's fingerprint is its size, its payload field and its time")
+T.group("a file's fingerprint is its size and its payload field")
 --------------------------------------------------------------------------------
 
 fs = new_install()
@@ -247,9 +232,9 @@ local surface = E.fingerprint_file(INSTALL, "Mods/terrains/Sinai/surface/SinaiMa
 T.eq("path as given", surface.path, "Mods/terrains/Sinai/surface/SinaiMap.surface5")
 T.eq("size from the file system", surface.size, 316)
 T.eq("payload from the header", surface.payload_size, 43964216)
-T.eq("time from the file system", surface.modified, 1756800001)
-T.eq("four keys and no more", E.json(surface),
-  '{"modified":1756800001,"path":"Mods/terrains/Sinai/surface/SinaiMap.surface5","payload_size":43964216,"size":316}')
+-- No time: a repair or reinstall of the same build must read the same.
+T.eq("three keys and no more", E.json(surface),
+  '{"path":"Mods/terrains/Sinai/surface/SinaiMap.surface5","payload_size":43964216,"size":316}')
 
 fs.files[TERRAINS .. "/Sinai/surface/short.surface5"] = "ten bytes."
 T.eq("a file too short for a header is refused",
@@ -258,7 +243,7 @@ T.eq("an absent file is refused",
   refused(E.fingerprint_file(INSTALL, "Mods/terrains/Sinai/surface/gone.surface5")):find("has no size", 1, true) ~= nil, true)
 
 --------------------------------------------------------------------------------
-T.group("the theatre's fingerprint and its digest")
+T.group("the theatre's fingerprint is one entry per file")
 --------------------------------------------------------------------------------
 
 fs = new_install()
@@ -271,29 +256,12 @@ T.eq("rn4 payload", fingerprint.rn4.payload_size, 200)
 T.eq("scn5", fingerprint.scn5.path, "Mods/terrains/Sinai/Scenes/SinaiMap.scn5")
 T.eq("scn5 size", fingerprint.scn5.size, 116)
 
--- The newest of the three times, which is the roads file here, in hex.
-T.eq("the digest is the newest time", fingerprint.digest, E.hex32(1756800003))
-T.eq("as eight hex digits", fingerprint.digest, "68b6a403")
-T.eq("the digest alone",
-  E.fingerprint_digest({ surface5 = { modified = 5 }, rn4 = { modified = 9 }, scn5 = { modified = 7 } }),
-  "00000009")
-T.raises("a file without a time cannot be digested",
-  function() E.fingerprint_digest({ surface5 = { modified = 5 }, rn4 = {}, scn5 = { modified = 7 } }) end,
-  "rn4 has no modification time")
-
--- Encoded, so a resume compares the same string run to run.
-T.eq("four keys, sorted", E.json(fingerprint):sub(1, 20), '{"digest":"68b6a403"')
-
--- The synthetic theatre's constants, which the Rust side holds a twin of,
--- follow the same rule: the digest there is the one this function gives.
-local S = require("synth_constants")
-T.eq("the synth digest follows the rule",
-  E.fingerprint_digest({
-    surface5 = { modified = S.FINGERPRINT_SURFACE5_MODIFIED },
-    rn4 = { modified = S.FINGERPRINT_RN4_MODIFIED },
-    scn5 = { modified = S.FINGERPRINT_SCN5_MODIFIED },
-  }),
-  S.FINGERPRINT_DIGEST)
+-- Encoded, so a resume compares the same string run to run. The three
+-- entries and nothing else: no time and no digest, because the theatre's
+-- data version is the DCS build, and the fingerprint only has to catch an
+-- install that is damaged or incomplete.
+T.eq("three keys, sorted, and no digest", E.json(fingerprint):sub(1, 8), '{"rn4":{')
+T.eq("nothing else", fingerprint.digest, nil)
 
 fs.files[TERRAINS .. "/Sinai/Scenes/SinaiMap.scn5"] = nil
 fs.files[TERRAINS .. "/Sinai/Scenes/readme.txt"] = "x"
@@ -343,7 +311,6 @@ T.eq("theatre from idle", run.identity.theatre, "SinaiMap")
 T.eq("build", run.identity.dcs_build, "2.9.29.27468")
 T.eq("timestamp", run.identity.dcs_build_timestamp, "20260902-093323")
 T.eq("directory", run.identity.terrain_dir, "Sinai")
-T.eq("digest", run.identity.terrain_fingerprint.digest, "68b6a403")
 T.eq("a file entry", run.identity.terrain_fingerprint.surface5.path,
   "Mods/terrains/Sinai/surface/SinaiMap.surface5")
 T.eq("the job is timed", run.timing_ms.identity ~= nil, true)
@@ -354,9 +321,8 @@ T.eq("install logged", has("install C:/DCS"), true)
 T.eq("build logged", has("dcs_build 2.9.29.27468 20260902-093323"), true)
 T.eq("directory logged", has("terrain_dir Sinai"), true)
 T.eq("each file logged",
-  has("surface5 Mods/terrains/Sinai/surface/SinaiMap.surface5 size 316 payload 43964216 modified 1756800001"), true)
-T.eq("roads too", has("rn4 Mods/terrains/Sinai/roads/SinaiMap.rn4 size 200 payload 200 modified 1756800003"), true)
-T.eq("digest logged", has("terrain_fingerprint 68b6a403"), true)
+  has("surface5 Mods/terrains/Sinai/surface/SinaiMap.surface5 size 316 payload 43964216"), true)
+T.eq("roads too", has("rn4 Mods/terrains/Sinai/roads/SinaiMap.rn4 size 200 payload 200"), true)
 
 --------------------------------------------------------------------------------
 T.group("the identity job refuses what it cannot read")

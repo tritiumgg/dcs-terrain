@@ -23,7 +23,7 @@ local function opts(edit)
     theatre = "Synth",
     dcs_build = "0.0.0.0",
     dcs_build_timestamp = "00000000-000000",
-    terrain_fingerprint = { digest = "6553f102", surface5 = { size = 4194304 } },
+    terrain_fingerprint = { surface5 = { size = 4194304 } },
     bounds_km = { sw = { -30, -45 }, ne = { 40, 25 } },
     grid = grid,
     omit_sea_tiles = true,
@@ -118,10 +118,10 @@ T.eq("another build timestamp", refusal({ dcs_build_timestamp = "20260902-093323
 T.eq("omit_sea_tiles flipped", refusal({ omit_sea_tiles = false }),
   "omit_sea_tiles was true, now false")
 
--- The fingerprint is the one that catches a terrain rebuilt under an unchanged
--- DCS build, which is what makes re-running the pre-sweep unnecessary.
-T.eq("a rebuilt terrain",
-  refusal({ terrain_fingerprint = { digest = "deadbeef", surface5 = { size = 4194304 } } })
+-- The build is the terrain's version; the fingerprint catches an install whose
+-- files are not the ones the extract was read from, damaged or incomplete.
+T.eq("a different data file",
+  refusal({ terrain_fingerprint = { surface5 = { size = 4194303 } } })
     :find("terrain_fingerprint was", 1, true) ~= nil, true)
 
 -- Two problems at once are both reported, so one pass of the log names

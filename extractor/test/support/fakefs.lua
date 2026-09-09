@@ -164,18 +164,6 @@ function FakeFs.new()
     return fs.cwd
   end
 
-  -- Modification times in seconds, set by the test per path. A file with no
-  -- entry reads as written at zero rather than as absent, so a test sets only
-  -- the times it asserts on.
-  fs.mtimes = {}
-  function fs.modified(path)
-    local data = files[path]
-    if data == nil or data == DIR then
-      return nil
-    end
-    return fs.mtimes[path] or 0
-  end
-
   return fs
 end
 

@@ -58,12 +58,10 @@ M.FILL_HEIGHT_M = 5.000005
 M.FILL_WATER = 0
 M.FILL_SEABED_M = 0.0
 
--- Theatre identity, as the manifest records it. A file's fingerprint is its
--- size, the payload size its container header carries, and its modification
--- time in whole seconds since the epoch; nothing is hashed (ADR 0021). The
--- digest is the newest of the three times as eight lowercase hex digits. The
--- three times are distinct and the newest is not the first, so a digest taken
--- from the wrong file fails.
+-- Theatre identity, as the manifest records it. The data version of a theatre
+-- is the DCS build, so the fingerprint is a record of the three files and not
+-- a version: each file's path, its size, and the payload size its container
+-- header carries. Nothing is hashed and no time is recorded (ADR 0023).
 
 M.THEATRE = "Synth"
 M.EXTRACTOR_VERSION = "0.1.0"
@@ -73,16 +71,12 @@ M.DCS_BUILD_TIMESTAMP = "00000000-000000"
 M.FINGERPRINT_SURFACE5_PATH = "Mods/terrains/Synth/Surface/Synth.surface5"
 M.FINGERPRINT_SURFACE5_SIZE = 4194304
 M.FINGERPRINT_SURFACE5_PAYLOAD_SIZE = 1048576
-M.FINGERPRINT_SURFACE5_MODIFIED = 1700000000
 M.FINGERPRINT_RN4_PATH = "Mods/terrains/Synth/roads/Synth.rn4"
 M.FINGERPRINT_RN4_SIZE = 2097152
 M.FINGERPRINT_RN4_PAYLOAD_SIZE = 2097152
-M.FINGERPRINT_RN4_MODIFIED = 1700000002
 M.FINGERPRINT_SCN5_PATH = "Mods/terrains/Synth/Scenes/Synth.scn5"
 M.FINGERPRINT_SCN5_SIZE = 3145728
 M.FINGERPRINT_SCN5_PAYLOAD_SIZE = 524288
-M.FINGERPRINT_SCN5_MODIFIED = 1700000001
-M.FINGERPRINT_DIGEST = "6553f102"
 
 -- Grid. The authored rectangle is inset a quarter cell from the grid on every
 -- side, so snapping it outward to a multiple of CELL_SIZE_M reproduces the

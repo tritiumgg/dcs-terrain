@@ -29,7 +29,6 @@ local nodir, nodir_err = E.fs.dir("anywhere")
 T.eq("no directory listing", nodir, nil)
 T.eq("with a message", type(nodir_err), "string")
 T.eq("no current directory", E.fs.currentdir(), nil)
-T.eq("no modification time", E.fs.modified("anywhere"), nil)
 
 --------------------------------------------------------------------------------
 T.group("the fake is strict")
@@ -182,12 +181,6 @@ T.eq("with a message", type(derr), "string")
 T.eq("no current directory until the test sets one", tree.currentdir(), nil)
 tree.cwd = "C:\\DCS"
 T.eq("then the one it set", tree.currentdir(), "C:\\DCS")
-
-T.eq("a file with no time set reads as zero", tree.modified("C:/DCS/autoupdate.cfg"), 0)
-tree.mtimes["C:/DCS/autoupdate.cfg"] = 1756800000
-T.eq("a set time is reported", tree.modified("C:/DCS/autoupdate.cfg"), 1756800000)
-T.eq("a directory has no time", tree.modified("C:/DCS/Mods"), nil)
-T.eq("nor does an absent file", tree.modified("C:/DCS/nothing"), nil)
 
 --------------------------------------------------------------------------------
 T.group("mkdir_p")
