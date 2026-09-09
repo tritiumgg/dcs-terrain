@@ -23,9 +23,13 @@ without `seek`.
   under a 1 km radius or where its box reaches outside the map (ADR 0019).
   Start re-points the run at
   whatever the boxes now say (ADR 0017), and the window is raised above DCS's
-  own chrome so it stays on screen (ADR 0018). *The sweeps that fill an
-  extract are not built yet, so a run reaches `done` in a few frames and
-  writes nothing.*
+  own chrome so it stays on screen (ADR 0018). Prepare reads the DCS build
+  from the install, finds the theatre's directory under `Mods/terrains` by
+  the id it declares, and fingerprints its three data files by size, payload
+  size and modification time, nothing hashed (ADR 0021, ADR 0022); an install
+  that does not hold them stops the run with the reason on the window. *The
+  sweeps that fill an extract are not built yet, so a run then reaches `done`
+  in a few frames and writes nothing.*
   A run writes `Logs/DcsTerrainExtract.log` in the same Saved Games folder, one
   line per tile and per phase change, appended across runs and never rotated;
   `dcs.log` gets a phase change at `INFO` and anything to act on at `WARNING`.

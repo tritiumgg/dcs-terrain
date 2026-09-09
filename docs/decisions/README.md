@@ -32,6 +32,8 @@ disagree, the later accepted one wins, and the earlier is marked
 | [0018](0018-the-window-is-raised-above-dcs-chrome.md) | Accepted | 2026-09-08 | The window is raised above DCS's own chrome | `plan.md` X13, X14 |
 | [0019](0019-a-crop-is-refused-under-a-kilometer-and-outside-the-map.md) | Accepted | 2026-09-08 | A crop is refused under a kilometer of radius and outside the map | `extractor-hook.md` "Config table"; ADR 0011's crop; `plan.md` X10, X13, X14 |
 | [0020](0020-the-output-directory-is-an-absolute-path-on-a-drive-that-exists.md) | Accepted | 2026-09-08 | The output directory is an absolute path on a drive that exists | `extractor-hook.md` "Config table"; ADR 0012; `plan.md` X10, X13, X14 |
+| [0021](0021-the-terrain-fingerprint-is-sizes-and-times-not-a-hash.md) | Accepted | 2026-09-09 | The terrain fingerprint records sizes and modification times, not a hash | `extract-format.md` "manifest.json"; `extractor-hook.md` "Hook-pass sweeps"; `design-and-facts.md` "Design decisions"; ADR 0007's digest clause; `plan.md` X2b, C3, C12c |
+| [0022](0022-fingerprint-files-are-found-by-extension.md) | Accepted | 2026-09-09 | Fingerprint files are found by extension, and a directory without `entry.lua` is not a theatre | `extract-format.md` "manifest.json"; ADR 0011's provisional paragraph; `plan.md` X2b |
 
 Add a row when you add an ADR. This table is the index Claude reads, so an ADR
 missing from it will not be found. Each record's own `Affects` line, at the top
