@@ -290,4 +290,117 @@ fs.files[TERRAINS .. "/Sinai/Scenes/readme.txt"] = "x"
 T.eq("a missing file refuses the whole fingerprint",
   refused(E.terrain_fingerprint(INSTALL, "Sinai")):find("no .scn5 file under Mods/terrains/Sinai/Scenes", 1, true) ~= nil, true)
 
+--------------------------------------------------------------------------------
+T.group("the identity job fills the run and says what it found")
+--------------------------------------------------------------------------------
+
+T.eq("it is the first prepare job", E.jobs.prepare[1], E.identity_job)
+
+local logged = {}
+E.log = function(message) logged[#logged + 1] = message end
+E.now_iso = function() return "2026-09-04T09:12:44Z" end
+E.clock = function() return 0 end
+-- The editor is open on Sinai, whose id is not its directory name.
+E.terrain_id = function() return "SinaiMap" end
+
+local function has(line)
+  for i = 1, #logged do
+    if logged[i] == line then
+      return true
+    end
+  end
+  return false
+end
+
+local function run_with(install)
+  E.fs = install
+  local run = E.new_run({
+    config = { output_dir = "C:/extract", frame_budget_ms = 5 },
+    jobs = { prepare = { E.identity_job }, hook = {}, mission = {} },
+  })
+  E.start(run)
+  -- Idle polls for terrain on its first frame and enters prepare; the next
+  -- frame is prepare's.
+  E.run_frame(run)
+  T.eq("prepare entered", run.state, E.STATE_PREPARE)
+  return run, E.run_frame(run)
+end
+
+fs = new_install()
+local run, after = run_with(fs)
+T.eq("prepare is one frame", after, E.STATE_HOOK)
+T.eq("theatre from idle", run.identity.theatre, "SinaiMap")
+T.eq("build", run.identity.dcs_build, "2.9.29.27468")
+T.eq("timestamp", run.identity.dcs_build_timestamp, "20260902-093323")
+T.eq("directory", run.identity.terrain_dir, "Sinai")
+T.eq("digest", run.identity.terrain_fingerprint.digest, "68b6a403")
+T.eq("a file entry", run.identity.terrain_fingerprint.surface5.path,
+  "Mods/terrains/Sinai/surface/SinaiMap.surface5")
+T.eq("the job is timed", run.timing_ms.identity ~= nil, true)
+T.eq("nothing was written", fs.files["C:/extract/manifest.json"], nil)
+
+-- One line per fact, each checkable against the install by hand.
+T.eq("install logged", has("install C:/DCS"), true)
+T.eq("build logged", has("dcs_build 2.9.29.27468 20260902-093323"), true)
+T.eq("directory logged", has("terrain_dir Sinai"), true)
+T.eq("each file logged",
+  has("surface5 Mods/terrains/Sinai/surface/SinaiMap.surface5 size 316 payload 43964216 modified 1756800001"), true)
+T.eq("roads too", has("rn4 Mods/terrains/Sinai/roads/SinaiMap.rn4 size 200 payload 200 modified 1756800003"), true)
+T.eq("digest logged", has("terrain_fingerprint 68b6a403"), true)
+
+--------------------------------------------------------------------------------
+T.group("the identity job refuses what it cannot read")
+--------------------------------------------------------------------------------
+
+local function refuses(install, finding)
+  logged = {}
+  local r, state = run_with(install)
+  T.eq("the run stops", state, E.STATE_STOPPED)
+  T.eq("the finding is on the run", r.refusal:sub(1, #finding), finding)
+  T.eq("and in the log", has(r.refusal), true)
+  T.eq("the identity is not half described", r.identity.dcs_build, nil)
+  return r
+end
+
+-- The theatre DCS has open is not installed under Mods/terrains.
+E.terrain_id = function() return "Nowhere" end
+local stopped = refuses(new_install(), "no theatre under Mods/terrains has id Nowhere")
+T.eq("the window gets the finding",
+  E.problem_for_screen(stopped.refusal), "no theatre under Mods/terrains has id Nowhere.")
+E.terrain_id = function() return "SinaiMap" end
+
+fs = new_install()
+fs.files[INSTALL .. "/autoupdate.cfg"] = nil
+refuses(fs, "autoupdate.cfg cannot be read")
+
+fs = new_install()
+fs.cwd = nil
+refuses(fs, "the install directory is unknown")
+
+fs = new_install()
+fs.files[TERRAINS .. "/Sinai/roads/Other.rn4"] = "x"
+refuses(fs, "2 .rn4 files under Mods/terrains/Sinai/roads")
+
+-- Prepare entered with no theatre on the run, which no frame does but a
+-- caller of enter could: a refusal, not a raise into DCS.
+fs = new_install()
+E.fs = fs
+local bare = E.new_run({
+  config = { output_dir = "C:/extract", frame_budget_ms = 5 },
+  jobs = { prepare = { E.identity_job }, hook = {}, mission = {} },
+})
+E.enter(bare, E.STATE_PREPARE)
+T.eq("no theatre is a refusal", E.run_frame(bare), E.STATE_STOPPED)
+T.eq("saying so", bare.refusal:sub(1, 26), "no theatre id to look for:")
+
+-- The next Start is a new attempt against whatever the install holds now.
+fs = new_install()
+fs.files[INSTALL .. "/autoupdate.cfg"] = nil
+local again = refuses(fs, "autoupdate.cfg cannot be read")
+fs.files[INSTALL .. "/autoupdate.cfg"] = BUILD
+T.eq("Start again", E.start(again), true)
+E.run_frame(again)
+T.eq("and this time it goes through", E.run_frame(again), E.STATE_HOOK)
+T.eq("with the identity filled", again.identity.terrain_dir, "Sinai")
+
 T.done()

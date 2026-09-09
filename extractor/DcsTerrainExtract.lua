@@ -3023,6 +3023,70 @@ function M.terrain_fingerprint(install, dir)
   return fingerprint
 end
 
+-- The prepare job that reads all of the above into run.identity. The reads are
+-- a handful of small files and three sixteen-byte heads, so the whole of it
+-- happens when the job starts and its one step only says it is done. A failure
+-- anywhere is a refusal: the run cannot describe what it is extracting, so it
+-- must not write anything claiming to.
+--
+-- Every line logged here is a fact somebody can check against the install with
+-- their own tools -- a directory listing, a file's size and time, sixteen bytes
+-- of its head -- which is how a live run is verified. Sizes go through
+-- tostring, because this Lua's %d overflows at 2^31 and the surface file is
+-- past 6 GB.
+M.identity_job = {
+  name = "identity",
+  start = function(run)
+    local function refuse(message)
+      run.refusal = message
+      return function()
+        return M.REFUSED
+      end
+    end
+
+    local install, ierr = M.install_dir()
+    if not install then
+      return refuse(ierr)
+    end
+    local build, berr = M.read_build(install)
+    if not build then
+      return refuse(berr)
+    end
+    local dir, derr = M.find_terrain_dir(install, run.identity.theatre)
+    if not dir then
+      return refuse(derr)
+    end
+    local fingerprint, ferr = M.terrain_fingerprint(install, dir)
+    if not fingerprint then
+      return refuse(ferr)
+    end
+
+    -- Set together, after everything was read, so a refusal leaves the
+    -- identity as it found it rather than half described.
+    run.identity.dcs_build = build.dcs_build
+    run.identity.dcs_build_timestamp = build.dcs_build_timestamp
+    run.identity.terrain_dir = dir
+    run.identity.terrain_fingerprint = fingerprint
+
+    M.log("install " .. install)
+    M.log(format("dcs_build %s %s", build.dcs_build, build.dcs_build_timestamp))
+    M.log("terrain_dir " .. dir)
+    for i = 1, #M.FINGERPRINT_FILES do
+      local key = M.FINGERPRINT_FILES[i].key
+      local entry = fingerprint[key]
+      M.log(format("%s %s size %s payload %s modified %s", key, entry.path,
+        tostring(entry.size), tostring(entry.payload_size), tostring(entry.modified)))
+    end
+    M.log("terrain_fingerprint " .. fingerprint.digest)
+
+    return function()
+      return M.DONE
+    end
+  end,
+}
+
+M.add_job("prepare", M.identity_job)
+
 --------------------------------------------------------------------------------
 -- DCS callbacks
 --
