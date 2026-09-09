@@ -78,6 +78,12 @@ T.eq("and not resizable",
 T.eq("and raised above the chrome", root.zorder, E.WINDOW_Z_ORDER)
 T.eq("which is not the default it would have had", root.zorder ~= 0, true)
 
+-- 360 wide, and centered on the screen the fake reports, once the frame has
+-- its size: every corner is somebody's in the Mission Editor.
+T.eq("360 wide", root.bounds[3], 360)
+T.eq("centered across", root.bounds[1], math.floor((2560 - 360) / 2))
+T.eq("and down", root.bounds[2], math.floor((1440 - root.bounds[4]) / 2))
+
 -- Built once. The caller asks on every frame, which is sixty times a second for
 -- the length of a session, and a second window a frame would be a new one every
 -- frame.

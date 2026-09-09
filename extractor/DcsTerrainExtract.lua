@@ -3811,6 +3811,9 @@ function M.build_window()
   M.window.controls, M.window.crop_labels = controls, crop_labels
   M.window.below_crop, M.window.crop_block_h = below_crop, crop_block_h
   M.window.below_bar, M.window.bar_block_h = below_bar, bar_block_h
+  -- Both blocks were placed and are on screen, and the first relayout goes
+  -- from that rather than from a nil that would read as hidden.
+  M.window.crop_shown, M.window.bar_shown = true, true
   M.window.frame = { w = width, h = height }
   M.window.client = { w = (view and view.w) or WIN.w, h = (view and view.h) or content }
   M.window.buttons = buttons
@@ -3831,7 +3834,7 @@ end
 M.STATUS_NO_TERRAIN = "Open a map in the Mission Editor."
 
 local STATUS_OF = {
-  [M.STATE_IDLE] = "Waiting for a theater.",
+  [M.STATE_IDLE] = "Waiting for a map.",
   [M.STATE_PREPARE] = "Preparing.",
   [M.STATE_HOOK] = "Sweeping the terrain.",
   [M.STATE_MISSION] = "Sweeping the scenery.",
@@ -3962,19 +3965,22 @@ local function fill_controls(run)
   -- it would say the same thing as an error, so that problem is left to the
   -- instruction here, and the next one, if any, is shown. Start shows it
   -- like any other, because by then the user has asked.
-  local problems = run.config_problems
-  if problems and problems[1] == M.field_problem("output_dir", nil) then
-    local rest = {}
-    for i = 2, #problems do
-      rest[#rest + 1] = problems[i]
-    end
-    problems = rest
+  --
+  -- A copy, because a drive problem is appended below and the run's own list
+  -- is the record of what the file held.
+  local problems = {}
+  local from = run.config_problems or {}
+  local first = 1
+  if from[1] == M.field_problem("output_dir", nil) then
+    first = 2
+  end
+  for i = first, #from do
+    problems[#problems + 1] = from[i]
   end
   -- And one the checker cannot find, because it has no disk: a drive in the
   -- file that is not there.
   local missing = M.drive_problem(run.config.output_dir)
   if missing then
-    problems = problems or {}
     problems[#problems + 1] = missing
   end
   show_problems(problems)

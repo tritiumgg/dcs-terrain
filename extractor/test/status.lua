@@ -35,7 +35,7 @@ T.group("with a map open the line is the state the run is in")
 
 terrain = "Caucasus"
 T.eq("stopped has nothing to say", E.window_status(run_in(E.STATE_STOPPED)), nil)
-T.eq("idle", E.window_status(run_in(E.STATE_IDLE)), "Waiting for a theater.")
+T.eq("idle", E.window_status(run_in(E.STATE_IDLE)), "Waiting for a map.")
 T.eq("prepare", E.window_status(run_in(E.STATE_PREPARE)), "Preparing.")
 T.eq("hook", E.window_status(run_in(E.STATE_HOOK)), "Sweeping the terrain.")
 T.eq("mission", E.window_status(run_in(E.STATE_MISSION)), "Sweeping the scenery.")
