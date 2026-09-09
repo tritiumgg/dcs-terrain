@@ -274,6 +274,17 @@ T.raises("a file without a time cannot be digested",
 -- Encoded, so a resume compares the same string run to run.
 T.eq("four keys, sorted", E.json(fingerprint):sub(1, 20), '{"digest":"68b6a403"')
 
+-- The synthetic theatre's constants, which the Rust side holds a twin of,
+-- follow the same rule: the digest there is the one this function gives.
+local S = require("synth_constants")
+T.eq("the synth digest follows the rule",
+  E.fingerprint_digest({
+    surface5 = { modified = S.FINGERPRINT_SURFACE5_MODIFIED },
+    rn4 = { modified = S.FINGERPRINT_RN4_MODIFIED },
+    scn5 = { modified = S.FINGERPRINT_SCN5_MODIFIED },
+  }),
+  S.FINGERPRINT_DIGEST)
+
 fs.files[TERRAINS .. "/Sinai/Scenes/SinaiMap.scn5"] = nil
 fs.files[TERRAINS .. "/Sinai/Scenes/readme.txt"] = "x"
 T.eq("a missing file refuses the whole fingerprint",

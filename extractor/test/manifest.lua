@@ -27,7 +27,7 @@ local function opts(edit)
     theatre = "Synth",
     dcs_build = "0.0.0.0",
     dcs_build_timestamp = "00000000-000000",
-    terrain_fingerprint = { digest = "90c9cec8", surface5 = { size = 4194304 } },
+    terrain_fingerprint = { digest = "6553f102", surface5 = { size = 4194304 } },
     bounds_km = { sw = { -30, -45 }, ne = { 40, 25 } },
     grid = grid,
     omit_sea_tiles = true,

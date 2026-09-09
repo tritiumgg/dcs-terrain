@@ -58,12 +58,12 @@ pub const FILL_HEIGHT_M: f64 = 5.000005;
 pub const FILL_WATER: u8 = 0;
 pub const FILL_SEABED_M: f64 = 0.0;
 
-// Theatre identity, as the manifest records it. The three head hashes are the
-// SHA-256 of the strings "dcsterrain synth surface5", "dcsterrain synth rn4"
-// and "dcsterrain synth scn5"; the digest is the first 8 hex characters of the
-// SHA-256 over those three lowercase hex strings concatenated in that order.
-// They are distinct, so the digest fails if the three are joined in any other
-// order.
+// Theatre identity, as the manifest records it. A file's fingerprint is its
+// size, the payload size its container header carries, and its modification
+// time in whole seconds since the epoch; nothing is hashed (ADR 0021). The
+// digest is the newest of the three times as eight lowercase hex digits. The
+// three times are distinct and the newest is not the first, so a digest taken
+// from the wrong file fails.
 
 pub const THEATRE: &str = "Synth";
 pub const EXTRACTOR_VERSION: &str = "0.1.0";
@@ -73,19 +73,16 @@ pub const DCS_BUILD_TIMESTAMP: &str = "00000000-000000";
 pub const FINGERPRINT_SURFACE5_PATH: &str = "Mods/terrains/Synth/Surface/Synth.surface5";
 pub const FINGERPRINT_SURFACE5_SIZE: u64 = 4194304;
 pub const FINGERPRINT_SURFACE5_PAYLOAD_SIZE: u64 = 1048576;
-pub const FINGERPRINT_SURFACE5_SHA256: &str =
-    "06869a4383338c0a767072ac14fc0f939d238e0101e3e4bb732182fe3c411e60";
+pub const FINGERPRINT_SURFACE5_MODIFIED: u64 = 1700000000;
 pub const FINGERPRINT_RN4_PATH: &str = "Mods/terrains/Synth/roads/Synth.rn4";
 pub const FINGERPRINT_RN4_SIZE: u64 = 2097152;
 pub const FINGERPRINT_RN4_PAYLOAD_SIZE: u64 = 2097152;
-pub const FINGERPRINT_RN4_SHA256: &str =
-    "261d9210306d14e1734b4503ecb3ce7de0c2d452145f154c34a6f4fe7f527a9b";
+pub const FINGERPRINT_RN4_MODIFIED: u64 = 1700000002;
 pub const FINGERPRINT_SCN5_PATH: &str = "Mods/terrains/Synth/Scenes/Synth.scn5";
 pub const FINGERPRINT_SCN5_SIZE: u64 = 3145728;
 pub const FINGERPRINT_SCN5_PAYLOAD_SIZE: u64 = 524288;
-pub const FINGERPRINT_SCN5_SHA256: &str =
-    "12713132dfe4ac49fd903889d6ebedd840b778bb66d6404e99cbc2a428c0c3c7";
-pub const FINGERPRINT_DIGEST: &str = "90c9cec8";
+pub const FINGERPRINT_SCN5_MODIFIED: u64 = 1700000001;
+pub const FINGERPRINT_DIGEST: &str = "6553f102";
 
 // Grid. The authored rectangle is inset a quarter cell from the grid on every
 // side, so snapping it outward to a multiple of CELL_SIZE_M reproduces the
