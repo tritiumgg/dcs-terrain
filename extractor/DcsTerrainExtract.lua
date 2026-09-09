@@ -2754,6 +2754,276 @@ function M.run_frame(run)
 end
 
 --------------------------------------------------------------------------------
+-- Identity
+--
+-- What the extract is an extract of: the DCS build, the theatre's directory
+-- under the install, and a fingerprint of the three terrain data files. All of
+-- it is read from the install and none of it from the user (ADR 0011).
+--
+-- The fingerprint is sizes and modification times, not a hash (ADR 0021). It
+-- has to change when ED rebuilds a terrain, and nothing else is asked of it: a
+-- rebuilt file is a new file, with a new payload field and a new time. Hashing
+-- three files inside DCS's Lua, which has no bit library, would have cost
+-- minutes of frame time on every Start for a label nobody is attacking. The
+-- price is that a repair or reinstall re-stamps the files and refuses a resume
+-- of an extract that was fine.
+--
+-- Every function here returns its value, or nil and one message with the
+-- finding before the colon, because the message ends up on the run as a
+-- refusal and the window shows only what stands before the colon.
+--------------------------------------------------------------------------------
+
+M.BUILD_FILE = "autoupdate.cfg"
+M.TERRAINS_DIR = "Mods/terrains"
+M.ENTRY_FILE = "entry.lua"
+
+-- The three files as the manifest keys them: the directory each lives in and
+-- its extension. The base name is derived from nothing, because it is the id
+-- on Sinai and the directory name on Cold War Germany, so the file is the one
+-- in the directory with that extension (ADR 0022).
+M.FINGERPRINT_FILES = {
+  { key = "surface5", dir = "Surface", ext = ".surface5" },
+  { key = "rn4", dir = "roads", ext = ".rn4" },
+  { key = "scn5", dir = "Scenes", ext = ".scn5" },
+}
+
+-- The container header carries its own payload size as a little-endian u64 at
+-- byte offset 8, and those sixteen bytes are all a fingerprint reads of a file.
+M.HEAD_BYTES = 16
+local PAYLOAD_OFFSET = 9
+
+function M.install_dir()
+  local dir, err = M.fs.currentdir()
+  if not dir then
+    return nil, "the install directory is unknown: " .. tostring(err)
+  end
+  return (dir:gsub("\\", "/"))
+end
+
+-- version and timestamp out of autoupdate.cfg, which is strict JSON.
+function M.parse_build(text)
+  local ok, value = pcall(M.decode, text)
+  if not ok then
+    return nil, M.BUILD_FILE .. " is not JSON: " .. tostring(value)
+  end
+  if type(value) ~= "table" then
+    return nil, M.BUILD_FILE .. " is not an object: " .. tostring(value)
+  end
+  for _, key in ipairs({ "version", "timestamp" }) do
+    if type(value[key]) ~= "string" or value[key] == "" then
+      return nil, format("%s has no %s: %s", M.BUILD_FILE, key, tostring(value[key]))
+    end
+  end
+  return { dcs_build = value.version, dcs_build_timestamp = value.timestamp }
+end
+
+function M.read_build(install)
+  local text, err = M.read_file(M.join(install, M.BUILD_FILE))
+  if not text then
+    return nil, M.BUILD_FILE .. " cannot be read: " .. tostring(err)
+  end
+  return M.parse_build(text)
+end
+
+-- The id an entry.lua declares. ED writes `['id'] = "SinaiMap";` inside the
+-- theatre table. The bracketed forms are tried first and a bare `id = "..."`
+-- only after them, so an `update_id` or a nested table's key cannot be taken
+-- for it. nil where the file declares none.
+local ID_PATTERNS = {
+  "%[%s*'id'%s*%]%s*=%s*\"([^\"]*)\"",
+  "%[%s*\"id\"%s*%]%s*=%s*\"([^\"]*)\"",
+  "%[%s*'id'%s*%]%s*=%s*'([^']*)'",
+  "%[%s*\"id\"%s*%]%s*=%s*'([^']*)'",
+  "%f[%w_]id%s*=%s*\"([^\"]*)\"",
+  "%f[%w_]id%s*=%s*'([^']*)'",
+}
+
+function M.entry_id(text)
+  if type(text) ~= "string" then
+    return nil
+  end
+  for i = 1, #ID_PATTERNS do
+    local id = text:match(ID_PATTERNS[i])
+    if id ~= nil and id ~= "" then
+      return id
+    end
+  end
+  return nil
+end
+
+-- The directory under Mods/terrains whose entry.lua declares `id`. A directory
+-- with no entry file is not a theatre and is passed over: Kola and Nevada sit
+-- there with a radio.lua each and nothing else. Before failing, the id itself
+-- is tried as a directory name (ADR 0011).
+function M.find_terrain_dir(install, id)
+  if type(id) ~= "string" or id == "" then
+    return nil, "no theatre id to look for: " .. tostring(id)
+  end
+  local root = M.join(install, M.TERRAINS_DIR)
+  local names, err = M.fs.dir(root)
+  if not names then
+    return nil, format("%s cannot be listed: %s", M.TERRAINS_DIR, tostring(err))
+  end
+  local scanned = {}
+  for i = 1, #names do
+    local name = names[i]
+    local text = M.read_file(M.join(M.join(root, name), M.ENTRY_FILE))
+    if text then
+      local found = M.entry_id(text)
+      if found == id then
+        return name
+      end
+      scanned[#scanned + 1] = name .. "=" .. tostring(found)
+    end
+  end
+  if M.fs.is_dir(M.join(root, id)) then
+    return id
+  end
+  return nil, format("no theatre under %s has id %s: scanned %s",
+    M.TERRAINS_DIR, id, #scanned > 0 and concat(scanned, ", ") or "nothing")
+end
+
+-- The one file with `ext` under the theatre's `subdir`, as a path relative to
+-- the install. The directory is matched without regard to case and recorded
+-- as the disk spells it -- Surface on Caucasus, surface on the rest -- because
+-- Windows does not care and the manifest records what was read. Zero or
+-- several matches is a refusal rather than a guess.
+function M.find_terrain_file(install, dir, subdir, ext)
+  local theatre = M.join(M.join(install, M.TERRAINS_DIR), dir)
+  local children, err = M.fs.dir(theatre)
+  if not children then
+    return nil, format("%s/%s cannot be listed: %s", M.TERRAINS_DIR, dir, tostring(err))
+  end
+  local found
+  for i = 1, #children do
+    if children[i]:lower() == subdir:lower() then
+      found = children[i]
+      break
+    end
+  end
+  if not found then
+    return nil, format("no %s directory under %s/%s: has %s",
+      subdir, M.TERRAINS_DIR, dir, #children > 0 and concat(children, ", ") or "nothing")
+  end
+  local where = format("%s/%s/%s", M.TERRAINS_DIR, dir, found)
+  local names, derr = M.fs.dir(M.join(theatre, found))
+  if not names then
+    return nil, format("%s cannot be listed: %s", where, tostring(derr))
+  end
+  local matches = {}
+  for i = 1, #names do
+    local name = names[i]
+    if #name > #ext and name:sub(-#ext):lower() == ext:lower() then
+      matches[#matches + 1] = name
+    end
+  end
+  if #matches == 0 then
+    return nil, format("no %s file under %s: has %s",
+      ext, where, #names > 0 and concat(names, ", ") or "nothing")
+  end
+  if #matches > 1 then
+    return nil, format("%d %s files under %s: %s", #matches, ext, where, concat(matches, ", "))
+  end
+  return where .. "/" .. matches[1]
+end
+
+-- A little-endian u64 by arithmetic, exact below 2^53. That is far above any
+-- file DCS ships; a field that reaches it would round, so it is nil instead.
+function M.u64le(s, pos)
+  pos = pos or 1
+  if type(s) ~= "string" or #s < pos + 7 then
+    return nil
+  end
+  local value, scale = 0, 1
+  for i = pos, pos + 7 do
+    value = value + s:byte(i) * scale
+    scale = scale * 256
+  end
+  if value >= 9007199254740992 then
+    return nil
+  end
+  return value
+end
+
+-- Eight lowercase hex digits of a whole number below 2^32, by arithmetic:
+-- string.format("%x") on this Lua goes through a 32-bit long, and the digest
+-- has to stay right for a modification time past 2038.
+local HEX_DIGITS = "0123456789abcdef"
+
+function M.hex32(n)
+  if not is_finite(n) or n < 0 or n >= 4294967296 or floor(n) ~= n then
+    error("hex32: not a whole number below 2^32: " .. tostring(n), 2)
+  end
+  local out = {}
+  for i = 8, 1, -1 do
+    local d = n % 16
+    out[i] = HEX_DIGITS:sub(d + 1, d + 1)
+    n = (n - d) / 16
+  end
+  return concat(out)
+end
+
+-- One file's entry in the fingerprint: its size and time from the file system,
+-- and the container's own payload size from a sixteen-byte read of its head.
+function M.fingerprint_file(install, relpath)
+  local path = M.join(install, relpath)
+  local size = M.fs.size(path)
+  if not is_finite(size) then
+    return nil, relpath .. " has no size: " .. tostring(size)
+  end
+  local modified = M.fs.modified(path)
+  if not is_finite(modified) then
+    return nil, relpath .. " has no modification time: " .. tostring(modified)
+  end
+  local head, err = M.read_head(path, M.HEAD_BYTES)
+  if not head then
+    return nil, relpath .. " cannot be read: " .. tostring(err)
+  end
+  local payload = M.u64le(head, PAYLOAD_OFFSET)
+  if payload == nil then
+    return nil, format("%s has no container header: %d bytes read", relpath, #head)
+  end
+  return { path = relpath, size = size, payload_size = payload, modified = floor(modified) }
+end
+
+-- The short id that file names carry: the newest of the three modification
+-- times as eight hex digits. It moves whenever any of the three files is
+-- rebuilt, and it is a time a reader can decode rather than a code they cannot.
+function M.fingerprint_digest(fingerprint)
+  local newest
+  for i = 1, #M.FINGERPRINT_FILES do
+    local key = M.FINGERPRINT_FILES[i].key
+    local entry = fingerprint[key]
+    if type(entry) ~= "table" or not is_finite(entry.modified) then
+      error("fingerprint_digest: " .. key .. " has no modification time", 2)
+    end
+    if newest == nil or entry.modified > newest then
+      newest = entry.modified
+    end
+  end
+  return M.hex32(newest)
+end
+
+-- The whole fingerprint of a theatre directory, as the manifest records it.
+function M.terrain_fingerprint(install, dir)
+  local fingerprint = {}
+  for i = 1, #M.FINGERPRINT_FILES do
+    local file = M.FINGERPRINT_FILES[i]
+    local relpath, err = M.find_terrain_file(install, dir, file.dir, file.ext)
+    if not relpath then
+      return nil, err
+    end
+    local entry, ferr = M.fingerprint_file(install, relpath)
+    if not entry then
+      return nil, ferr
+    end
+    fingerprint[file.key] = entry
+  end
+  fingerprint.digest = M.fingerprint_digest(fingerprint)
+  return fingerprint
+end
+
+--------------------------------------------------------------------------------
 -- DCS callbacks
 --
 -- The four callbacks the run is driven by. onSimulationFrame is the whole
