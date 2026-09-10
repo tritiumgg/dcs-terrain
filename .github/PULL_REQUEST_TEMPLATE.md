@@ -42,9 +42,15 @@ Place a Verify step wherever the tester needs to know the steps so far worked
 before going on. Several actions, a Verify, more actions, another Verify is
 the expected shape.
 
+Every command the tester runs gets its own fenced code block under its step:
+one command per block, tagged powershell or bash, no prompt character and no
+output inside it. A command named in a sentence is not a step anyone can copy.
+
 Without DCS: builds, unit tests, the offline Lua tests, the document tools,
-the synthetic theatre. Windows steps in PowerShell, macOS and Linux steps in
-bash. Where the two are the same command, give it once under "All platforms".
+the synthetic theatre. Windows steps in PowerShell wherever the command can
+run there; where a task needs `sh` (the mise tasks that run tools/*.sh), name
+Git Bash and say why. macOS and Linux steps in bash. Where the two are the
+same command, give it once under "All platforms".
 
 With DCS: this needs a Windows machine with DCS installed. Build the
 artifacts, copy the hook into Saved Games (say the exact path and edit), then
