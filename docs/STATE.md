@@ -4,7 +4,7 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-09T23:09Z
+**Last updated:** 2026-09-10T00:13Z
 
 ## Done
 
@@ -17,8 +17,8 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    and payload field, each found by extension; no hash, no time, no digest,
    since terrain data ships only inside a DCS update. A step may return
    `M.REFUSED`, which stops the run with the reason on it. ADRs **0022** and
-   **0023** (0021 superseded the same day). *Verified by:* an agent, offline and
-   through the bridge at the menu. *Not yet observed:* a Start in the editor on Caucasus, then Sinai.
+   **0023** (0021 superseded the same day). *Verified by:* an agent offline, then
+   live: Starts on Caucasus and Sinai logged every size and payload the install reports, in 2 and 4 ms.
 2. **X14: the window belongs in the editor, and says one thing at a time.**
    Skins read off `me_aircraft_group.dlg`, not the `_ME` family; 360 wide,
    centered; the crop block and the bar hide and the rows close up; one line
