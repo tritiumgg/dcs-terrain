@@ -31,8 +31,13 @@ without `seek`.
   the reason on the window. *The
   sweeps that fill an extract are not built yet, so a run then reaches `done`
   in a few frames and writes nothing.*
+  While a run is sweeping, the line names the sweep, which of how many it is
+  and its count, refreshed every second, and the bar is that sweep's own count;
+  nothing claims to know how far the whole run is (ADR 0025).
   A run writes `Logs/DcsTerrainExtract.log` in the same Saved Games folder, one
-  line per tile and per phase change, appended across runs and never rotated;
+  line per tile, per phase change and per finished sweep, a heartbeat every ten
+  seconds naming the sweep, which of how many, its count and elapsed, and
+  one line of totals at done (ADR 0024), appended across runs and never rotated;
   `dcs.log` gets a phase change at `INFO` and anything to act on at `WARNING`.
 - `test/` — offline tests, run with a plain `lua5.1` interpreter. Every `.lua`
   file directly under it is a test; `test/support/` holds what they read.
