@@ -119,7 +119,38 @@ T.eq("a raising call is no id", real_terrain_id(), nil)
 
 _G.terrain = { GetTerrainConfig = "not a function" }
 T.eq("a module without the call is no id", real_terrain_id(), nil)
+T.eq("and is no module either", E.terrain_module(), nil)
+
+--------------------------------------------------------------------------------
+T.group("the bounds rectangle is read in kilometers and given in both units")
+--------------------------------------------------------------------------------
+
+-- SW_bound and NE_bound are {x_km, 0, z_km}, and ED reads [1] and [3]. A
+-- fractional kilometer is here on purpose: the kilometer form has to be what
+-- DCS said, never the meters divided back.
+local config = { SW_bound = { -600, 0, -560.5 }, NE_bound = { 380, 0, 1130 } }
+_G.terrain = { GetTerrainConfig = function(key) return config[key] end }
+package.loaded.terrain = _G.terrain
+T.eq("the module is handed out", E.terrain_module(), _G.terrain)
+
+local m = E.terrain_bounds()
+T.eq("meters, south-west x", m.min_x, -600000)
+T.eq("meters, south-west z", m.min_z, -560500)
+T.eq("meters, north-east x", m.max_x, 380000)
+T.eq("meters, north-east z", m.max_z, 1130000)
+
+T.eq("kilometers, as the manifest records them", E.json(E.terrain_bounds_km()),
+  '{"ne":[380,1130],"sw":[-600,-560.5]}')
+
+config.NE_bound = nil
+T.eq("one bound missing is no rectangle", E.terrain_bounds(), nil)
+T.eq("in either unit", E.terrain_bounds_km(), nil)
+config.NE_bound = { -600, 0, 1130 }
+T.eq("an empty rectangle is no rectangle", E.terrain_bounds_km(), nil)
+config.NE_bound = { "380", 0, 1130 }
+T.eq("a bound that is not a number is no rectangle", E.terrain_bounds_km(), nil)
 
 _G.terrain, package.loaded.terrain = restore[1], restore[2]
+T.eq("no module, no rectangle", E.terrain_bounds_km(), nil)
 
 T.done()

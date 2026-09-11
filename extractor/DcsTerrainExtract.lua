@@ -2296,9 +2296,10 @@ function M.add_job(phase, job)
   return job
 end
 
--- Seam. The theatre id, or nil when no map is open: the module loads at the
--- main menu and answers nil there, so a non-nil id is what says the editor has
--- a map open or a mission is running.
+-- Seam. The terrain module, or nil where there is none, which is every
+-- offline test and is not an error. Everything that calls into the terrain
+-- goes through here, so the sweeps have one place to be told there is no
+-- module rather than each discovering it.
 --
 -- The hook state spells the module table lowercase, terrain.GetTerrainConfig,
 -- where the editor state spells it Terrain. Those are two entries in the DCS
@@ -2307,13 +2308,24 @@ end
 -- The global is the fallback rather than an error because Lua 5.1 require
 -- returns true, not the module, when a C module installs itself as a global
 -- and returns nothing.
-function M.terrain_id()
+function M.terrain_module()
   local ok, mod = pcall(require, "terrain")
   if not ok then
     return nil
   end
   local terrain = type(mod) == "table" and mod or rawget(_G, "terrain")
   if type(terrain) ~= "table" or type(terrain.GetTerrainConfig) ~= "function" then
+    return nil
+  end
+  return terrain
+end
+
+-- The theatre id, or nil when no map is open: the module loads at the main
+-- menu and answers nil there, so a non-nil id is what says the editor has a
+-- map open or a mission is running.
+function M.terrain_id()
+  local terrain = M.terrain_module()
+  if not terrain then
     return nil
   end
   local got, id = pcall(terrain.GetTerrainConfig, "id")
@@ -2323,17 +2335,13 @@ function M.terrain_id()
   return id
 end
 
--- The theatre's bounds rectangle in meters, or nil with no terrain loaded or
--- a config that does not carry one. `SW_bound` and `NE_bound` are
--- `{x_km, 0, z_km}`; ED reads [1] as x and [3] as z and multiplies by a
--- thousand, and so does this.
-function M.terrain_bounds()
-  local ok, mod = pcall(require, "terrain")
-  if not ok then
-    return nil
-  end
-  local terrain = type(mod) == "table" and mod or rawget(_G, "terrain")
-  if type(terrain) ~= "table" or type(terrain.GetTerrainConfig) ~= "function" then
+-- The bounds rectangle as DCS gives it, in kilometers: `SW_bound` and
+-- `NE_bound` are `{x_km, 0, z_km}`, and ED reads [1] as x and [3] as z. Nil
+-- with no terrain loaded, a config that does not carry both, or a rectangle
+-- that is not one.
+local function read_bounds_km()
+  local terrain = M.terrain_module()
+  if not terrain then
     return nil
   end
   local got_sw, sw = pcall(terrain.GetTerrainConfig, "SW_bound")
@@ -2349,9 +2357,33 @@ function M.terrain_bounds()
   if min_x >= max_x or min_z >= max_z then
     return nil
   end
+  return min_x, min_z, max_x, max_z
+end
+
+-- The theatre's bounds rectangle in meters, multiplied by a thousand the way
+-- ED does it.
+function M.terrain_bounds()
+  local min_x, min_z, max_x, max_z = read_bounds_km()
+  if not min_x then
+    return nil
+  end
   return {
     min_x = min_x * 1000, min_z = min_z * 1000,
     max_x = max_x * 1000, max_z = max_z * 1000,
+  }
+end
+
+-- The same rectangle as the manifest records it, in the kilometers DCS gave,
+-- read once rather than divided back out of the meters: a kilometer figure
+-- that is not whole need not survive a multiply and a divide unchanged.
+function M.terrain_bounds_km()
+  local min_x, min_z, max_x, max_z = read_bounds_km()
+  if not min_x then
+    return nil
+  end
+  return {
+    sw = M.as_array({ min_x, min_z }),
+    ne = M.as_array({ max_x, max_z }),
   }
 end
 
@@ -2459,6 +2491,22 @@ function M.new_run(opts)
     -- times its own jobs before there is a manifest to put the timings in.
     timing_ms = {},
     entries = {},
+    -- The journal as an index, tile key to entry, so a sweep asks whether a
+    -- tile is already written with one lookup. Rebuilt from entries when a
+    -- directory is resumed, and grown beside them as tiles are written.
+    done = {},
+    -- What the config sweep measured, for the tile sweeps: the fill triple
+    -- the theatre returns outside its terrain, or false where the three
+    -- samples disagreed and no cell can be called fill.
+    fill = false,
+    -- What the pre-sweep found, for the grid: the authored rectangle in
+    -- meters, and the record config.json carries of how it was found. Both
+    -- false until a pre-sweep runs, which is never on a crop run.
+    presweep_bounds = false,
+    presweep = false,
+    -- The rows the tables sweep wrote, kept for the road sweeps, which seed
+    -- from every airdrome and town. False until that sweep has run.
+    tables = false,
     -- Where the run has got to, as last reported: false until a pass has
     -- something to say, and cleared at every phase change. The clock stamps
     -- beside it say when the record and the log line were last due. All
