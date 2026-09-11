@@ -1531,6 +1531,12 @@ end
 -- raises, because a step that returned nil by accident would otherwise read as
 -- "not finished" and the sweep would never end.
 --
+-- `start` may return a second function, `progress`, which answers how far the
+-- sweep has got as `done, total` -- tiles, seeds, spheres, whatever the sweep
+-- counts in -- or nil when it cannot count its work. It is optional, and a
+-- job without one is reported as running with no count rather than as
+-- broken: a sweep that cannot count is still a sweep.
+--
 -- A refusal ends the frame at once, so no job later in the queue starts
 -- against work that did not happen. The queue only relays it: what a refusal
 -- does to the run is the state machine's business.
@@ -1579,11 +1585,16 @@ function M.queue_frame(queue, run, spent)
     end
     if queue.step == nil then
       queue.started = M.clock()
-      queue.step = job.start(run)
-      if type(queue.step) ~= "function" then
+      local step, progress = job.start(run)
+      if type(step) ~= "function" then
         error(format("job %s: start returned %s, not a step function",
-          job.name, type(queue.step)), 0)
+          job.name, type(step)), 0)
       end
+      if progress ~= nil and type(progress) ~= "function" then
+        error(format("job %s: start returned %s, not a progress function",
+          job.name, type(progress)), 0)
+      end
+      queue.step, queue.progress = step, progress
     end
     local status = queue.step()
     if status == M.REFUSED then
@@ -1594,7 +1605,11 @@ function M.queue_frame(queue, run, spent)
         name = job.name, ms = elapsed_ms(queue.started),
       }
       queue.index = queue.index + 1
+      -- All three go together. The loop carries on to the next job, and a
+      -- progress function left behind would answer for a sweep that is over
+      -- as if it were the one about to start.
       queue.step = nil
+      queue.progress = nil
       queue.started = nil
     elseif status ~= M.MORE then
       error(format("job %s: step returned %s, not M.MORE or M.DONE",
@@ -1605,6 +1620,28 @@ function M.queue_frame(queue, run, spent)
     return M.DONE
   end
   return M.MORE
+end
+
+-- How far the running job has got, as `done, total`, or nil where there is no
+-- running job, it has no progress function, or what that function answered
+-- is not a count. Both must be finite numbers with a positive total, and done
+-- is held inside [0, total]: this is the one place a fraction above one is
+-- stopped, so nothing downstream has to check for a sweep that counted past
+-- its own total.
+function M.queue_progress(queue)
+  if queue.step == nil or queue.progress == nil then
+    return nil
+  end
+  local done, total = queue.progress()
+  if not (is_finite(done) and is_finite(total)) or total <= 0 then
+    return nil
+  end
+  if done < 0 then
+    done = 0
+  elseif done > total then
+    done = total
+  end
+  return done, total
 end
 
 --------------------------------------------------------------------------------

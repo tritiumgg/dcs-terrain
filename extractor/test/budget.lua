@@ -227,4 +227,85 @@ queue = E.new_queue({})
 T.eq("nothing to run", E.queue_frame(queue, nil, E.budget(5)), E.DONE)
 T.eq("nothing reported", #queue.finished, 0)
 
+--------------------------------------------------------------------------------
+T.group("a job may say how far it has got")
+--------------------------------------------------------------------------------
+
+-- Finishes after `steps` steps and answers whatever `answer` returns when asked
+-- for its progress, so the sanitising below can be fed anything.
+local function counting(name, steps, answer)
+  return {
+    name = name,
+    start = function()
+      local left = steps
+      return function()
+        advance_ms(1)
+        left = left - 1
+        return left > 0 and E.MORE or E.DONE
+      end, answer
+    end,
+  }
+end
+
+-- No running job, nothing to ask.
+queue = E.new_queue({ counting("water", 3, function() return 1, 3 end) })
+T.eq("before the first frame there is no count", E.queue_progress(queue), nil)
+
+E.queue_frame(queue, nil, E.budget(1))
+local done, total = E.queue_progress(queue)
+T.eq("a running job answers", done .. "/" .. total, "1/3")
+
+-- A job that returns only a step is the contract every earlier job was built
+-- to, and it still runs, with no count.
+queue = E.new_queue({ endless(1, { steps = 0 }) })
+E.queue_frame(queue, nil, E.budget(1))
+T.eq("a job without progress has no count", E.queue_progress(queue), nil)
+
+-- The second value is checked like the first, because a typo here would
+-- otherwise surface as a raise the first time somebody asked mid-sweep, on
+-- DCS's own stack.
+T.raises("a second value that is not a function raises", function()
+  local q = E.new_queue({ { name = "water", start = function()
+    return function() return E.DONE end, 7
+  end } })
+  E.queue_frame(q, nil, E.budget(5))
+end, "job water: start returned number, not a progress function")
+
+-- What a progress function may answer and still be counted: two finite
+-- numbers with a positive total. Anything else is "cannot count", and done is
+-- held inside the total, so no fraction above one can come out of here.
+local function sanitised(d, t)
+  local q = E.new_queue({ counting("x", 10, function() return d, t end) })
+  E.queue_frame(q, nil, E.budget(0))
+  local got_done, got_total = E.queue_progress(q)
+  if got_done == nil then
+    return "nil"
+  end
+  return got_done .. "/" .. got_total
+end
+T.eq("done above total is clamped to it", sanitised(7, 5), "5/5")
+T.eq("done below zero is clamped to zero", sanitised(-1, 5), "0/5")
+T.eq("a zero total cannot count", sanitised(0, 0), "nil")
+T.eq("a negative total cannot count", sanitised(1, -5), "nil")
+T.eq("a string cannot count", sanitised("3", 5), "nil")
+T.eq("nothing answered cannot count", sanitised(nil, nil), "nil")
+T.eq("an infinite total cannot count", sanitised(1, math.huge), "nil")
+T.eq("a nan done cannot count", sanitised(0 / 0, 5), "nil")
+T.eq("a fraction of a unit is fine", sanitised(2.5, 5), "2.5/5")
+
+-- The frame in which a job finishes and its budget runs out before the next
+-- starts: the count belongs to nobody. A progress function left over from the
+-- finished job would answer total/total for a sweep that has not begun.
+queue = E.new_queue({
+  counting("water", 1, function() return 1, 1 end),
+  counting("height", 5, function() return 0, 5 end),
+})
+T.eq("water finishes in one step", E.queue_frame(queue, nil, E.budget(1)), E.MORE)
+T.eq("and the queue is between jobs", queue.step, nil)
+T.eq("with no progress function held", queue.progress, nil)
+T.eq("so there is no count", E.queue_progress(queue), nil)
+E.queue_frame(queue, nil, E.budget(1))
+done, total = E.queue_progress(queue)
+T.eq("height's own count once it starts", done .. "/" .. total, "0/5")
+
 T.done()
