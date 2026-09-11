@@ -4826,7 +4826,11 @@ local function tile_sweep(spec)
         end
         local key = M.tile_key(layer, tx, tz)
         local why = skipped_why(tx, tz)
-        if why then
+        -- A tile with a journal line keeps its file even when the set now
+        -- says to leave it out, because the line cannot be taken back and a
+        -- line for a file that is not there never validates. It falls
+        -- through to the journalled branch below.
+        if why and not run.done[key] then
           -- Whether or not a file is there: one with no line never heals.
           M.remove_tile(run.dir, layer, tx, tz)
           skipped = skipped + 1

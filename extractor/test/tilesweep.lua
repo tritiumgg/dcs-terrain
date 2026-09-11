@@ -289,6 +289,33 @@ statuses = sweep(E.height_job, run)
 T.eq("the fill tile's heights are the fill height rounded", tile(fs, "height", 0, 0), string.rep(i16(5), 16))
 
 --------------------------------------------------------------------------------
+T.group("a tile that flips into the set keeps the other layer's journalled tile")
+--------------------------------------------------------------------------------
+
+-- The run above wrote every tile with no triple. Now the triple is known and
+-- the fill tile's water file is gone, so water sweeps it again and finds it
+-- fill. Its height tile has a journal line, and a line cannot be taken back,
+-- so that tile stays, is not removed, and is counted once.
+fs.files["C:/extract/tiles/water/0_0.bin"] = nil
+local flipped = new_run(fs)
+flipped.entries = E.load_journal("C:/extract")
+flipped.done = E.journal_index(flipped.entries)
+logged = {}
+statuses = sweep(E.water_job, flipped)
+T.eq("water finds the tile fill", flipped.skip["0_0"], "fill")
+T.eq("and counts it once", log_has("water: 0 tiles written, 3 journalled, 1 swept again, 1 omitted, 0 skipped"), true)
+step, progress = E.height_job.start(flipped)
+T.eq("three height tiles done before a step", select(1, progress()), 3)
+for i = 1, 4 do
+  statuses[i] = step()
+end
+T.eq("finishes", statuses[4], E.DONE)
+T.eq("the journalled height tile stays", tile(fs, "height", 0, 0) ~= nil, true)
+T.eq("the bar is exactly full", select(1, progress()), 4)
+T.eq("counted as journalled, not skipped", log_has("height: 0 tiles written, 3 journalled, 0 swept again, 0 omitted, 1 skipped"), true)
+T.eq("no entry was added", #flipped.entries, 7)
+
+--------------------------------------------------------------------------------
 T.group("refusals")
 --------------------------------------------------------------------------------
 
