@@ -4,14 +4,14 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-11T19:57Z
+**Last updated:** 2026-09-11T21:21Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **X5 offline: the grid job, `config.json` and the seven tables.** Prepare
-   is `identity` then `grid`: the grid is planned from the crop, the output
+1. **X5: the grid job, `config.json` and the seven tables.** Prepare is
+   `identity` then `grid`: the grid is planned from the crop, the output
    directory is opened or resumed (the disk manifest's timings folded in
    once), and a run with no crop refuses until the pre-sweep exists. The hook
    pass is `config` (the theatre's facts, twenty lat/lon samples, the fill
@@ -19,9 +19,11 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    `progress()`. No rectangle is read from a theatre file: ADR **0026**,
    measured against ED's own use and five theatres' values. Every shaper is
    terrain agnostic and never raises: an unexpected value is null with a log
-   line, a table the theatre cannot give is empty. *Verified by:* an agent,
-   offline, over fakes shaped as measured; the live diff of every table
-   against the bridge is still to do, because DCS was closed.
+   line, a table the theatre cannot give is empty. *Verified by:* an agent
+   offline over fakes shaped as measured, then live on Caucasus: a second
+   reading of all eight files through the bridge matched byte for byte, and
+   raw probes without the extractor agree with the rows. `runwayName` is the
+   list of edge names, `["25", "07"]` at Kutaisi.
 2. **X12: the run says where it is, and claims no more.** A job's `start`
    may return `progress()` beside its step; the run keeps a record refreshed
    every second that the window's line reads ("Sweeping the terrain: water,
@@ -46,27 +48,27 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
 One task. The thing to pick up immediately.
 
-**X5, live, then its pull request.** With DCS in the Mission Editor on
-Caucasus: Start with a 5 km crop at Kutaisi, then diff `config.json` and every
-table against the same calls made through the bridge, and read the manifest's
-null authored pair. *Verified by:* an agent through the bridge, with a
-maintainer watching the line say "config, 3 of 4" then "tables, 4 of 4, k of
-7". Then the adversarial review's fixes, `mise run docs`, push, PR.
+**X6** — the pre-sweep as a prepare job between `identity` and `grid`, the
+only rectangle source on every theatre (ADR 0026), skipping itself when the
+directory resumes; then `water` and `height` as `add_job("hook", ...)` with
+`progress()` counting journalled tiles as done (ADR 0025), where carries 2
+and 3 are discharged. *Verified by:* an agent offline over the driver, then
+tile cells re-read through the bridge on a small crop; a maintainer watching
+the bar climb.
 
 ## Then
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **X6** — the pre-sweep as a prepare job between `identity` and `grid`, the
-   only rectangle source on every theatre (ADR 0026); then `water` and
-   `height`, where carry 2 is discharged.
-2. **X7** — roads and railroads, each as two jobs, seeds then paths.
-3. **X8a / X8b / X8c / X9** — the mission pass, scenery, the model catalogue
+1. **X7** — roads and railroads, each as two jobs, seeds then paths; carry 4.
+2. **X8a / X8b / X8c / X9** — the mission pass, scenery, the model catalogue
    and failure handling. X ends here until `check-extract` exists.
-4. **C1 / C2 / C3** — the Rust interlude X10 needs: scaffold, `synth` on the F2
+3. **C1 / C2 / C3** — the Rust interlude X10 needs: scaffold, `synth` on the F2
    constants, `check-extract`. Closes P2 and MS0 past.
-5. **X10** — the 10 x 10 km Kutaisi crop that `check-extract` accepts; its
+4. **X10** — the 10 x 10 km Kutaisi crop that `check-extract` accepts; its
    authored pair is null (ADR 0009, ADR 0026).
+5. **C4** — `pack` reads the extract: the first consumer of the X10 crop, and
+   where carry 1 is discharged.
 
 Milestone in view: **MS0 Contract** (P1, P2, F1, F2, C1, C2, C3, X1, X3).
 Proof is `check-extract` accepting the Rust synthetic extract and the hook's
