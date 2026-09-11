@@ -4216,6 +4216,189 @@ function M.read_terrain_table(path, global)
 end
 
 --------------------------------------------------------------------------------
+-- Tables sweep
+--
+-- Seven files, one a step, in a fixed order: the airdromes first, because
+-- the runways and the stands are read through each airdrome's own road
+-- network file; then what the theatre says about its beacons and radios;
+-- then the two Lua files. The whole sweep is a few hundred calls and a few
+-- hundred kilobytes, so it runs on every Start, resumed or not, and rewrites
+-- what is there: the rows it keeps on the run are what the road sweeps seed
+-- from, and a resumed run has to have them too.
+--
+-- A table the theatre cannot give -- a call that is not there, a file that
+-- is missing or will not load -- is written empty, with the reason in the
+-- log, and the sweep goes on. A theatre with no towns file is a theatre with
+-- no towns, not a theatre that cannot be extracted.
+--------------------------------------------------------------------------------
+
+M.TABLE_ORDER = { "airdromes", "runways", "stands", "beacons", "radio", "towns", "nodes" }
+
+M.tables_job = {
+  name = "tables",
+  start = function(run)
+    local function refuse(message)
+      run.refusal = message
+      return function()
+        return M.REFUSED
+      end
+    end
+
+    local terrain = M.terrain_module()
+    if not terrain then
+      return refuse("the terrain module is not loaded")
+    end
+
+    local written = 0
+    local kept = {}
+    -- The DCS table, read at the first step and walked again for the runways
+    -- and the stands.
+    local airdromes = {}
+
+    local function read_airdromes()
+      local ok, t = M.terrain_call(terrain, "GetTerrainConfig", "Airdromes")
+      if ok and type(t) == "table" then
+        airdromes = t
+      else
+        M.log("Airdromes is not a table, airdromes written empty: " .. type(t))
+        airdromes = {}
+      end
+      return M.airdrome_rows(airdromes)
+    end
+
+    -- Rows read through each airdrome's road network, in ascending id. An
+    -- airdrome with no roadnet has no runways and no stands to read, and a
+    -- call that fails on one airdrome costs that airdrome's rows alone.
+    local function per_roadnet(call, shape, extra)
+      local out = M.as_array({})
+      local ids = {}
+      for id, entry in pairs(airdromes) do
+        if is_finite(id) and type(entry) == "table" and type(entry.roadnet) == "string" then
+          ids[#ids + 1] = id
+        end
+      end
+      sort(ids)
+      for i = 1, #ids do
+        local id = ids[i]
+        local ok, list = M.terrain_call(terrain, call, airdromes[id].roadnet, extra)
+        if ok then
+          local rows = shape(id, list)
+          for j = 1, #rows do
+            out[#out + 1] = rows[j]
+          end
+        else
+          M.log(format("airdrome %s: %s gave nothing, no rows", tostring(id), call))
+        end
+      end
+      return out
+    end
+
+    -- A call that answers a whole table, or nothing: nothing is an empty
+    -- table, and the call has already logged why.
+    local function whole(call)
+      local ok, t = M.terrain_call(terrain, call)
+      if ok and type(t) == "table" then
+        return t
+      end
+      if ok then
+        M.log(format("terrain.%s answered a %s, written empty", call, type(t)))
+      end
+      return {}
+    end
+
+    -- One of the theatre's Lua files as a table, or an empty one with the
+    -- reason logged: the file's path is what the log names, because that is
+    -- what somebody checking the theatre directory needs.
+    local function lua_table(subdir, file, global)
+      local install, ierr = M.install_dir()
+      if not install then
+        M.log(format("%s not read, %s written empty: %s", file, global, ierr))
+        return {}
+      end
+      local rel, perr = M.find_terrain_path(install, run.identity.terrain_dir, subdir, file)
+      if not rel then
+        M.log(format("%s not read, %s written empty: %s", file, global, perr))
+        return {}
+      end
+      local t, lerr = M.read_terrain_table(M.join(install, rel), global)
+      if not t then
+        M.log(format("%s not read, %s written empty: %s", rel, global, lerr))
+        return {}
+      end
+      M.log("read " .. rel)
+      return t
+    end
+
+    local function to_meters(lat, lon)
+      local ok, x, z = M.terrain_call(terrain, "convertLatLonToMeters", lat, lon)
+      if ok then
+        return x, z
+      end
+      return nil
+    end
+
+    local readers = {
+      airdromes = read_airdromes,
+      runways = function()
+        return per_roadnet("getRunwayList", M.runway_rows)
+      end,
+      stands = function()
+        return per_roadnet("getStandList", M.stand_rows, M.STAND_PARAMS)
+      end,
+      beacons = function()
+        return M.beacon_rows(whole("getBeacons"))
+      end,
+      radio = function()
+        return M.radio_rows(whole("getRadio"))
+      end,
+      towns = function()
+        return M.town_rows(lua_table("Map", "towns.lua", "towns"), to_meters)
+      end,
+      nodes = function()
+        return M.node_rows(lua_table("MissionGenerator", "nodes.lua", "missionNodes"))
+      end,
+    }
+
+    local function step()
+      local name = M.TABLE_ORDER[written + 1]
+      if name == nil then
+        return M.DONE
+      end
+      local rows = readers[name]()
+      -- The shapers write nothing the encoder refuses, so this is a check
+      -- on them rather than on the theatre; it still ends the run with a
+      -- reason rather than a raise.
+      local encoded, text = pcall(M.json, rows)
+      if not encoded then
+        run.refusal = format("%s cannot be encoded: %s", TABLE_FILES[name], tostring(text))
+        return M.REFUSED
+      end
+      local ok, err = M.write_file(M.join(run.dir, TABLE_FILES[name]), text)
+      if not ok then
+        run.refusal = format("%s cannot be written: %s", TABLE_FILES[name], tostring(err))
+        return M.REFUSED
+      end
+      M.log(format("wrote %s: %d rows", TABLE_FILES[name], #rows))
+      kept[name] = rows
+      written = written + 1
+      if written < #M.TABLE_ORDER then
+        return M.MORE
+      end
+      run.tables = { airdromes = kept.airdromes, towns = kept.towns }
+      return M.DONE
+    end
+
+    local function progress()
+      return written, #M.TABLE_ORDER
+    end
+
+    return step, progress
+  end,
+}
+
+M.add_job("hook", M.tables_job)
+
+--------------------------------------------------------------------------------
 -- DCS callbacks
 --
 -- The four callbacks the run is driven by. onSimulationFrame is the whole
