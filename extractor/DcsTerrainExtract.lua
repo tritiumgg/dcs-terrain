@@ -3336,7 +3336,153 @@ M.identity_job = {
   end,
 }
 
-M.add_job("prepare", M.identity_job)
+--------------------------------------------------------------------------------
+-- Grid job
+--
+-- The second prepare job: which rectangle the extract covers, and the
+-- manifest that says so. It plans the grid, opens the output directory, and
+-- either resumes the extract already there or starts a fresh one. After it
+-- the run has a manifest, and every sweep that follows has a grid to walk and
+-- a journal to skip by.
+--
+-- ADR 0026: no rectangle is read from a theatre file. The theatre's own
+-- nodesMapBorders is the extent of a picture, cut to the built terrain on one
+-- theatre and to the whole map or the middle of it on others, so a rule that
+-- read it would be right on one theatre by an artist's choice. The authored
+-- rectangle comes from the pre-sweep, which measures the terrain the same way
+-- everywhere, or it is unknown.
+--------------------------------------------------------------------------------
+
+-- The timings a manifest on disk recorded, added onto the run's. Only the
+-- first time this process sees the directory: after a Stop and a Start into
+-- the same directory the run's own table is already what is on disk, saved
+-- at the stop, and adding it again would count every sweep twice.
+local function adopt_timings(run, disk)
+  if type(disk) ~= "table" then
+    return
+  end
+  for name, ms in pairs(disk) do
+    if is_finite(ms) then
+      run.timing_ms[name] = (run.timing_ms[name] or 0) + ms
+    end
+  end
+end
+
+local function rect_text(rect)
+  return format("x %s..%s z %s..%s", tostring(rect.min_x), tostring(rect.max_x),
+    tostring(rect.min_z), tostring(rect.max_z))
+end
+
+M.grid_job = {
+  name = "grid",
+  start = function(run)
+    local function refuse(message)
+      run.refusal = message
+      return function()
+        return M.REFUSED
+      end
+    end
+
+    local bounds_km = M.terrain_bounds_km()
+    if not bounds_km then
+      return refuse("the theatre reports no bounds rectangle")
+    end
+
+    -- A crop wins; else what the pre-sweep found; else there is nothing to
+    -- sweep. The pre-sweep is the only whole-map source on every theatre
+    -- (ADR 0026), and until it is built a whole-map run cannot start.
+    local crop_m = M.crop_box(run.config.crop)
+    local presweep_m = run.presweep_bounds or nil
+    if not crop_m and not presweep_m then
+      return refuse("no crop was given, and the whole-map pre-sweep is not"
+        .. " built yet: give a crop")
+    end
+    local planned = M.plan_grid({
+      crop_m = crop_m,
+      presweep_bounds_m = presweep_m,
+      cell_size = M.CELL_SIZE,
+      tile_size = M.TILE_SIZE,
+    })
+
+    local made, merr = M.ensure_output_dirs(run.dir)
+    if not made then
+      return refuse("the output directory cannot be made: " .. tostring(merr))
+    end
+
+    -- The grid is held against the manifest only where a crop planned it. A
+    -- pre-sweep is a measurement, and measuring again can move the lattice
+    -- by a cell; a resumed pre-sweep run takes the grid it was started with.
+    local identity = run.identity
+    local state, problems = M.prepare_resume(run.dir, {
+      theatre = identity.theatre,
+      dcs_build = identity.dcs_build,
+      dcs_build_timestamp = identity.dcs_build_timestamp,
+      terrain_fingerprint = identity.terrain_fingerprint,
+      omit_sea_tiles = M.OMIT_SEA_TILES,
+      grid = crop_m and planned.grid or nil,
+    })
+    if not state then
+      for i = 1, #problems do
+        M.log(problems[i])
+      end
+      return refuse("the output directory holds another extract: "
+        .. concat(problems, "; "))
+    end
+
+    if state.resumed then
+      local first_sight = run.manifest == nil
+      run.manifest = state.manifest
+      run.entries = state.entries
+      run.done = state.done
+      if first_sight then
+        adopt_timings(run, state.manifest.timing_ms)
+      end
+      M.log(format("resuming %s: %d tiles journalled", run.dir, #state.entries))
+      if state.partial_bytes > 0 then
+        M.log(format("%d bytes of a cut-short journal line are ignored",
+          state.partial_bytes))
+      end
+    else
+      run.manifest = M.new_manifest({
+        theatre = identity.theatre,
+        dcs_build = identity.dcs_build,
+        dcs_build_timestamp = identity.dcs_build_timestamp,
+        terrain_fingerprint = identity.terrain_fingerprint,
+        bounds_km = bounds_km,
+        grid = planned.grid,
+        crop_m = planned.crop_m,
+        authored_bounds_m = planned.authored_bounds_m,
+        authored_bounds_source = planned.authored_bounds_source,
+        omit_sea_tiles = M.OMIT_SEA_TILES,
+      })
+      run.entries = {}
+      run.done = {}
+      M.log("fresh extract in " .. run.dir)
+    end
+
+    local grid = run.manifest.grid
+    local high, wide = M.tile_counts(grid)
+    M.log(format("grid origin %s %s cells %d x %d at %d m, tiles %d x %d of %d",
+      tostring(grid.origin_x), tostring(grid.origin_z), grid.height, grid.width,
+      grid.cell_size, high, wide, grid.tile_size))
+    if crop_m then
+      M.log("crop " .. rect_text(crop_m))
+    end
+    if presweep_m then
+      M.log("authored rectangle from the pre-sweep " .. rect_text(presweep_m))
+    else
+      M.log("authored rectangle unknown")
+    end
+
+    return function()
+      return M.DONE
+    end
+  end,
+}
+
+-- In this order, and stated in one place so the walk the window counts
+-- sweeps over is readable: what the extract is of, then what it covers.
+M.jobs.prepare = { M.identity_job, M.grid_job }
 
 --------------------------------------------------------------------------------
 -- DCS callbacks
