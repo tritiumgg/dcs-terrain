@@ -4,13 +4,22 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-10T00:13Z
+**Last updated:** 2026-09-11T17:21Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **X2b: the run knows what it is extracting, and the build is the terrain's
+1. **X12: the run says where it is, and claims no more.** A job's `start`
+   may return `progress()` beside its step; the run keeps a record refreshed
+   every second that the window's line reads ("Sweeping the terrain: water,
+   3 of 9, 1234 of 5000."), logs a `heartbeat` line every ten seconds and
+   one `totals` line at done. The bar is the running sweep's own count: a
+   whole-run fraction weighted by the spec's minutes was built and taken out,
+   because those minutes are guesses on one machine. ADRs **0024**, **0025**.
+   *Verified by:* an agent, offline, over the 10 000-frame driver; the bar
+   and line moving on screen is a maintainer's eyes once a sweep exists.
+2. **X2b: the run knows what it is extracting, and the build is the terrain's
    version.** The first prepare job reads `dcs_build` off `autoupdate.cfg`,
    finds `terrain_dir` by the shallowest id in an `entry.lua` (a directory
    without one is skipped), and records the three data files by path, size
@@ -19,7 +28,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    `M.REFUSED`, which stops the run with the reason on it. ADRs **0022** and
    **0023** (0021 superseded the same day). *Verified by:* an agent offline, then
    live: Starts on Caucasus and Sinai logged every size and payload the install reports, in 2 and 4 ms.
-2. **X14: the window belongs in the editor, and says one thing at a time.**
+3. **X14: the window belongs in the editor, and says one thing at a time.**
    Skins read off `me_aircraft_group.dlg`, not the `_ME` family; 360 wide,
    centered; the crop block and the bar hide and the rows close up; one line
    beside one Start/Stop slot shows whatever was said last, wrapping when it
@@ -28,7 +37,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    rectangle, checked at Start, at the first terrain frame and at the pick)
    and ADR **0020** (absolute path on a drive that exists; the run still
    creates it). ED's folder dialog was measured and not built. PR **48**.
-3. **X13: the window has controls, and the live pass found two bugs the offline
+4. **X13: the window has controls, and the live pass found two bugs the offline
    tests could not.** A box for `output_dir`, a tick and three boxes for the
    crop, a line per field, Start, Stop, a bar X12 fills in, and a pick button
    that arms the next click on the map. ADR **0017**, Start re-points a run at
@@ -38,7 +47,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    destroyed and was **z-order** — it was underneath all along, and `getVisible`
    says true either way. ADR **0018** raises it once at build. X14 added.
    PR **47**.
-4. **One pull request per task, reviewed commit by commit.** The 400-line cap
+5. **One pull request per task, reviewed commit by commit.** The 400-line cap
    and the stack of branches are gone: the size limit is on the commit now —
    about 100 lines, 300 for one logical change, 1 000 split before committing —
    and a task is one branch. A push needs an adversarial local review and the
@@ -46,42 +55,31 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    refuses in `guard-bash.sh`, tested both ways — the adversarial review of the
    branch is what found the message text and `git -C`. Every earlier stack had
    landed by then, so nothing is left running on the old rules. PR **46**.
-5. **A write inside DCS never landed, and sixteen green test files could not see
-   it.** In the hook state a handle's `write` and `close` return *no values at
-   all* — on success and on a write to a read-only handle alike — where stock
-   Lua 5.1 returns `true` from both, which is what `write_file` and
-   `append_file` checked. So every write reported failure: `write_file` gave up
-   before its rename and left a `.tmp` holding the right bytes, so no manifest,
-   tile or config file could be written by a live run. It is ED's own C io, not
-   a Lua patch in `Scripts/Hooks` — the `gui` state answers the same. ADR 0016
-   checks the size that landed, and the fake reports nothing now too and can
-   lose bytes. PR **44**, off `main`.
 
 ## Next
 
 One task. The thing to pick up immediately.
 
-**X12** — progress reporting: `progress()` on a sweep, a heartbeat, and the
-weighted fraction replacing `window_progress`'s equal halves. The bar and the
-line it reports into are there, and the line wraps to two. Needs the ADR its
-row names, for the third kind of log line. *Verified by:* an agent, offline,
-over the 10 000-frame driver; the bar moving is a maintainer's eyes.
+**X5 / X6 / X7** — the tables, `water` and `height`, then roads, each an
+`add_job("hook", ...)` returning `step, progress` (ADR 0025: `progress()`
+counts journalled tiles as done). X5 builds the manifest from
+`run.identity`, which X2b fills. *Verified by:* each swept table and tile
+re-read through the bridge; a maintainer watching the bar and the line.
 
 ## Then
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **X5 / X6 / X7** — the tables, `water` and `height`, then roads, each an
-   `add_job("hook", ...)` against X12's contract. X5 builds the manifest from
-   `run.identity`, which X2b now fills. Verified through the bridge.
-2. **X8a / X8b / X8c / X9** — the mission pass, scenery, the model catalogue
+1. **X8a / X8b / X8c / X9** — the mission pass, scenery, the model catalogue
    and failure handling. X ends here until `check-extract` exists.
-3. **C1 / C2 / C3** — the Rust interlude X10 needs: scaffold, `synth` on the F2
+2. **C1 / C2 / C3** — the Rust interlude X10 needs: scaffold, `synth` on the F2
    constants, `check-extract`. Closes P2 and MS0 past.
-4. **X10** — the 10 x 10 km Kutaisi crop that `check-extract` accepts; its
+3. **X10** — the 10 x 10 km Kutaisi crop that `check-extract` accepts; its
    5 km radius passes ADR 0019's checks.
-5. **C4** — `pack` reads the extract: the first consumer of the X10 crop, and
+4. **C4** — `pack` reads the extract: the first consumer of the X10 crop, and
    where carry 1 is discharged.
+5. **C5a / C5b / C5c** — `pack` itself: schema and `meta`, the re-tiled base
+   grids, the vector tables and their R-trees.
 
 Milestone in view: **MS0 Contract** (P1, P2, F1, F2, C1, C2, C3, X1, X3).
 Proof is `check-extract` accepting the Rust synthetic extract and the hook's
