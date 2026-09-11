@@ -2638,6 +2638,20 @@ local function phase_change(state)
   M.ui(M.on_phase, state)
 end
 
+-- What the run came to, in one line at done: the tiles journalled, the frames
+-- it took and the time its sweeps spent. All three accumulate across a Stop
+-- and a Start into the same directory, so this is the work behind the extract
+-- rather than the last attempt at it. Each sweep's own time is already in the
+-- log where it finished, and in the manifest.
+local function log_totals(run)
+  local ms = 0
+  for _, spent in pairs(run.timing_ms) do
+    ms = ms + spent
+  end
+  M.log(format("totals %d tiles %d frames %d s in sweeps",
+    #run.entries, run.frames, floor(ms / 1000 + 0.5)))
+end
+
 -- Moves the run into a state, and is the only place that does. A phase change
 -- builds the queue for the phase it enters, logs to both destinations, and
 -- saves the manifest, which with the per-sweep save is the whole of "the
@@ -2686,6 +2700,11 @@ function M.enter(run, state)
   end
 
   phase_change(state)
+  -- After the phase line, whether done was reached by finishing or by the
+  -- terrain going away mid-pass: either way this is what there is.
+  if state == M.STATE_DONE then
+    log_totals(run)
+  end
   M.save(run)
   return state
 end
@@ -4463,6 +4482,23 @@ function M.window_status(run)
   -- later without one would otherwise reach setText as a nil and take the whole
   -- window down with it, which is a steep price for a missing sentence.
   local sentence = STATUS_OF[run.state] or tostring(run.state)
+
+  -- With a record, the sentence gains the sweep and its count: "Sweeping the
+  -- terrain: water, 1234 of 5000." The run refreshes the record about once a
+  -- second, and the line is written when its words change, so a count moving
+  -- is a write a second and a sweep that cannot count is no write at all.
+  -- Joined once per record rather than per frame, on the record itself, so the
+  -- sixty frames a second that ask between refreshes get the string back.
+  local progress = run.progress
+  if progress then
+    if progress.screen == nil then
+      if sentence:sub(-1) == "." then
+        sentence = sentence:sub(1, -2)
+      end
+      progress.screen = sentence .. ": " .. progress.text .. "."
+    end
+    return progress.screen
+  end
   return sentence
 end
 

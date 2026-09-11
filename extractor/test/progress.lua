@@ -285,6 +285,18 @@ T.eq("and the same numbers on the log line",
   true)
 T.eq("and cleared at done", driven.progress, false)
 
+-- One line at done with what the run came to. No tile was written by these
+-- sweeps, the frames are the ones driven, and the sweeps' time is the clock
+-- they stepped: 49 100 ms, to the nearest second.
+local totals
+for i = 1, #logged do
+  if logged[i] == "phase done" then
+    totals = logged[i + 1]
+  end
+end
+T.eq("totals follow the phase line", totals,
+  string.format("totals 0 tiles %d frames 49 s in sweeps", driven.frames))
+
 -- A count past 2^31, which this Lua's %d wraps negative: a sweep that counts
 -- bytes gets there, and the record has to print what it was told.
 local big = E.new_run({

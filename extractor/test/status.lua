@@ -248,6 +248,76 @@ T.eq("one write per change", bar_writes(), 5)
 
 
 --------------------------------------------------------------------------------
+T.group("the line names the sweep the run is in, once per record")
+--------------------------------------------------------------------------------
+
+-- The run keeps a record of where it is, refreshed about once a second, and
+-- the line is the phase's sentence with the record's words after it. Built
+-- by hand here, with the words the run would put in it.
+local function record(text)
+  return { text = text }
+end
+
+terrain = "Caucasus"
+run = four_sweeps(E.STATE_HOOK)
+T.eq("with no record, the phase alone", E.window_status(run),
+  "Sweeping the terrain.")
+run.progress = record("water, 2 of 4, 1234 of 5000")
+T.eq("a record names the sweep and its count", E.window_status(run),
+  "Sweeping the terrain: water, 2 of 4, 1234 of 5000.")
+run.progress = record("roads, 4 of 9")
+T.eq("one without a count names the sweep", E.window_status(run),
+  "Sweeping the terrain: roads, 4 of 9.")
+run.state = E.STATE_MISSION
+run.progress = record("surface, 9 of 9, 3 of 6")
+T.eq("in the scenery pass too", E.window_status(run),
+  "Sweeping the scenery: surface, 9 of 9, 3 of 6.")
+run.state = E.STATE_PREPARE
+run.progress = record("presweep, 2 of 9, 10 of 400")
+T.eq("and while preparing", E.window_status(run),
+  "Preparing: presweep, 2 of 9, 10 of 400.")
+-- A state with no sentence of its own has no full stop to take off.
+run.state = "rehearsing"
+run.progress = record("lines")
+T.eq("a bare state name takes the words after it", E.window_status(run),
+  "rehearsing: lines.")
+-- Without a map, nothing about the sweep: the map is what to say.
+terrain = nil
+run.state = E.STATE_HOOK
+T.eq("no map outranks the record", E.window_status(run), E.STATUS_NO_TERRAIN)
+
+-- Written when the words change: a fresh record with a moved count is one
+-- write, the same record over sixty frames is none, and a fresh record whose
+-- words are the same -- a sweep that cannot count -- is none either.
+fresh()
+terrain = "Caucasus"
+run = four_sweeps(E.STATE_HOOK)
+E.on_frame(run)
+-- The first frame also writes the instruction into the line before the
+-- phase replaces it, so the counts below are relative to that.
+local base = writes()
+run.progress = record("water, 2 of 4, 1 of 5000")
+E.on_frame(run)
+T.eq("a record is written", E.window.message.text,
+  "Sweeping the terrain: water, 2 of 4, 1 of 5000.")
+T.eq("once", writes(), base + 1)
+for _ = 1, 60 do E.on_frame(run) end
+T.eq("and not again while it stands", writes(), base + 1)
+run.progress = record("water, 2 of 4, 2 of 5000")
+E.on_frame(run)
+T.eq("a moved count is a write", writes(), base + 2)
+run.progress = record("roads, 4 of 9")
+E.on_frame(run)
+T.eq("a new sweep is a write", writes(), base + 3)
+run.progress = record("roads, 4 of 9")
+for _ = 1, 60 do E.on_frame(run) end
+T.eq("the same words again are not", writes(), base + 3)
+run.progress = false
+E.on_frame(run)
+T.eq("the record going is the phase alone again", E.window.message.text,
+  "Sweeping the terrain.")
+
+--------------------------------------------------------------------------------
 T.group("a window that cannot be built ticks a no-op")
 --------------------------------------------------------------------------------
 
