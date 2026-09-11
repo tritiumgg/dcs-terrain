@@ -28,19 +28,26 @@ without `seek`.
   the id it declares, and records its three data files by path, size and
   payload size, nothing hashed, because the build is the terrain's version
   (ADR 0022, ADR 0023); an install that does not hold them stops the run with
-  the reason on the window. The grid is planned from the crop, and the output
-  directory is opened, or resumed when it already holds an extract of the
-  same theatre, build and grid. No rectangle is ever read from a theatre
-  file: the authored area is measured by the pre-sweep, the same way on
-  every theatre (ADR 0026), so *until the pre-sweep is built a run without a
-  crop stops and asks for one*. The hook pass then writes `config.json`, with
-  the theatre's own facts, twenty lat/lon samples and the fill triple, and the
-  seven tables, one file a step. Every table is shaped the same way on every
-  theatre: a value that is not what was measured elsewhere is written null
-  with a line in the log, a table the theatre cannot give is written empty,
-  and the run never stops for either. *The tile and road sweeps are not
-  built yet, so a run then reaches `done` with the tables written and no
-  tiles.*
+  the reason on the window. No rectangle is ever read from a theatre file:
+  a run without a crop measures the built area itself, the same way on every
+  theatre (ADR 0026), with a 5 km lattice over the map where a cell counts
+  when a 2 km line of heights crosses enough posts or a road lies within 5
+  km, and the grid is that rectangle grown by 10 km; a crop run measures
+  nothing and records no rectangle (ADR 0009). The grid is planned from the
+  crop or the measurement, and the output directory is opened, or resumed
+  when it already holds an extract of the same theatre and build, in which
+  case the rectangle is the manifest's and is not measured again. The hook
+  pass then writes `config.json`, with the theatre's own facts, twenty
+  lat/lon samples and the fill triple, and the seven tables, one file a step.
+  Every table is shaped the same way on every theatre: a value that is not
+  what was measured elsewhere is written null with a line in the log, a table
+  the theatre cannot give is written empty, and the run never stops for
+  either. Then the `water` and `height` tiles, one tile a step, each cell
+  tested against the fill triple before it is rounded: a tile that is fill
+  throughout is not written, a tile that is sea throughout is written for
+  `water` only, and a resumed run counts its journalled tiles as done and
+  reads them back to find the sea ones. *The road and scenery sweeps are not
+  built yet, so a run reaches `done` with those two layers and no roads.*
   While a run is sweeping, the line names the sweep, which of how many it is
   and its count, refreshed every second, and the bar is that sweep's own count;
   nothing claims to know how far the whole run is (ADR 0025).
