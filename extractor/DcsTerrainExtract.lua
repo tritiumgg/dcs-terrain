@@ -809,6 +809,37 @@ function M.presweep_bitmask(lattice, authored)
   return M.base64(concat(bytes))
 end
 
+-- How many of n heights along a line have a second difference beyond eps.
+-- The engine interpolates between height posts, and the second difference
+-- is zero between two posts and not zero at one, so the count is how many
+-- posts the line crossed: many where somebody built the terrain, few where
+-- the coarse raster outside it runs. A nil is a sample the theatre did not
+-- answer; it is no breakpoint, and neither is a difference taken across it.
+function M.breakpoints(heights, n, eps)
+  local count = 0
+  for i = 2, n - 1 do
+    local a, b, c = heights[i - 1], heights[i], heights[i + 1]
+    if a and b and c then
+      local d = a - 2 * b + c
+      if d > eps or d < -eps then
+        count = count + 1
+      end
+    end
+  end
+  return count
+end
+
+-- Either rule makes a cell built: enough breakpoints, or a road close
+-- enough. Flat built ground has few breakpoints and a road; detailed terrain
+-- with no road exists too, and each rule catches what the other misses. A
+-- nil road is no road reachable.
+function M.cell_authored(breaks, road_m, opts)
+  if breaks >= opts.breakpoint_min then
+    return true
+  end
+  return road_m ~= nil and road_m <= opts.road_max_m
+end
+
 -- The whole block config.json carries for a pre-sweep. Built here rather than
 -- where config.json is written, so the lattice's indexing convention and the
 -- record of it stay in one place.
@@ -1691,6 +1722,22 @@ M.OMIT_SEA_TILES = true
 M.FRAME_BUDGET_MS = 5
 M.ROAD_SEED_SPACING = 1000
 M.ROAD_SEED_NEIGHBOURS = 4
+
+-- The pre-sweep's numbers, all measured. Inside the built terrain a 2 km
+-- line sampled at 10 m reads 100 to 170 samples where the second difference
+-- of height is not zero, and 0 to 35 outside it, with flat built ground as
+-- low as 0; a road lies within a few hundred meters of built ground and
+-- tens to hundreds of kilometers from unbuilt. So a 5 km cell is built when
+-- it reads 60 breakpoints or a road within 5 km, and the rectangle around
+-- the built cells is grown by 10 km so a cell on the edge is whole. The
+-- epsilon is what "not zero" means for a float second difference.
+M.PRESWEEP_CELL_KM = 5
+M.PRESWEEP_MARGIN_M = 10000
+M.PRESWEEP_LINE_M = 2000
+M.PRESWEEP_STEP_M = 10
+M.PRESWEEP_BREAKPOINT_MIN = 60
+M.PRESWEEP_ROAD_MAX_M = 5000
+M.PRESWEEP_BREAK_EPS = 1e-4
 
 local function bad_boolean(v, name)
   if type(v) ~= "boolean" then

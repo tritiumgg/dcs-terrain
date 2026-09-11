@@ -161,4 +161,27 @@ T.eq("the record encodes", E.json(record),
   '{"authored_cells":2,"bits":"AEAAIAA=","breakpoint_min":60,'
   .. '"cell_km":5,"road_max_m":5000,"total_cells":15}')
 
+--------------------------------------------------------------------------------
+T.group("breakpoints and the built-cell rule")
+--------------------------------------------------------------------------------
+
+-- A straight line has a zero second difference everywhere; a kink is one
+-- non-zero, at the sample where the slope changes.
+T.eq("a plane has none", E.breakpoints({ 1, 2, 3, 4, 5 }, 5, 1e-4), 0)
+T.eq("a kink is one", E.breakpoints({ 1, 2, 3, 3, 3 }, 5, 1e-4), 1)
+T.eq("a zigzag is every interior sample", E.breakpoints({ 0, 1, 0, 1, 0 }, 5, 1e-4), 3)
+T.eq("under the epsilon is zero", E.breakpoints({ 0, 0.00001, 0, 0, 0 }, 5, 1e-4), 0)
+T.eq("on the epsilon is zero", E.breakpoints({ 0, 0.00005, 0, 0, 0 }, 5, 1e-4), 0)
+T.eq("a nil sample takes its differences with it",
+  E.breakpoints({ 0, 1, nil, 1, 0 }, 5, 1e-4), 0)
+T.eq("a nil at the end leaves the rest", E.breakpoints({ 0, 1, 0, 1, nil }, 5, 1e-4), 2)
+T.eq("two samples have no interior", E.breakpoints({ 0, 1 }, 2, 1e-4), 0)
+
+local rule = { breakpoint_min = 60, road_max_m = 5000 }
+T.eq("enough breakpoints", E.cell_authored(60, nil, rule), true)
+T.eq("one short and no road", E.cell_authored(59, nil, rule), false)
+T.eq("a road close enough", E.cell_authored(0, 5000, rule), true)
+T.eq("a road too far", E.cell_authored(0, 5001, rule), false)
+T.eq("the same road with a bumpy line", E.cell_authored(150, 5001, rule), true)
+
 T.done()
