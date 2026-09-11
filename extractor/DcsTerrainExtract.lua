@@ -3485,6 +3485,296 @@ M.grid_job = {
 M.jobs.prepare = { M.identity_job, M.grid_job }
 
 --------------------------------------------------------------------------------
+-- Calling the terrain
+--
+-- Every call into the terrain module goes through here, under pcall, and a
+-- failure is a log line and a nil rather than a raise: a frame callback that
+-- raises climbs out into DCS's own stack, and a sweep that is forty minutes
+-- long must not be ended by one call that threw. What a nil means to the
+-- value being built is each sweep's business -- a null field, an empty
+-- table, a sample that cannot agree.
+--------------------------------------------------------------------------------
+
+-- Returns true and the call's results, or nil after logging why. Two results
+-- are enough: no terrain call the hook makes returns more.
+function M.terrain_call(terrain, name, ...)
+  local f = terrain[name]
+  if type(f) ~= "function" then
+    M.log(format("terrain.%s is not a function: %s", name, type(f)))
+    return nil
+  end
+  local ok, a, b = pcall(f, ...)
+  if not ok then
+    M.log(format("terrain.%s failed: %s", name, tostring(a)))
+    return nil
+  end
+  return true, a, b
+end
+
+--------------------------------------------------------------------------------
+-- Config sweep
+--
+-- The first hook-pass sweep: what the theatre says about itself, twenty
+-- points for the projection to be fitted from later, and the fill triple --
+-- what the engine returns where there is no terrain -- which the tile sweeps
+-- test every cell against. It runs on every Start, resumed or not, because
+-- the triple lives on the run and not in the manifest, and it is cheap:
+-- about thirty calls and one small file.
+--------------------------------------------------------------------------------
+
+-- The water codes of the format. A string not in the table is 254, so that
+-- a cell whose surface the hook did not recognise stays apart from a fill
+-- cell, which is 255 (ADR 0007).
+local WATER_CODES = { land = 0, lake = 1, sea = 2, river = 3 }
+M.WATER_UNRECOGNISED = 254
+M.WATER_NODATA = 255
+
+-- Logged once per distinct string for as long as the hook is loaded: a
+-- theatre that says something new says it a million times in a sweep.
+local unrecognised_surface = {}
+
+function M.water_class(s)
+  local code = type(s) == "string" and WATER_CODES[s] or nil
+  if code then
+    return code
+  end
+  local key = tostring(s)
+  if not unrecognised_surface[key] then
+    unrecognised_surface[key] = true
+    M.log(format("unrecognised surface string %s, encoded %d", key, M.WATER_UNRECOGNISED))
+  end
+  return M.WATER_UNRECOGNISED
+end
+
+M.LATLON_ROWS = 4
+M.LATLON_COLS = 5
+
+-- Twenty points on a 4 by 5 lattice inside the grid, row-major, each at the
+-- middle of its share of the rectangle so none sits on an edge. They are
+-- where the projection is checked or fitted, so they are spread over the
+-- whole extract rather than clustered anywhere.
+function M.latlon_lattice(grid)
+  local north = grid.height * grid.cell_size
+  local east = grid.width * grid.cell_size
+  local points, n = {}, 0
+  for i = 0, M.LATLON_ROWS - 1 do
+    for j = 0, M.LATLON_COLS - 1 do
+      n = n + 1
+      points[n] = {
+        x = grid.origin_x + (i + 0.5) / M.LATLON_ROWS * north,
+        z = grid.origin_z + (j + 0.5) / M.LATLON_COLS * east,
+      }
+    end
+  end
+  return points
+end
+
+M.FILL_OFFSET_M = 500000
+
+-- Three points 500 km outside the bounds rectangle, off three different
+-- corners, where every theatre measured returns its fill constant. Three
+-- rather than one so that a point that happened to land on something real
+-- is caught by the other two disagreeing.
+function M.fill_points(bounds_m)
+  local d = M.FILL_OFFSET_M
+  return {
+    { x = bounds_m.min_x - d, z = bounds_m.min_z - d },
+    { x = bounds_m.max_x + d, z = bounds_m.max_z + d },
+    { x = bounds_m.max_x + d, z = bounds_m.min_z - d },
+  }
+end
+
+-- The triple when every sample carries all three values and they agree
+-- exactly, else nil. Exactly: the tile sweeps compare unrounded returns
+-- against these, so a triple that is nearly the same is not the fill.
+function M.fill_from_samples(samples)
+  local first = samples[1]
+  if first == nil then
+    return nil
+  end
+  for i = 1, #samples do
+    local s = samples[i]
+    if not (is_finite(s.height) and is_finite(s.water) and is_finite(s.seabed)) then
+      return nil
+    end
+    if s.height ~= first.height or s.water ~= first.water or s.seabed ~= first.seabed then
+      return nil
+    end
+  end
+  return { height = first.height, water = first.water, seabed = first.seabed }
+end
+
+local function null_unless(v)
+  if v == nil then
+    return M.JSON_NULL
+  end
+  return v
+end
+
+-- A DCS point {x, y} as the format's {x, z}, or null where it is not one.
+local function point_xz(p)
+  if type(p) ~= "table" or not (is_finite(p.x) and is_finite(p.y)) then
+    return M.JSON_NULL
+  end
+  return { x = p.x, z = p.y }
+end
+
+-- config.json as a table for the encoder. Every key the format names is
+-- present, null where the theatre did not answer, and nothing is invented:
+-- a bullseye of {0, 0} is recorded as {0, 0}. `presweep` is the one key
+-- that is absent rather than null when there is nothing to say, because a
+-- crop run never had one to record.
+function M.config_record(opts)
+  local bullseye = M.JSON_NULL
+  if type(opts.default_bullseye) == "table" then
+    bullseye = {
+      blue = point_xz(opts.default_bullseye.blue),
+      red = point_xz(opts.default_bullseye.red),
+    }
+  end
+  local camera = M.JSON_NULL
+  local c = opts.default_camera_km
+  if type(c) == "table" and is_finite(c[1]) and is_finite(c[2]) and is_finite(c[3]) then
+    camera = M.as_array({ c[1], c[2], c[3] })
+  end
+  local fill = M.JSON_NULL
+  if opts.fill then
+    fill = {
+      height = opts.fill.height,
+      water = opts.fill.water,
+      seabed = opts.fill.seabed,
+      samples = M.as_array(opts.fill_samples or {}),
+    }
+  end
+  local record = {
+    id = null_unless(opts.id),
+    bounds_km = opts.bounds_km,
+    default_bullseye = bullseye,
+    sea_enabled = null_unless(opts.sea_enabled),
+    default_camera_km = camera,
+    summer_time_delta = null_unless(opts.summer_time_delta),
+    shape = null_unless(opts.shape),
+    -- Fitted by pack from the samples below; the extractor never carries one
+    -- (ADR 0011).
+    crs = M.JSON_NULL,
+    latlon_samples = M.as_array(opts.latlon_samples or {}),
+    fill = fill,
+  }
+  if opts.presweep then
+    record.presweep = opts.presweep
+  end
+  return record
+end
+
+-- A resumed run rewrites config.json without having pre-swept, so the block
+-- the first run recorded is kept from the file already there. Only that
+-- block: everything else is measured again and the new measurement wins.
+function M.keep_presweep(existing_text, record)
+  if record.presweep ~= nil or type(existing_text) ~= "string" then
+    return record
+  end
+  local ok, existing = pcall(M.decode, existing_text)
+  if ok and type(existing) == "table" and type(existing.presweep) == "table" then
+    record.presweep = existing.presweep
+  end
+  return record
+end
+
+M.config_job = {
+  name = "config",
+  start = function(run)
+    local function refuse(message)
+      run.refusal = message
+      return function()
+        return M.REFUSED
+      end
+    end
+
+    local terrain = M.terrain_module()
+    if not terrain then
+      return refuse("the terrain module is not loaded")
+    end
+    local bounds_m = M.terrain_bounds()
+    if not bounds_m then
+      return refuse("the theatre reports no bounds rectangle")
+    end
+
+    local function config(key)
+      local ok, value = M.terrain_call(terrain, "GetTerrainConfig", key)
+      if ok then
+        return value
+      end
+      return nil
+    end
+
+    local samples = {}
+    local points = M.latlon_lattice(run.manifest.grid)
+    for i = 1, #points do
+      local p = points[i]
+      local ok, lat, lon = M.terrain_call(terrain, "convertMetersToLatLon", p.x, p.z)
+      samples[i] = {
+        x = p.x, z = p.z,
+        lat = ok and is_finite(lat) and lat or M.JSON_NULL,
+        lon = ok and is_finite(lon) and lon or M.JSON_NULL,
+      }
+    end
+
+    -- Each call's return is taken as it comes; a call that failed leaves its
+    -- field nil, and a nil cannot agree, so the triple is then not known.
+    local fill_samples = {}
+    local fill_at = M.fill_points(bounds_m)
+    for i = 1, #fill_at do
+      local p = fill_at[i]
+      local got_h, height = M.terrain_call(terrain, "GetHeight", p.x, p.z)
+      local got_s, surface = M.terrain_call(terrain, "GetSurfaceType", p.x, p.z)
+      local got_d, _, seabed = M.terrain_call(terrain, "GetSurfaceHeightWithSeabed", p.x, p.z)
+      fill_samples[i] = {
+        x = p.x, z = p.z,
+        height = got_h and height or nil,
+        water = got_s and M.water_class(surface) or nil,
+        seabed = got_d and seabed or nil,
+      }
+    end
+    local fill = M.fill_from_samples(fill_samples)
+    if fill then
+      M.log(format("fill height %s water %d seabed %s", tostring(fill.height),
+        fill.water, tostring(fill.seabed)))
+    else
+      M.log("fill samples disagree, no cell will be called fill: " .. M.json(M.as_array(fill_samples)))
+    end
+    run.fill = fill or false
+
+    local got_shape, shape = M.terrain_call(terrain, "getTerrainShpare")
+    local record = M.config_record({
+      id = config("id"),
+      bounds_km = run.manifest.bounds_km,
+      default_bullseye = config("defaultBullseye"),
+      sea_enabled = config("seaEnabled"),
+      default_camera_km = config("defaultcamera"),
+      summer_time_delta = config("SummerTimeDelta"),
+      shape = got_shape and shape or nil,
+      latlon_samples = samples,
+      fill = fill,
+      fill_samples = fill_samples,
+      presweep = run.presweep or nil,
+    })
+    local path = M.join(run.dir, TABLE_FILES.config)
+    M.keep_presweep(M.read_file(path), record)
+    local ok, err = M.write_file(path, M.json(record))
+    if not ok then
+      return refuse("config.json cannot be written: " .. tostring(err))
+    end
+    M.log("wrote " .. TABLE_FILES.config)
+
+    return function()
+      return M.DONE
+    end
+  end,
+}
+
+M.add_job("hook", M.config_job)
+
+--------------------------------------------------------------------------------
 -- DCS callbacks
 --
 -- The four callbacks the run is driven by. onSimulationFrame is the whole
