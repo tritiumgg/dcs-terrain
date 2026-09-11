@@ -2273,6 +2273,15 @@ M.STATE_DONE = "done"
 -- lasts for as long as DCS sits at the main menu, which can be hours.
 M.IDLE_POLL_FRAMES = 60
 
+-- ADR 0024. Two cadences for one record of where the run has got to. The record is
+-- refreshed every second for the window's line, which is what somebody
+-- watching reads; the log gets a heartbeat line every ten, which is what
+-- somebody reading afterwards greps. Both are wall-clock seconds, because a
+-- frame is not a unit of time in the editor -- the rate varies with what else
+-- is on screen -- and a reader compares the log against a clock.
+M.PROGRESS_S = 1
+M.HEARTBEAT_S = 10
+
 -- Only two of the six states are passes the manifest records.
 local PASS_OF = { [M.STATE_HOOK] = "hook", [M.STATE_MISSION] = "mission" }
 
@@ -2450,6 +2459,19 @@ function M.new_run(opts)
     -- times its own jobs before there is a manifest to put the timings in.
     timing_ms = {},
     entries = {},
+    -- Where the run has got to, as last reported: false until a pass has
+    -- something to say, and cleared at every phase change. The clock stamps
+    -- beside it say when the record and the log line were last due. All
+    -- three are values rather than nil so that a retarget's copy of a fresh
+    -- run replaces them, and so that the test holding retarget to new_run's
+    -- shape can see them.
+    progress = false,
+    progress_at = 0,
+    heartbeat_at = 0,
+    -- When this attempt found its terrain, for the elapsed the record
+    -- carries. Not when Start was pressed: a run can wait at the main menu
+    -- for hours before a map is opened, and none of that was work.
+    started_clock = 0,
     queue = nil,
     manifest = nil,
   }
@@ -2624,6 +2646,19 @@ function M.enter(run, state)
   run.state = state
   run.phase_frames = 0
   run.queue = nil
+  -- A record belongs to the phase that made it. Left in place it would name
+  -- the last sweep of the pass before, on the window, for up to a second into
+  -- this one -- and, on a resume, name work from the attempt before.
+  run.progress = false
+  if state == M.STATE_PREPARE then
+    -- The clocks start here, where the work does, and not at Start: a run
+    -- can wait at the main menu for hours before a map is opened, and a
+    -- record due since then would fire on the first frame of work saying
+    -- nothing had happened yet, which the phase line already says.
+    local now = M.clock()
+    run.started_clock = now
+    run.progress_at, run.heartbeat_at = now, now
+  end
 
   local pass = PASS_OF[state]
   if pass then
@@ -2736,6 +2771,79 @@ local function frame_idle(run)
   return M.enter(run, M.STATE_PREPARE)
 end
 
+-- A count as the record prints it: whole where it is whole, which is every
+-- sweep's case, and to a tenth where a sweep counts in fractions of a unit.
+-- Through %.0f rather than %d, because this Lua's %d wraps at 2^31 and a
+-- sweep that counts bytes passes that.
+local function count_text(n)
+  if n == floor(n) then
+    return format("%.0f", n)
+  end
+  return format("%.1f", n)
+end
+
+-- Where the run has got to, refreshed on the run and, less often, written to
+-- the log. Called only on a frame that leaves the run in the phase it named,
+-- so a record never describes a phase the run has just left; the phase line
+-- is the marker for that.
+--
+-- The record carries the log line and the words for the window ready made,
+-- so the frame callback, which asks sixty times a second, concatenates a
+-- string it already has rather than formatting numbers it already formatted.
+--
+-- Between jobs -- the last step of one finished and the budget ran out
+-- before the next started -- the sweep named is the one about to start, with
+-- no count, which is the truth about that frame.
+--
+-- Elapsed counts from the terrain being found, on M.clock, which is wall
+-- time on the C runtime DCS ships with; the frame budget already relies on
+-- that. It is held at zero rather than trusted, because a clock that has
+-- wrapped would otherwise print a negative age.
+local function report_progress(run)
+  local now = M.clock()
+  local line_due = now - run.progress_at >= M.PROGRESS_S
+  local log_due = now - run.heartbeat_at >= M.HEARTBEAT_S
+  if not (line_due or log_due) then
+    return
+  end
+  -- The queue has a job at its index, because a frame reports only when
+  -- queue_frame said there was more to do.
+  local queue = run.queue
+  local sweep = queue.jobs[queue.index].name
+  local done, total = M.queue_progress(queue)
+  local elapsed = floor(now - run.started_clock + 0.5)
+  if elapsed < 0 then
+    elapsed = 0
+  end
+  -- Never nil here: a reporting frame has a queue with a job in it, so there
+  -- is at least one sweep to be on.
+  local position, count = M.sweep_position(run)
+
+  local counted = ""
+  local text = format("%s, %d of %d", sweep, position, count)
+  if done then
+    counted = format(" %s/%s", count_text(done), count_text(total))
+    text = format("%s, %s of %s", text, count_text(done), count_text(total))
+  end
+  run.progress = {
+    phase = run.state,
+    sweep = sweep,
+    position = position,
+    count = count,
+    done = done,
+    total = total,
+    elapsed_s = elapsed,
+    text = text,
+    line = format("heartbeat %s %s %d/%d%s elapsed %d s",
+      run.state, sweep, position, count, counted, elapsed),
+  }
+  run.progress_at = now
+  if log_due then
+    M.log(run.progress.line)
+    run.heartbeat_at = now
+  end
+end
+
 local function frame_pass(run)
   run.phase_frames = run.phase_frames + 1
   local pass = PASS_OF[run.state]
@@ -2767,6 +2875,9 @@ local function frame_pass(run)
     return M.STATE_STOPPED
   end
   if status == M.MORE then
+    -- After the finished jobs were recorded, so a record naming the next
+    -- sweep follows the line that closed the one before it.
+    report_progress(run)
     return run.state
   end
   if pass then
@@ -2800,6 +2911,10 @@ function M.start(run)
   run.idle_frames = 0
   -- A refusal belongs to the attempt it stopped; this is the next one.
   run.refusal = nil
+  -- No record carries over: what the last attempt was sweeping is not where
+  -- this one is. The clocks are left alone: they start when prepare does,
+  -- because idle can last hours.
+  run.progress = false
   phase_change(M.STATE_IDLE)
   return true
 end
@@ -2817,6 +2932,8 @@ function M.stop(run)
   M.save(run)
   run.state = M.STATE_STOPPED
   run.queue = nil
+  -- A stopped run is sweeping nothing, so it keeps no record of a sweep.
+  run.progress = false
   phase_change(M.STATE_STOPPED)
   return true
 end
