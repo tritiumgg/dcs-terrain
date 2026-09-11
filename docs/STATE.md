@@ -4,7 +4,7 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-11T22:50Z
+**Last updated:** 2026-09-11T23:55Z
 
 ## Done
 
@@ -19,8 +19,10 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    is `config`, `tables`, `water`, `height`, one tile a step; water builds
    `run.skip` (fill and all-sea tiles) and a resumed water sweep reads each
    journalled tile back to find the sea ones. *Verified by:* an agent offline
-   over closed-form fakes, every byte of a 2 x 2 tile grid written down. The
-   live pass is still owed, below.
+   over closed-form fakes, every byte of a 2 x 2 tile grid written down; then
+   a 5 km Kutaisi crop run by the maintainer on Caucasus 2.9.29.27468, ten
+   cells re-read through the bridge equal to the bytes, journal min/max equal
+   to the tiles, 58 ms a water tile. The whole-map half is Next.
 2. **X5: the grid job, `config.json` and the seven tables.** Prepare is
    `identity` then `grid`; the hook pass is `config` (the theatre's facts,
    twenty lat/lon samples, the fill triple off three corners 500 km out) then
@@ -43,14 +45,13 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
 One task. The thing to pick up immediately.
 
-**X6, the live pass** — on Caucasus through the bridge, from the session
-talking to the user: the road snap at the Kutaisi reference point answers
-`x, z`; a 5 km crop at Kutaisi, ten cells' `height` and `water` re-read
-through the bridge equal the tile bytes and the journal's min/max; a
-whole-map run watched through the pre-sweep and the first tiles, its
-rectangle within 10 km of the hull ADR 0026 records, then Stop and Start
-resuming without measuring again; row bands if a tile a step stutters.
-*Verified by:* a maintainer at the install, watching the bar.
+**X6, the whole-map half of the live pass** — on Caucasus, from the session
+talking to the user: a run with no crop into an empty directory, watched
+through the pre-sweep and the first tiles, its logged rectangle within 10 km
+of the hull ADR 0026 records, then Stop and Start resuming with "authored
+rectangle kept from the manifest" and no second measurement. The road snap
+answers `x, z` at Kutaisi and 500 km out, so the 5 km rule is what decides.
+*Verified by:* a maintainer at the install, watching the bar; PR **52**.
 
 ## Then
 
