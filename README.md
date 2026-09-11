@@ -57,8 +57,10 @@ write the extract and, optionally, a crop — a centre and a radius, where **Pic
 centre on map** arms the next click you make on the map and fills the centre in.
 **Start** begins the run, which sweeps across frames, shows how far it has got,
 logs to `Logs/DcsTerrainExtract.log`, resumes after **Stop**, and never writes
-into your DCS install. *The window and its controls work; the sweeps that fill
-an extract are not built yet, so a run finishes in seconds and writes nothing.*
+into your DCS install. *The window and its controls work, and a run writes the
+manifest, `config.json` and the seven tables; the tile and road sweeps are not
+built yet, so a run finishes in seconds with no tiles, and a run without a crop
+stops and asks for one until the whole-map pre-sweep exists.*
 
 **Pack** the extract into a single file, then verify it:
 

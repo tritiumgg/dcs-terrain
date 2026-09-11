@@ -28,9 +28,19 @@ without `seek`.
   the id it declares, and records its three data files by path, size and
   payload size, nothing hashed, because the build is the terrain's version
   (ADR 0022, ADR 0023); an install that does not hold them stops the run with
-  the reason on the window. *The
-  sweeps that fill an extract are not built yet, so a run then reaches `done`
-  in a few frames and writes nothing.*
+  the reason on the window. The grid is planned from the crop, and the output
+  directory is opened, or resumed when it already holds an extract of the
+  same theatre, build and grid. No rectangle is ever read from a theatre
+  file: the authored area is measured by the pre-sweep, the same way on
+  every theatre (ADR 0026), so *until the pre-sweep is built a run without a
+  crop stops and asks for one*. The hook pass then writes `config.json`, with
+  the theatre's own facts, twenty lat/lon samples and the fill triple, and the
+  seven tables, one file a step. Every table is shaped the same way on every
+  theatre: a value that is not what was measured elsewhere is written null
+  with a line in the log, a table the theatre cannot give is written empty,
+  and the run never stops for either. *The tile and road sweeps are not
+  built yet, so a run then reaches `done` with the tables written and no
+  tiles.*
   While a run is sweeping, the line names the sweep, which of how many it is
   and its count, refreshed every second, and the bar is that sweep's own count;
   nothing claims to know how far the whole run is (ADR 0025).
