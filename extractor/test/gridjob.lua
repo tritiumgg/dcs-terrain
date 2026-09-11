@@ -100,12 +100,13 @@ local function manifest_on(fs, dir)
 end
 
 --------------------------------------------------------------------------------
-T.group("the real prepare jobs are identity then grid")
+T.group("the real prepare jobs are identity, presweep, grid")
 --------------------------------------------------------------------------------
 
-T.eq("two jobs", #E.jobs.prepare, 2)
+T.eq("three jobs", #E.jobs.prepare, 3)
 T.eq("identity first", E.jobs.prepare[1].name, "identity")
-T.eq("then the grid", E.jobs.prepare[2].name, "grid")
+T.eq("then the pre-sweep", E.jobs.prepare[2].name, "presweep")
+T.eq("then the grid", E.jobs.prepare[3].name, "grid")
 
 --------------------------------------------------------------------------------
 T.group("a crop run plans its grid from the box and knows no authored rectangle")
@@ -165,15 +166,62 @@ T.eq("the grid covers it", written.grid.height, 800)
 T.eq("the log names the source", log_has("authored rectangle from the pre-sweep"), true)
 
 --------------------------------------------------------------------------------
+T.group("a whole-map run measures its rectangle once")
+--------------------------------------------------------------------------------
+
+-- The real pre-sweep over a fake theatre bumpy everywhere: every lattice cell
+-- is authored, and the rectangle is the bounds grown by the margin. 70 by 70
+-- km at 5 km cells is 14 by 14.
+local real_module = E.terrain_module
+local height_calls = 0
+E.terrain_module = function()
+  return {
+    GetTerrainConfig = function() return nil end,
+    GetHeight = function(x, z)
+      height_calls = height_calls + 1
+      return (x % 20 < 10) and 1 or 0
+    end,
+    getClosestPointOnRoads = function() return nil end,
+  }
+end
+logged = {}
+run = new_run({ output_dir = "C:/extract" })
+T.eq("reaches done", drive(run), E.STATE_DONE)
+written = manifest_on(run.fs)
+T.eq("the rectangle is the bounds grown by the margin", E.json(written.authored_bounds_m),
+  '{"max_x":50000,"max_z":35000,"min_x":-40000,"min_z":-55000}')
+T.eq("from the pre-sweep", written.authored_bounds_source, "presweep")
+T.eq("which was timed", written.timing_ms.presweep ~= nil, true)
+T.eq("196 cells of 201 heights", height_calls, 196 * 201)
+
+-- The same directory again, from a new process: the rectangle is the
+-- manifest's, and nothing is measured.
+height_calls = 0
+logged = {}
+run = new_run({ output_dir = "C:/extract" }, nil, run.fs)
+T.eq("reaches done again", drive(run), E.STATE_DONE)
+T.eq("without a height read", height_calls, 0)
+T.eq("the log says the rectangle was kept", log_has("authored rectangle kept from the manifest"), true)
+T.eq("and the run resumed", log_has("resuming C:/extract"), true)
+E.terrain_module = real_module
+
+--------------------------------------------------------------------------------
 T.group("refusals, before anything is written")
 --------------------------------------------------------------------------------
 
+-- No crop, and no terrain module for the pre-sweep to measure with: the
+-- pre-sweep refuses, and nothing is written.
 logged = {}
 run = new_run({ output_dir = "C:/extract" })
-T.eq("no crop and no pre-sweep stops the run", drive(run), E.STATE_STOPPED)
-T.eq("with the reason", run.refusal:find("give a crop", 1, true) ~= nil, true)
+T.eq("no crop and no module stops the run", drive(run), E.STATE_STOPPED)
+T.eq("at the pre-sweep", run.refusal, "the terrain module is not loaded")
 T.eq("and nothing written", run.fs.files["C:/extract/manifest.json"], nil)
 T.eq("not even the directory", run.fs.files["C:/extract"], nil)
+
+-- A job list without the pre-sweep: the grid job has no rectangle at all.
+run = new_run({ output_dir = "C:/extract" }, { E.identity_job, E.grid_job })
+T.eq("no crop and no pre-sweep stops the run", drive(run), E.STATE_STOPPED)
+T.eq("with the reason", run.refusal, "no crop was given and the pre-sweep found no rectangle")
 
 E.terrain_bounds_km = function() return nil end
 run = new_run({ output_dir = "C:/extract", crop = CROP })

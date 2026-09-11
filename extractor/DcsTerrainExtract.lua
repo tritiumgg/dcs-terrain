@@ -3440,6 +3440,197 @@ local function rect_text(rect)
     tostring(rect.min_z), tostring(rect.max_z))
 end
 
+--------------------------------------------------------------------------------
+-- The pre-sweep
+--
+-- The authored rectangle is measured, on every theatre (ADR 0026): a 5 km
+-- lattice over the theatre's bounds, and per cell a 2 km line of heights and,
+-- where the line does not settle it, one road snap. It is a prepare job
+-- because the grid is planned from what it finds, and it sits before the grid
+-- job, which is why it looks at the output directory itself: a directory that
+-- already holds this theatre's extract holds the rectangle the grid was
+-- planned from, and measuring again could move the lattice by a cell and
+-- refuse a half-finished extract that was perfectly good. A crop run measures
+-- nothing and has no rectangle (ADR 0009).
+--
+-- A Stop during the measurement loses it, because nothing is on disk yet, and
+-- the next Start measures again. The rectangle left on the run by the lost
+-- attempt is never adopted: it could be another theatre's.
+--------------------------------------------------------------------------------
+
+M.presweep_job = {
+  name = "presweep",
+  start = function(run)
+    local function refuse(message)
+      run.refusal = message
+      return function()
+        return M.REFUSED
+      end
+    end
+    local function done()
+      return function()
+        return M.DONE
+      end
+    end
+
+    if M.crop_box(run.config.crop) then
+      M.log("crop given, no pre-sweep")
+      return done()
+    end
+
+    -- The directory first, and the cheap identity check before the minute the
+    -- measurement costs. The words are the grid job's, which makes the same
+    -- checks again after this one and has to say the same thing.
+    local existing = M.read_manifest(run.dir)
+    if not existing then
+      local journal, partial = M.load_journal(run.dir)
+      if #journal > 0 or partial > 0 then
+        return refuse("the output directory holds another extract:"
+          .. " tiles.jsonl is present and manifest.json is not")
+      end
+    else
+      local identity = run.identity
+      local problems = M.identity_problems(existing, {
+        theatre = identity.theatre,
+        dcs_build = identity.dcs_build,
+        dcs_build_timestamp = identity.dcs_build_timestamp,
+        terrain_fingerprint = identity.terrain_fingerprint,
+        omit_sea_tiles = M.OMIT_SEA_TILES,
+      })
+      if #problems > 0 then
+        for i = 1, #problems do
+          M.log(problems[i])
+        end
+        return refuse("the output directory holds another extract: "
+          .. concat(problems, "; "))
+      end
+      -- A crop extract's grid is the crop's, and a whole-map run resuming it
+      -- would sweep the crop and call it the map. The grid job does not
+      -- compare grids on this path, so the check is here.
+      if or_nil(existing.crop_m) ~= nil then
+        return refuse("the output directory holds a crop extract:"
+          .. " give the same crop, or another directory")
+      end
+      local rect = or_nil(existing.authored_bounds_m)
+      if or_nil(existing.authored_bounds_source) == "presweep" and type(rect) == "table" then
+        run.presweep_bounds = rect
+        M.log("authored rectangle kept from the manifest " .. rect_text(rect))
+        return done()
+      end
+    end
+
+    local terrain = M.terrain_module()
+    if not terrain then
+      return refuse("the terrain module is not loaded")
+    end
+    local get_height = terrain.GetHeight
+    if type(get_height) ~= "function" then
+      return refuse("terrain.GetHeight is not a function")
+    end
+    local snap = terrain.getClosestPointOnRoads
+    if type(snap) ~= "function" then
+      M.log("terrain.getClosestPointOnRoads is not a function: cells are"
+        .. " authored by breakpoints alone")
+      snap = nil
+    end
+    local bounds_m = M.terrain_bounds()
+    if not bounds_m then
+      return refuse("the theatre reports no bounds rectangle")
+    end
+
+    local lattice = M.presweep_lattice(bounds_m, M.PRESWEEP_CELL_KM)
+    local total = lattice.rows * lattice.cols
+    local samples = M.PRESWEEP_LINE_M / M.PRESWEEP_STEP_M + 1
+    local rule = {
+      breakpoint_min = M.PRESWEEP_BREAKPOINT_MIN,
+      road_max_m = M.PRESWEEP_ROAD_MAX_M,
+    }
+    local authored = {}
+    local measured = 0
+    local count, by_road = 0, 0
+    -- A failure is logged the first time with its message and counted after
+    -- that: a theatre that fails once fails a million times in a sweep.
+    local height_failures, snap_failures = 0, 0
+    local heights = {}
+    M.log(format("pre-sweep: %d cells of %d km over %s", total,
+      M.PRESWEEP_CELL_KM, rect_text(bounds_m)))
+
+    -- Direct pcalls rather than terrain_call, which logs every failure.
+    local function measure(row, col)
+      local cx, cz = M.presweep_center(lattice, row, col)
+      for k = 1, samples do
+        local ok, h = pcall(get_height, cx + (k - 1) * M.PRESWEEP_STEP_M, cz)
+        if ok and is_finite(h) then
+          heights[k] = h
+        else
+          heights[k] = nil
+          height_failures = height_failures + 1
+          if height_failures == 1 then
+            M.log(format("terrain.GetHeight failed at %s %s: %s", tostring(cx),
+              tostring(cz), tostring(h)))
+          end
+        end
+      end
+      local breaks = M.breakpoints(heights, samples, M.PRESWEEP_BREAK_EPS)
+      local road_m
+      if breaks < rule.breakpoint_min and snap then
+        local ok, sx, sz = pcall(snap, "roads", cx, cz)
+        if not ok then
+          snap_failures = snap_failures + 1
+          if snap_failures == 1 then
+            M.log(format("terrain.getClosestPointOnRoads failed at %s %s: %s",
+              tostring(cx), tostring(cz), tostring(sx)))
+          end
+        elseif is_finite(sx) and is_finite(sz) then
+          local dx, dz = sx - cx, sz - cz
+          road_m = math.sqrt(dx * dx + dz * dz)
+        end
+      end
+      return M.cell_authored(breaks, road_m, rule), breaks < rule.breakpoint_min
+    end
+
+    local function step()
+      if measured >= total then
+        return M.DONE
+      end
+      local row = floor(measured / lattice.cols)
+      local col = measured - row * lattice.cols
+      local is_authored, road_decided = measure(row, col)
+      measured = measured + 1
+      if is_authored then
+        authored[M.presweep_index(lattice, row, col)] = true
+        count = count + 1
+        if road_decided then
+          by_road = by_road + 1
+        end
+      end
+      if measured < total then
+        return M.MORE
+      end
+      if height_failures + snap_failures > 0 then
+        M.log(format("pre-sweep: %d height samples and %d road snaps failed",
+          height_failures, snap_failures))
+      end
+      if count == 0 then
+        run.refusal = "the pre-sweep found no authored cell: nothing to extract"
+        return M.REFUSED
+      end
+      run.presweep_bounds = M.presweep_bounds(lattice, authored, M.PRESWEEP_MARGIN_M)
+      run.presweep = M.presweep_record(lattice, authored, rule)
+      M.log(format("pre-sweep: %d of %d cells authored, %d by a road alone;"
+        .. " authored rectangle %s", count, total, by_road,
+        rect_text(run.presweep_bounds)))
+      return M.DONE
+    end
+
+    local function progress()
+      return measured, total
+    end
+
+    return step, progress
+  end,
+}
+
 M.grid_job = {
   name = "grid",
   start = function(run)
@@ -3457,12 +3648,11 @@ M.grid_job = {
 
     -- A crop wins; else what the pre-sweep found; else there is nothing to
     -- sweep. The pre-sweep is the only whole-map source on every theatre
-    -- (ADR 0026), and until it is built a whole-map run cannot start.
+    -- (ADR 0026), so this only fires when the job list lacks it.
     local crop_m = M.crop_box(run.config.crop)
     local presweep_m = run.presweep_bounds or nil
     if not crop_m and not presweep_m then
-      return refuse("no crop was given, and the whole-map pre-sweep is not"
-        .. " built yet: give a crop")
+      return refuse("no crop was given and the pre-sweep found no rectangle")
     end
     local planned = M.plan_grid({
       crop_m = crop_m,
@@ -3549,7 +3739,7 @@ M.grid_job = {
 
 -- In this order, and stated in one place so the walk the window counts
 -- sweeps over is readable: what the extract is of, then what it covers.
-M.jobs.prepare = { M.identity_job, M.grid_job }
+M.jobs.prepare = { M.identity_job, M.presweep_job, M.grid_job }
 
 --------------------------------------------------------------------------------
 -- Calling the terrain
