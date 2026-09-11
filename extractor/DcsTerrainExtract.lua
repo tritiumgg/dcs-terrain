@@ -2539,6 +2539,60 @@ function M.prepare_jobs(run)
   return run.jobs.prepare or {}
 end
 
+-- Which sweep the run is on, as `position, count` over the whole walk --
+-- prepare, hook, mission, in the order the queues are built -- or nil outside
+-- a pass, or with nothing registered.
+--
+-- That is all the run says about the whole (ADR 0025). Nothing here knows
+-- what a sweep costs: the design's minutes per sweep were one machine's
+-- per-call costs times a guess at the counts, and a bar built on them would
+-- have been describing the guess. "Sweep 5 of 9" is true on any machine.
+--
+-- No queue in a pass state is a run put there by hand rather than by entering
+-- the phase, and it stands at the phase's first sweep.
+--
+-- A pass whose own phase has nothing registered never reports: the queue
+-- answers done at once for an empty list, so no frame of it is a reporting
+-- frame, and what this would say of one is not exercised.
+function M.sweep_position(run)
+  if run.state ~= M.STATE_PREPARE and run.state ~= M.STATE_HOOK
+    and run.state ~= M.STATE_MISSION then
+    return nil
+  end
+  local walk = {
+    { M.STATE_PREPARE, M.prepare_jobs(run) },
+    { M.STATE_HOOK, run.jobs.hook or {} },
+    { M.STATE_MISSION, run.jobs.mission or {} },
+  }
+  local count, before, here, reached = 0, 0, 0, false
+  for i = 1, #walk do
+    local state, jobs = walk[i][1], walk[i][2]
+    count = count + #jobs
+    if not reached then
+      if state == run.state then
+        reached = true
+        here = #jobs
+      else
+        before = before + #jobs
+      end
+    end
+  end
+  if count == 0 then
+    return nil
+  end
+  -- A queue past its end -- the phase's last sweep finished, and the frame
+  -- that changes phase has not run yet -- is still on that last sweep.
+  local index = run.queue and run.queue.index or 1
+  if index > here then
+    index = here
+  end
+  local position = before + index
+  if position < 1 then
+    position = 1
+  end
+  return position, count
+end
+
 -- Overridden by the window, and a no-op until something does. Two of them,
 -- because they answer different questions: on_phase is the run reaching a new
 -- state, which is rare, and on_frame is the tick the window redraws on.
@@ -4291,31 +4345,34 @@ function M.window_status(run)
   -- The state's own name for a state with no line of its own. A state added
   -- later without one would otherwise reach setText as a nil and take the whole
   -- window down with it, which is a steep price for a missing sentence.
-  return STATUS_OF[run.state] or tostring(run.state)
+  local sentence = STATUS_OF[run.state] or tostring(run.state)
+  return sentence
 end
 
--- Where the bar stands, as a percentage.
---
--- By phase, because that is all anything here can know yet: a sweep cannot say
--- how much of its own work is done, so the bar moves at a phase change and
--- stands still in between. Prepare is left at zero rather than given a slice of
--- its own -- it is a handful of frames against tens of minutes, and a bar that
--- jumped before any terrain had been read would be describing nothing.
---
--- The two passes are given equal halves, which is wrong and is the honest kind
--- of wrong: the mission pass is not half the work, and nothing has measured
--- what it is. A fraction that knows costs a per-sweep measurement.
-local PROGRESS_OF = {
-  [M.STATE_STOPPED] = 0,
-  [M.STATE_IDLE] = 0,
-  [M.STATE_PREPARE] = 0,
-  [M.STATE_HOOK] = 0,
-  [M.STATE_MISSION] = 50,
-  [M.STATE_DONE] = 100,
-}
-
-function M.window_progress(state)
-  return PROGRESS_OF[state] or 0
+-- Where the bar stands: the running sweep's own count as a whole percentage,
+-- nothing where the sweep cannot count or none is running, and full at done.
+-- The sweep's, not the run's (ADR 0025): the line beside it says which sweep
+-- of how many, and that is as much as the run knows about the whole. Whole,
+-- because the bar is written when this changes and a fraction that moved
+-- every frame would be a write every frame; a hundred writes a sweep is the
+-- most this can cost.
+-- Asked every frame, so a sweep answers its count from counters it keeps
+-- rather than by counting anything.
+function M.window_progress(run)
+  if run.state == M.STATE_DONE then
+    return 100
+  end
+  -- A queue exists only in prepare, hook and mission, and only while the run
+  -- is going: stop drops it.
+  local queue = run.queue
+  if queue == nil then
+    return 0
+  end
+  local done, total = M.queue_progress(queue)
+  if done == nil then
+    return 0
+  end
+  return floor(done / total * 100)
 end
 
 -- Written only when it changed. The frame callback arrives about sixty times a
@@ -4422,7 +4479,7 @@ end
 
 -- Same rule as the line above it, for the same reason.
 local function update_progress(run)
-  local value = M.window_progress(run.state)
+  local value = M.window_progress(run)
   if value == M.window.bar_value then
     return
   end

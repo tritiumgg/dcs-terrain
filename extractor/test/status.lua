@@ -135,20 +135,60 @@ T.eq("and the next phase replaces them", E.window.message.text,
   E.STATUS_NO_TERRAIN)
 
 --------------------------------------------------------------------------------
-T.group("the bar moves at a phase change and stands still between")
+T.group("the bar follows the running sweep's own count")
 --------------------------------------------------------------------------------
 
-T.eq("stopped is nothing done", E.window_progress(E.STATE_STOPPED), 0)
-T.eq("and so is waiting", E.window_progress(E.STATE_IDLE), 0)
--- Prepare is a handful of frames against tens of minutes: a bar that jumped
--- before any terrain had been read would be describing nothing.
-T.eq("preparing has done no work", E.window_progress(E.STATE_PREPARE), 0)
-T.eq("nor has the first pass, starting", E.window_progress(E.STATE_HOOK), 0)
-T.eq("the second pass is half way", E.window_progress(E.STATE_MISSION), 50)
-T.eq("and finished is full", E.window_progress(E.STATE_DONE), 100)
--- A state added later without a share reads as no progress rather than taking
--- the bar down with it, the same way the status line handles one.
-T.eq("a state nobody gave a share", E.window_progress("elsewhere"), 0)
+-- A run with four jobs across the walk: the identity read, water and height,
+-- then surface. The bar is the running sweep's own count and nothing else;
+-- which sweep of the four it is goes on the line, and nothing claims to know
+-- how far the whole run is.
+local function job(name)
+  return { name = name, start = function() return function() return E.DONE end end }
+end
+
+local function four_sweeps(state)
+  local r = E.new_run({ config = {}, jobs = {
+    prepare = { job("identity") },
+    hook = { job("water"), job("height") },
+    mission = { job("surface") },
+  } })
+  r.state = state
+  return r
+end
+
+-- Puts the run part way through its current phase: `index` names the running
+-- job, and `done`/`total` is what that job answers.
+local function part_way(r, index, done, total)
+  r.queue = E.new_queue(r.jobs[r.state])
+  r.queue.index = index
+  if done then
+    r.queue.step = function() return E.MORE end
+    r.queue.progress = function() return done, total end
+  end
+  return r
+end
+
+T.eq("stopped is nothing", E.window_progress(four_sweeps(E.STATE_STOPPED)), 0)
+T.eq("and so is waiting", E.window_progress(four_sweeps(E.STATE_IDLE)), 0)
+T.eq("a sweep that has not started",
+  E.window_progress(part_way(four_sweeps(E.STATE_HOOK), 1)), 0)
+T.eq("a quarter through water",
+  E.window_progress(part_way(four_sweeps(E.STATE_HOOK), 1, 1, 4)), 25)
+T.eq("water done and height not started is nothing again",
+  E.window_progress(part_way(four_sweeps(E.STATE_HOOK), 2)), 0)
+T.eq("half through height",
+  E.window_progress(part_way(four_sweeps(E.STATE_HOOK), 2, 2, 4)), 50)
+T.eq("the second pass with no queue",
+  E.window_progress(four_sweeps(E.STATE_MISSION)), 0)
+T.eq("half through surface",
+  E.window_progress(part_way(four_sweeps(E.STATE_MISSION), 1, 3, 6)), 50)
+local mute = part_way(four_sweeps(E.STATE_MISSION), 1)
+mute.queue.step = function() return E.MORE end
+T.eq("a sweep that cannot count shows nothing", E.window_progress(mute), 0)
+T.eq("and finished is full", E.window_progress(four_sweeps(E.STATE_DONE)), 100)
+-- A state added later without a bar reads as nothing rather than taking the
+-- bar down with it, the same way the status line handles one.
+T.eq("a state nobody gave a bar", E.window_progress(four_sweeps("elsewhere")), 0)
 
 local function bar_writes()
   return E.gui.count(E.window.bar, "setValue")
@@ -156,7 +196,7 @@ end
 
 fresh()
 terrain = "Caucasus"
-run = run_in(E.STATE_STOPPED)
+run = four_sweeps(E.STATE_STOPPED)
 E.on_frame(run)
 local bar = E.gui.find("HorzProgressBar")
 T.eq("the bar is a percentage", bar.range[1] .. ".." .. bar.range[2], "0..100")
@@ -165,16 +205,47 @@ T.eq("and hidden, with nothing on it to show", bar.visible, false)
 T.eq("written once", bar_writes(), 1)
 
 for _ = 1, 200 do E.on_frame(run) end
-T.eq("and left alone while the phase holds", bar_writes(), 1)
+T.eq("and left alone while nothing moves", bar_writes(), 1)
 
+-- A phase change alone moves nothing: the bar is a sweep's, and no sweep is
+-- counting yet.
 run.state = E.STATE_MISSION
 E.on_frame(run)
-T.eq("the second pass moves it", bar.value, 50)
+T.eq("a pass with no sweep counting leaves it", bar_writes(), 1)
+T.eq("and hidden", bar.visible, false)
+
+part_way(run, 1, 3, 6)
+E.on_frame(run)
+T.eq("a sweep counting moves it", bar.value, 50)
 T.eq("and puts it on screen", bar.visible, true)
+T.eq("with one write", bar_writes(), 2)
+
+-- Only when the whole percentage does: sixty frames of a count creeping
+-- inside one percent are no writes at all.
+local creep = 0
+run.queue.progress = function() return 3 + creep, 6 end
+for _ = 1, 60 do
+  creep = creep + 0.0001
+  E.on_frame(run)
+end
+T.eq("a count inside one percent is not written", bar_writes(), 2)
+
+-- The next sweep starts from nothing: between one finishing and the next
+-- counting, the bar is empty again and off the screen.
+run.state = E.STATE_HOOK
+part_way(run, 1, 1, 4)
+E.on_frame(run)
+T.eq("a new sweep starts low", bar.value, 25)
+part_way(run, 2)
+E.on_frame(run)
+T.eq("and between sweeps it is empty", bar.value, 0)
+T.eq("and hidden again", bar.visible, false)
+
 run.state = E.STATE_DONE
 E.on_frame(run)
 T.eq("and finishing fills it", bar.value, 100)
-T.eq("one write per change", bar_writes(), 3)
+T.eq("one write per change", bar_writes(), 5)
+
 
 --------------------------------------------------------------------------------
 T.group("a window that cannot be built ticks a no-op")
