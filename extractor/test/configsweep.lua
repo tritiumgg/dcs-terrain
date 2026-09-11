@@ -135,6 +135,18 @@ local odd = E.config_record({
 T.eq("a bullseye that is not a point is null", E.json(odd.default_bullseye), '{"blue":null,"red":null}')
 T.eq("a camera short a number is null", odd.default_camera_km, E.JSON_NULL)
 
+-- What the encoder refuses -- a NaN, a table, a function, an infinity --
+-- never reaches it: each is null. This is the case that climbs into DCS
+-- when it is missed, because nothing above the job catches a raise.
+local hostile = E.config_record({
+  bounds_km = {}, id = function() end, sea_enabled = {}, summer_time_delta = 0 / 0, shape = 1 / 0,
+})
+T.eq("a function is null", hostile.id, E.JSON_NULL)
+T.eq("a table where a boolean was is null", hostile.sea_enabled, E.JSON_NULL)
+T.eq("a NaN is null", hostile.summer_time_delta, E.JSON_NULL)
+T.eq("an infinity is null", hostile.shape, E.JSON_NULL)
+T.eq("and the record encodes", type(E.json(hostile)), "string")
+
 local swept = E.config_record({ bounds_km = {}, presweep = { cell_km = 5, bits = "AA==" } })
 T.eq("a pre-sweep record rides along", swept.presweep.cell_km, 5)
 T.eq("and is absent, not null, without one", record.presweep, nil)
@@ -234,6 +246,14 @@ T.eq("logged with the message", log_count("terrain.convertMetersToLatLon failed:
 T.eq("a call that is not there is null", written.shape, E.JSON_NULL)
 T.eq("and logged", log_count("terrain.getTerrainShpare is not a function"), 1)
 T.eq("the triple is still read", run.fill.height, 5.000005)
+
+-- A theatre answering a NaN for a number the record carries: the file says
+-- null and the job does not raise.
+config.SummerTimeDelta = 0 / 0
+run.refusal = nil
+T.eq("a NaN from the theatre is one step and done", E.config_job.start(run)(), E.DONE)
+T.eq("written null", E.decode(fs.files["C:/extract/config.json"]).summer_time_delta, E.JSON_NULL)
+config.SummerTimeDelta = 4
 
 -- No module is a refusal, and so is a file that will not land.
 E.terrain_module = function() return nil end

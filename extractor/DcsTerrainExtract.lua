@@ -645,20 +645,21 @@ end
 -- tells a later reader which of those cells are terrain someone built rather
 -- than the fill the engine returns outside it.
 --
--- ADR 0009: a crop run with no authored rectangle leaves both nil, and the
--- manifest writes them as null. Nil here means unknown, never empty.
+-- ADR 0026: the authored rectangle has one source, the pre-sweep, which
+-- measures the terrain the same way on every theatre; nothing read from a
+-- theatre file is one. ADR 0009: a crop run with no pre-sweep leaves both
+-- nil, and the manifest writes them as null. Nil here means unknown, never
+-- empty.
 function M.plan_grid(opts)
-  local authored, source = opts.authored_bounds_m, nil
-  if authored then
-    source = "config"
-  elseif opts.presweep_bounds_m then
+  local authored, source = nil, nil
+  if opts.presweep_bounds_m then
     authored = opts.presweep_bounds_m
     source = "presweep"
   end
 
   local rect = opts.crop_m or authored
   if not rect then
-    error("plan_grid: no crop, authored bounds or pre-sweep rectangle", 2)
+    error("plan_grid: no crop or pre-sweep rectangle", 2)
   end
 
   return {
@@ -3623,11 +3624,17 @@ function M.fill_from_samples(samples)
   return { height = first.height, water = first.water, seabed = first.seabed }
 end
 
-local function null_unless(v)
-  if v == nil then
-    return M.JSON_NULL
+-- A value the encoder can write as it is -- a string, a boolean, a finite
+-- number -- else null. Everything the theatre answers passes through here
+-- or a sibling before it reaches a record: the encoder raises on a NaN, a
+-- function or a table with a hole in it, and a raise from a frame callback
+-- climbs out into DCS.
+local function scalar_or_null(v)
+  local t = type(v)
+  if t == "string" or t == "boolean" or (t == "number" and is_finite(v)) then
+    return v
   end
-  return v
+  return M.JSON_NULL
 end
 
 -- A DCS point {x, y} as the format's {x, z}, or null where it is not one.
@@ -3666,13 +3673,13 @@ function M.config_record(opts)
     }
   end
   local record = {
-    id = null_unless(opts.id),
+    id = scalar_or_null(opts.id),
     bounds_km = opts.bounds_km,
     default_bullseye = bullseye,
-    sea_enabled = null_unless(opts.sea_enabled),
+    sea_enabled = scalar_or_null(opts.sea_enabled),
     default_camera_km = camera,
-    summer_time_delta = null_unless(opts.summer_time_delta),
-    shape = null_unless(opts.shape),
+    summer_time_delta = scalar_or_null(opts.summer_time_delta),
+    shape = scalar_or_null(opts.shape),
     -- Fitted by pack from the samples below; the extractor never carries one
     -- (ADR 0011).
     crs = M.JSON_NULL,
@@ -3779,7 +3786,13 @@ M.config_job = {
     })
     local path = M.join(run.dir, TABLE_FILES.config)
     M.keep_presweep(M.read_file(path), record)
-    local ok, err = M.write_file(path, M.json(record))
+    -- Every field was sanitised above, so this is a check on the record's
+    -- own construction; it still ends the run with a reason, not a raise.
+    local encoded, text = pcall(M.json, record)
+    if not encoded then
+      return refuse("config.json cannot be encoded: " .. tostring(text))
+    end
+    local ok, err = M.write_file(path, text)
     if not ok then
       return refuse("config.json cannot be written: " .. tostring(err))
     end
@@ -3807,14 +3820,6 @@ M.add_job("hook", M.config_job)
 -- (ADR 0007): the encoder raises on a function or a userdata, and a theatre
 -- may put anything in a key nobody reads.
 --------------------------------------------------------------------------------
-
-local function scalar_or_null(v)
-  local t = type(v)
-  if t == "string" or t == "boolean" or (t == "number" and is_finite(v)) then
-    return v
-  end
-  return M.JSON_NULL
-end
 
 -- A table of strings keyed by strings, such as an airdrome's `names`, kept
 -- to exactly that. Anything else in it is dropped rather than encoded.
@@ -4364,7 +4369,14 @@ M.tables_job = {
       if name == nil then
         return M.DONE
       end
-      local rows = readers[name]()
+      -- The shapers raise on nothing the theatre can hand them, and this is
+      -- the guard behind that discipline: a table that could not be shaped
+      -- is written empty, with the reason, and the sweep goes on.
+      local shaped, rows = pcall(readers[name])
+      if not shaped then
+        M.log(format("%s could not be shaped, written empty: %s", name, tostring(rows)))
+        rows = M.as_array({})
+      end
       -- The shapers write nothing the encoder refuses, so this is a check
       -- on them rather than on the theatre; it still ends the run with a
       -- reason rather than a raise.

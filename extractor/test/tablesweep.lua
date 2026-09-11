@@ -196,6 +196,18 @@ T.eq("and no runways", file(fs, "runways.json"), "[]")
 T.eq("and says so", log_has("Airdromes is not a table, airdromes written empty"), true)
 fake.GetTerrainConfig = function(key) if key == "Airdromes" then return airdromes end end
 
+-- A shaper that raised -- which none does on anything a theatre has handed
+-- back, and which is the guard behind that -- costs its table, not the run.
+fs = new_install()
+local real_rows = E.airdrome_rows
+E.airdrome_rows = function() error("a shape nobody foresaw") end
+logged = {}
+statuses = sweep(new_run())
+E.airdrome_rows = real_rows
+T.eq("the sweep still finishes", statuses[#statuses], E.DONE)
+T.eq("the table is empty", file(fs, "airdromes.json"), "[]")
+T.eq("and the reason is logged", log_has("airdromes could not be shaped, written empty: "), true)
+
 --------------------------------------------------------------------------------
 T.group("what stops the sweep: no module, and a file that will not land")
 --------------------------------------------------------------------------------

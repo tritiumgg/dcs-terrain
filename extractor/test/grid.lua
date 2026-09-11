@@ -94,28 +94,30 @@ T.eq("the crop is recorded", by_crop.crop_m, crop)
 T.eq("no authored rectangle", by_crop.authored_bounds_m, nil)
 T.eq("and so no source", by_crop.authored_bounds_source, nil)
 
-local by_config = E.plan_grid({ cell_size = 50, tile_size = 256, authored_bounds_m = authored })
-T.eq("the authored rectangle drives the grid", by_config.grid.origin_x, -400000)
-T.eq("source is config", by_config.authored_bounds_source, "config")
-T.eq("no crop", by_config.crop_m, nil)
-
 local by_presweep = E.plan_grid({ cell_size = 50, tile_size = 256, presweep_bounds_m = presweep })
 T.eq("the pre-sweep rectangle drives the grid", by_presweep.grid.origin_x, -390000)
 T.eq("source is presweep", by_presweep.authored_bounds_source, "presweep")
 T.eq("and it is recorded as the authored rectangle", by_presweep.authored_bounds_m, presweep)
+T.eq("no crop", by_presweep.crop_m, nil)
 
 -- Both given: the crop cuts the grid, and the rectangle is still recorded,
 -- because it is what says which of those cells are authored terrain.
 local by_both = E.plan_grid({
-  cell_size = 50, tile_size = 256, crop_m = crop, authored_bounds_m = authored })
+  cell_size = 50, tile_size = 256, crop_m = crop, presweep_bounds_m = presweep })
 T.eq("the crop wins", by_both.grid.origin_x, -285000)
-T.eq("the rectangle survives", by_both.authored_bounds_m, authored)
-T.eq("with its source", by_both.authored_bounds_source, "config")
+T.eq("the rectangle survives", by_both.authored_bounds_m, presweep)
+T.eq("with its source", by_both.authored_bounds_source, "presweep")
 
-local config_wins = E.plan_grid({
-  cell_size = 50, tile_size = 256, authored_bounds_m = authored, presweep_bounds_m = presweep })
-T.eq("config beats a pre-sweep", config_wins.authored_bounds_source, "config")
-T.eq("and its rectangle is the one used", config_wins.grid.origin_x, -400000)
+-- ADR 0026: a rectangle read from a theatre file is not a source. The old
+-- option is not merely unused; it is ignored, so a caller that still passes
+-- one gets the pre-sweep's rectangle or none.
+local by_file = E.plan_grid({
+  cell_size = 50, tile_size = 256, crop_m = crop, authored_bounds_m = authored })
+T.eq("a file rectangle is ignored", by_file.authored_bounds_m, nil)
+T.eq("and gives no source", by_file.authored_bounds_source, nil)
+T.raises("a file rectangle alone is nothing to sweep",
+  function() E.plan_grid({ cell_size = 50, tile_size = 256, authored_bounds_m = authored }) end,
+  "no crop or pre-sweep rectangle")
 
 --------------------------------------------------------------------------------
 T.group("refusals")
@@ -125,7 +127,7 @@ local box = { min_x = 0, min_z = 0, max_x = 10, max_z = 10 }
 
 T.raises("nothing to work from",
   function() return E.plan_grid({ cell_size = 50, tile_size = 256 }) end,
-  "no crop, authored bounds or pre-sweep")
+  "no crop or pre-sweep rectangle")
 T.raises("min above max",
   function() return E.grid_from_rect({ min_x = 10, min_z = 0, max_x = 0, max_z = 10 }, 50, 256) end,
   "rectangle is empty")
