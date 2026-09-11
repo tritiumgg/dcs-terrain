@@ -37,6 +37,7 @@ disagree, the later accepted one wins, and the earlier is marked
 | [0023](0023-the-dcs-build-is-the-terrain-version.md) | Accepted | 2026-09-09 | The DCS build is the terrain version, and the fingerprint is a record of the files | `core.md` "Packed file", "Versioning"; `query-operations.md` "Common types"; `mcp-server.md` "Response discipline"; `extract-format.md` "manifest.json"; `design-and-facts.md` "Two version stamps"; ADR 0021; `plan.md` X2b, C3, C12c |
 | [0024](0024-the-progress-log-carries-a-heartbeat-and-totals.md) | Accepted | 2026-09-11 | The progress log carries a heartbeat and a totals line | `extractor-hook.md` "Files", "Lifecycle" step 5; ADR 0013's consequence; `plan.md` X12 |
 | [0025](0025-the-bar-is-the-running-sweep-s-own-count.md) | Accepted | 2026-09-11 | The bar is the running sweep's own count, and the run reports no fraction of the whole | `extractor-hook.md` "Lifecycle", "Performance targets"; `plan.md` X12, X5–X8c |
+| [0026](0026-the-authored-rectangle-is-measured-never-read.md) | Accepted | 2026-09-11 | The authored rectangle is measured, never read from a theatre file | `extract-format.md` "manifest.json"; `extractor-hook.md` "Lifecycle"; `design-and-facts.md` `nodesMapBorders`, "Geometry facts"; ADR 0009, ADR 0011; `plan.md` X5, X6, X10, X11, V |
 
 Add a row when you add an ADR. This table is the index Claude reads, so an ADR
 missing from it will not be found. Each record's own `Affects` line, at the top
