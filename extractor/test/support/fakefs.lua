@@ -154,6 +154,16 @@ function FakeFs.new()
     return names
   end
 
+  -- A file's contents compiled as a chunk, the way loadfile answers: nil and
+  -- a message for a file that is not there or will not compile.
+  function fs.loadfile(path)
+    local data = files[path]
+    if data == nil or data == DIR then
+      return nil, path .. ": no such file"
+    end
+    return loadstring(data, "=" .. path)
+  end
+
   -- What lfs.currentdir would answer; a test sets it. nil is no lfs at all,
   -- which is what a plain interpreter has.
   fs.cwd = nil

@@ -3180,25 +3180,44 @@ end
 -- as the disk spells it -- Surface on Caucasus, surface on the rest -- because
 -- Windows does not care and the manifest records what was read. Zero or
 -- several matches is a refusal rather than a guess.
-function M.find_terrain_file(install, dir, subdir, ext)
+-- The theatre's `subdir` as a path relative to the install, matched without
+-- regard to case and spelled as the disk spells it: Surface on one theatre
+-- and surface on the rest, Map on four and map on four.
+local function find_subdir(install, dir, subdir)
   local theatre = M.join(M.join(install, M.TERRAINS_DIR), dir)
   local children, err = M.fs.dir(theatre)
   if not children then
     return nil, format("%s/%s cannot be listed: %s", M.TERRAINS_DIR, dir, tostring(err))
   end
-  local found
   for i = 1, #children do
     if children[i]:lower() == subdir:lower() then
-      found = children[i]
-      break
+      return format("%s/%s/%s", M.TERRAINS_DIR, dir, children[i])
     end
   end
-  if not found then
-    return nil, format("no %s directory under %s/%s: has %s",
-      subdir, M.TERRAINS_DIR, dir, #children > 0 and concat(children, ", ") or "nothing")
+  return nil, format("no %s directory under %s/%s: has %s",
+    subdir, M.TERRAINS_DIR, dir, #children > 0 and concat(children, ", ") or "nothing")
+end
+
+-- A named file under the theatre's `subdir`, relative to the install, or nil
+-- and why. The name is taken as given; only the directory is matched loosely.
+function M.find_terrain_path(install, dir, subdir, name)
+  local where, err = find_subdir(install, dir, subdir)
+  if not where then
+    return nil, err
   end
-  local where = format("%s/%s/%s", M.TERRAINS_DIR, dir, found)
-  local names, derr = M.fs.dir(M.join(theatre, found))
+  local path = where .. "/" .. name
+  if M.fs.size(M.join(install, path)) == nil then
+    return nil, format("no %s under %s", name, where)
+  end
+  return path
+end
+
+function M.find_terrain_file(install, dir, subdir, ext)
+  local where, err = find_subdir(install, dir, subdir)
+  if not where then
+    return nil, err
+  end
+  local names, derr = M.fs.dir(M.join(install, where))
   if not names then
     return nil, format("%s cannot be listed: %s", where, tostring(derr))
   end
@@ -3773,6 +3792,428 @@ M.config_job = {
 }
 
 M.add_job("hook", M.config_job)
+
+--------------------------------------------------------------------------------
+-- Table rows
+--
+-- The seven tables, each shaped from what DCS hands back into the rows the
+-- format names. Every shaper here is pure -- a table in, rows out -- and none
+-- of them raises: DCS's tables differ from theatre to theatre in which keys
+-- are present, which base a list is keyed from, and occasionally in what a
+-- value is, and a sweep that stopped on one odd airfield would stop on a
+-- theatre nobody has measured. A field that is not what was expected is
+-- written null, or an empty list, with one log line saying where, and the
+-- rest of the row is kept. Keys the format does not name are not copied
+-- (ADR 0007): the encoder raises on a function or a userdata, and a theatre
+-- may put anything in a key nobody reads.
+--------------------------------------------------------------------------------
+
+local function scalar_or_null(v)
+  local t = type(v)
+  if t == "string" or t == "boolean" or (t == "number" and is_finite(v)) then
+    return v
+  end
+  return M.JSON_NULL
+end
+
+-- A table of strings keyed by strings, such as an airdrome's `names`, kept
+-- to exactly that. Anything else in it is dropped rather than encoded.
+local function string_map(t)
+  if type(t) ~= "table" then
+    return M.JSON_NULL
+  end
+  local out = {}
+  for k, v in pairs(t) do
+    if type(k) == "string" and type(v) == "string" then
+      out[k] = v
+    end
+  end
+  return out
+end
+
+-- A DCS list -- keyed from 0 or from 1 -- as a JSON array of its scalar
+-- members, `[]` when empty, null when absent, and null with a log line when
+-- it is not a list at all. `where` names the field for the log.
+function M.list_or_null(t, where)
+  if t == nil then
+    return M.JSON_NULL
+  end
+  local ok, list = pcall(M.normalise_list, t)
+  if not ok then
+    M.log(format("%s: not a list, written null: %s", where, tostring(list)))
+    return M.JSON_NULL
+  end
+  for i = 1, #list do
+    list[i] = scalar_or_null(list[i])
+  end
+  return list
+end
+
+-- The same, keeping the members as tables for a caller that reads into them.
+local function table_list(t, where)
+  if t == nil then
+    return nil
+  end
+  local ok, list = pcall(M.normalise_list, t)
+  if not ok then
+    M.log(format("%s: not a list, written empty: %s", where, tostring(list)))
+    return nil
+  end
+  return list
+end
+
+-- A scalar out of a table that may not be one, else null.
+local function field(t, key)
+  if type(t) ~= "table" then
+    return M.JSON_NULL
+  end
+  return scalar_or_null(t[key])
+end
+
+-- A number out of a table that may not be one, else null: a coordinate that
+-- arrives as a string is not a coordinate, and a reader that adds it up
+-- must not find text there.
+local function num_field(t, key)
+  if type(t) ~= "table" or not is_finite(t[key]) then
+    return M.JSON_NULL
+  end
+  return t[key]
+end
+
+function M.airdrome_row(id, entry)
+  local where = "airdrome " .. tostring(id)
+  local beacon_ids = M.JSON_NULL
+  local beacons = table_list(entry.beacons, where .. " beacons")
+  if beacons then
+    beacon_ids = M.as_array({})
+    for i = 1, #beacons do
+      beacon_ids[i] = field(beacons[i], "beaconId")
+    end
+  end
+  return {
+    id = id,
+    name_id = scalar_or_null(entry.id),
+    code = scalar_or_null(entry.code),
+    display_name = scalar_or_null(entry.display_name),
+    names = string_map(entry.names),
+    x = num_field(entry.reference_point, "x"),
+    z = num_field(entry.reference_point, "y"),
+    lat = num_field(entry.reference_point_geo, "lat"),
+    lon = num_field(entry.reference_point_geo, "lon"),
+    civilian = scalar_or_null(entry.civilian),
+    abandoned = scalar_or_null(entry.abandoned),
+    class = scalar_or_null(entry.class),
+    runway_names = M.list_or_null(entry.runwayName, where .. " runwayName"),
+    beacon_ids = beacon_ids,
+    radio_ids = M.list_or_null(entry.radio, where .. " radio"),
+    roadnet = scalar_or_null(entry.roadnet),
+    roadnet5 = scalar_or_null(entry.roadnet5),
+    towers = M.list_or_null(entry.towers, where .. " towers"),
+    warehouses = M.list_or_null(entry.warehouses, where .. " warehouses"),
+    fueldepots = M.list_or_null(entry.fueldepots, where .. " fueldepots"),
+    shelters = M.list_or_null(entry.shelters, where .. " shelters"),
+  }
+end
+
+-- One row per airdrome, in ascending numeric id, which is the table key. A
+-- key that is not a number, or an entry that is not a table, is logged and
+-- left out: there is no row to write for it.
+function M.airdrome_rows(airdromes)
+  local rows = M.as_array({})
+  if type(airdromes) ~= "table" then
+    M.log("Airdromes is not a table: " .. type(airdromes))
+    return rows
+  end
+  local ids = {}
+  for k, v in pairs(airdromes) do
+    if is_finite(k) and type(v) == "table" then
+      ids[#ids + 1] = k
+    else
+      M.log(format("airdrome %s is not an entry, left out: %s", tostring(k), type(v)))
+    end
+  end
+  sort(ids)
+  for i = 1, #ids do
+    rows[i] = M.airdrome_row(ids[i], airdromes[ids[i]])
+  end
+  return rows
+end
+
+-- The runway name is the two edge names joined by a hyphen, which is what ED
+-- calls the same runway in the airdrome's own table (ADR 0007).
+function M.runway_rows(airdrome_id, list)
+  local rows = M.as_array({})
+  local runways = table_list(list, "airdrome " .. tostring(airdrome_id) .. " runways")
+  if not runways then
+    return rows
+  end
+  for i = 1, #runways do
+    local r = runways[i]
+    local name = M.JSON_NULL
+    if type(r) == "table" and type(r.edge1name) == "string" and type(r.edge2name) == "string" then
+      name = r.edge1name .. "-" .. r.edge2name
+    end
+    rows[i] = {
+      airdrome_id = airdrome_id,
+      name = name,
+      edge1_name = field(r, "edge1name"),
+      edge1_x = num_field(r, "edge1x"),
+      edge1_z = num_field(r, "edge1y"),
+      edge2_name = field(r, "edge2name"),
+      edge2_x = num_field(r, "edge2x"),
+      edge2_z = num_field(r, "edge2y"),
+      course = num_field(r, "course"),
+    }
+  end
+  return rows
+end
+
+M.STAND_PARAMS = { "SHELTER", "FOR_HELICOPTERS", "FOR_AIRPLANES", "WIDTH", "LENGTH", "HEIGHT" }
+
+function M.stand_rows(airdrome_id, list)
+  local rows = M.as_array({})
+  local stands = table_list(list, "airdrome " .. tostring(airdrome_id) .. " stands")
+  if not stands then
+    return rows
+  end
+  for i = 1, #stands do
+    local s = stands[i]
+    local params = M.JSON_NULL
+    if type(s) == "table" and type(s.params) == "table" then
+      params = {}
+      for j = 1, #M.STAND_PARAMS do
+        params[M.STAND_PARAMS[j]] = scalar_or_null(s.params[M.STAND_PARAMS[j]])
+      end
+    end
+    rows[i] = {
+      airdrome_id = airdrome_id,
+      crossroad_index = field(s, "crossroad_index"),
+      name = field(s, "name"),
+      flag = field(s, "flag"),
+      x = num_field(s, "x"),
+      z = num_field(s, "y"),
+      params = params,
+    }
+  end
+  return rows
+end
+
+-- Rows out of a table iterated with pairs, sorted on one string field so the
+-- file is the same whatever order the engine hands them out in.
+local function sorted_rows(rows, key)
+  sort(rows, function(a, b)
+    local ka, kb = tostring(a[key]), tostring(b[key])
+    if ka ~= kb then
+      return ka < kb
+    end
+    return M.json(a) < M.json(b)
+  end)
+  return M.as_array(rows)
+end
+
+function M.beacon_rows(beacons)
+  local rows = {}
+  if type(beacons) ~= "table" then
+    M.log("beacons is not a table: " .. type(beacons))
+    return M.as_array(rows)
+  end
+  for k, b in pairs(beacons) do
+    if type(b) ~= "table" then
+      M.log(format("beacon %s is not an entry, left out: %s", tostring(k), type(b)))
+    else
+      local where = "beacon " .. tostring(b.beaconId or k)
+      rows[#rows + 1] = {
+        beacon_id = scalar_or_null(b.beaconId),
+        callsign = scalar_or_null(b.callsign),
+        display_name = scalar_or_null(b.display_name),
+        type = scalar_or_null(b.type),
+        frequency_hz = scalar_or_null(b.frequency),
+        channel = scalar_or_null(b.channel),
+        direction = scalar_or_null(b.direction),
+        x = num_field(b.position, 1),
+        alt = num_field(b.position, 2),
+        z = num_field(b.position, 3),
+        lat = num_field(b.positionGeo, "latitude"),
+        lon = num_field(b.positionGeo, "longitude"),
+        scene_objects = M.list_or_null(b.sceneObjects, where .. " sceneObjects"),
+      }
+    end
+  end
+  return sorted_rows(rows, "beacon_id")
+end
+
+-- `frequency` is keyed 0..3, each a pair whose second member is the Hz, in
+-- the order HF, FM, VHF, UHF. `callsign` is an array of {<lang> = {name,
+-- name}} tables, recorded as {<lang>: first name}.
+local FREQUENCY_BANDS = { [0] = "hf", [1] = "fm", [2] = "vhf", [3] = "uhf" }
+
+function M.radio_rows(radios)
+  local rows = {}
+  if type(radios) ~= "table" then
+    M.log("radio is not a table: " .. type(radios))
+    return M.as_array(rows)
+  end
+  for k, r in pairs(radios) do
+    if type(r) ~= "table" then
+      M.log(format("radio %s is not an entry, left out: %s", tostring(k), type(r)))
+    else
+      local where = "radio " .. tostring(r.radioId or k)
+      local frequencies = M.JSON_NULL
+      if type(r.frequency) == "table" then
+        frequencies = {}
+        for index, band in pairs(FREQUENCY_BANDS) do
+          frequencies[band] = num_field(r.frequency[index], 2)
+        end
+      end
+      local callsigns = M.JSON_NULL
+      if type(r.callsign) == "table" then
+        callsigns = {}
+        for _, item in pairs(r.callsign) do
+          if type(item) == "table" then
+            for lang, names in pairs(item) do
+              if type(lang) == "string" then
+                if type(names) == "table" then
+                  callsigns[lang] = scalar_or_null(names[1])
+                else
+                  callsigns[lang] = scalar_or_null(names)
+                end
+              end
+            end
+          end
+        end
+      end
+      rows[#rows + 1] = {
+        radio_id = scalar_or_null(r.radioId),
+        callsigns = callsigns,
+        roles = M.list_or_null(r.role, where .. " role"),
+        frequencies_hz = frequencies,
+        scene_objects = M.list_or_null(r.sceneObjects, where .. " sceneObjects"),
+      }
+    end
+  end
+  return sorted_rows(rows, "radio_id")
+end
+
+-- `to_meters(lat, lon)` is the terrain's own conversion, handed in so this
+-- stays a function of its inputs. A town whose position does not convert
+-- keeps its name and its lat/lon, with x and z null.
+function M.town_rows(towns, to_meters)
+  local rows = {}
+  if type(towns) ~= "table" then
+    M.log("towns is not a table: " .. type(towns))
+    return M.as_array(rows)
+  end
+  local names = {}
+  for name, t in pairs(towns) do
+    if type(name) == "string" and type(t) == "table" then
+      names[#names + 1] = name
+    else
+      M.log(format("town %s is not an entry, left out: %s", tostring(name), type(t)))
+    end
+  end
+  sort(names)
+  for i = 1, #names do
+    local t = towns[names[i]]
+    local x, z = M.JSON_NULL, M.JSON_NULL
+    if is_finite(t.latitude) and is_finite(t.longitude) then
+      local mx, mz = to_meters(t.latitude, t.longitude)
+      if is_finite(mx) and is_finite(mz) then
+        x, z = mx, mz
+      else
+        M.log(format("town %s: position did not convert", names[i]))
+      end
+    end
+    rows[i] = {
+      name = names[i],
+      display_name = scalar_or_null(t.display_name),
+      lat = scalar_or_null(t.latitude),
+      lon = scalar_or_null(t.longitude),
+      x = x,
+      z = z,
+    }
+  end
+  return M.as_array(rows)
+end
+
+-- The node's positions are positional pairs, {x, z}, not {x, y} tables; its
+-- id is its own and not its index in the list (ADR 0007).
+function M.node_rows(nodes)
+  local rows = M.as_array({})
+  local list = table_list(nodes, "missionNodes")
+  if not list then
+    return rows
+  end
+  local function pos(p)
+    if type(p) ~= "table" or not (is_finite(p[1]) and is_finite(p[2])) then
+      return M.JSON_NULL
+    end
+    return { x = p[1], z = p[2] }
+  end
+  for i = 1, #list do
+    local n = list[i]
+    rows[i] = {
+      id = field(n, "id"),
+      name = field(n, "name"),
+      red = type(n) == "table" and pos(n.redPos) or M.JSON_NULL,
+      blue = type(n) == "table" and pos(n.bluePos) or M.JSON_NULL,
+    }
+  end
+  return rows
+end
+
+--------------------------------------------------------------------------------
+-- Reading a theatre's Lua
+--
+-- towns.lua and nodes.lua are plain Lua that set one global each and ask for
+-- one module, the translator, which they call on every display name. They
+-- are run in an environment of their own: a translator that returns its
+-- argument, `_` the same, and the standard libraries a data file might
+-- reach for. Nothing else. Whatever the chunk sets lands in that environment
+-- and nowhere else, and the one global the caller names is what comes back.
+--------------------------------------------------------------------------------
+
+local function identity(s)
+  return s
+end
+
+function M.load_terrain_table(chunk, global)
+  if type(chunk) ~= "function" then
+    return nil, "not a chunk: " .. type(chunk)
+  end
+  local env = {
+    require = function()
+      return { translate = identity }
+    end,
+    _ = identity,
+    math = math, string = string, table = table,
+    pairs = pairs, ipairs = ipairs, type = type,
+    tostring = tostring, tonumber = tonumber,
+  }
+  setfenv(chunk, env)
+  local ok, err = pcall(chunk)
+  if not ok then
+    return nil, tostring(err)
+  end
+  local value = rawget(env, global)
+  if type(value) ~= "table" then
+    return nil, format("the file sets no %s table", global)
+  end
+  return value
+end
+
+-- Seam, beside the rest of M.fs: the compiled chunk of a file, or nil and
+-- why, which is what loadfile answers.
+function M.fs.loadfile(path)
+  return loadfile(path)
+end
+
+function M.read_terrain_table(path, global)
+  local chunk, err = M.fs.loadfile(path)
+  if not chunk then
+    return nil, tostring(err)
+  end
+  return M.load_terrain_table(chunk, global)
+end
 
 --------------------------------------------------------------------------------
 -- DCS callbacks
