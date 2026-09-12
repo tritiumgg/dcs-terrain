@@ -4888,7 +4888,7 @@ M.water_height_job = {
             if code == nil or height == nil then
               t.failed = t.failed + 1
             end
-            if code ~= nil and code == fill_class and height == fill_height
+            if tester ~= nil and code == fill_class and height == fill_height
                 and seabed_matches(x, z) then
               wparts[n] = WATER_NODATA_BYTES
               hparts[n] = M.I16_NODATA_BYTES

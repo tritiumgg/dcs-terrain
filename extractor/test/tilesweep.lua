@@ -275,6 +275,26 @@ statuses = sweep(and_again)
 T.eq("the height file is back", tile(fs, "height", 1, 1) ~= nil, true)
 T.eq("nine lines now", #and_again.entries, 9)
 
+-- A run killed between the two writes leaves a land tile with a water line
+-- and no height line: it is swept again, both layers land, and the bar
+-- still ends exactly full.
+fs.files["C:/extract/tiles.jsonl"] = fs.files["C:/extract/tiles.jsonl"]
+  .. E.journal_line(E.tile_entry("water", 1, 1, 0, 0))
+fs.files["C:/extract/tiles/height/1_1.bin"] = nil
+local killed = resumed(fs)
+killed.done["height/1_1"] = nil
+logged = {}
+step, progress = E.water_height_job.start(killed)
+T.eq("three tiles counted before a step", select(1, progress()), 3)
+for i = 1, 4 do
+  statuses[i] = step()
+end
+T.eq("finishes", statuses[4], E.DONE)
+T.eq("the height file is written", tile(fs, "height", 1, 1) ~= nil, true)
+T.eq("and has its line", killed.done["height/1_1"] ~= nil, true)
+T.eq("the bar ends exactly full", select(1, progress()), 4)
+T.eq("counted as swept again", log_has("water+height: 1 tiles written, 2 journalled, 1 swept again, 1 omitted as fill, 0 written for water only"), true)
+
 --------------------------------------------------------------------------------
 T.group("no triple: nothing is fill, and everything is written")
 --------------------------------------------------------------------------------
