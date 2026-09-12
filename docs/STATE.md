@@ -4,7 +4,7 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-12T01:01Z
+**Last updated:** 2026-09-12T01:25Z
 
 ## Done
 
@@ -24,8 +24,9 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    bridge's, the whole map's rectangle is 470 x 785 km in 19 s (38 km past
    the hull on the north where roads run, 14 km and 56 km short of it over
    roadless mountains and sea), and Stop then Start resumed without measuring
-   again; Marianas found Pagan lost to a far snap's disc, fixed. PR **52**.
-   The fused sweep's live timing is still owed, below.
+   again; Marianas found Pagan lost to a far snap's disc, fixed. The fused
+   sweep on the call floor: Caucasus 100 s for 2 294 tiles against 189 s as
+   two passes, Marianas 40 s against 47 s, same bytes. PR **52**.
 2. **X5: the grid job, `config.json` and the seven tables.** Prepare is
    `identity` then `grid`; the hook pass is `config` (the theatre's facts,
    twenty lat/lon samples, the fill triple off three corners 500 km out) then
@@ -48,14 +49,13 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
 One task. The thing to pick up immediately.
 
-**X6, last live step** — Caucasus and Marianas whole-map runs on the fused
-sweep (ADR 0028): the `water+height` time against 189 s and 61 s for the two
-passes, and Pagan inside the Marianas rectangle. Then **X7**, roads and
-railroads, each as two jobs, seeds then paths; carry 2. A snap costs by its
-distance to the nearest road (84 ms at 500 km), so seeds go only in the
-rectangle's non-skipped tiles and the pre-sweep's disc bound applies to
-seeds too. *Verified by:* a maintainer at the install, then an agent offline
-over the driver and a sampled path re-read through the bridge on the crop.
+**X7** — roads and railroads, each as two jobs, seeds then paths; carry 2. A
+snap costs by its distance to the nearest road (84 ms at 500 km, measured in
+X6), so seeds go only in the rectangle's non-skipped tiles and the
+pre-sweep's disc bound applies to seeds too; the tile sweep's inner loop
+shows the Lua around a call can cost more than the call. *Verified by:* an
+agent offline over the driver, then a sampled path re-read through the
+bridge on the Kutaisi crop; a maintainer watching the whole-map roads sweep.
 
 ## Then
 
