@@ -4,25 +4,26 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-12T00:34Z
+**Last updated:** 2026-09-12T00:46Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **X6, offline: the pre-sweep, `water` and `height`.** Prepare is
-   `identity`, `presweep`, `grid`: the pre-sweep walks a 5 km lattice one
-   cell a step (a road snap first, a 2 km line of heights only where a road
-   lies 5 to 25 km off, ADR 0027), skips itself on a crop run and on a directory
-   whose manifest already carries this theatre's rectangle, and refuses a
-   crop extract or another theatre's before paying the minute. The hook pass
-   is `config`, `tables`, `water`, `height`, one tile a step; water builds
-   `run.skip` (fill and all-sea tiles) and a resumed water sweep reads each
-   journalled tile back to find the sea ones. *Verified by:* an agent offline
-   over closed-form fakes, every byte of a 2 x 2 tile grid written down; then
-   a 5 km Kutaisi crop run by the maintainer on Caucasus 2.9.29.27468, ten
-   cells re-read through the bridge equal to the bytes, journal min/max equal
-   to the tiles, 58 ms a water tile. The whole-map half is Next.
+1. **X6: the pre-sweep, `water` and `height`.** Prepare is `identity`,
+   `presweep`, `grid`: the pre-sweep walks a 5 km lattice one cell a step, a
+   road snap first and a 2 km line of heights only where a road lies 5 to
+   25 km off (ADR **0027**, after the spec's rule authored Caucasus's roadless
+   mountains), every far snap kept as the disc it clears; it skips itself on
+   a crop run and on a directory whose manifest carries the rectangle. The
+   hook pass is `config`, `tables`, `water`, `height`, one tile a step at the
+   terrain module's own per-call speed; water builds `run.skip` and a resumed
+   sweep reads journalled tiles back for the sea ones. *Verified by:* an agent
+   offline, then the maintainer on Caucasus 2.9.29.27468: a 5 km Kutaisi
+   crop's cells equal the bridge's, the whole map's rectangle is 470 x 785 km
+   in 19 s (38 km past the hull on the north where roads run, 14 km and 56 km
+   short of it over roadless mountains and sea), water 118 s, height 71 s,
+   and Stop then Start resumed without measuring again. PR **52**.
 2. **X5: the grid job, `config.json` and the seven tables.** Prepare is
    `identity` then `grid`; the hook pass is `config` (the theatre's facts,
    twenty lat/lon samples, the fill triple off three corners 500 km out) then
@@ -38,35 +39,34 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    version.** `dcs_build` off `autoupdate.cfg`, `terrain_dir` by the
    shallowest id in an `entry.lua`, the three data files by path, size and
    payload field. ADRs **0022**, **0023**. Verified live on Caucasus and Sinai.
-5. **X14: the window belongs in the editor, and says one thing at a time.**
-   Skins off `me_aircraft_group.dlg`; ADR **0019**, ADR **0020**. PR **48**.
+5. **X13: the window has controls, and the live pass found two bugs the offline
+   tests could not.** ADR **0017**, ADR **0018**. PR **47**.
 
 ## Next
 
 One task. The thing to pick up immediately.
 
-**X6, the whole-map half of the live pass, again under ADR 0027** — the
-first whole-map run authored Turkey's and Crimea's roadless mountains and
-drew 590 000 km², which packs at 100 m; the rule is now a road within 5 km,
-or breakpoints with a road within 25 km. Rerun on Caucasus from the session
-talking to the user: the rectangle contains the hull ADR 0026 records and
-exceeds it only along the north strip that has roads; then Stop and Start
-resuming with "authored rectangle kept from the manifest". *Verified by:* a
-maintainer at the install, watching the bar; PR **52**.
+**X7** — roads and railroads, each as two jobs, seeds then paths; carry 2. A
+snap costs by its distance to the nearest road (84 ms at 500 km, measured in
+X6), so seeds are placed only inside the authored rectangle's non-skipped
+tiles and the pre-sweep's disc bound applies to seeds too. *Verified by:* an
+agent offline over the driver, then a sampled path re-read through the bridge
+on the Kutaisi crop; a maintainer watching the whole-map roads sweep start.
 
 ## Then
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **X7** — roads and railroads, each as two jobs, seeds then paths; carry 2.
-2. **X8a / X8b / X8c / X9** — the mission pass, scenery, the model catalogue
+1. **X8a / X8b / X8c / X9** — the mission pass, scenery, the model catalogue
    and failure handling. X ends here until `check-extract` exists.
-3. **C1 / C2 / C3** — the Rust interlude X10 needs: scaffold, `synth` on the F2
+2. **C1 / C2 / C3** — the Rust interlude X10 needs: scaffold, `synth` on the F2
    constants, `check-extract`. Closes P2 and MS0 past.
-4. **X10** — the 10 x 10 km Kutaisi crop that `check-extract` accepts; its
+3. **X10** — the 10 x 10 km Kutaisi crop that `check-extract` accepts; its
    authored pair is null (ADR 0009, ADR 0026).
-5. **C4** — `pack` reads the extract: the first consumer of the X10 crop, and
+4. **C4** — `pack` reads the extract: the first consumer of the X10 crop, and
    where carry 1 is discharged.
+5. **C5a** — `pack` skeleton: schema, `meta` with the authored rectangle
+   (ADR 0008), one transaction.
 
 Milestone in view: **MS0 Contract** (P1, P2, F1, F2, C1, C2, C3, X1, X3).
 Proof is `check-extract` accepting the Rust synthetic extract and the hook's
