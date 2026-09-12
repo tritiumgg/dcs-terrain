@@ -3583,16 +3583,35 @@ M.presweep_job = {
     -- sampled. One far snap clears hundreds of kilometers; a near one clears
     -- nothing and costs nothing. This takes the snap for the nearest road
     -- point, which is what the editor moves a waypoint to.
+    --
+    -- A disc says how near a road can be, not whether the theatre would say
+    -- so: it answers nothing beyond a reach of its own, about 250 km on
+    -- Marianas and past 800 km on Afghanistan, and no answer leaves the
+    -- breakpoints to decide. A snap that answered at distance d proves the
+    -- reach is at least d. So a cleared cell whose nearest road is provably
+    -- within the farthest distance answered so far, which is its disc's
+    -- distance plus its offset from the disc's center, would be answered
+    -- too, and is settled without a line or an ask; one whose road may lie
+    -- beyond that reach reads its line and, if rough, asks. This takes the
+    -- reach as a distance around the query point, which is how it measured
+    -- on Marianas in two directions.
     local cleared, discs = {}, 0
+    local answered_max = 0
     local function road_known_far(cx, cz)
+      local covered, answerable = false, false
       for i = 1, discs do
         local c = cleared[i]
         local dx, dz = cx - c.x, cz - c.z
-        if dx * dx + dz * dz < c.r2 then
-          return true
+        local dd = dx * dx + dz * dz
+        if dd < c.r2 then
+          covered = true
+          if c.d + math.sqrt(dd) <= answered_max then
+            answerable = true
+            break
+          end
         end
       end
-      return false
+      return covered, answerable
     end
     local snaps, snaps_cleared, lines = 0, 0, 0
 
@@ -3634,10 +3653,13 @@ M.presweep_job = {
       end
       local dx, dz = sx - cx, sz - cz
       local road_m = math.sqrt(dx * dx + dz * dz)
+      if road_m > answered_max then
+        answered_max = road_m
+      end
       local r = road_m - rule.breakpoint_road_max_m
       if r > 0 then
         discs = discs + 1
-        cleared[discs] = { x = cx, z = cz, r2 = r * r }
+        cleared[discs] = { x = cx, z = cz, r2 = r * r, d = road_m }
       end
       return road_m
     end
@@ -3657,8 +3679,12 @@ M.presweep_job = {
     -- the ask reached it.
     local function measure(row, col)
       local cx, cz = M.presweep_center(lattice, row, col)
-      if road_known_far(cx, cz) then
+      local covered, answerable = road_known_far(cx, cz)
+      if covered then
         snaps_cleared = snaps_cleared + 1
+        if answerable then
+          return false, false
+        end
         local breaks = read_line(cx, cz)
         if breaks < rule.breakpoint_min then
           return false, false

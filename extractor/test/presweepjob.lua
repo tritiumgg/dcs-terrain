@@ -247,10 +247,13 @@ T.eq("eight snaps", snap_calls, 8)
 T.eq("thirteen lines", height_calls, 13 * 201)
 
 -- Rough everywhere, and the nearest road 138 km away: the first snap clears
--- the lattice, but a rough cleared cell still asks, because only the answer
--- tells a far road from no answer. Every cell snaps and every cleared cell
--- reads its line; nothing is authored, because rough ground that far from
--- every road is not built terrain.
+-- the lattice and proves the theatre answers to 138 km. A cleared cell
+-- whose road is provably within that is settled with nothing read; one
+-- whose road may lie beyond it reads its line and, rough, asks, and each
+-- such answer's disc settles cells after it. How many ask depends on the
+-- geometry to the meter, so the checks are the properties: fewer than all,
+-- one line per cleared cell that asked, and nothing authored, because rough
+-- ground that far from every road is not built terrain.
 fake.GetHeight = counted(function(x, z) return (x % 20 < 10) and 1 or 0 end)
 fake.getClosestPointOnRoads = function()
   snap_calls = snap_calls + 1
@@ -259,8 +262,8 @@ end
 snap_calls, height_calls = 0, 0
 run = new_run()
 T.eq("rough ground far from every road is not authored", sweep(run), E.REFUSED)
-T.eq("every cell asked", snap_calls, 15)
-T.eq("the cleared ones read their lines first", height_calls, 14 * 201)
+T.eq("not every cell asked", snap_calls < 15 and snap_calls > 1, true)
+T.eq("each cleared cell that asked read its line first", height_calls, (snap_calls - 1) * 201)
 
 -- Pagan: the theatre answers a far road from the sea south of an island and
 -- nothing at all from the island, which has no road of its own. Rows 0 to 2
@@ -288,6 +291,28 @@ T.eq("the rectangle is the island's row", run.presweep_bounds.min_x .. ".." .. r
 T.eq("one snap cleared the lattice, and the three rough cells asked", snap_calls, 4)
 T.eq("every cleared cell read its line", height_calls, 14 * 201)
 fake.GetHeight = counted(function(x, z) return (x % 20 < 10) and 1 or 0 end)
+
+-- Rough everywhere again, with the theatre's reach proven by the first
+-- answer: the first cell hears of a road 1 000 km away, and every later cell
+-- of a road 47 to 70 km away. The first answer's disc covers the lattice
+-- and proves the theatre answers to 1 000 km; the second cell's road is not
+-- provably within that from the first disc, so it reads its line and asks,
+-- but its own answer's disc puts every other cell's road within 78 km, so
+-- the thirteen left are settled with neither. Two snaps, one line.
+local first = true
+fake.getClosestPointOnRoads = function(kind, x, z)
+  snap_calls = snap_calls + 1
+  if first then
+    first = false
+    return 1000000, 12500
+  end
+  return 60000, 12500
+end
+snap_calls, height_calls = 0, 0
+run = new_run()
+T.eq("nothing is authored", sweep(run), E.REFUSED)
+T.eq("two snaps", snap_calls, 2)
+T.eq("one line", height_calls, 201)
 
 -- The same rough ground with no road reachable at all: the line decides
 -- alone, and every cell is authored, so an island keeps its detailed
