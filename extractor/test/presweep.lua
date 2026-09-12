@@ -147,7 +147,8 @@ T.eq("every column set", E.presweep_bitmask(wide, full), E.base64("\255\128"))
 T.group("record")
 --------------------------------------------------------------------------------
 
-local record = E.presweep_record(lattice, authored, { breakpoint_min = 60, road_max_m = 5000 })
+local record = E.presweep_record(lattice, authored,
+  { breakpoint_min = 60, road_max_m = 5000, breakpoint_road_max_m = 25000 })
 T.eq("cell size in kilometers", record.cell_km, 5)
 T.eq("breakpoint threshold", record.breakpoint_min, 60)
 T.eq("road distance", record.road_max_m, 5000)
@@ -159,7 +160,7 @@ T.eq("bits", record.bits, "AEAAIAA=")
 
 T.eq("the record encodes", E.json(record),
   '{"authored_cells":2,"bits":"AEAAIAA=","breakpoint_min":60,'
-  .. '"cell_km":5,"road_max_m":5000,"total_cells":15}')
+  .. '"breakpoint_road_max_m":25000,"cell_km":5,"road_max_m":5000,"total_cells":15}')
 
 --------------------------------------------------------------------------------
 T.group("breakpoints and the built-cell rule")
@@ -177,11 +178,15 @@ T.eq("a nil sample takes its differences with it",
 T.eq("a nil at the end leaves the rest", E.breakpoints({ 0, 1, 0, 1, nil }, 5, 1e-4), 2)
 T.eq("two samples have no interior", E.breakpoints({ 0, 1 }, 2, 1e-4), 0)
 
-local rule = { breakpoint_min = 60, road_max_m = 5000 }
-T.eq("enough breakpoints", E.cell_authored(60, nil, rule), true)
-T.eq("one short and no road", E.cell_authored(59, nil, rule), false)
+local rule = { breakpoint_min = 60, road_max_m = 5000, breakpoint_road_max_m = 25000 }
 T.eq("a road close enough", E.cell_authored(0, 5000, rule), true)
-T.eq("a road too far", E.cell_authored(0, 5001, rule), false)
-T.eq("the same road with a bumpy line", E.cell_authored(150, 5001, rule), true)
+T.eq("a road too far, flat", E.cell_authored(0, 5001, rule), false)
+T.eq("that road with a bumpy line", E.cell_authored(150, 5001, rule), true)
+T.eq("bumpy at the edge of where a road still counts", E.cell_authored(60, 25000, rule), true)
+T.eq("bumpy just beyond it", E.cell_authored(150, 25001, rule), false)
+T.eq("one breakpoint short", E.cell_authored(59, 6000, rule), false)
+T.eq("no road reachable, enough breakpoints", E.cell_authored(60, nil, rule), true)
+T.eq("no road reachable, one short", E.cell_authored(59, nil, rule), false)
+T.eq("no line read, no road reachable", E.cell_authored(nil, nil, rule), false)
 
 T.done()

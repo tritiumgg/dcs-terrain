@@ -71,6 +71,14 @@ local fake = {
 }
 E.terrain_module = function() return fake end
 
+-- Heights swapped in below count their calls like the first.
+local function counted(f)
+  return function(x, z)
+    height_calls = height_calls + 1
+    return f(x, z)
+  end
+end
+
 local fs = FakeFs.new()
 E.fs = fs
 local IDENTITY = {
@@ -105,7 +113,7 @@ T.eq("of the lattice's cells", select(2, progress()), 15)
 T.eq("the first step wants more", step(), E.MORE)
 T.eq("and counts one cell", select(1, progress()), 1)
 T.eq("201 heights along the line", height_calls, 201)
-T.eq("a bumpy cell asks no road", snap_calls, 0)
+T.eq("after asking for a road first", snap_calls, 1)
 local status = E.MORE
 for _ = 1, 14 do
   status = step()
@@ -113,8 +121,8 @@ end
 T.eq("the fifteenth cell finishes", status, E.DONE)
 T.eq("and done stays done", step(), E.DONE)
 T.eq("every cell counted", select(1, progress()), 15)
-T.eq("every cell read its line", height_calls, 15 * 201)
-T.eq("the flat cells asked for a road", snap_calls, 11)
+T.eq("every cell but the road's read its line", height_calls, 14 * 201)
+T.eq("every cell asked for a road", snap_calls, 15)
 
 local rect = run.presweep_bounds
 T.eq("the rectangle bounds rows 0 to 3 with the margin", rect.min_x, -10000)
@@ -127,8 +135,10 @@ T.eq("of fifteen", record.total_cells, 15)
 T.eq("at 5 km", record.cell_km, 5)
 T.eq("the breakpoint rule", record.breakpoint_min, 60)
 T.eq("the road rule", record.road_max_m, 5000)
+T.eq("and how far a road still lets breakpoints count", record.breakpoint_road_max_m, 25000)
 T.eq("the bitmask, row by row", record.bits, E.base64("\192\192\000\064\000"))
-T.eq("the log counts the cells", log_has("pre-sweep: 5 of 15 cells authored, 1 by a road alone"), true)
+T.eq("the log counts the cells", log_has("pre-sweep: 5 of 15 cells authored, 1 by a road within 5 km;"
+  .. " 15 snaps, 0 cells cleared, 14 lines read"), true)
 T.eq("and names the rectangle", log_has("authored rectangle x -10000..30000 z -10000..20000"), true)
 T.eq("no failure is reported", log_has("failed"), false)
 
@@ -216,46 +226,76 @@ fs.files["C:/extract/tiles.jsonl"] = nil
 T.group("a far snap clears every cell nearer than what it found")
 --------------------------------------------------------------------------------
 
--- Flat everywhere, and the nearest road point is always (12500, 22500), 10 km
--- east of the lattice, as a theatre with roads answers from anywhere. The
--- first cell's snap is 22 361 m away, so it clears every cell within
--- 17 361 m of its center; by hand that leaves cell (3, 2) at 18 028 m to
--- snap next, whose 11 180 m clears (4, 2) beside it, and (4, 0) to snap last,
--- clearing (4, 1). Three snaps for fifteen cells, and no road within 5 km of
--- any of them.
-fake.GetHeight = function() return 5 end
+-- Flat everywhere, and the nearest road point is always (40000, 12500), 15 km
+-- north of the lattice, as a theatre with roads answers from anywhere. The
+-- first cell's snap is 38 810 m away, so it clears every cell within
+-- 13 810 m of its center, seven of them; by hand, (2, 2) snaps at 27 500 m
+-- and clears nothing, and the six cells of rows 3 and 4 snap between 17 500
+-- and 24 622 m, inside the 25 km where breakpoints would count, so each
+-- reads its line. Eight snaps, six lines, nothing authored.
+fake.GetHeight = counted(function() return 5 end)
 fake.getClosestPointOnRoads = function()
   snap_calls = snap_calls + 1
-  return 12500, 22500
+  return 40000, 12500
 end
-snap_calls = 0
+snap_calls, height_calls = 0, 0
 logged = {}
 run = new_run()
 T.eq("nothing is authored", sweep(run), E.REFUSED)
-T.eq("three snaps", snap_calls, 3)
+T.eq("eight snaps", snap_calls, 8)
+T.eq("six lines", height_calls, 6 * 201)
 
--- The same, with the road inside cell (3, 1) at (16000, 9000): every cell
--- whose center is within 5 km is authored by it, and the snaps that
--- answered under 5 km cleared nothing, so the flat cells snap one by one
--- except (1, 2), which the first snap covered.
-fake.GetHeight = function(x, z)
+-- Rough everywhere, and the nearest road 138 km away: one snap clears the
+-- lattice, no line is read, and nothing is authored, because rough ground
+-- that far from every road is not built terrain.
+fake.GetHeight = counted(function(x, z) return (x % 20 < 10) and 1 or 0 end)
+fake.getClosestPointOnRoads = function()
+  snap_calls = snap_calls + 1
+  return 100000, 100000
+end
+snap_calls, height_calls = 0, 0
+run = new_run()
+T.eq("rough ground far from every road is not authored", sweep(run), E.REFUSED)
+T.eq("one snap", snap_calls, 1)
+T.eq("no line", height_calls, 0)
+
+-- The same rough ground with no road reachable at all: the line decides
+-- alone, and every cell is authored, so an island keeps its detailed
+-- ground.
+fake.getClosestPointOnRoads = function()
+  snap_calls = snap_calls + 1
+  return nil
+end
+snap_calls, height_calls = 0, 0
+run = new_run()
+T.eq("no road reachable leaves it to the line", sweep(run), E.DONE)
+T.eq("every cell", run.presweep.authored_cells, 15)
+T.eq("every line read", height_calls, 15 * 201)
+
+-- The bumpy corner with the road inside cell (3, 1) at (16000, 9000): every
+-- cell whose center is within 5 km is authored by it without a line, the
+-- four bumpy cells are within 25 km of it and are authored by their lines,
+-- and the flat ring reads its lines for nothing. No snap answered beyond
+-- 25 km, so nothing is cleared.
+fake.GetHeight = counted(function(x, z)
   if x < 10000 and z < 10000 then
     return (x % 20 < 10) and 1 or 0
   end
   return 5
-end
+end)
 fake.getClosestPointOnRoads = function()
   snap_calls = snap_calls + 1
   return 16000, 9000
 end
-snap_calls = 0
+snap_calls, height_calls = 0, 0
 logged = {}
 run = new_run()
 T.eq("the sweep completes", sweep(run), E.DONE)
 T.eq("four cells by the road and four by their lines", run.presweep.authored_cells, 8)
 T.eq("the bitmask", run.presweep.bits, E.base64("\192\192\096\096\000"))
-T.eq("ten snaps of eleven flat cells", snap_calls, 10)
-T.eq("the log counts both", log_has("10 road snaps made, 1 cleared by an earlier one"), true)
+T.eq("fifteen snaps", snap_calls, 15)
+T.eq("eleven lines", height_calls, 11 * 201)
+T.eq("the log counts them", log_has("8 of 15 cells authored, 4 by a road within 5 km; 15 snaps, 0 cells cleared, 11 lines read"), true)
 fake.getClosestPointOnRoads = function(kind, x, z)
   if x >= 15000 and x < 20000 and z >= 5000 and z < 10000 then
     return 16000, 9000
@@ -283,12 +323,12 @@ T.eq("no rectangle", run.presweep_bounds, false)
 -- message and counted, never a raise out of the step. Here every call in the
 -- bumpy corner raises, so those cells read flat and the road cell alone is
 -- authored.
-fake.GetHeight = function(x, z)
+fake.GetHeight = counted(function(x, z)
   if x < 10000 and z < 10000 then
     error("no height here")
   end
   return 5
-end
+end)
 fake.getClosestPointOnRoads = function(kind, x, z)
   if x >= 15000 and x < 20000 and z >= 5000 and z < 10000 then
     return 16000, 9000
@@ -296,10 +336,12 @@ fake.getClosestPointOnRoads = function(kind, x, z)
   error("no roads here")
 end
 logged = {}
+height_calls = 0
 run = new_run()
 got, steps = sweep(run)
 T.eq("the sweep completes", got, E.DONE)
 T.eq("one cell authored, by its road", run.presweep.authored_cells, 1)
+T.eq("without reading that cell's line", height_calls, 14 * 201)
 T.eq("the first height failure carries its message", log_has("terrain.GetHeight failed at 2500 2500: "), true)
 T.eq("the first snap failure too", log_has("terrain.getClosestPointOnRoads failed at 2500 2500: "), true)
 T.eq("and the totals are one line", log_has("pre-sweep: 804 height samples and 14 road snaps failed"), true)

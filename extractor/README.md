@@ -31,9 +31,11 @@ without `seek`.
   the reason on the window. No rectangle is ever read from a theatre file:
   a run without a crop measures the built area itself, the same way on every
   theatre (ADR 0026), with a 5 km lattice over the map where a cell counts
-  when a 2 km line of heights crosses enough posts or a road lies within 5
-  km, and the grid is that rectangle grown by 10 km; a crop run measures
-  nothing and records no rectangle (ADR 0009). The grid is planned from the
+  when a road lies within 5 km, or when a 2 km line of heights is rough
+  enough and a road lies within 25 km (ADR 0027: rough ground far from
+  every road is a model of real mountains, not built terrain), and the grid
+  is that rectangle grown by 10 km; a crop run measures nothing and records
+  no rectangle (ADR 0009). The grid is planned from the
   crop or the measurement, and the output directory is opened, or resumed
   when it already holds an extract of the same theatre and build, in which
   case the rectangle is the manifest's and is not measured again. The hook

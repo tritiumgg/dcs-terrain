@@ -829,15 +829,20 @@ function M.breakpoints(heights, n, eps)
   return count
 end
 
--- Either rule makes a cell built: enough breakpoints, or a road close
--- enough. Flat built ground has few breakpoints and a road; detailed terrain
--- with no road exists too, and each rule catches what the other misses. A
--- nil road is no road reachable.
+-- A road close enough makes a cell built. Enough breakpoints make it built
+-- too, but only where a road lies within the wider distance, because rough
+-- ground far from every road is a coarse model of real mountains and not
+-- built terrain (ADR 0027). A nil road is no road reachable at all, which
+-- constrains nothing: the breakpoints then decide alone, so an island with
+-- detailed ground and no road is kept.
 function M.cell_authored(breaks, road_m, opts)
-  if breaks >= opts.breakpoint_min then
+  if road_m ~= nil and road_m <= opts.road_max_m then
     return true
   end
-  return road_m ~= nil and road_m <= opts.road_max_m
+  if breaks == nil or breaks < opts.breakpoint_min then
+    return false
+  end
+  return road_m == nil or road_m <= opts.breakpoint_road_max_m
 end
 
 -- The whole block config.json carries for a pre-sweep. Built here rather than
@@ -855,6 +860,8 @@ function M.presweep_record(lattice, authored, opts)
     cell_km = lattice.cell_m / 1000,
     breakpoint_min = opts.breakpoint_min,
     road_max_m = opts.road_max_m,
+    -- ADR 0027: how far from a road the breakpoints still count.
+    breakpoint_road_max_m = opts.breakpoint_road_max_m,
     authored_cells = count,
     total_cells = total,
     bits = M.presweep_bitmask(lattice, authored),
@@ -1723,20 +1730,25 @@ M.FRAME_BUDGET_MS = 5
 M.ROAD_SEED_SPACING = 1000
 M.ROAD_SEED_NEIGHBOURS = 4
 
--- The pre-sweep's numbers, all measured. Inside the built terrain a 2 km
--- line sampled at 10 m reads 100 to 170 samples where the second difference
--- of height is not zero, and 0 to 35 outside it, with flat built ground as
--- low as 0; a road lies within a few hundred meters of built ground and
--- tens to hundreds of kilometers from unbuilt. So a 5 km cell is built when
--- it reads 60 breakpoints or a road within 5 km, and the rectangle around
--- the built cells is grown by 10 km so a cell on the edge is whole. The
--- epsilon is what "not zero" means for a float second difference.
+-- The pre-sweep's numbers, all measured. A road lies within a few hundred
+-- meters of built ground and tens to hundreds of kilometers from unbuilt, so
+-- a 5 km cell is built when a road lies within 5 km. Flat built ground reads
+-- few breakpoints along a 2 km line sampled at 10 m, and detailed ground
+-- with no road of its own reads 100 to 170, so a cell also counts when it
+-- reads 60 and a road lies within 25 km; not farther, because on Caucasus
+-- the mountains of Turkey and Crimea read 120 to 144 with the nearest road
+-- 85 to 200 km away, and they are not built terrain (ADR 0027). Where the
+-- snap answers nothing at all, as on an island with no road, the
+-- breakpoints decide alone. The rectangle around the built cells is grown by
+-- 10 km so a cell on the edge is whole. The epsilon is what "not zero" means
+-- for a float second difference.
 M.PRESWEEP_CELL_KM = 5
 M.PRESWEEP_MARGIN_M = 10000
 M.PRESWEEP_LINE_M = 2000
 M.PRESWEEP_STEP_M = 10
 M.PRESWEEP_BREAKPOINT_MIN = 60
 M.PRESWEEP_ROAD_MAX_M = 5000
+M.PRESWEEP_BREAK_ROAD_MAX_M = 25000
 M.PRESWEEP_BREAK_EPS = 1e-4
 
 local function bad_boolean(v, name)
@@ -3549,6 +3561,7 @@ M.presweep_job = {
     local rule = {
       breakpoint_min = M.PRESWEEP_BREAKPOINT_MIN,
       road_max_m = M.PRESWEEP_ROAD_MAX_M,
+      breakpoint_road_max_m = M.PRESWEEP_BREAK_ROAD_MAX_M,
     }
     local authored = {}
     local measured = 0
@@ -3565,10 +3578,11 @@ M.presweep_job = {
     -- a bounds rectangle is far from every road. So every snap made is kept
     -- as the disc it clears. The nearest road to a point d from its snap can
     -- be no nearer than d - r to any point r away, so a cell whose center
-    -- lies within d - road_max of an earlier query has no road within
-    -- road_max and is not asked. One far snap clears hundreds of kilometers;
-    -- a near one clears nothing and costs nothing. This takes the snap for
-    -- the nearest road point, which is what the editor moves a waypoint to.
+    -- lies within d - breakpoint_road_max of an earlier query has no road
+    -- within either distance, cannot be authored, and is neither asked nor
+    -- sampled. One far snap clears hundreds of kilometers; a near one clears
+    -- nothing and costs nothing. This takes the snap for the nearest road
+    -- point, which is what the editor moves a waypoint to.
     local cleared, discs = {}, 0
     local function road_known_far(cx, cz)
       for i = 1, discs do
@@ -3580,11 +3594,10 @@ M.presweep_job = {
       end
       return false
     end
-    local snaps, snaps_cleared = 0, 0
+    local snaps, snaps_cleared, lines = 0, 0, 0
 
     -- Direct pcalls rather than terrain_call, which logs every failure.
-    local function measure(row, col)
-      local cx, cz = M.presweep_center(lattice, row, col)
+    local function read_line(cx, cz)
       for k = 1, samples do
         local ok, h = pcall(get_height, cx + (k - 1) * M.PRESWEEP_STEP_M, cz)
         if ok and is_finite(h) then
@@ -3598,32 +3611,48 @@ M.presweep_job = {
           end
         end
       end
-      local breaks = M.breakpoints(heights, samples, M.PRESWEEP_BREAK_EPS)
+      lines = lines + 1
+      return M.breakpoints(heights, samples, M.PRESWEEP_BREAK_EPS)
+    end
+
+    -- The snap first, because it decides most cells by itself: a road within
+    -- road_max makes the cell authored with no line read, a road beyond
+    -- breakpoint_road_max rules it out the same way, and only the ring
+    -- between needs the line. No snap answer at all, and the line decides.
+    -- Returns whether the cell is authored, and whether a road alone said so.
+    local function measure(row, col)
+      local cx, cz = M.presweep_center(lattice, row, col)
+      if road_known_far(cx, cz) then
+        snaps_cleared = snaps_cleared + 1
+        return false, false
+      end
       local road_m
-      if breaks < rule.breakpoint_min and snap then
-        if road_known_far(cx, cz) then
-          snaps_cleared = snaps_cleared + 1
-        else
-          snaps = snaps + 1
-          local ok, sx, sz = pcall(snap, "roads", cx, cz)
-          if not ok then
-            snap_failures = snap_failures + 1
-            if snap_failures == 1 then
-              M.log(format("terrain.getClosestPointOnRoads failed at %s %s: %s",
-                tostring(cx), tostring(cz), tostring(sx)))
-            end
-          elseif is_finite(sx) and is_finite(sz) then
-            local dx, dz = sx - cx, sz - cz
-            road_m = math.sqrt(dx * dx + dz * dz)
-            local r = road_m - rule.road_max_m
-            if r > 0 then
-              discs = discs + 1
-              cleared[discs] = { x = cx, z = cz, r2 = r * r }
-            end
+      if snap then
+        snaps = snaps + 1
+        local ok, sx, sz = pcall(snap, "roads", cx, cz)
+        if not ok then
+          snap_failures = snap_failures + 1
+          if snap_failures == 1 then
+            M.log(format("terrain.getClosestPointOnRoads failed at %s %s: %s",
+              tostring(cx), tostring(cz), tostring(sx)))
+          end
+        elseif is_finite(sx) and is_finite(sz) then
+          local dx, dz = sx - cx, sz - cz
+          road_m = math.sqrt(dx * dx + dz * dz)
+          local r = road_m - rule.breakpoint_road_max_m
+          if r > 0 then
+            discs = discs + 1
+            cleared[discs] = { x = cx, z = cz, r2 = r * r }
           end
         end
       end
-      return M.cell_authored(breaks, road_m, rule), breaks < rule.breakpoint_min
+      if road_m ~= nil and road_m <= rule.road_max_m then
+        return true, true
+      end
+      if road_m ~= nil and road_m > rule.breakpoint_road_max_m then
+        return false, false
+      end
+      return M.cell_authored(read_line(cx, cz), road_m, rule), false
     end
 
     local function step()
@@ -3654,9 +3683,10 @@ M.presweep_job = {
       end
       run.presweep_bounds = M.presweep_bounds(lattice, authored, M.PRESWEEP_MARGIN_M)
       run.presweep = M.presweep_record(lattice, authored, rule)
-      M.log(format("pre-sweep: %d of %d cells authored, %d by a road alone;"
-        .. " %d road snaps made, %d cleared by an earlier one; authored rectangle %s",
-        count, total, by_road, snaps, snaps_cleared, rect_text(run.presweep_bounds)))
+      M.log(format("pre-sweep: %d of %d cells authored, %d by a road within %d km;"
+        .. " %d snaps, %d cells cleared, %d lines read; authored rectangle %s",
+        count, total, by_road, M.PRESWEEP_ROAD_MAX_M / 1000, snaps, snaps_cleared,
+        lines, rect_text(run.presweep_bounds)))
       return M.DONE
     end
 
