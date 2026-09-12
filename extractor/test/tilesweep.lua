@@ -362,6 +362,39 @@ T.eq("no module refuses", E.water_height_job.start(run)(), E.REFUSED)
 E.terrain_module = function() return fake end
 
 --------------------------------------------------------------------------------
+T.group("a row that answers well and then not at all is redone cell by cell")
+--------------------------------------------------------------------------------
+
+-- The land tile's second row answers two good heights, then not a number,
+-- then a good one: the row is read again carefully, and the tile's bytes,
+-- counts and range are what the careful reading alone gives.
+surface_raises_at, height_raises_at = nil, nil
+local real_height = fake.GetHeight
+fake.GetHeight = function(x, z)
+  if floor(x / 50) == 5 and floor(z / 50) == 5 then
+    return 0 / 0
+  end
+  return real_height(x, z)
+end
+fs = FakeFs.new()
+run = new_run(fs)
+logged = {}
+statuses = sweep(run)
+T.eq("the sweep completes", statuses[#statuses], E.DONE)
+T.eq("that cell alone is nodata in height", tile(fs, "height", 1, 1),
+  i16(5, 32767, -32767) .. NODATA16
+  .. i16(5) .. NODATA16 .. i16(5) .. NODATA16
+  .. i16(5, 5, 5) .. NODATA16
+  .. i16(5, 5, 5) .. NODATA16)
+T.eq("and land in water", tile(fs, "water", 1, 1), bytes(
+  0, 0, 0, 255,
+  0, 0, 0, 255,
+  0, 0, 0, 255,
+  0, 0, 0, 255))
+T.eq("counted once", log_has("tile 1_1: water 0..0, height -32767..32767, 4 nodata, 1 failed"), true)
+fake.GetHeight = real_height
+
+--------------------------------------------------------------------------------
 T.group("the seabed call is made where the fill is sea, and only there")
 --------------------------------------------------------------------------------
 
