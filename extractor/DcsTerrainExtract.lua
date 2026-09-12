@@ -4868,59 +4868,148 @@ M.water_height_job = {
     -- Both layers of one tile. nodata counts the cells nodata in both, fill
     -- and beyond the grid; failed counts cells a call did not answer, which
     -- are nodata in that layer alone.
+    --
+    -- The inner loop is where a whole-map run spends its minutes, at 65 536
+    -- cells a tile, so it carries as little Lua as it can: the calls of a
+    -- whole row are made under one protected call and only a row that raised
+    -- is redone cell by cell, a byte string is looked up rather than built,
+    -- the center advances by a cell rather than being computed, and the
+    -- checks are inline. Measured live, the bookkeeping around the two calls
+    -- cost more than the calls.
+    local HUGE = math.huge
+    local cell_size = grid.cell_size
+    local origin_x, origin_z = grid.origin_x, grid.origin_z
+    local WATER_BYTES = {}
+    for code = 0, 255 do
+      WATER_BYTES[code] = char(code)
+    end
+    local HEIGHT_BYTES = {}
+    -- One row's cells, into the arrays from index n0, with no protection:
+    -- a raise anywhere in it unwinds to the caller, which redoes the row.
+    local function read_row(t, x, z0, lc0, lc1, n0)
+      local wparts, hparts = t.wparts, t.hparts
+      local wmin, wmax, hmin, hmax = t.wmin, t.wmax, t.hmin, t.hmax
+      local nodata, sea = 0, 0
+      local n = n0
+      local z = z0
+      for _ = lc0, lc1 do
+        n = n + 1
+        local s = get_surface(x, z)
+        local h = get_height(x, z)
+        local code = WATER_CODES[s]
+        if code == nil then
+          code = M.water_class(s)
+        end
+        local finite = type(h) == "number" and h == h and h < HUGE and h > -HUGE
+        if not finite then
+          error("not a height: " .. tostring(h), 0)
+        end
+        if tester ~= nil and code == fill_class and h == fill_height
+            and seabed_matches(x, z) then
+          wparts[n] = WATER_NODATA_BYTES
+          hparts[n] = M.I16_NODATA_BYTES
+          nodata = nodata + 1
+        else
+          wparts[n] = WATER_BYTES[code]
+          if wmin == nil or code < wmin then wmin = code end
+          if wmax == nil or code > wmax then wmax = code end
+          if code == 2 then
+            sea = sea + 1
+          end
+          local v = floor(h + 0.5)
+          if v < I16_SAMPLE_MIN then
+            v = I16_SAMPLE_MIN
+          elseif v > I16_SAMPLE_MAX then
+            v = I16_SAMPLE_MAX
+          end
+          local b = HEIGHT_BYTES[v]
+          if b == nil then
+            b = i16_bytes(v)
+            HEIGHT_BYTES[v] = b
+          end
+          hparts[n] = b
+          if hmin == nil or v < hmin then hmin = v end
+          if hmax == nil or v > hmax then hmax = v end
+        end
+        z = z + cell_size
+      end
+      t.wmin, t.wmax, t.hmin, t.hmax = wmin, wmax, hmin, hmax
+      t.nodata = t.nodata + nodata
+      t.sea = t.sea + sea
+    end
+
+    -- The same row cell by cell, each call protected, for a row that raised.
+    local function read_row_carefully(t, x, z0, lc0, lc1, n0)
+      local wparts, hparts = t.wparts, t.hparts
+      local n = n0
+      local z = z0
+      for _ = lc0, lc1 do
+        n = n + 1
+        local got_s, s = pcall(get_surface, x, z)
+        local got_h, h = pcall(get_height, x, z)
+        local code = got_s and M.water_class(s) or nil
+        local height = (got_h and is_finite(h)) and h or nil
+        if code == nil or height == nil then
+          t.failed = t.failed + 1
+        end
+        if tester ~= nil and code == fill_class and height == fill_height
+            and seabed_matches(x, z) then
+          wparts[n] = WATER_NODATA_BYTES
+          hparts[n] = M.I16_NODATA_BYTES
+          t.nodata = t.nodata + 1
+        else
+          if code == nil then
+            wparts[n] = WATER_NODATA_BYTES
+          else
+            wparts[n] = WATER_BYTES[code]
+            if t.wmin == nil or code < t.wmin then t.wmin = code end
+            if t.wmax == nil or code > t.wmax then t.wmax = code end
+            if code == 2 then
+              t.sea = t.sea + 1
+            end
+          end
+          if height == nil then
+            hparts[n] = M.I16_NODATA_BYTES
+          else
+            local v = floor(height + 0.5)
+            if v < I16_SAMPLE_MIN then
+              v = I16_SAMPLE_MIN
+            elseif v > I16_SAMPLE_MAX then
+              v = I16_SAMPLE_MAX
+            end
+            hparts[n] = i16_bytes(v)
+            if t.hmin == nil or v < t.hmin then t.hmin = v end
+            if t.hmax == nil or v > t.hmax then t.hmax = v end
+          end
+        end
+        z = z + cell_size
+      end
+    end
+
     local function sweep_tile(tx, tz)
       local t = { wparts = {}, hparts = {}, nodata = 0, sea = 0, failed = 0 }
       local wparts, hparts = t.wparts, t.hparts
-      local n = 0
       local row0, col0 = M.tile_first_cell(grid, tx, tz)
+      -- Columns past the grid edge are nodata in both layers.
+      local in_cols = grid.width - col0
+      if in_cols > size then in_cols = size end
+      local z0 = origin_z + (col0 + 0.5) * cell_size
       for lr = 0, size - 1 do
         local row = row0 + lr
-        local row_in = row < grid.height
-        for lc = 0, size - 1 do
-          local col = col0 + lc
-          n = n + 1
-          if row_in and col < grid.width then
-            local x, z = M.cell_center(grid, row, col)
-            local got_s, s = pcall(get_surface, x, z)
-            local got_h, h = pcall(get_height, x, z)
-            local code = got_s and M.water_class(s) or nil
-            local height = (got_h and is_finite(h)) and h or nil
-            if code == nil or height == nil then
-              t.failed = t.failed + 1
-            end
-            if tester ~= nil and code == fill_class and height == fill_height
-                and seabed_matches(x, z) then
-              wparts[n] = WATER_NODATA_BYTES
-              hparts[n] = M.I16_NODATA_BYTES
-              t.nodata = t.nodata + 1
-            else
-              if code == nil then
-                wparts[n] = WATER_NODATA_BYTES
-              else
-                wparts[n] = char(code)
-                if t.wmin == nil or code < t.wmin then t.wmin = code end
-                if t.wmax == nil or code > t.wmax then t.wmax = code end
-                if code == 2 then
-                  t.sea = t.sea + 1
-                end
-              end
-              if height == nil then
-                hparts[n] = M.I16_NODATA_BYTES
-              else
-                -- Rounded to the meter and clamped so that -32768 stays
-                -- nodata; the value min and max see is the one the bytes hold.
-                local v = floor(height + 0.5)
-                if v < I16_SAMPLE_MIN then
-                  v = I16_SAMPLE_MIN
-                elseif v > I16_SAMPLE_MAX then
-                  v = I16_SAMPLE_MAX
-                end
-                hparts[n] = i16_bytes(v)
-                if t.hmin == nil or v < t.hmin then t.hmin = v end
-                if t.hmax == nil or v > t.hmax then t.hmax = v end
-              end
-            end
-          else
+        local n0 = lr * size
+        if row < grid.height and in_cols > 0 then
+          local x = origin_x + (row + 0.5) * cell_size
+          local ok = pcall(read_row, t, x, z0, 0, in_cols - 1, n0)
+          if not ok then
+            read_row_carefully(t, x, z0, 0, in_cols - 1, n0)
+          end
+          for n = n0 + in_cols + 1, n0 + size do
+            wparts[n] = WATER_NODATA_BYTES
+            hparts[n] = M.I16_NODATA_BYTES
+            t.nodata = t.nodata + 1
+          end
+        else
+          for n = n0 + 1, n0 + size do
             wparts[n] = WATER_NODATA_BYTES
             hparts[n] = M.I16_NODATA_BYTES
             t.nodata = t.nodata + 1
