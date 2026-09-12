@@ -3615,37 +3615,57 @@ M.presweep_job = {
       return M.breakpoints(heights, samples, M.PRESWEEP_BREAK_EPS)
     end
 
+    -- One snap, with its bookkeeping: the counters, the first failure's
+    -- message, and the disc a far answer clears. Returns the road distance,
+    -- or nil where the theatre answered nothing.
+    local function ask(cx, cz)
+      snaps = snaps + 1
+      local ok, sx, sz = pcall(snap, "roads", cx, cz)
+      if not ok then
+        snap_failures = snap_failures + 1
+        if snap_failures == 1 then
+          M.log(format("terrain.getClosestPointOnRoads failed at %s %s: %s",
+            tostring(cx), tostring(cz), tostring(sx)))
+        end
+        return nil
+      end
+      if not (is_finite(sx) and is_finite(sz)) then
+        return nil
+      end
+      local dx, dz = sx - cx, sz - cz
+      local road_m = math.sqrt(dx * dx + dz * dz)
+      local r = road_m - rule.breakpoint_road_max_m
+      if r > 0 then
+        discs = discs + 1
+        cleared[discs] = { x = cx, z = cz, r2 = r * r }
+      end
+      return road_m
+    end
+
     -- The snap first, because it decides most cells by itself: a road within
     -- road_max makes the cell authored with no line read, a road beyond
     -- breakpoint_road_max rules it out the same way, and only the ring
     -- between needs the line. No snap answer at all, and the line decides.
     -- Returns whether the cell is authored, and whether a road alone said so.
+    --
+    -- A cell inside a disc has no road within breakpoint_road_max, if the
+    -- theatre would answer at all. That settles a flat cell with its line
+    -- alone. A rough one still asks, because the theatre answers nothing
+    -- beyond some distance of its own (about 250 km on Marianas), that
+    -- answer leaves the breakpoints to decide, and nothing but asking tells
+    -- a far road from no answer: Pagan was lost to a sea cell's disc before
+    -- the ask reached it.
     local function measure(row, col)
       local cx, cz = M.presweep_center(lattice, row, col)
       if road_known_far(cx, cz) then
         snaps_cleared = snaps_cleared + 1
-        return false, false
-      end
-      local road_m
-      if snap then
-        snaps = snaps + 1
-        local ok, sx, sz = pcall(snap, "roads", cx, cz)
-        if not ok then
-          snap_failures = snap_failures + 1
-          if snap_failures == 1 then
-            M.log(format("terrain.getClosestPointOnRoads failed at %s %s: %s",
-              tostring(cx), tostring(cz), tostring(sx)))
-          end
-        elseif is_finite(sx) and is_finite(sz) then
-          local dx, dz = sx - cx, sz - cz
-          road_m = math.sqrt(dx * dx + dz * dz)
-          local r = road_m - rule.breakpoint_road_max_m
-          if r > 0 then
-            discs = discs + 1
-            cleared[discs] = { x = cx, z = cz, r2 = r * r }
-          end
+        local breaks = read_line(cx, cz)
+        if breaks < rule.breakpoint_min then
+          return false, false
         end
+        return M.cell_authored(breaks, snap and ask(cx, cz) or nil, rule), false
       end
+      local road_m = snap and ask(cx, cz) or nil
       if road_m ~= nil and road_m <= rule.road_max_m then
         return true, true
       end
@@ -4780,10 +4800,16 @@ local function fill_tester(run, terrain)
   return {
     height = fill.height,
     water = fill.water,
-    -- For the water sweep, whose own call matched the class.
+    -- For the water sweep, whose own call matched the class. Where the fill
+    -- is sea the seabed goes first, because real sea shares the fill's
+    -- height of 0 and only its depth tells the two apart; a height call
+    -- there would be paid on every sea cell and separate nothing.
     height_and_seabed = function(x, z)
+      if seabed_needed and not seabed_matches(x, z) then
+        return false
+      end
       local ok, h = pcall(get_height, x, z)
-      return ok and h == fill.height and seabed_matches(x, z)
+      return ok and h == fill.height
     end,
     -- For the height sweep, whose own call matched the height.
     surface_and_seabed = function(x, z)

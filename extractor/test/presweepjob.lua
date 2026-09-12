@@ -229,10 +229,11 @@ T.group("a far snap clears every cell nearer than what it found")
 -- Flat everywhere, and the nearest road point is always (40000, 12500), 15 km
 -- north of the lattice, as a theatre with roads answers from anywhere. The
 -- first cell's snap is 38 810 m away, so it clears every cell within
--- 13 810 m of its center, seven of them; by hand, (2, 2) snaps at 27 500 m
--- and clears nothing, and the six cells of rows 3 and 4 snap between 17 500
--- and 24 622 m, inside the 25 km where breakpoints would count, so each
--- reads its line. Eight snaps, six lines, nothing authored.
+-- 13 810 m of its center, seven of them, which read their lines and no
+-- more, being flat; by hand, (2, 2) snaps at 27 500 m and clears nothing,
+-- and the six cells of rows 3 and 4 snap between 17 500 and 24 622 m,
+-- inside the 25 km where breakpoints would count, so each reads its line.
+-- Eight snaps, thirteen lines, nothing authored.
 fake.GetHeight = counted(function() return 5 end)
 fake.getClosestPointOnRoads = function()
   snap_calls = snap_calls + 1
@@ -243,11 +244,13 @@ logged = {}
 run = new_run()
 T.eq("nothing is authored", sweep(run), E.REFUSED)
 T.eq("eight snaps", snap_calls, 8)
-T.eq("six lines", height_calls, 6 * 201)
+T.eq("thirteen lines", height_calls, 13 * 201)
 
--- Rough everywhere, and the nearest road 138 km away: one snap clears the
--- lattice, no line is read, and nothing is authored, because rough ground
--- that far from every road is not built terrain.
+-- Rough everywhere, and the nearest road 138 km away: the first snap clears
+-- the lattice, but a rough cleared cell still asks, because only the answer
+-- tells a far road from no answer. Every cell snaps and every cleared cell
+-- reads its line; nothing is authored, because rough ground that far from
+-- every road is not built terrain.
 fake.GetHeight = counted(function(x, z) return (x % 20 < 10) and 1 or 0 end)
 fake.getClosestPointOnRoads = function()
   snap_calls = snap_calls + 1
@@ -256,8 +259,35 @@ end
 snap_calls, height_calls = 0, 0
 run = new_run()
 T.eq("rough ground far from every road is not authored", sweep(run), E.REFUSED)
-T.eq("one snap", snap_calls, 1)
-T.eq("no line", height_calls, 0)
+T.eq("every cell asked", snap_calls, 15)
+T.eq("the cleared ones read their lines first", height_calls, 14 * 201)
+
+-- Pagan: the theatre answers a far road from the sea south of an island and
+-- nothing at all from the island, which has no road of its own. Rows 0 to 2
+-- answer a road 100 km south, rows 3 and 4 answer nil, and only row 4 is
+-- rough. The first cell's disc covers the lattice; the rough cells of row 4
+-- ask anyway, hear nothing, and are authored by their lines.
+fake.GetHeight = counted(function(x, z)
+  if x >= 20000 then
+    return (x % 20 < 10) and 1 or 0
+  end
+  return 5
+end)
+fake.getClosestPointOnRoads = function(kind, x, z)
+  snap_calls = snap_calls + 1
+  if x < 15000 then
+    return -100000, 7500
+  end
+  return nil
+end
+snap_calls, height_calls = 0, 0
+run = new_run()
+T.eq("the island is authored", sweep(run), E.DONE)
+T.eq("its three cells", run.presweep.authored_cells, 3)
+T.eq("the rectangle is the island's row", run.presweep_bounds.min_x .. ".." .. run.presweep_bounds.max_x, "10000..35000")
+T.eq("one snap cleared the lattice, and the three rough cells asked", snap_calls, 4)
+T.eq("every cleared cell read its line", height_calls, 14 * 201)
+fake.GetHeight = counted(function(x, z) return (x % 20 < 10) and 1 or 0 end)
 
 -- The same rough ground with no road reachable at all: the line decides
 -- alone, and every cell is authored, so an island keeps its detailed
