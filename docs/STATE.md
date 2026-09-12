@@ -12,8 +12,8 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
 1. **X6, offline: the pre-sweep, `water` and `height`.** Prepare is
    `identity`, `presweep`, `grid`: the pre-sweep walks a 5 km lattice one
-   cell a step (201 heights along 2 km, then one road snap only where the
-   breakpoints did not decide), skips itself on a crop run and on a directory
+   cell a step (a road snap first, a 2 km line of heights only where a road
+   lies 5 to 25 km off, ADR 0027), skips itself on a crop run and on a directory
    whose manifest already carries this theatre's rectangle, and refuses a
    crop extract or another theatre's before paying the minute. The hook pass
    is `config`, `tables`, `water`, `height`, one tile a step; water builds
