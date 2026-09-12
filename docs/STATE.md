@@ -4,7 +4,7 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-11T23:55Z
+**Last updated:** 2026-09-12T00:34Z
 
 ## Done
 
@@ -45,13 +45,14 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
 One task. The thing to pick up immediately.
 
-**X6, the whole-map half of the live pass** — on Caucasus, from the session
-talking to the user: a run with no crop into an empty directory, watched
-through the pre-sweep and the first tiles, its logged rectangle within 10 km
-of the hull ADR 0026 records, then Stop and Start resuming with "authored
-rectangle kept from the manifest" and no second measurement. The road snap
-answers `x, z` at Kutaisi and 500 km out, so the 5 km rule is what decides.
-*Verified by:* a maintainer at the install, watching the bar; PR **52**.
+**X6, the whole-map half of the live pass, again under ADR 0027** — the
+first whole-map run authored Turkey's and Crimea's roadless mountains and
+drew 590 000 km², which packs at 100 m; the rule is now a road within 5 km,
+or breakpoints with a road within 25 km. Rerun on Caucasus from the session
+talking to the user: the rectangle contains the hull ADR 0026 records and
+exceeds it only along the north strip that has roads; then Stop and Start
+resuming with "authored rectangle kept from the manifest". *Verified by:* a
+maintainer at the install, watching the bar; PR **52**.
 
 ## Then
 
