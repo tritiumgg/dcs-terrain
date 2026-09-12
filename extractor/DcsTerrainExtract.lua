@@ -3560,6 +3560,28 @@ M.presweep_job = {
     M.log(format("pre-sweep: %d cells of %d km over %s", total,
       M.PRESWEEP_CELL_KM, rect_text(bounds_m)))
 
+    -- A snap costs by how far it has to look: nothing beside a road, tens of
+    -- milliseconds from the far side of a sea or a fill corner, and most of
+    -- a bounds rectangle is far from every road. So every snap made is kept
+    -- as the disc it clears. The nearest road to a point d from its snap can
+    -- be no nearer than d - r to any point r away, so a cell whose center
+    -- lies within d - road_max of an earlier query has no road within
+    -- road_max and is not asked. One far snap clears hundreds of kilometers;
+    -- a near one clears nothing and costs nothing. This takes the snap for
+    -- the nearest road point, which is what the editor moves a waypoint to.
+    local cleared, discs = {}, 0
+    local function road_known_far(cx, cz)
+      for i = 1, discs do
+        local c = cleared[i]
+        local dx, dz = cx - c.x, cz - c.z
+        if dx * dx + dz * dz < c.r2 then
+          return true
+        end
+      end
+      return false
+    end
+    local snaps, snaps_cleared = 0, 0
+
     -- Direct pcalls rather than terrain_call, which logs every failure.
     local function measure(row, col)
       local cx, cz = M.presweep_center(lattice, row, col)
@@ -3579,16 +3601,26 @@ M.presweep_job = {
       local breaks = M.breakpoints(heights, samples, M.PRESWEEP_BREAK_EPS)
       local road_m
       if breaks < rule.breakpoint_min and snap then
-        local ok, sx, sz = pcall(snap, "roads", cx, cz)
-        if not ok then
-          snap_failures = snap_failures + 1
-          if snap_failures == 1 then
-            M.log(format("terrain.getClosestPointOnRoads failed at %s %s: %s",
-              tostring(cx), tostring(cz), tostring(sx)))
+        if road_known_far(cx, cz) then
+          snaps_cleared = snaps_cleared + 1
+        else
+          snaps = snaps + 1
+          local ok, sx, sz = pcall(snap, "roads", cx, cz)
+          if not ok then
+            snap_failures = snap_failures + 1
+            if snap_failures == 1 then
+              M.log(format("terrain.getClosestPointOnRoads failed at %s %s: %s",
+                tostring(cx), tostring(cz), tostring(sx)))
+            end
+          elseif is_finite(sx) and is_finite(sz) then
+            local dx, dz = sx - cx, sz - cz
+            road_m = math.sqrt(dx * dx + dz * dz)
+            local r = road_m - rule.road_max_m
+            if r > 0 then
+              discs = discs + 1
+              cleared[discs] = { x = cx, z = cz, r2 = r * r }
+            end
           end
-        elseif is_finite(sx) and is_finite(sz) then
-          local dx, dz = sx - cx, sz - cz
-          road_m = math.sqrt(dx * dx + dz * dz)
         end
       end
       return M.cell_authored(breaks, road_m, rule), breaks < rule.breakpoint_min
@@ -3623,8 +3655,8 @@ M.presweep_job = {
       run.presweep_bounds = M.presweep_bounds(lattice, authored, M.PRESWEEP_MARGIN_M)
       run.presweep = M.presweep_record(lattice, authored, rule)
       M.log(format("pre-sweep: %d of %d cells authored, %d by a road alone;"
-        .. " authored rectangle %s", count, total, by_road,
-        rect_text(run.presweep_bounds)))
+        .. " %d road snaps made, %d cleared by an earlier one; authored rectangle %s",
+        count, total, by_road, snaps, snaps_cleared, rect_text(run.presweep_bounds)))
       return M.DONE
     end
 

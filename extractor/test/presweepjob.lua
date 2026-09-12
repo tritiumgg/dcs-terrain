@@ -213,6 +213,57 @@ T.eq("without measuring", height_calls, 0)
 fs.files["C:/extract/tiles.jsonl"] = nil
 
 --------------------------------------------------------------------------------
+T.group("a far snap clears every cell nearer than what it found")
+--------------------------------------------------------------------------------
+
+-- Flat everywhere, and the nearest road point is always (12500, 22500), 10 km
+-- east of the lattice, as a theatre with roads answers from anywhere. The
+-- first cell's snap is 22 361 m away, so it clears every cell within
+-- 17 361 m of its center; by hand that leaves cell (3, 2) at 18 028 m to
+-- snap next, whose 11 180 m clears (4, 2) beside it, and (4, 0) to snap last,
+-- clearing (4, 1). Three snaps for fifteen cells, and no road within 5 km of
+-- any of them.
+fake.GetHeight = function() return 5 end
+fake.getClosestPointOnRoads = function()
+  snap_calls = snap_calls + 1
+  return 12500, 22500
+end
+snap_calls = 0
+logged = {}
+run = new_run()
+T.eq("nothing is authored", sweep(run), E.REFUSED)
+T.eq("three snaps", snap_calls, 3)
+
+-- The same, with the road inside cell (3, 1) at (16000, 9000): every cell
+-- whose center is within 5 km is authored by it, and the snaps that
+-- answered under 5 km cleared nothing, so the flat cells snap one by one
+-- except (1, 2), which the first snap covered.
+fake.GetHeight = function(x, z)
+  if x < 10000 and z < 10000 then
+    return (x % 20 < 10) and 1 or 0
+  end
+  return 5
+end
+fake.getClosestPointOnRoads = function()
+  snap_calls = snap_calls + 1
+  return 16000, 9000
+end
+snap_calls = 0
+logged = {}
+run = new_run()
+T.eq("the sweep completes", sweep(run), E.DONE)
+T.eq("four cells by the road and four by their lines", run.presweep.authored_cells, 8)
+T.eq("the bitmask", run.presweep.bits, E.base64("\192\192\096\096\000"))
+T.eq("ten snaps of eleven flat cells", snap_calls, 10)
+T.eq("the log counts both", log_has("10 road snaps made, 1 cleared by an earlier one"), true)
+fake.getClosestPointOnRoads = function(kind, x, z)
+  if x >= 15000 and x < 20000 and z >= 5000 and z < 10000 then
+    return 16000, 9000
+  end
+  return nil
+end
+
+--------------------------------------------------------------------------------
 T.group("what the theatre cannot answer")
 --------------------------------------------------------------------------------
 
