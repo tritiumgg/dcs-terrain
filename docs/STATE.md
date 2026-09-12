@@ -4,7 +4,7 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-12T00:46Z
+**Last updated:** 2026-09-12T01:01Z
 
 ## Done
 
@@ -16,14 +16,16 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    25 km off (ADR **0027**, after the spec's rule authored Caucasus's roadless
    mountains), every far snap kept as the disc it clears; it skips itself on
    a crop run and on a directory whose manifest carries the rectangle. The
-   hook pass is `config`, `tables`, `water`, `height`, one tile a step at the
-   terrain module's own per-call speed; water builds `run.skip` and a resumed
-   sweep reads journalled tiles back for the sea ones. *Verified by:* an agent
-   offline, then the maintainer on Caucasus 2.9.29.27468: a 5 km Kutaisi
-   crop's cells equal the bridge's, the whole map's rectangle is 470 x 785 km
-   in 19 s (38 km past the hull on the north where roads run, 14 km and 56 km
-   short of it over roadless mountains and sea), water 118 s, height 71 s,
-   and Stop then Start resumed without measuring again. PR **52**.
+   hook pass is `config`, `tables`, then `water+height` as one sweep with both
+   calls at each cell (ADR **0028**: measured half the cost of two passes),
+   one tile a step; it builds `run.skip` and a resumed sweep reads journalled
+   tiles back for the sea ones. *Verified by:* an agent offline, then the
+   maintainer on Caucasus 2.9.29.27468: a 5 km Kutaisi crop's cells equal the
+   bridge's, the whole map's rectangle is 470 x 785 km in 19 s (38 km past
+   the hull on the north where roads run, 14 km and 56 km short of it over
+   roadless mountains and sea), and Stop then Start resumed without measuring
+   again; Marianas found Pagan lost to a far snap's disc, fixed. PR **52**.
+   The fused sweep's live timing is still owed, below.
 2. **X5: the grid job, `config.json` and the seven tables.** Prepare is
    `identity` then `grid`; the hook pass is `config` (the theatre's facts,
    twenty lat/lon samples, the fill triple off three corners 500 km out) then
@@ -46,12 +48,14 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
 One task. The thing to pick up immediately.
 
-**X7** — roads and railroads, each as two jobs, seeds then paths; carry 2. A
-snap costs by its distance to the nearest road (84 ms at 500 km, measured in
-X6), so seeds are placed only inside the authored rectangle's non-skipped
-tiles and the pre-sweep's disc bound applies to seeds too. *Verified by:* an
-agent offline over the driver, then a sampled path re-read through the bridge
-on the Kutaisi crop; a maintainer watching the whole-map roads sweep start.
+**X6, last live step** — Caucasus and Marianas whole-map runs on the fused
+sweep (ADR 0028): the `water+height` time against 189 s and 61 s for the two
+passes, and Pagan inside the Marianas rectangle. Then **X7**, roads and
+railroads, each as two jobs, seeds then paths; carry 2. A snap costs by its
+distance to the nearest road (84 ms at 500 km), so seeds go only in the
+rectangle's non-skipped tiles and the pre-sweep's disc bound applies to
+seeds too. *Verified by:* a maintainer at the install, then an agent offline
+over the driver and a sampled path re-read through the bridge on the crop.
 
 ## Then
 
