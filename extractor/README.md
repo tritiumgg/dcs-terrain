@@ -44,11 +44,12 @@ without `seek`.
   Every table is shaped the same way on every theatre: a value that is not
   what was measured elsewhere is written null with a line in the log, a table
   the theatre cannot give is written empty, and the run never stops for
-  either. Then the `water` and `height` tiles, one tile a step, each cell
-  tested against the fill triple before it is rounded: a tile that is fill
-  throughout is not written, a tile that is sea throughout is written for
-  `water` only, and a resumed run counts its journalled tiles as done and
-  reads them back to find the sea ones. *The road and scenery sweeps are not
+  either. Then the `water` and `height` tiles in one sweep, one tile a step
+  with both calls at each cell, which costs less than either layer walked
+  alone (ADR 0028); each cell is tested against the fill triple before it is
+  rounded, a tile that is fill throughout is not written, a tile that is sea
+  throughout is written for `water` only, and a resumed run counts its
+  journalled tiles as done and reads them back to find the sea ones. *The road and scenery sweeps are not
   built yet, so a run reaches `done` with those two layers and no roads.*
   While a run is sweeping, the line names the sweep, which of how many it is
   and its count, refreshed every second, and the bar is that sweep's own count;

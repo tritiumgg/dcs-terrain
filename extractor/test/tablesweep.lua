@@ -28,14 +28,13 @@ local function log_has(text)
 end
 
 --------------------------------------------------------------------------------
-T.group("the hook pass is config, tables, water, height")
+T.group("the hook pass is config, tables, then water and height together")
 --------------------------------------------------------------------------------
 
-T.eq("four jobs so far", #E.jobs.hook, 4)
+T.eq("three jobs so far", #E.jobs.hook, 3)
 T.eq("config first", E.jobs.hook[1].name, "config")
 T.eq("then the tables", E.jobs.hook[2].name, "tables")
-T.eq("then water", E.jobs.hook[3].name, "water")
-T.eq("then height", E.jobs.hook[4].name, "height")
+T.eq("then the tile sweep", E.jobs.hook[3].name, "water+height")
 
 --------------------------------------------------------------------------------
 T.group("seven files in order, and the rows kept for the road sweeps")

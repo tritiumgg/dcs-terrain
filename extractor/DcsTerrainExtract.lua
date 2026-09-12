@@ -4735,31 +4735,34 @@ M.tables_job = {
 M.add_job("hook", M.tables_job)
 
 --------------------------------------------------------------------------------
--- Tile sweeps: water, then height
+-- The tile sweep: water and height together
 --
--- Both walk the grid tile by tile, tx outer and tz inner and row-major within
--- a tile, because sequential access is what makes the terrain calls cheap. A
--- tile is one step: its samples accumulate as byte strings, are joined once
--- and written whole, then one journal line, and only then is the tile done on
--- the run, so a run killed anywhere loses at most the tile it was writing.
+-- One walk over the grid, tile by tile, tx outer and tz inner and row-major
+-- within a tile, reading both calls at each cell. Measured on Saipan, a tile
+-- walked once with both calls costs less than either layer walked alone,
+-- because the second call at a cell finds the terrain the first just loaded;
+-- the design's rule against interleaving layers was measured on scattered
+-- points, not on two calls at one (ADR 0028). Reading both at once also
+-- makes the fill test one test: a cell is fill when the class, the unrounded
+-- height and, where the fill is sea, the seabed all equal the triple, and it
+-- is nodata in both layers.
 --
--- The fill test runs on unrounded returns, because after rounding the fill
--- height is a real height. A cell is fill when all three calls equal the
--- theatre's triple, and each sweep compares its own call first so the other
--- two are paid only where it matched. On a land-fill theatre every land cell
--- matches the water class, so the water sweep pays a height call on land; the
--- height sweep's own comparison is exact on a float and matches almost
--- nothing that is not fill.
+-- A tile is one step: both layers' samples accumulate as byte strings, are
+-- joined once and written whole, water then height, each followed by its
+-- journal line and only then done on the run, so a run killed anywhere loses
+-- at most the tile it was writing. A tile whose every cell is fill is written
+-- in neither layer and its stale files are removed, because the format has
+-- no journal line for a tile it omits; a tile whose every byte of water is
+-- sea is written for water only, since an absent height tile reads as sea
+-- exactly. Both join the skip set for the sweeps after this one. A layer
+-- that already has a journal line always gets its file, because a line
+-- cannot be taken back and a line for a file that is not there never
+-- validates.
 --
--- Water runs first and builds the skip set. A tile whose every cell is fill
--- is not written and its stale file is removed, because the format has no
--- journal line for a tile it omits; a tile whose every byte is sea is written
--- and joins the set, since an absent height tile reads as sea exactly. The
--- set lives on the run and does not survive a restart, so a resumed water
--- sweep reads the bytes of each journalled tile back to find the all-sea
--- ones. The all-fill ones have no line, read as not yet swept, and are swept
--- again on every Start; that is the cost of the missing line, and the count
--- is logged.
+-- The set lives on the run and does not survive a restart, so a resumed
+-- sweep reads each journalled water tile back to find the all-sea ones. The
+-- all-fill ones have no line, read as not yet swept, and are swept again on
+-- every Start; that is the cost of the missing line, and the count is logged.
 --------------------------------------------------------------------------------
 
 local WATER_NODATA_BYTES = char(M.WATER_NODATA)
@@ -4769,329 +4772,269 @@ local function skip_key(tx, tz)
   return format("%d_%d", tx, tz)
 end
 
--- The fill test's other two calls, given the one the sweep made, or nil when
--- the triple is not known and no cell can be called fill.
+-- The fill triple as the sweep compares it, or nil when the triple is not
+-- known and no cell can be called fill. The seabed return is 0 on land and
+-- the depth at sea: where the fill's seabed is 0 the fill is land, and 0 is
+-- what real land answers too, so that call separates nothing and is not
+-- made; where the fill is sea it is the one channel that tells the void from
+-- water with a real depth, since both answer a height of 0.
 local function fill_tester(run, terrain)
   local fill = run.fill
   if not fill then
     return nil
   end
-  local get_height = terrain.GetHeight
-  local get_surface = terrain.GetSurfaceType
   local get_seabed = terrain.GetSurfaceHeightWithSeabed
-  -- The seabed return is 0 on land and the depth at sea. Where the fill's
-  -- seabed is 0 the fill is land, and 0 is what real land answers too, so the
-  -- call separates nothing and is not made; where the fill is sea it is the
-  -- one channel that tells the void from water with a real depth.
   local seabed_needed = fill.seabed ~= 0
-  if type(get_height) ~= "function" or type(get_surface) ~= "function"
-      or (seabed_needed and type(get_seabed) ~= "function") then
-    M.log("the fill test needs GetHeight, GetSurfaceType and"
-      .. " GetSurfaceHeightWithSeabed: no cell will be called fill")
+  if seabed_needed and type(get_seabed) ~= "function" then
+    M.log("the fill test needs GetSurfaceHeightWithSeabed on a sea-fill"
+      .. " theatre: no cell will be called fill")
     return nil
-  end
-  local function seabed_matches(x, z)
-    if not seabed_needed then
-      return true
-    end
-    local ok, _, seabed = pcall(get_seabed, x, z)
-    return ok and seabed == fill.seabed
   end
   return {
     height = fill.height,
     water = fill.water,
-    -- For the water sweep, whose own call matched the class. Where the fill
-    -- is sea the seabed goes first, because real sea shares the fill's
-    -- height of 0 and only its depth tells the two apart; a height call
-    -- there would be paid on every sea cell and separate nothing.
-    height_and_seabed = function(x, z)
-      if seabed_needed and not seabed_matches(x, z) then
-        return false
+    seabed_matches = function(x, z)
+      if not seabed_needed then
+        return true
       end
-      local ok, h = pcall(get_height, x, z)
-      return ok and h == fill.height
-    end,
-    -- For the height sweep, whose own call matched the height.
-    surface_and_seabed = function(x, z)
-      local ok, s = pcall(get_surface, x, z)
-      return ok and M.water_class(s) == fill.water and seabed_matches(x, z)
+      local ok, _, seabed = pcall(get_seabed, x, z)
+      return ok and seabed == fill.seabed
     end,
   }
 end
 
--- One sweep over the grid. The spec says which layer, how a cell is sampled
--- (bytes and a value for min and max, or nil for nodata, and whether the
--- call failed), what to do with a journalled tile, which tiles to leave out,
--- and what a written tile adds to the skip set.
-local function tile_sweep(spec)
-  return {
-    name = spec.layer,
-    start = function(run)
-      local function refuse(message)
-        run.refusal = message
-        return function()
-          return M.REFUSED
-        end
+M.water_height_job = {
+  name = "water+height",
+  start = function(run)
+    local function refuse(message)
+      run.refusal = message
+      return function()
+        return M.REFUSED
       end
+    end
 
-      local terrain = M.terrain_module()
-      if not terrain then
-        return refuse("the terrain module is not loaded")
-      end
-      if not (run.manifest and run.manifest.grid) then
-        return refuse("no grid was planned")
-      end
-      local grid = run.manifest.grid
-      local sample, serr = spec.sampler(run, terrain)
-      if not sample then
-        return refuse(serr)
-      end
-      local skipped_why = spec.skip(run)
-      local layer = spec.layer
-      local nodata = spec.nodata
-      local size = grid.tile_size
-      local cells = size * size
-      local high, wide = M.tile_counts(grid)
-      local total = high * wide
+    local terrain = M.terrain_module()
+    if not terrain then
+      return refuse("the terrain module is not loaded")
+    end
+    if not (run.manifest and run.manifest.grid) then
+      return refuse("no grid was planned")
+    end
+    local get_surface, get_height = terrain.GetSurfaceType, terrain.GetHeight
+    if type(get_surface) ~= "function" then
+      return refuse("terrain.GetSurfaceType is not a function")
+    end
+    if type(get_height) ~= "function" then
+      return refuse("terrain.GetHeight is not a function")
+    end
+    local grid = run.manifest.grid
+    local tester = fill_tester(run, terrain)
+    local fill_class = tester and tester.water
+    local fill_height = tester and tester.height
+    local seabed_matches = tester and tester.seabed_matches
+    -- The set is this sweep's to make, and it starts empty on every Start.
+    run.skip = {}
+    local size = grid.tile_size
+    local cells = size * size
+    local high, wide = M.tile_counts(grid)
+    local total = high * wide
 
-      -- Journalled tiles count as done from the start, so a resumed sweep's
-      -- bar climbs rather than falling back (ADR 0025).
-      local journalled = 0
-      for tx, tz in M.each_tile(grid) do
-        if run.done[M.tile_key(layer, tx, tz)] then
-          journalled = journalled + 1
-        end
+    -- Journalled tiles count as done from the start, so a resumed sweep's
+    -- bar climbs rather than falling back (ADR 0025).
+    local journalled = 0
+    for tx, tz in M.each_tile(grid) do
+      if run.done[M.tile_key("water", tx, tz)] then
+        journalled = journalled + 1
       end
-      local iter = M.each_tile(grid)
-      local processed = 0
-      local written, omitted, skipped, reused, reswept = 0, 0, 0, 0, 0
+    end
+    local iter = M.each_tile(grid)
+    local processed = 0
+    local written, omitted, sea_only, reused, reswept = 0, 0, 0, 0, 0
 
-      local function sweep_tile(tx, tz)
-        local parts, n = {}, 0
-        local nodata_count, failed = 0, 0
-        local min, max
-        local stats = spec.stats()
-        local row0, col0 = M.tile_first_cell(grid, tx, tz)
-        for lr = 0, size - 1 do
-          local row = row0 + lr
-          local row_in = row < grid.height
-          for lc = 0, size - 1 do
-            local col = col0 + lc
-            n = n + 1
-            if row_in and col < grid.width then
-              local x, z = M.cell_center(grid, row, col)
-              local bytes, value, did_fail = sample(x, z)
-              parts[n] = bytes
-              if value == nil then
-                nodata_count = nodata_count + 1
-                if did_fail then
-                  failed = failed + 1
-                end
-              else
-                if min == nil or value < min then min = value end
-                if max == nil or value > max then max = value end
-                spec.count(stats, value)
-              end
-            else
-              parts[n] = nodata
-              nodata_count = nodata_count + 1
+    -- The sweep finishes on its last tile, with the totals, and says done
+    -- again to any step after that.
+    local handled = 0
+    local function next_status()
+      handled = handled + 1
+      if handled < total then
+        return M.MORE
+      end
+      M.log(format("water+height: %d tiles written, %d journalled, %d swept"
+        .. " again, %d omitted as fill, %d written for water only", written,
+        reused, reswept, omitted, sea_only))
+      return M.DONE
+    end
+
+    -- Both layers of one tile. nodata counts the cells nodata in both, fill
+    -- and beyond the grid; failed counts cells a call did not answer, which
+    -- are nodata in that layer alone.
+    local function sweep_tile(tx, tz)
+      local t = { wparts = {}, hparts = {}, nodata = 0, sea = 0, failed = 0 }
+      local wparts, hparts = t.wparts, t.hparts
+      local n = 0
+      local row0, col0 = M.tile_first_cell(grid, tx, tz)
+      for lr = 0, size - 1 do
+        local row = row0 + lr
+        local row_in = row < grid.height
+        for lc = 0, size - 1 do
+          local col = col0 + lc
+          n = n + 1
+          if row_in and col < grid.width then
+            local x, z = M.cell_center(grid, row, col)
+            local got_s, s = pcall(get_surface, x, z)
+            local got_h, h = pcall(get_height, x, z)
+            local code = got_s and M.water_class(s) or nil
+            local height = (got_h and is_finite(h)) and h or nil
+            if code == nil or height == nil then
+              t.failed = t.failed + 1
             end
+            if code ~= nil and code == fill_class and height == fill_height
+                and seabed_matches(x, z) then
+              wparts[n] = WATER_NODATA_BYTES
+              hparts[n] = M.I16_NODATA_BYTES
+              t.nodata = t.nodata + 1
+            else
+              if code == nil then
+                wparts[n] = WATER_NODATA_BYTES
+              else
+                wparts[n] = char(code)
+                if t.wmin == nil or code < t.wmin then t.wmin = code end
+                if t.wmax == nil or code > t.wmax then t.wmax = code end
+                if code == 2 then
+                  t.sea = t.sea + 1
+                end
+              end
+              if height == nil then
+                hparts[n] = M.I16_NODATA_BYTES
+              else
+                -- Rounded to the meter and clamped so that -32768 stays
+                -- nodata; the value min and max see is the one the bytes hold.
+                local v = floor(height + 0.5)
+                if v < I16_SAMPLE_MIN then
+                  v = I16_SAMPLE_MIN
+                elseif v > I16_SAMPLE_MAX then
+                  v = I16_SAMPLE_MAX
+                end
+                hparts[n] = i16_bytes(v)
+                if t.hmin == nil or v < t.hmin then t.hmin = v end
+                if t.hmax == nil or v > t.hmax then t.hmax = v end
+              end
+            end
+          else
+            wparts[n] = WATER_NODATA_BYTES
+            hparts[n] = M.I16_NODATA_BYTES
+            t.nodata = t.nodata + 1
           end
         end
-        return parts, min, max, nodata_count, failed, stats
       end
+      return t
+    end
 
-      -- The sweep finishes on its last tile, with the totals, and says done
-      -- again to any step after that.
-      local handled = 0
-      local function next_status()
-        handled = handled + 1
-        if handled < total then
-          return M.MORE
-        end
-        M.log(format("%s: %d tiles written, %d journalled, %d swept again,"
-          .. " %d omitted, %d skipped", layer, written, reused, reswept,
-          omitted, skipped))
+    -- File, then line, then done on the run; a refusal leaves the reason.
+    local function write_layer(layer, tx, tz, parts, min, max)
+      local path = M.tile_path(layer, tx, tz)
+      local ok, err = M.write_file(M.join(run.dir, path), concat(parts))
+      if not ok then
+        run.refusal = format("%s cannot be written: %s", path, tostring(err))
+        return false
+      end
+      local entry = M.tile_entry(layer, tx, tz, min, max)
+      local appended, aerr = M.append_tile(run.dir, entry)
+      if not appended then
+        run.refusal = format("%s cannot be journalled: %s", path, tostring(aerr))
+        return false
+      end
+      run.entries[#run.entries + 1] = entry
+      run.done[M.tile_key(layer, tx, tz)] = entry
+      return true
+    end
+
+    local function on_disk(layer, tx, tz, size_bytes)
+      return M.fs.size(M.join(run.dir, M.tile_path(layer, tx, tz))) == size_bytes
+    end
+
+    local function step()
+      local tx, tz = iter()
+      if tx == nil then
         return M.DONE
       end
-
-      local function step()
-        local tx, tz = iter()
-        if tx == nil then
-          return M.DONE
-        end
-        local key = M.tile_key(layer, tx, tz)
-        local why = skipped_why(tx, tz)
-        -- A tile with a journal line keeps its file even when the set now
-        -- says to leave it out, because the line cannot be taken back and a
-        -- line for a file that is not there never validates. It falls
-        -- through to the journalled branch below.
-        if why and not run.done[key] then
-          -- Whether or not a file is there: one with no line never heals.
-          M.remove_tile(run.dir, layer, tx, tz)
-          skipped = skipped + 1
-          processed = processed + 1
-          return next_status()
-        end
-        if run.done[key] then
-          if spec.reuse(run, tx, tz, cells) then
+      local wkey, hkey = M.tile_key("water", tx, tz), M.tile_key("height", tx, tz)
+      local key = skip_key(tx, tz)
+      if run.done[wkey] then
+        -- Read back for the set: every byte sea means the height tile was
+        -- left out on purpose. A water file that is not there or not a
+        -- tile's length, or a journalled height file that is not, means the
+        -- tile is swept again.
+        local data = M.read_file(M.join(run.dir, M.tile_path("water", tx, tz)))
+        if data and #data == cells then
+          local all_sea = M.OMIT_SEA_TILES and data:find("[^" .. SEA_BYTE .. "]") == nil
+          if all_sea then
+            run.skip[key] = "sea"
+          end
+          local height_ok
+          if run.done[hkey] then
+            height_ok = on_disk("height", tx, tz, cells * 2)
+          else
+            height_ok = all_sea
+          end
+          if height_ok then
             reused = reused + 1
             return next_status()
           end
-          journalled = journalled - 1
-          reswept = reswept + 1
-          M.log(format("%s %d_%d is journalled but its file is not there"
-            .. " or not the size: swept again", layer, tx, tz))
         end
+        journalled = journalled - 1
+        reswept = reswept + 1
+        M.log(format("tile %d_%d is journalled but a file is not there or not"
+          .. " the size: swept again", tx, tz))
+      end
 
-        local parts, min, max, nodata_count, failed, stats = sweep_tile(tx, tz)
-        processed = processed + 1
-        -- Every cell fill, and none of them a call that failed: nothing to
-        -- write. A tile of failed calls is written as nodata and journalled,
-        -- so that it reads as a hole rather than as fill.
-        if spec.omit_all_nodata and nodata_count == cells and failed == 0 then
-          run.skip[skip_key(tx, tz)] = "fill"
-          M.remove_tile(run.dir, layer, tx, tz)
+      local t = sweep_tile(tx, tz)
+      processed = processed + 1
+      local lined = run.done[wkey] ~= nil or run.done[hkey] ~= nil
+      -- Every cell fill, and none of them a call that failed: fill throughout,
+      -- and nothing to write unless a line already promises a file. A tile of
+      -- failed calls is written as nodata and journalled, so that it reads as
+      -- a hole rather than as fill.
+      if t.nodata == cells and t.failed == 0 then
+        run.skip[key] = "fill"
+        if not lined then
+          M.remove_tile(run.dir, "water", tx, tz)
+          M.remove_tile(run.dir, "height", tx, tz)
           omitted = omitted + 1
-          M.log(format("%s %d_%d: fill throughout, omitted", layer, tx, tz))
+          M.log(format("tile %d_%d: fill throughout, omitted", tx, tz))
           return next_status()
         end
-        local path = M.tile_path(layer, tx, tz)
-        local ok, err = M.write_file(M.join(run.dir, path), concat(parts))
-        if not ok then
-          run.refusal = format("%s cannot be written: %s", path, tostring(err))
-          return M.REFUSED
-        end
-        local entry = M.tile_entry(layer, tx, tz, min, max)
-        local appended, aerr = M.append_tile(run.dir, entry)
-        if not appended then
-          run.refusal = format("%s cannot be journalled: %s", path, tostring(aerr))
-          return M.REFUSED
-        end
-        run.entries[#run.entries + 1] = entry
-        run.done[key] = entry
-        written = written + 1
-        spec.after(run, tx, tz, stats, cells)
-        M.log(format("%s %d_%d: min %s max %s, %d nodata, %d failed", layer, tx, tz,
-          tostring(min), tostring(max), nodata_count, failed))
-        return next_status()
       end
+      if not write_layer("water", tx, tz, t.wparts, t.wmin, t.wmax) then
+        return M.REFUSED
+      end
+      local all_sea = M.OMIT_SEA_TILES and t.sea == cells
+      if all_sea then
+        run.skip[key] = "sea"
+      end
+      if all_sea and not run.done[hkey] then
+        -- Whether or not a file is there: one with no line never heals.
+        M.remove_tile(run.dir, "height", tx, tz)
+        sea_only = sea_only + 1
+      elseif not write_layer("height", tx, tz, t.hparts, t.hmin, t.hmax) then
+        return M.REFUSED
+      end
+      written = written + 1
+      M.log(format("tile %d_%d: water %s..%s, height %s..%s, %d nodata, %d failed",
+        tx, tz, tostring(t.wmin), tostring(t.wmax), tostring(t.hmin),
+        tostring(t.hmax), t.nodata, t.failed))
+      return next_status()
+    end
 
-      local function progress()
-        return journalled + processed, total
-      end
+    local function progress()
+      return journalled + processed, total
+    end
 
-      return step, progress
-    end,
-  }
-end
+    return step, progress
+  end,
+}
 
-M.water_job = tile_sweep({
-  layer = "water",
-  nodata = WATER_NODATA_BYTES,
-  omit_all_nodata = true,
-  sampler = function(run, terrain)
-    local get_surface = terrain.GetSurfaceType
-    if type(get_surface) ~= "function" then
-      return nil, "terrain.GetSurfaceType is not a function"
-    end
-    local tester = fill_tester(run, terrain)
-    local fill_class = tester and tester.water
-    return function(x, z)
-      local ok, s = pcall(get_surface, x, z)
-      if not ok then
-        return WATER_NODATA_BYTES, nil, true
-      end
-      local code = M.water_class(s)
-      if code == fill_class and tester.height_and_seabed(x, z) then
-        return WATER_NODATA_BYTES, nil
-      end
-      return char(code), code
-    end
-  end,
-  -- The set is this sweep's to make, and it starts empty on every Start.
-  skip = function(run)
-    run.skip = {}
-    return function()
-      return nil
-    end
-  end,
-  -- A journalled tile is read back for the set: every byte sea means the
-  -- height sweep leaves it out. A file that is not there, or not a tile's
-  -- length, is swept again.
-  reuse = function(run, tx, tz, cells)
-    local data = M.read_file(M.join(run.dir, M.tile_path("water", tx, tz)))
-    if not data or #data ~= cells then
-      return false
-    end
-    if M.OMIT_SEA_TILES and data:find("[^" .. SEA_BYTE .. "]") == nil then
-      run.skip[skip_key(tx, tz)] = "sea"
-    end
-    return true
-  end,
-  stats = function()
-    return { sea = 0 }
-  end,
-  count = function(stats, code)
-    if code == 2 then
-      stats.sea = stats.sea + 1
-    end
-  end,
-  after = function(run, tx, tz, stats, cells)
-    if M.OMIT_SEA_TILES and stats.sea == cells then
-      run.skip[skip_key(tx, tz)] = "sea"
-    end
-  end,
-})
-
-M.height_job = tile_sweep({
-  layer = "height",
-  nodata = M.I16_NODATA_BYTES,
-  omit_all_nodata = false,
-  sampler = function(run, terrain)
-    local get_height = terrain.GetHeight
-    if type(get_height) ~= "function" then
-      return nil, "terrain.GetHeight is not a function"
-    end
-    local tester = fill_tester(run, terrain)
-    local fill_height = tester and tester.height
-    return function(x, z)
-      local ok, h = pcall(get_height, x, z)
-      if not ok or not is_finite(h) then
-        return M.I16_NODATA_BYTES, nil, true
-      end
-      if h == fill_height and tester.surface_and_seabed(x, z) then
-        return M.I16_NODATA_BYTES, nil
-      end
-      -- Rounded to the meter and clamped so that -32768 stays nodata; the
-      -- value min and max see is the one the bytes hold.
-      local v = floor(h + 0.5)
-      if v < I16_SAMPLE_MIN then
-        v = I16_SAMPLE_MIN
-      elseif v > I16_SAMPLE_MAX then
-        v = I16_SAMPLE_MAX
-      end
-      return i16_bytes(v), v
-    end
-  end,
-  skip = function(run)
-    local set = run.skip or {}
-    return function(tx, tz)
-      return set[skip_key(tx, tz)]
-    end
-  end,
-  reuse = function()
-    return true
-  end,
-  stats = function()
-    return nil
-  end,
-  count = function() end,
-  after = function() end,
-})
-
-M.add_job("hook", M.water_job)
-M.add_job("hook", M.height_job)
+M.add_job("hook", M.water_height_job)
 
 --------------------------------------------------------------------------------
 -- DCS callbacks

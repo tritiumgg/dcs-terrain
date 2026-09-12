@@ -39,6 +39,7 @@ disagree, the later accepted one wins, and the earlier is marked
 | [0025](0025-the-bar-is-the-running-sweep-s-own-count.md) | Accepted | 2026-09-11 | The bar is the running sweep's own count, and the run reports no fraction of the whole | `extractor-hook.md` "Lifecycle", "Performance targets"; `plan.md` X12, X5–X8c |
 | [0026](0026-the-authored-rectangle-is-measured-never-read.md) | Accepted | 2026-09-11 | The authored rectangle is measured, never read from a theatre file | `extract-format.md` "manifest.json"; `extractor-hook.md` "Lifecycle"; `design-and-facts.md` `nodesMapBorders`, "Geometry facts"; ADR 0009, ADR 0011; `plan.md` X5, X6, X10, X11, V |
 | [0027](0027-breakpoints-count-only-near-a-road.md) | Accepted | 2026-09-12 | The pre-sweep's breakpoints count only near a road | `extract-format.md` "manifest.json"; `design-and-facts.md` "Geometry facts", "Design decisions"; `extractor-hook.md` "Lifecycle"; ADR 0026's X11 check; `plan.md` X6, X11 |
+| [0028](0028-water-and-height-are-one-sweep.md) | Accepted | 2026-09-12 | Water and height are one sweep | `extractor-hook.md` "Hook-pass sweeps", "Performance targets"; `extract-format.md` "manifest.json" `timing_ms`; ADR 0025; `plan.md` X6, X11 |
 
 Add a row when you add an ADR. This table is the index Claude reads, so an ADR
 missing from it will not be found. Each record's own `Affects` line, at the top
