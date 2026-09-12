@@ -4729,13 +4729,21 @@ local function fill_tester(run, terrain)
   local get_height = terrain.GetHeight
   local get_surface = terrain.GetSurfaceType
   local get_seabed = terrain.GetSurfaceHeightWithSeabed
+  -- The seabed return is 0 on land and the depth at sea. Where the fill's
+  -- seabed is 0 the fill is land, and 0 is what real land answers too, so the
+  -- call separates nothing and is not made; where the fill is sea it is the
+  -- one channel that tells the void from water with a real depth.
+  local seabed_needed = fill.seabed ~= 0
   if type(get_height) ~= "function" or type(get_surface) ~= "function"
-      or type(get_seabed) ~= "function" then
+      or (seabed_needed and type(get_seabed) ~= "function") then
     M.log("the fill test needs GetHeight, GetSurfaceType and"
       .. " GetSurfaceHeightWithSeabed: no cell will be called fill")
     return nil
   end
   local function seabed_matches(x, z)
+    if not seabed_needed then
+      return true
+    end
     local ok, _, seabed = pcall(get_seabed, x, z)
     return ok and seabed == fill.seabed
   end

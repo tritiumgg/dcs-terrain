@@ -347,18 +347,28 @@ E.terrain_module = function() return nil end
 T.eq("no module refuses", E.height_job.start(run)(), E.REFUSED)
 E.terrain_module = function() return fake end
 
--- A triple on the run but a module missing one of the three calls: nothing
--- is fill, said once, and the sweep goes on.
+-- A sea-fill triple on the run but a module without the seabed call, which is
+-- the one channel that tells that fill from real sea: nothing is fill, said
+-- once, and the sweep goes on.
 local partial = { GetTerrainConfig = fake.GetTerrainConfig, GetSurfaceType = fake.GetSurfaceType,
   GetHeight = fake.GetHeight }
 E.terrain_module = function() return partial end
 fs = FakeFs.new()
-run = new_run(fs)
+run = new_run(fs, { height = 0, water = 2, seabed = 100 })
 logged = {}
 statuses = sweep(E.water_job, run)
 T.eq("the sweep completes", statuses[#statuses], E.DONE)
-T.eq("the fill tile is written as land", tile(fs, "water", 0, 0), string.rep(bytes(0), 16))
+T.eq("the sea tile is written as sea", tile(fs, "water", 1, 0), string.rep(bytes(2), 16))
 T.eq("and the log says why", log_has("no cell will be called fill"), true)
+
+-- A land-fill triple needs no seabed call: its fill seabed is 0, and so is
+-- real land's, so the same module tests fill with the two calls it has.
+logged = {}
+fs = FakeFs.new()
+run = new_run(fs)
+statuses = sweep(E.water_job, run)
+T.eq("the fill tile is omitted without the seabed call", run.skip["0_0"], "fill")
+T.eq("and nothing is said", log_has("no cell will be called fill"), false)
 E.terrain_module = function() return fake end
 
 T.done()
