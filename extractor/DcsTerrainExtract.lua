@@ -5328,8 +5328,10 @@ function M.parse_road_line(line)
 end
 
 -- Buckets on a square lattice with an integer key, so a lookup allocates
--- nothing. Coordinates are DCS meters within a few thousand kilometers, so
--- the bucket numbers fit beside each other in one double exactly.
+-- nothing. The two numbers sit beside each other in one double exactly, and
+-- are distinct as long as the z bucket stays within a million of zero: at
+-- the finest step used, 100 m, that is a hundred thousand kilometers, and
+-- no theatre comes near it.
 local BUCKET_SHIFT = 2097152
 
 local function bucket_key(bx, bz)
@@ -5405,7 +5407,7 @@ end
 
 function M.disc_add(discs, x, z, d)
   local r = d - discs.max_m
-  if r < discs.spacing then
+  if r <= discs.spacing then
     return false
   end
   local n = discs.n + 1
@@ -5843,7 +5845,7 @@ function M.road_seeds_job(kind)
       if type(terrain.findPathOnRoads) ~= "function" then
         return refuse("terrain.findPathOnRoads is not a function")
       end
-      if not (run.manifest and run.manifest.grid) then
+      if not (run.manifest and type(run.manifest.grid) == "table") then
         return refuse("no grid was planned")
       end
       if run.manifest.passes.hook.complete == true then
@@ -5851,9 +5853,16 @@ function M.road_seeds_job(kind)
         return finished()
       end
 
-      local tables = run.tables or {}
-      local plan = M.seed_plan(run.manifest.grid, M.ROAD_SEED_SPACING,
-        tables.airdromes, tables.towns)
+      -- The plan is built under protection: a manifest edited by hand can
+      -- hold a grid of the wrong shape, and a raise here would climb into
+      -- DCS's frame callback.
+      local tables = type(run.tables) == "table" and run.tables or {}
+      local planned, plan = pcall(M.seed_plan, run.manifest.grid, M.ROAD_SEED_SPACING,
+        type(tables.airdromes) == "table" and tables.airdromes or nil,
+        type(tables.towns) == "table" and tables.towns or nil)
+      if not planned then
+        return refuse("the seed plan cannot be made: " .. tostring(plan))
+      end
       local skip = run.skip or {}
       local spacing = plan.spacing
       local max_m = M.ROAD_SEED_MAX_M
@@ -5890,7 +5899,9 @@ function M.road_seeds_job(kind)
           none = none + 1
         elseif sd > max_m then
           far = far + 1
-          if M.disc_add(discs, x, z, sd) and row ~= nil then
+          -- Only a lattice answer can clear the rest of its row; the table
+          -- seeds come after every lattice seed.
+          if M.disc_add(discs, x, z, sd) and row ~= nil and id <= plan.lattice then
             -- The disc is centered on the query point, which for a far
             -- answer is what the sweep would clear around; the snap itself
             -- is the road it found.

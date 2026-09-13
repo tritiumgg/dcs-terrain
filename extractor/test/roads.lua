@@ -153,7 +153,15 @@ T.eq("with their ids in order", kept.id[3], 12)
 T.group("a far answer clears a disc, and a row of seeds is tested by spans")
 --------------------------------------------------------------------------------
 
-local discs = E.discs(25000, 1000)
+-- A disc that exactly reaches the next seed does not cover it, since the
+-- edge is outside, so it is not kept.
+local edge = E.discs(25000, 1000)
+T.eq("26 km away reaches the next seed exactly: no disc", E.disc_add(edge, 0, 0, 26000), false)
+T.eq("26.001 km away is one", E.disc_add(edge, 0, 0, 26001), true)
+T.eq("that covers the next seed", E.disc_covers(edge, 1000, 0), true)
+
+-- The step a hair under the radius, so the numbers below stay round.
+local discs = E.discs(25000, 999)
 T.eq("an answer 25.9 km away clears less than a seed's step: no disc", E.disc_add(discs, 0, 0, 25900), false)
 T.eq("26 km away is a 1 km disc", E.disc_add(discs, 0, 0, 26000), true)
 T.eq("one disc", discs.n, 1)
