@@ -4,7 +4,7 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-12T01:51Z
+**Last updated:** 2026-09-13T03:54Z
 
 ## Done
 
@@ -49,13 +49,14 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
 One task. The thing to pick up immediately.
 
-**X7** — roads and railroads, each as two jobs, seeds then paths; carry 2. A
-snap costs by its distance to the nearest road (84 ms at 500 km, measured in
-X6), so seeds go only in the rectangle's non-skipped tiles and the
-pre-sweep's disc bound applies to seeds too; the tile sweep's inner loop
-shows the Lua around a call can cost more than the call. *Verified by:* an
-agent offline over the driver, then a sampled path re-read through the
-bridge on the Kutaisi crop; a maintainer watching the whole-map roads sweep.
+**X7** — roads and railroads: built, reviewed and offline-verified on
+`task/X7-roads`, PR **53** (ADRs **0030**, **0031**). What remains is the
+live half: the Kutaisi 5 km crop with three seeds and three paths re-read
+through the bridge on both networks and a Stop and Start mid-paths, then the
+whole-map Caucasus sweep with call time against sweep time recorded, since
+the spec's 25 minutes is roads only and counts no Lua. *Verified by:* the
+bridge steps from a session with the maintainer's DCS; a maintainer
+watching the whole-map sweep.
 
 ## Then
 
@@ -89,4 +90,3 @@ Things a later task must not lose. Max 10 — `CLAUDE.md` has the rules.
 |---|---|---|
 | 1 | `synth` produces no all-fill tile at any size: the fill margin is 2 km and a tile is 12.8 km, so no tile is fill throughout. Test the absent-fill-tile read against a hand-built manifest, not against a generated extract. The all-sea case is generated, as one interior tile. | C4 |
 | 2 | Measured authored rectangles: Afghanistan 855 x 1105 km, 945 000 km², its roads reaching the bounds rectangle's west edge; Cold War Germany 810 x 750 km, 607 500 km², roads within 5 km of 11 036 of its 11 063 authored cells. The size rule packs both at 100 m, where the design's 176 M-cell estimate for Afghanistan assumed 440 000 km². Whether the 500 000 km² threshold stands is C5b's to decide, as an ADR if it moves. | C5b |
-| 3 | Roads: seed ids are positions in a fixed plan (lattice row-major at 1 km, then airdromes by numeric id, then towns by name), so a resume re-derives them; merge after every snap, into the lowest-id kept seed within 100 m, no chaining; neighbours are the 4 nearest kept seeds, ties by id; a pair is emitted at its lower id, so no seen set. Resume by streaming `roads.jsonl` in counted reads as steps and counting seed and pair lines; repair a partial tail by a streamed copy and rename, never a whole-file rewrite, because Caucasus is hundreds of MB and `write_file` holds the string. | X7 |
