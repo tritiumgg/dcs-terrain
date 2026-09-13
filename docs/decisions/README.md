@@ -41,6 +41,8 @@ disagree, the later accepted one wins, and the earlier is marked
 | [0027](0027-breakpoints-count-only-near-a-road.md) | Accepted | 2026-09-12 | The pre-sweep's breakpoints count only near a road | `extract-format.md` "manifest.json"; `design-and-facts.md` "Geometry facts", "Design decisions"; `extractor-hook.md` "Lifecycle"; ADR 0026's X11 check; `plan.md` X6, X11 |
 | [0028](0028-water-and-height-are-one-sweep.md) | Accepted | 2026-09-12 | Water and height are one sweep | `extractor-hook.md` "Hook-pass sweeps", "Performance targets"; `extract-format.md` "manifest.json" `timing_ms`; ADR 0025; `plan.md` X6, X11 |
 | [0029](0029-a-disc-settles-a-cell-only-within-the-theatres-reach.md) | Accepted | 2026-09-12 | A disc settles a cell only within the theatre's reach | ADR 0027's disc paragraph; `extractor-hook.md` "Lifecycle", roads seeds; `plan.md` X6, X7 |
+| [0030](0030-road-seeds-follow-a-fixed-plan.md) | Accepted | 2026-09-12 | Road seeds follow a fixed plan, and the file is its own journal | `extractor-hook.md` "Hook-pass sweeps", "Lifecycle"; `extract-format.md` "Tables", "manifest.json" `timing_ms`; `plan.md` X7 |
+| [0031](0031-a-far-seed-is-neither-asked-nor-written.md) | Accepted | 2026-09-12 | A far seed is neither asked nor written | ADR 0029's roads paragraph; `extractor-hook.md` "Hook-pass sweeps"; `extract-format.md` "Tables"; `plan.md` X7 |
 
 Add a row when you add an ADR. This table is the index Claude reads, so an ADR
 missing from it will not be found. Each record's own `Affects` line, at the top
