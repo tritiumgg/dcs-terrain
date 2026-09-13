@@ -31,7 +31,7 @@ end
 T.group("the hook pass is config, tables, then water and height together")
 --------------------------------------------------------------------------------
 
-T.eq("five jobs so far", #E.jobs.hook, 5)
+T.eq("seven jobs", #E.jobs.hook, 7)
 T.eq("config first", E.jobs.hook[1].name, "config")
 T.eq("then the tables", E.jobs.hook[2].name, "tables")
 T.eq("then the tile sweep", E.jobs.hook[3].name, "water+height")

@@ -110,8 +110,11 @@ local seeds = E.road_seeds_job("roads")
 T.group("the hook pass is config, tables, the tile sweep, then the roads")
 --------------------------------------------------------------------------------
 
-T.eq("five jobs so far", #E.jobs.hook, 5)
+T.eq("seven jobs", #E.jobs.hook, 7)
 T.eq("the road seeds after the tiles", E.jobs.hook[4].name, "roads:seeds")
+T.eq("then the road paths", E.jobs.hook[5].name, "roads:paths")
+T.eq("then the railroad seeds", E.jobs.hook[6].name, "railroads:seeds")
+T.eq("then the railroad paths", E.jobs.hook[7].name, "railroads:paths")
 
 --------------------------------------------------------------------------------
 T.group("every placed seed gets a line with the router's answer, in plan order")
@@ -381,8 +384,6 @@ fake.findPathOnRoads = function(kind, x1, z1, x2, z2)
 end
 local paths = E.road_paths_job("roads")
 
-T.eq("five hook jobs so far", #E.jobs.hook, 5)
-T.eq("the road paths after the seeds", E.jobs.hook[5].name, "roads:paths")
 
 local function pairs_in(text)
   local list, set = {}, {}
@@ -568,5 +569,36 @@ calls.path = 0
 T.eq("a complete hook pass is done at once", paths.start(run)(), E.DONE)
 T.eq("with no call", calls.path, 0)
 T.eq("and the state released", run.roadnets.roads, nil)
+
+--------------------------------------------------------------------------------
+T.group("railroads are the same two sweeps with the other word and their own file")
+--------------------------------------------------------------------------------
+
+local kinds_asked = {}
+local plain_snap = fake.getClosestPointOnRoads
+fake.getClosestPointOnRoads = function(kind, x, z)
+  kinds_asked[kind] = (kinds_asked[kind] or 0) + 1
+  return plain_snap(kind, x, z)
+end
+fs = FakeFs.new()
+run = new_run(fs)
+calls.path = 0
+logged = {}
+statuses = drive(E.road_seeds_job("railroads"), run)
+T.eq("the seeds finish", statuses[#statuses], E.DONE)
+T.eq("every snap asked for railroads", kinds_asked.railroads, 13)
+T.eq("and none for roads", kinds_asked.roads, nil)
+state = run.roadnets.railroads
+T.eq("a column shares its railway point: four kept", state.kept.n, 4)
+T.eq("the airdrome among them", state.kept.id[4], 13)
+statuses = drive(E.road_paths_job("railroads"), run)
+T.eq("the paths finish", statuses[#statuses], E.DONE)
+T.eq("six pairs among four", calls.path, 6)
+list = pairs_in(fs.files[DIR .. "/railroads.jsonl"])
+T.eq("six pair lines", #list, 6)
+T.eq("every pair a path along the railway", log_count("railroads: 6 pairs of 4 kept seeds, 6 paths with 12 points, 0 with no path"), 1)
+T.eq("nothing written for roads", fs.files[FILE], nil)
+T.eq("the railroad state released", run.roadnets.railroads, nil)
+fake.getClosestPointOnRoads = plain_snap
 
 T.done()

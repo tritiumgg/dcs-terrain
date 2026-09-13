@@ -6112,8 +6112,6 @@ function M.road_seeds_job(kind)
   }
 end
 
-M.add_job("hook", M.road_seeds_job("roads"))
-
 --------------------------------------------------------------------------------
 -- The paths sweep
 --
@@ -6365,7 +6363,13 @@ function M.road_paths_job(kind)
   }
 end
 
-M.add_job("hook", M.road_paths_job("roads"))
+-- Roads then railroads, each its seeds then its paths: the same two sweeps
+-- with the other word, since the router takes the network as an argument
+-- and nothing else about it differs.
+for i = 1, #M.ROAD_KINDS do
+  M.add_job("hook", M.road_seeds_job(M.ROAD_KINDS[i]))
+  M.add_job("hook", M.road_paths_job(M.ROAD_KINDS[i]))
+end
 
 --------------------------------------------------------------------------------
 -- DCS callbacks
