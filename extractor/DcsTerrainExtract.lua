@@ -4794,9 +4794,12 @@ M.add_job("hook", M.tables_job)
 local WATER_NODATA_BYTES = char(M.WATER_NODATA)
 local SEA_BYTE = char(2)
 
-local function skip_key(tx, tz)
+-- The key a tile has in the skip set, stated once: the tile sweep writes the
+-- set and the road sweeps read it.
+function M.skip_key(tx, tz)
   return format("%d_%d", tx, tz)
 end
+local skip_key = M.skip_key
 
 -- The fill triple as the sweep compares it, or nil when the triple is not
 -- known and no cell can be called fill. The seabed return is 0 on land and
@@ -5150,6 +5153,1234 @@ M.water_height_job = {
 }
 
 M.add_job("hook", M.water_height_job)
+
+--------------------------------------------------------------------------------
+-- Roads and railroads: the seed plan, the lines and the geometry
+--
+-- The road network is not readable, but the engine's own router is: asked for
+-- the nearest road to a point it answers a point on one, and asked for a route
+-- between two road points it answers the polyline it would drive. So the sweep
+-- scatters seeds, a lattice every kilometer plus every airdrome and town,
+-- snaps each to its nearest road, and asks for a route from each snap to its
+-- four nearest other snaps. The file records what the router said, one line
+-- per answer; joining the routes into a graph is pack's job.
+--
+-- Seeds are numbered by their position in a fixed plan, lattice row-major
+-- then airdromes by id then towns by name, so a resumed run gives every seed
+-- the id it had without reading anything (ADR 0030). A position whose seed
+-- cannot be placed, off the grid or in a tile the tile sweep left out, keeps
+-- its number and gets no line.
+--
+-- Everything in this section is pure and is what the offline tests hold. The
+-- two jobs that drive the router follow.
+--------------------------------------------------------------------------------
+
+-- Two snaps within the merge distance are one road point, and the seeds that
+-- made them are one seed for pairing: near Kutaisi 126 of 441 merged. A seed
+-- provably farther than ROAD_SEED_MAX_M from every road is on ground the
+-- pre-sweep calls unbuilt (ADR 0027) and is neither asked nor written, and
+-- one whose own answer is that far is written and not paired (ADR 0031). A
+-- seed with fewer than four kept seeds within ROAD_NEIGHBOUR_MAX_M takes the
+-- ones it has. Lines go to the file in batches of ROAD_LINE_BATCH, because an
+-- append is an open, a close and two size checks, and Caucasus writes two
+-- million lines.
+M.ROAD_MERGE_M = 100
+M.ROAD_SEED_MAX_M = 25000
+M.ROAD_NEIGHBOUR_MAX_M = 50000
+M.ROAD_LINE_BATCH = 64
+M.ROAD_KINDS = { "roads", "railroads" }
+
+-- The plan: how many seeds there are and where each one is. The tables are
+-- the rows the tables sweep wrote, airdromes already in ascending id and
+-- towns already sorted by name, so their order here is theirs.
+function M.seed_plan(grid, spacing, airdromes, towns)
+  if type(grid) ~= "table" then
+    error("seed_plan: not a grid: " .. tostring(grid), 2)
+  end
+  if not is_finite(spacing) or spacing <= 0 then
+    error("seed_plan: spacing is not a positive number: " .. tostring(spacing), 2)
+  end
+  airdromes = airdromes or {}
+  towns = towns or {}
+  local rows = ceil(grid.height * grid.cell_size / spacing)
+  local cols = ceil(grid.width * grid.cell_size / spacing)
+  local lattice = rows * cols
+  return {
+    grid = grid,
+    spacing = spacing,
+    rows = rows,
+    cols = cols,
+    lattice = lattice,
+    airdromes = airdromes,
+    towns = towns,
+    total = lattice + #airdromes + #towns,
+  }
+end
+
+-- Where the seed with this id goes, or nil where the position places none:
+-- a table row with no position, a point outside the grid, or a tile in the
+-- skip set. The lattice is anchored on the grid origin, so the last row or
+-- column of seeds can fall past the grid's edge; those are outside like any
+-- other point.
+function M.seed_at(plan, id, skip)
+  local x, z
+  if id <= plan.lattice then
+    local i = floor((id - 1) / plan.cols)
+    local j = (id - 1) - i * plan.cols
+    x = plan.grid.origin_x + (i + 0.5) * plan.spacing
+    z = plan.grid.origin_z + (j + 0.5) * plan.spacing
+  else
+    local row
+    if id <= plan.lattice + #plan.airdromes then
+      row = plan.airdromes[id - plan.lattice]
+    else
+      row = plan.towns[id - plan.lattice - #plan.airdromes]
+    end
+    if type(row) ~= "table" then
+      return nil
+    end
+    x, z = row.x, row.z
+  end
+  if not (is_finite(x) and is_finite(z)) then
+    return nil
+  end
+  local grid = plan.grid
+  local row = floor((x - grid.origin_x) / grid.cell_size)
+  local col = floor((z - grid.origin_z) / grid.cell_size)
+  if not M.cell_in_grid(grid, row, col) then
+    return nil
+  end
+  if skip and skip[M.skip_key(floor(row / grid.tile_size), floor(col / grid.tile_size))] then
+    return nil
+  end
+  return x, z
+end
+
+-- The three line kinds, formatted by hand. Each is byte for byte what M.json
+-- writes for the same record, keys in sorted order and numbers to 17 digits,
+-- and a test holds them to that; the encoder itself sorts keys and walks
+-- tables per line, which at two million lines is minutes.
+local function num_or_null(v)
+  if v == nil then
+    return "null"
+  end
+  return format("%.17g", v)
+end
+
+function M.seed_line(id, x, z, snap_x, snap_z, snap_dist)
+  return format('{"id":%d,"kind":"seed","snap_dist":%s,"snap_x":%s,"snap_z":%s,"x":%.17g,"z":%.17g}\n',
+    id, num_or_null(snap_dist), num_or_null(snap_x), num_or_null(snap_z), x, z)
+end
+
+function M.nopath_line(from, to)
+  return format('{"from":%d,"kind":"nopath","to":%d}\n', from, to)
+end
+
+-- The points as the router gives them, {x=, y=} with y meaning DCS z, and
+-- translated here. Nil and the reason where the array is not one the format
+-- can hold: nothing, or a point that is not two finite numbers.
+function M.path_line(from, to, points)
+  if type(points) ~= "table" then
+    return nil, "not a table: " .. type(points)
+  end
+  local n = #points
+  if n == 0 then
+    return nil, "no points"
+  end
+  local parts = {}
+  for i = 1, n do
+    local p = points[i]
+    if type(p) ~= "table" then
+      return nil, format("point %d is a %s", i, type(p))
+    end
+    local x, y = p.x, p.y
+    if not (is_finite(x) and is_finite(y)) then
+      return nil, format("point %d is not finite", i)
+    end
+    parts[i] = format("[%.17g,%.17g]", x, y)
+  end
+  return format('{"from":%d,"kind":"path","points":[%s],"to":%d}\n',
+    from, concat(parts, ","), to)
+end
+
+-- One line read back: its kind and its numbers, in the order the line
+-- functions above take them, with nil for null. Only the kinds this file
+-- writes are read; anything else is nil with the line's kind, or nil twice
+-- for a line that has none.
+local function field_number(line, key)
+  local text = line:match('"' .. key .. '":([^,}]+)')
+  if text == nil or text == "null" then
+    return nil
+  end
+  return tonumber(text)
+end
+
+function M.parse_road_line(line)
+  local kind = line:match('"kind":"(%a+)"')
+  if kind == "seed" then
+    return "seed", field_number(line, "id"), field_number(line, "x"),
+      field_number(line, "z"), field_number(line, "snap_x"),
+      field_number(line, "snap_z"), field_number(line, "snap_dist")
+  elseif kind == "path" or kind == "nopath" then
+    return kind, field_number(line, "from"), field_number(line, "to")
+  end
+  return nil, kind
+end
+
+-- Buckets on a square lattice with an integer key, so a lookup allocates
+-- nothing. The two numbers sit beside each other in one double exactly, and
+-- are distinct as long as the z bucket stays within a million of zero: at
+-- the finest step used, 100 m, that is a hundred thousand kilometers, and
+-- no theatre comes near it.
+local BUCKET_SHIFT = 2097152
+
+local function bucket_key(bx, bz)
+  return bx * BUCKET_SHIFT + bz
+end
+
+-- The kept seeds: the ones that snapped, were not merged and were not far.
+-- Parallel arrays rather than a table per seed, because Caucasus keeps
+-- hundreds of thousands, and buckets of the snap points at the merge
+-- distance, so a new snap is compared against the seeds that could be within
+-- it and no others.
+function M.kept_seeds(merge_m)
+  return {
+    n = 0, id = {}, sx = {}, sz = {},
+    merge_m = merge_m, r2 = merge_m * merge_m, buckets = {},
+  }
+end
+
+-- The lowest kept id whose snap lies within the merge distance of this one,
+-- or nil. Kept seeds are added in ascending id, so within one bucket the
+-- first hit is the lowest, and the answer is the least over the nine.
+function M.merge_target(kept, sx, sz)
+  local b, m = kept.buckets, kept.merge_m
+  local bx, bz = floor(sx / m), floor(sz / m)
+  local ksx, ksz, kid = kept.sx, kept.sz, kept.id
+  local r2 = kept.r2
+  local best
+  for dx = -1, 1 do
+    for dz = -1, 1 do
+      local list = b[bucket_key(bx + dx, bz + dz)]
+      if list then
+        for i = 1, #list do
+          local k = list[i]
+          local ex, ez = ksx[k] - sx, ksz[k] - sz
+          if ex * ex + ez * ez <= r2 then
+            local id = kid[k]
+            if best == nil or id < best then
+              best = id
+            end
+            break
+          end
+        end
+      end
+    end
+  end
+  return best
+end
+
+-- Keeps a seed, and returns its kept index.
+function M.keep_seed(kept, id, sx, sz)
+  local n = kept.n + 1
+  kept.n = n
+  kept.id[n], kept.sx[n], kept.sz[n] = id, sx, sz
+  local m = kept.merge_m
+  local key = bucket_key(floor(sx / m), floor(sz / m))
+  local list = kept.buckets[key]
+  if list == nil then
+    kept.buckets[key] = { n }
+  else
+    list[#list + 1] = n
+  end
+  return n
+end
+
+-- The discs far answers clear. A snap that answered a road d away proves no
+-- road lies within d - r of any point r from the query, so a seed nearer
+-- than d - max_m to the query has no road within max_m and is not asked. A
+-- disc too small to reach the next lattice seed is not kept: it would clear
+-- nothing and cost every row a look.
+function M.discs(max_m, spacing)
+  return { n = 0, x = {}, z = {}, r = {}, max_m = max_m, spacing = spacing }
+end
+
+function M.disc_add(discs, x, z, d)
+  local r = d - discs.max_m
+  if r <= discs.spacing then
+    return false
+  end
+  local n = discs.n + 1
+  discs.n = n
+  discs.x[n], discs.z[n], discs.r[n] = x, z, r
+  return true
+end
+
+-- Whether a point is inside any disc: the plain scan, for the few seeds that
+-- are not on the lattice.
+function M.disc_covers(discs, x, z)
+  local dx_, dz_, dr = discs.x, discs.z, discs.r
+  for i = 1, discs.n do
+    local ex, ez, r = x - dx_[i], z - dz_[i], dr[i]
+    if ex * ex + ez * ez < r * r then
+      return true
+    end
+  end
+  return false
+end
+
+-- What the discs clear along one lattice row: the row's x cuts each disc
+-- into a span of z, and the spans, sorted and merged, are a flat list
+-- z0, z1, z0, z1, ... in ascending order. A lattice row is then tested by a
+-- cursor that only moves forward, which is a few instructions a seed where
+-- a scan of the discs would be a few hundred.
+function M.disc_row(discs, x)
+  local dx_, dz_, dr = discs.x, discs.z, discs.r
+  local lo, hi, order = {}, {}, {}
+  local n = 0
+  for i = 1, discs.n do
+    local ex, r = x - dx_[i], dr[i]
+    if ex < r and ex > -r then
+      local half = math.sqrt(r * r - ex * ex)
+      n = n + 1
+      lo[n], hi[n], order[n] = dz_[i] - half, dz_[i] + half, n
+    end
+  end
+  if n == 0 then
+    return {}
+  end
+  sort(order, function(a, b) return lo[a] < lo[b] end)
+  local spans = {}
+  local z0, z1 = lo[order[1]], hi[order[1]]
+  for k = 2, n do
+    local i = order[k]
+    if lo[i] < z1 then
+      if hi[i] > z1 then
+        z1 = hi[i]
+      end
+    else
+      spans[#spans + 1] = z0
+      spans[#spans + 1] = z1
+      z0, z1 = lo[i], hi[i]
+    end
+  end
+  spans[#spans + 1] = z0
+  spans[#spans + 1] = z1
+  return spans
+end
+
+-- Whether z lies strictly inside a span, given a cursor at the span the
+-- last z was tested against; z only climbs along a row, so the cursor only
+-- climbs. Returns the answer and the cursor to pass next time.
+function M.span_covers(spans, z, cursor)
+  local n = #spans
+  while cursor < n and spans[cursor + 1] <= z do
+    cursor = cursor + 2
+  end
+  if cursor >= n then
+    return false, cursor
+  end
+  return spans[cursor] < z, cursor
+end
+
+-- The kept seeds bucketed by snap point at a coarser step for the neighbour
+-- search: kept index lists keyed like the merge buckets. Empty until
+-- index_seeds fills it, a range at a time, so a sweep can build it under
+-- the budget.
+function M.neighbour_index(bucket_m)
+  return { buckets = {}, bucket_m = bucket_m }
+end
+
+function M.index_seeds(index, kept, from, to)
+  local buckets, bucket_m = index.buckets, index.bucket_m
+  local ksx, ksz = kept.sx, kept.sz
+  for k = from, to do
+    local key = bucket_key(floor(ksx[k] / bucket_m), floor(ksz[k] / bucket_m))
+    local list = buckets[key]
+    if list == nil then
+      buckets[key] = { k }
+    else
+      list[#list + 1] = k
+    end
+  end
+end
+
+-- The `count` kept seeds nearest to kept seed k by snap point, nearest
+-- first, ties by id, written into out[1..count] with 0 in the slots left over
+-- where fewer lie within max_m. Rings of buckets outward from k's own: ring
+-- r can hold nothing nearer than (r - 1) buckets, so the search stops once
+-- the count is full and the next ring cannot beat the worst of it.
+function M.seed_neighbours(kept, index, k, count, max_m, out)
+  local ksx, ksz = kept.sx, kept.sz
+  local x, z = ksx[k], ksz[k]
+  local bm = index.bucket_m
+  local buckets = index.buckets
+  local bx, bz = floor(x / bm), floor(z / bm)
+  local best_d = {}
+  local found = 0
+  local function offer(j)
+    if j == k then
+      return
+    end
+    local ex, ez = ksx[j] - x, ksz[j] - z
+    local d = ex * ex + ez * ez
+    if found == count and d >= best_d[count] then
+      -- Equal distance and a higher index loses, and every j after the
+      -- first in a bucket is higher, so >= is the right side.
+      if d > best_d[count] or j > out[count] then
+        return
+      end
+    end
+    local i = found < count and found + 1 or count
+    while i > 1 and (d < best_d[i - 1] or (d == best_d[i - 1] and j < out[i - 1])) do
+      best_d[i], out[i] = best_d[i - 1], out[i - 1]
+      i = i - 1
+    end
+    best_d[i], out[i] = d, j
+    if found < count then
+      found = found + 1
+    end
+  end
+  local max2 = max_m * max_m
+  local ring = 0
+  while true do
+    local inner = (ring - 1) * bm
+    if inner > max_m then
+      break
+    end
+    if found == count and inner > 0 and inner * inner >= best_d[count] then
+      break
+    end
+    for dx = -ring, ring do
+      local edge = dx == -ring or dx == ring
+      local step = edge and 1 or 2 * ring
+      if ring == 0 then
+        step = 1
+      end
+      for dz = -ring, ring, step do
+        local list = buckets[bucket_key(bx + dx, bz + dz)]
+        if list then
+          for i = 1, #list do
+            offer(list[i])
+          end
+        end
+      end
+    end
+    ring = ring + 1
+  end
+  for i = found + 1, count do
+    out[i] = 0
+  end
+  -- Beyond the cap is not a neighbour, however few there were.
+  for i = 1, found do
+    if best_d[i] > max2 then
+      for j = i, count do
+        out[j] = 0
+      end
+      break
+    end
+  end
+  return out
+end
+
+-- Whether the pair (k, j) is requested when the cursor reaches slot s of k,
+-- where j is the kept index in that slot. A pair is requested from its lower
+-- index, unless the lower one does not list the higher, in which case the
+-- higher requests it: every unordered pair once, and no set of seen pairs.
+function M.pair_requested(nbr, count, k, s)
+  local j = nbr[(k - 1) * count + s]
+  if j == 0 then
+    return nil
+  end
+  if j > k then
+    return j
+  end
+  local base = (j - 1) * count
+  for t = 1, count do
+    if nbr[base + t] == k then
+      return nil
+    end
+  end
+  return j
+end
+
+-- The next requested pair after cursor (k, s), as its cursor and the other
+-- kept index; nil past the last. (0, count) is the cursor before the first.
+function M.next_pair(nbr, count, n, k, s)
+  while true do
+    s = s + 1
+    if s > count then
+      k, s = k + 1, 1
+      if k > n then
+        return nil
+      end
+    end
+    local j = M.pair_requested(nbr, count, k, s)
+    if j then
+      return k, s, j
+    end
+  end
+end
+
+--------------------------------------------------------------------------------
+-- A line file read back in pieces, and its tail repaired in pieces
+--
+-- roads.jsonl on Caucasus is hundreds of megabytes and the handles here have
+-- no seek, so a resume reads the file from the top in counted chunks, one a
+-- step, and never holds more than a chunk and the line that straddles it. A
+-- kill mid-append leaves a cut-short last line; the repair copies the file up
+-- to its last newline, again a chunk a step, and swaps the copy in by
+-- renaming the original aside first, so there is no moment with no file.
+--------------------------------------------------------------------------------
+
+M.LINE_CHUNK = 65536
+
+-- A reader over the file: `step(on_line)` reads one chunk and hands each
+-- complete line, without its newline, to on_line, then answers M.MORE, or
+-- M.DONE at the end of the file with the number of bytes of a cut-short
+-- last line, or nil and a message. `read` counts the bytes taken so far.
+function M.line_reader(path, chunk)
+  chunk = chunk or M.LINE_CHUNK
+  local f, err = M.fs.open(path, "rb")
+  if not f then
+    return nil, err or (path .. ": cannot open")
+  end
+  local rest = ""
+  local reader = { read = 0, size = M.fs.size(path) or 0 }
+  local find, sub = string.find, string.sub
+  function reader.step(on_line)
+    local data = f:read(chunk)
+    if data == nil or data == "" then
+      f:close()
+      reader.step = function()
+        return M.DONE, #rest
+      end
+      return M.DONE, #rest
+    end
+    reader.read = reader.read + #data
+    if rest ~= "" then
+      data = rest .. data
+      rest = ""
+    end
+    local at = 1
+    while true do
+      local nl = find(data, "\n", at, true)
+      if nl == nil then
+        break
+      end
+      on_line(sub(data, at, nl - 1))
+      at = nl + 1
+    end
+    if at <= #data then
+      rest = sub(data, at)
+    end
+    return M.MORE
+  end
+  function reader.close()
+    f:close()
+    reader.step = function()
+      return nil, path .. ": closed"
+    end
+  end
+  return reader
+end
+
+-- The stepper that copies the first `keep` bytes of the file to `<path>.tmp`
+-- and swaps it in: `step()` answers M.MORE while copying, M.DONE once the
+-- swap is complete, or nil and a message. A stale `.tmp` from an earlier
+-- attempt is removed first. The swap renames the original to `<path>.old`,
+-- the copy to `<path>`, then removes the `.old`; a kill between the two
+-- renames leaves the `.old` for recover_swap to find.
+function M.copy_head(path, keep, chunk)
+  chunk = chunk or M.LINE_CHUNK
+  local tmp, old = path .. ".tmp", path .. ".old"
+  M.fs.remove(tmp)
+  local f, err = M.fs.open(path, "rb")
+  if not f then
+    return nil, err or (path .. ": cannot open")
+  end
+  local copied = 0
+  local function fail(message)
+    f:close()
+    return nil, message
+  end
+  return function()
+    if copied < keep then
+      local want = keep - copied
+      if want > chunk then
+        want = chunk
+      end
+      local data = f:read(want)
+      if data == nil or data == "" then
+        return fail(format("%s: ended after %d of %d bytes", path, copied, keep))
+      end
+      local ok, aerr = M.append_file(tmp, data)
+      if not ok then
+        return fail(aerr)
+      end
+      copied = copied + #data
+      return M.MORE
+    end
+    f:close()
+    if keep == 0 then
+      -- Nothing to copy means nothing was appended, and the empty file the
+      -- swap needs has to be made.
+      local ok, werr = M.write_file(tmp, "")
+      if not ok then
+        return nil, werr
+      end
+    end
+    M.fs.remove(old)
+    local ok, rerr = M.fs.rename(path, old)
+    if not ok then
+      return nil, rerr or (path .. ": cannot be renamed aside")
+    end
+    ok, rerr = M.fs.rename(tmp, path)
+    if not ok then
+      return nil, rerr or (tmp .. ": cannot be renamed in")
+    end
+    M.fs.remove(old)
+    return M.DONE
+  end
+end
+
+-- Puts a file back after a swap that was cut short: an `.old` with no file
+-- beside it is the file, renamed back; an `.old` beside a file is the swap's
+-- last step, done now. A `.tmp` is always stale here and goes. Returns what
+-- it did, for the log, or nil for nothing.
+function M.recover_swap(path)
+  local tmp, old = path .. ".tmp", path .. ".old"
+  local did
+  if M.fs.size(tmp) ~= nil then
+    M.fs.remove(tmp)
+    did = "a stale copy removed"
+  end
+  if M.fs.size(old) ~= nil then
+    if M.fs.size(path) == nil then
+      M.fs.rename(old, path)
+      did = "the file renamed back from its aside"
+    else
+      M.fs.remove(old)
+      did = "an aside removed"
+    end
+  end
+  return did
+end
+
+--------------------------------------------------------------------------------
+-- The seeds sweep
+--
+-- One job per network. It reads back whatever the file already holds, which
+-- is its journal: every seed line replayed through the merge gives the kept
+-- set the earlier run had, bit for bit, and the pair lines are counted for
+-- the paths sweep. Then it asks the router for every seed the file does not
+-- have yet, one snap a step, and appends the lines in batches.
+--
+-- What it leaves for the paths sweep is on run.roadnets[kind]: the kept
+-- seeds, the plan, and how many pairs the file already holds.
+--------------------------------------------------------------------------------
+
+-- Positions that place no seed, or are cleared by a disc, cost no call; a
+-- step passes over this many of them at most before yielding, so a map that
+-- is mostly sea does not spend a whole frame in one step.
+local ROAD_PASS_LIMIT = 4096
+
+-- How long a step of many small things runs before yielding, in seconds:
+-- under the frame budget, so the queue still gets to look at the clock.
+M.ROAD_BATCH_S = 0.002
+
+-- Lines on their way to the file. `push` takes a line and appends the batch
+-- once it is full; `flush` appends whatever is waiting. Both answer false
+-- after leaving the reason on the run, which is a refusal for the caller.
+local function line_batch(run, file, path)
+  local lines, pending = {}, 0
+  local batch = {}
+  function batch.flush()
+    if pending == 0 then
+      return true
+    end
+    local ok, err = M.append_file(path, concat(lines, "", 1, pending))
+    lines, pending = {}, 0
+    if not ok then
+      run.refusal = format("%s cannot be written: %s", file, tostring(err))
+      return false
+    end
+    return true
+  end
+  function batch.push(line)
+    pending = pending + 1
+    lines[pending] = line
+    if pending >= M.ROAD_LINE_BATCH then
+      return batch.flush()
+    end
+    return true
+  end
+  return batch
+end
+
+function M.road_seeds_job(kind)
+  return {
+    name = kind .. ":seeds",
+    start = function(run)
+      local function refuse(message)
+        run.refusal = message
+        return function()
+          return M.REFUSED
+        end
+      end
+      local function finished()
+        return function()
+          return M.DONE
+        end
+      end
+
+      local terrain = M.terrain_module()
+      if not terrain then
+        return refuse("the terrain module is not loaded")
+      end
+      local snap = terrain.getClosestPointOnRoads
+      if type(snap) ~= "function" then
+        return refuse("terrain.getClosestPointOnRoads is not a function")
+      end
+      if type(terrain.findPathOnRoads) ~= "function" then
+        return refuse("terrain.findPathOnRoads is not a function")
+      end
+      if not (run.manifest and type(run.manifest.grid) == "table") then
+        return refuse("no grid was planned")
+      end
+      if run.manifest.passes.hook.complete == true then
+        M.log(kind .. ": the hook pass is complete, nothing to sweep")
+        return finished()
+      end
+
+      -- The plan is built under protection: a manifest edited by hand can
+      -- hold a grid of the wrong shape, and a raise here would climb into
+      -- DCS's frame callback.
+      local tables = type(run.tables) == "table" and run.tables or {}
+      local planned, plan = pcall(M.seed_plan, run.manifest.grid, M.ROAD_SEED_SPACING,
+        type(tables.airdromes) == "table" and tables.airdromes or nil,
+        type(tables.towns) == "table" and tables.towns or nil)
+      if not planned then
+        return refuse("the seed plan cannot be made: " .. tostring(plan))
+      end
+      local skip = run.skip or {}
+      local spacing = plan.spacing
+      local max_m = M.ROAD_SEED_MAX_M
+      local kept = M.kept_seeds(M.ROAD_MERGE_M)
+      local discs = M.discs(max_m, spacing)
+      local state = {
+        plan = plan, kept = kept, pairs_read = 0, last_from = nil, last_to = nil,
+      }
+      run.roadnets = run.roadnets or {}
+      run.roadnets[kind] = state
+      local file = TABLE_FILES[kind]
+      local path = M.join(run.dir, file)
+
+      -- The counts, over the file as a whole: what was read back and what
+      -- was asked this time both end up in it.
+      local placed, asked, cleared, merged, none, far, failed, read_back = 0, 0, 0, 0, 0, 0, 0, 0
+
+      -- The row's spans, for the lattice: recomputed when the row changes and
+      -- when an answer on the row makes a disc, since that disc can clear the
+      -- rest of the row.
+      local row, spans, cursor = nil, {}, 1
+      local function row_x(i)
+        return plan.grid.origin_x + (i + 0.5) * spacing
+      end
+      local function respan(i)
+        row = i
+        spans = M.disc_row(discs, row_x(i))
+        cursor = 1
+      end
+
+      -- One answer, from the router or from the file, into the state.
+      local function absorb(id, x, z, sx, sz, sd)
+        if sd == nil then
+          none = none + 1
+        elseif sd > max_m then
+          far = far + 1
+          -- Only a lattice answer can clear the rest of its row; the table
+          -- seeds come after every lattice seed.
+          if M.disc_add(discs, x, z, sd) and row ~= nil and id <= plan.lattice then
+            -- The disc is centered on the query point, which for a far
+            -- answer is what the sweep would clear around; the snap itself
+            -- is the road it found.
+            respan(row)
+          end
+        elseif M.merge_target(kept, sx, sz) then
+          merged = merged + 1
+        else
+          M.keep_seed(kept, id, sx, sz)
+        end
+      end
+
+      local batch = line_batch(run, file, path)
+      local push, flush = batch.push, batch.flush
+
+      local recovered = M.recover_swap(path)
+      if recovered then
+        M.log(format("%s: %s", file, recovered))
+      end
+
+      -- Where the sweep is: reading the file back, repairing its tail,
+      -- asking, or done. `next_id` is the first position the file does not
+      -- settle.
+      local phase = "ask"
+      local next_id = 1
+      local in_pairs = false
+      local reader, copier, bad, last_line
+      if M.fs.size(path) ~= nil then
+        local rerr
+        reader, rerr = M.line_reader(path)
+        if not reader then
+          return refuse(format("%s cannot be read back: %s", file, tostring(rerr)))
+        end
+        phase = "read"
+      end
+
+      local function on_line(line)
+        if bad then
+          return
+        end
+        if in_pairs then
+          state.pairs_read = state.pairs_read + 1
+          last_line = line
+          return
+        end
+        local k, id, x, z, sx, sz, sd = M.parse_road_line(line)
+        if k == "seed" then
+          if not (is_finite(id) and id > next_id - 1 and id <= plan.total
+              and is_finite(x) and is_finite(z)) then
+            bad = format("seed line %s after seed %d of %d", tostring(id), next_id - 1, plan.total)
+            return
+          end
+          -- The seed's own tile may be cleared now and not then, or the
+          -- reverse; the line stands either way, because the id is the
+          -- plan's and the answer is the router's.
+          read_back = read_back + 1
+          placed = placed + 1
+          next_id = id + 1
+          absorb(id, x, z, sx, sz, sd)
+        elseif k == "path" or k == "nopath" then
+          in_pairs = true
+          state.pairs_read = 1
+          last_line = line
+        else
+          bad = "a line that is not a seed, a path or a nopath"
+        end
+      end
+
+      local function mismatch()
+        run.refusal = format("%s does not match this extract's seed plan (%s):"
+          .. " move it aside to sweep %s again", file, bad, kind)
+        return M.REFUSED
+      end
+
+      local function finish()
+        if not flush() then
+          return M.REFUSED
+        end
+        phase = "done"
+        M.log(format("%s: %d seeds placed of %d positions, %d asked, %d cleared by a disc,"
+          .. " %d kept, %d merged, %d with no road, %d far, %d failed, %d read back",
+          kind, placed, plan.total, asked, cleared, kept.n, merged, none, far, failed,
+          read_back))
+        return M.DONE
+      end
+
+      -- The end of the read-back: what the file settled, and whether its
+      -- tail needs repair before anything is appended after it.
+      local function after_read(tail)
+        if in_pairs then
+          local k, from, to = M.parse_road_line(last_line)
+          if k ~= "path" and k ~= "nopath" then
+            bad = "a last line that is not a path or a nopath"
+            return mismatch()
+          end
+          state.last_from, state.last_to = from, to
+          M.log(format("%s: %d seed lines and %d pair lines read back", file,
+            read_back, state.pairs_read))
+        else
+          M.log(format("%s: %d seed lines read back", file, read_back))
+        end
+        if tail > 0 then
+          local keep = reader.read - tail
+          M.log(format("%s: a cut-short last line of %d bytes is dropped", file, tail))
+          local cerr
+          copier, cerr = M.copy_head(path, keep)
+          if not copier then
+            run.refusal = format("%s cannot be repaired: %s", file, tostring(cerr))
+            return M.REFUSED
+          end
+          phase = "repair"
+          return M.MORE
+        end
+        phase = "ask"
+        return M.MORE
+      end
+
+      local function ask_step()
+        if in_pairs or next_id > plan.total then
+          return finish()
+        end
+        local passed = 0
+        while passed < ROAD_PASS_LIMIT do
+          local id = next_id
+          if id > plan.total then
+            return finish()
+          end
+          local x, z = M.seed_at(plan, id, skip)
+          local covered = false
+          if x ~= nil then
+            if id <= plan.lattice then
+              local i = floor((id - 1) / plan.cols)
+              if i ~= row then
+                respan(i)
+              end
+              covered, cursor = M.span_covers(spans, z, cursor)
+            else
+              covered = M.disc_covers(discs, x, z)
+            end
+          end
+          if x == nil or covered then
+            if covered then
+              cleared = cleared + 1
+            end
+            next_id = id + 1
+            passed = passed + 1
+          else
+            asked = asked + 1
+            placed = placed + 1
+            local ok, sx, sz = pcall(snap, kind, x, z)
+            local sd
+            if not ok then
+              failed = failed + 1
+              if failed == 1 then
+                M.log(format("terrain.getClosestPointOnRoads(%s) failed at %s %s: %s",
+                  kind, tostring(x), tostring(z), tostring(sx)))
+              end
+              sx, sz = nil, nil
+            elseif is_finite(sx) and is_finite(sz) then
+              local dx, dz = sx - x, sz - z
+              sd = math.sqrt(dx * dx + dz * dz)
+            else
+              sx, sz = nil, nil
+            end
+            if not push(M.seed_line(id, x, z, sx, sz, sd)) then
+              return M.REFUSED
+            end
+            absorb(id, x, z, sx, sz, sd)
+            next_id = id + 1
+            return M.MORE
+          end
+        end
+        return M.MORE
+      end
+
+      local function step()
+        if phase == "done" then
+          return M.DONE
+        elseif phase == "read" then
+          local status, tail = reader.step(on_line)
+          if bad then
+            reader.close()
+            return mismatch()
+          end
+          if status == M.MORE then
+            return M.MORE
+          elseif status == M.DONE then
+            return after_read(tail)
+          end
+          run.refusal = format("%s cannot be read back: %s", file, tostring(tail))
+          return M.REFUSED
+        elseif phase == "repair" then
+          local status, err = copier()
+          if status == M.MORE then
+            return M.MORE
+          elseif status == M.DONE then
+            phase = "ask"
+            return M.MORE
+          end
+          run.refusal = format("%s cannot be repaired: %s", file, tostring(err))
+          return M.REFUSED
+        end
+        return ask_step()
+      end
+
+      local function progress()
+        if phase == "read" then
+          return reader.read, reader.size
+        elseif phase == "repair" then
+          return nil
+        end
+        return next_id - 1, plan.total
+      end
+
+      M.log(format("%s: %d positions, %d on the lattice, %d airdromes, %d towns", kind,
+        plan.total, plan.lattice, #plan.airdromes, #plan.towns))
+      return step, progress
+    end,
+  }
+end
+
+--------------------------------------------------------------------------------
+-- The paths sweep
+--
+-- One job per network, after its seeds. It finds every kept seed's nearest
+-- neighbours by snap point and, from each, asks the router for a route to
+-- them, one call a step, each unordered pair once. The pairs are never
+-- listed: a cursor over the neighbour array names the next one, and the
+-- pairs the file already holds are passed over by advancing it, with the
+-- last one checked against the file's last line.
+--
+-- The neighbours and the pair count come from one walk over the kept seeds
+-- in order, because a pair is requested by its lower index unless that one
+-- does not list the higher, and by the time the walk reaches a seed every
+-- lower seed's list is done.
+--------------------------------------------------------------------------------
+
+M.ROAD_NEIGHBOUR_BUCKET_M = 1000
+
+function M.road_paths_job(kind)
+  return {
+    name = kind .. ":paths",
+    start = function(run)
+      local function refuse(message)
+        run.refusal = message
+        return function()
+          return M.REFUSED
+        end
+      end
+      local function finished()
+        return function()
+          return M.DONE
+        end
+      end
+
+      local terrain = M.terrain_module()
+      if not terrain then
+        return refuse("the terrain module is not loaded")
+      end
+      local find_path = terrain.findPathOnRoads
+      if type(find_path) ~= "function" then
+        return refuse("terrain.findPathOnRoads is not a function")
+      end
+      if run.manifest and run.manifest.passes.hook.complete == true then
+        if run.roadnets then
+          run.roadnets[kind] = nil
+        end
+        M.log(kind .. ": the hook pass is complete, nothing to route")
+        return finished()
+      end
+      local state = run.roadnets and run.roadnets[kind]
+      if not state then
+        return refuse(format("the %s seeds sweep has not run", kind))
+      end
+
+      local kept = state.kept
+      local n = kept.n
+      local kid, ksx, ksz = kept.id, kept.sx, kept.sz
+      local count = M.ROAD_SEED_NEIGHBOURS
+      local max_m = M.ROAD_NEIGHBOUR_MAX_M
+      local index = M.neighbour_index(M.ROAD_NEIGHBOUR_BUCKET_M)
+      local nbr = {}
+      local file = TABLE_FILES[kind]
+      local path = M.join(run.dir, file)
+      local batch = line_batch(run, file, path)
+      local push, flush = batch.push, batch.flush
+
+      -- The walk: index, then neighbours and the pair count, then the cursor
+      -- past what the file holds, then the calls.
+      local phase = "index"
+      local indexed = 0
+      local walked = 0
+      local total = 0
+      local cursor_k, cursor_s = 0, count
+      local passed = 0
+      local paths, nopaths, failed, malformed, points = 0, 0, 0, 0, 0
+      local out = {}
+
+      local function finish()
+        if not flush() then
+          return M.REFUSED
+        end
+        phase = "done"
+        M.log(format("%s: %d pairs of %d kept seeds, %d paths with %d points, %d with"
+          .. " no path, %d failed, %d not a polyline, %d read back", kind, total, n,
+          paths, points, nopaths, failed, malformed, state.pairs_read))
+        run.roadnets[kind] = nil
+        return M.DONE
+      end
+
+      local function mismatch(why)
+        run.refusal = format("%s does not match this extract's seed plan (%s):"
+          .. " move it aside to sweep %s again", file, why, kind)
+        return M.REFUSED
+      end
+
+      local function until_spent(fn)
+        local started = M.clock()
+        repeat
+          if fn() then
+            return true
+          end
+        until M.clock() - started >= M.ROAD_BATCH_S
+        return false
+      end
+
+      local function index_step()
+        local done = until_spent(function()
+          if indexed >= n then
+            return true
+          end
+          local to = indexed + 256
+          if to > n then
+            to = n
+          end
+          M.index_seeds(index, kept, indexed + 1, to)
+          indexed = to
+          return false
+        end)
+        if done then
+          phase = "walk"
+        end
+        return M.MORE
+      end
+
+      -- One kept seed's neighbours into the array, and its pairs counted.
+      local function walk_one()
+        if walked >= n then
+          return true
+        end
+        local k = walked + 1
+        M.seed_neighbours(kept, index, k, count, max_m, out)
+        local base = (k - 1) * count
+        for s = 1, count do
+          nbr[base + s] = out[s]
+        end
+        for s = 1, count do
+          if M.pair_requested(nbr, count, k, s) then
+            total = total + 1
+          end
+        end
+        walked = k
+        return false
+      end
+
+      local function walk_step()
+        if until_spent(walk_one) then
+          if state.pairs_read > total then
+            return mismatch(format("%d pair lines where the plan has %d pairs",
+              state.pairs_read, total))
+          end
+          phase = "advance"
+        end
+        return M.MORE
+      end
+
+      -- The cursor moved past the pairs the file holds, and the last of them
+      -- held against the file's last line.
+      local function advance_step()
+        local done = until_spent(function()
+          if passed >= state.pairs_read then
+            return true
+          end
+          cursor_k, cursor_s = M.next_pair(nbr, count, n, cursor_k, cursor_s)
+          passed = passed + 1
+          return false
+        end)
+        if done then
+          if passed > 0 then
+            local j = nbr[(cursor_k - 1) * count + cursor_s]
+            local a, b = kid[cursor_k], kid[j]
+            if a > b then
+              a, b = b, a
+            end
+            if a ~= state.last_from or b ~= state.last_to then
+              return mismatch(format("pair line %d is %s-%s where the plan has %d-%d",
+                passed, tostring(state.last_from), tostring(state.last_to), a, b))
+            end
+          end
+          phase = "call"
+        end
+        return M.MORE
+      end
+
+      local function call_step()
+        local k, s, j = M.next_pair(nbr, count, n, cursor_k, cursor_s)
+        if k == nil then
+          return finish()
+        end
+        cursor_k, cursor_s = k, s
+        passed = passed + 1
+        local from, to = kid[k], kid[j]
+        if from > to then
+          from, to = to, from
+        end
+        local ok, pts = pcall(find_path, kind, ksx[k], ksz[k], ksx[j], ksz[j])
+        local line
+        if not ok then
+          failed = failed + 1
+          if failed == 1 then
+            M.log(format("terrain.findPathOnRoads(%s) failed between %d and %d: %s",
+              kind, from, to, tostring(pts)))
+          end
+        elseif pts ~= nil then
+          local why
+          line, why = M.path_line(from, to, pts)
+          if line == nil then
+            malformed = malformed + 1
+            if malformed == 1 then
+              M.log(format("terrain.findPathOnRoads(%s) between %d and %d is not a"
+                .. " polyline: %s", kind, from, to, why))
+            end
+          else
+            paths = paths + 1
+            points = points + #pts
+          end
+        end
+        if line == nil then
+          nopaths = nopaths + 1
+          line = M.nopath_line(from, to)
+        end
+        if not push(line) then
+          return M.REFUSED
+        end
+        return M.MORE
+      end
+
+      local function step()
+        if phase == "done" then
+          return M.DONE
+        elseif phase == "index" then
+          return index_step()
+        elseif phase == "walk" then
+          return walk_step()
+        elseif phase == "advance" then
+          return advance_step()
+        end
+        return call_step()
+      end
+
+      local function progress()
+        if phase == "index" or phase == "walk" then
+          return walked, n
+        end
+        return passed, total
+      end
+
+      return step, progress
+    end,
+  }
+end
+
+-- Roads then railroads, each its seeds then its paths: the same two sweeps
+-- with the other word, since the router takes the network as an argument
+-- and nothing else about it differs.
+for i = 1, #M.ROAD_KINDS do
+  M.add_job("hook", M.road_seeds_job(M.ROAD_KINDS[i]))
+  M.add_job("hook", M.road_paths_job(M.ROAD_KINDS[i]))
+end
 
 --------------------------------------------------------------------------------
 -- DCS callbacks

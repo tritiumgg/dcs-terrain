@@ -49,8 +49,16 @@ without `seek`.
   alone (ADR 0028); each cell is tested against the fill triple before it is
   rounded, a tile that is fill throughout is not written, a tile that is sea
   throughout is written for `water` only, and a resumed run counts its
-  journalled tiles as done and reads them back to find the sea ones. *The road and scenery sweeps are not
-  built yet, so a run reaches `done` with those two layers and no roads.*
+  journalled tiles as done and reads them back to find the sea ones. Then the
+  roads and the railroads, each as two sweeps: seeds, a lattice every
+  kilometer plus every airdrome and town, snapped to the nearest road one
+  call a step, and paths, one route call a step from each seed to its four
+  nearest by road point, every unordered pair once. The seeds are numbered
+  by a fixed plan and the file is its own journal, so a resumed run reads
+  it back and asks only what it lacks (ADR 0030); a seed provably farther
+  than 25 km from every road is neither asked nor written (ADR 0031). *The
+  scenery sweep is not built yet, so a run reaches `done` with two layers,
+  the roads and no scenery.*
   While a run is sweeping, the line names the sweep, which of how many it is
   and its count, refreshed every second, and the bar is that sweep's own count;
   nothing claims to know how far the whole run is (ADR 0025).
