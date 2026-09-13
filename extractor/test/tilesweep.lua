@@ -146,10 +146,9 @@ local function lines(fs)
 end
 
 --------------------------------------------------------------------------------
-T.group("the hook pass ends with the one tile sweep")
+T.group("the tile sweep is the third hook job, before the roads")
 --------------------------------------------------------------------------------
 
-T.eq("three jobs", #E.jobs.hook, 3)
 T.eq("the sweep is the third", E.jobs.hook[3], E.water_height_job)
 T.eq("named for both layers", E.water_height_job.name, "water+height")
 
