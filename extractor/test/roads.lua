@@ -228,7 +228,8 @@ E.keep_seed(kept, 4, 3000, 0)
 E.keep_seed(kept, 5, -1000, 0)   -- ties with 2 for seed 1
 E.keep_seed(kept, 6, 0, 2000)
 E.keep_seed(kept, 7, 200000, 0)  -- beyond every cap
-local index = E.neighbour_index(kept, 1000)
+local index = E.neighbour_index(1000)
+E.index_seeds(index, kept, 1, kept.n)
 local out = {}
 E.seed_neighbours(kept, index, 1, 4, 50000, out)
 T.eq("nearest first, the tie broken by id", out[1], 2)
@@ -256,7 +257,8 @@ kept = E.kept_seeds(100)
 for i = 1, 300 do
   E.keep_seed(kept, i, math.random(-20000, 20000), math.random(-20000, 20000))
 end
-index = E.neighbour_index(kept, 1000)
+index = E.neighbour_index(1000)
+E.index_seeds(index, kept, 1, kept.n)
 local wrong = 0
 for k = 1, kept.n do
   E.seed_neighbours(kept, index, k, 4, 50000, out)

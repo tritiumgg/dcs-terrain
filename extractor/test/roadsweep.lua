@@ -110,7 +110,7 @@ local seeds = E.road_seeds_job("roads")
 T.group("the hook pass is config, tables, the tile sweep, then the roads")
 --------------------------------------------------------------------------------
 
-T.eq("four jobs so far", #E.jobs.hook, 4)
+T.eq("five jobs so far", #E.jobs.hook, 5)
 T.eq("the road seeds after the tiles", E.jobs.hook[4].name, "roads:seeds")
 
 --------------------------------------------------------------------------------
@@ -359,5 +359,214 @@ T.eq("a complete hook pass is done at once", statuses[1], E.DONE)
 T.eq("with no call", calls.snap, 0)
 T.eq("and no file", fs.files[FILE], nil)
 T.eq("saying why", log_count("roads: the hook pass is complete"), 1)
+
+--------------------------------------------------------------------------------
+T.group("the paths sweep asks each unordered pair of neighbours once, lower id first")
+--------------------------------------------------------------------------------
+
+-- The fake route: along one road when both snaps lie on it, else through
+-- the crossing; nothing for a railway point off the railway.
+fake.findPathOnRoads = function(kind, x1, z1, x2, z2)
+  calls.path = calls.path + 1
+  if kind == "railroads" then
+    if x1 == 3000 and x2 == 3000 then
+      return { { x = x1, y = z1 }, { x = x2, y = z2 } }
+    end
+    return nil
+  end
+  if (x1 == 0 and x2 == 0) or (z1 == 0 and z2 == 0) then
+    return { { x = x1, y = z1 }, { x = x2, y = z2 } }
+  end
+  return { { x = x1, y = z1 }, { x = 0, y = 0 }, { x = x2, y = z2 } }
+end
+local paths = E.road_paths_job("roads")
+
+T.eq("five hook jobs so far", #E.jobs.hook, 5)
+T.eq("the road paths after the seeds", E.jobs.hook[5].name, "roads:paths")
+
+local function pairs_in(text)
+  local list, set = {}, {}
+  for _, line in ipairs(lines_of(text)) do
+    local k, from, to = E.parse_road_line(line)
+    if k == "path" or k == "nopath" then
+      local key = from .. "-" .. to
+      list[#list + 1] = key
+      set[key] = (set[key] or 0) + 1
+    end
+  end
+  return list, set
+end
+
+fs = FakeFs.new()
+run = new_run(fs)
+drive(seeds, run)
+calls.path = 0
+logged = {}
+statuses, progress, step = drive(paths, run)
+T.eq("the sweep finishes", statuses[#statuses], E.DONE)
+T.eq("fourteen calls", calls.path, 14)
+local list, set = pairs_in(fs.files[FILE])
+T.eq("fourteen pair lines", #list, 14)
+T.eq("in cursor order, each from its lower id", table.concat(list, " "),
+  "1-13 1-4 1-5 1-3 3-5 3-13 3-4 4-13 4-5 4-10 5-13 10-13 5-10 3-10")
+for key, times in pairs(set) do
+  T.eq("pair " .. key .. " once", times, 1)
+end
+local all = lines_of(fs.files[FILE])
+T.eq("a path line carries the route, y as z", all[14],
+  (E.path_line(1, 13, { { x = -1500, y = 0 }, { x = 10, y = 0 } }):gsub("\n$", "")))
+T.eq("a route through the crossing", all[15],
+  (E.path_line(1, 4, { { x = -1500, y = 0 }, { x = 0, y = 0 }, { x = 0, y = -500 } }):gsub("\n$", "")))
+T.eq("the state is released", run.roadnets.roads, nil)
+T.eq("progress is the pairs", (progress()), 14)
+T.eq("of the pairs", select(2, progress()), 14)
+T.eq("the finish line", log_count("roads: 14 pairs of 6 kept seeds, 14 paths with "), 1)
+T.eq("and its tail", log_count(" points, 0 with no path, 0 failed, 0 not a polyline, 0 read back"), 1)
+T.eq("done stays done", step(), E.DONE)
+T.eq("a complete file, twenty-seven lines", #all, 27)
+
+--------------------------------------------------------------------------------
+T.group("a resumed paths sweep passes over the pairs the file holds")
+--------------------------------------------------------------------------------
+
+local WHOLE2 = fs.files[FILE]
+run = new_run(fs)
+calls.snap, calls.path = 0, 0
+drive(seeds, run)
+statuses = drive(paths, run)
+T.eq("finishes", statuses[#statuses], E.DONE)
+T.eq("with no call", calls.snap + calls.path, 0)
+T.eq("and the file untouched", fs.files[FILE], WHOLE2)
+
+-- Stopped after five route calls with the batch at four: four landed.
+E.ROAD_LINE_BATCH = 4
+fs = FakeFs.new()
+run = new_run(fs)
+drive(seeds, run)
+calls.path = 0
+step = paths.start(run)
+while calls.path < 5 do
+  step()
+end
+T.eq("four pair lines landed", #pairs_in(fs.files[FILE]), 4)
+run = new_run(fs)
+calls.path = 0
+drive(seeds, run)
+logged = {}
+statuses, progress = drive(paths, run)
+T.eq("finishes", statuses[#statuses], E.DONE)
+T.eq("ten more calls", calls.path, 10)
+T.eq("the file equals a straight run's", fs.files[FILE], WHOLE2)
+T.eq("read back is counted", log_count("4 read back"), 1)
+E.ROAD_LINE_BATCH = 64
+
+-- A cut-short pair line is repaired by the seeds sweep and the pair asked again.
+fs = FakeFs.new()
+fs.files[FILE] = WHOLE2:sub(1, -8)
+run = new_run(fs)
+calls.path = 0
+drive(seeds, run)
+statuses = drive(paths, run)
+T.eq("one pair asked again", calls.path, 1)
+T.eq("the file equals a straight run's", fs.files[FILE], WHOLE2)
+
+-- A last pair line the plan would not have produced there refuses.
+fs = FakeFs.new()
+fs.files[FILE] = WHOLE2:gsub('"from":3,"kind":"path","points":%b[],"to":10}\n$', '"from":3,"kind":"nopath","to":13}\n')
+T.eq("the fixture changed the last line", fs.files[FILE] ~= WHOLE2, true)
+run = new_run(fs)
+drive(seeds, run)
+statuses = drive(paths, run)
+T.eq("refused", statuses[#statuses], E.REFUSED)
+T.eq("naming the line", run.refusal,
+  "roads.jsonl does not match this extract's seed plan (pair line 14 is 3-13 where the plan has 3-10): move it aside to sweep roads again")
+
+fs = FakeFs.new()
+fs.files[FILE] = WHOLE2 .. E.nopath_line(1, 2)
+run = new_run(fs)
+drive(seeds, run)
+statuses = drive(paths, run)
+T.eq("more pair lines than pairs refuses", statuses[#statuses], E.REFUSED)
+T.eq("saying so", run.refusal:find("15 pair lines where the plan has 14 pairs", 1, true) ~= nil, true)
+
+--------------------------------------------------------------------------------
+T.group("the walk is sliced by the clock, and progress follows it")
+--------------------------------------------------------------------------------
+
+local now = 0
+local real_clock = E.clock
+E.clock = function()
+  now = now + 0.003
+  return now
+end
+fs = FakeFs.new()
+run = new_run(fs)
+drive(seeds, run)
+step, progress = paths.start(run)
+T.eq("nothing walked", (progress()), 0)
+T.eq("of six kept", select(2, progress()), 6)
+T.eq("the index is one step", step(), E.MORE)
+T.eq("and one to see it done", step(), E.MORE)
+step()
+T.eq("one seed walked a step", (progress()), 1)
+for _ = 1, 5 do step() end
+T.eq("all six walked", (progress()), 6)
+step()
+T.eq("then the pairs", select(2, progress()), 14)
+T.eq("none passed yet", (progress()), 0)
+E.clock = real_clock
+
+--------------------------------------------------------------------------------
+T.group("what the router cannot route, and what stops the paths sweep")
+--------------------------------------------------------------------------------
+
+local good_path = fake.findPathOnRoads
+fake.findPathOnRoads = function(kind, x1, z1, x2, z2)
+  calls.path = calls.path + 1
+  if x1 == -1500 then
+    error("router down")
+  end
+  if z1 == 1500 then
+    return { { x = 1, y = 2 }, { x = 0 / 0, y = 0 } }
+  end
+  return nil
+end
+fs = FakeFs.new()
+run = new_run(fs)
+drive(seeds, run)
+logged = {}
+statuses = drive(paths, run)
+T.eq("finishes", statuses[#statuses], E.DONE)
+list = pairs_in(fs.files[FILE])
+T.eq("every pair has a line", #list, 14)
+T.eq("all of them nopath", log_count("14 with no path, 4 failed, 3 not a polyline"), 1)
+T.eq("the raise logged once", log_count("terrain.findPathOnRoads(roads) failed between 1 and 13: "), 1)
+T.eq("the shape logged once", log_count("is not a polyline: point 2 is not finite"), 1)
+fake.findPathOnRoads = good_path
+
+run = new_run(FakeFs.new())
+T.eq("no seeds sweep refuses", paths.start(run)(), E.REFUSED)
+T.eq("saying so", run.refusal, "the roads seeds sweep has not run")
+
+E.terrain_module = function() return nil end
+run = new_run(FakeFs.new())
+T.eq("no module refuses", paths.start(run)(), E.REFUSED)
+E.terrain_module = function() return fake end
+
+fs = FakeFs.new()
+run = new_run(fs)
+drive(seeds, run)
+fs.lose_bytes(1)
+statuses = drive(paths, run)
+T.eq("a short write refuses", statuses[#statuses], E.REFUSED)
+T.eq("naming the file", run.refusal:find("roads.jsonl cannot be written", 1, true), 1)
+
+run = new_run(FakeFs.new())
+run.manifest.passes.hook.complete = true
+run.roadnets = { roads = {} }
+calls.path = 0
+T.eq("a complete hook pass is done at once", paths.start(run)(), E.DONE)
+T.eq("with no call", calls.path, 0)
+T.eq("and the state released", run.roadnets.roads, nil)
 
 T.done()

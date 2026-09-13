@@ -5482,11 +5482,17 @@ function M.span_covers(spans, z, cursor)
 end
 
 -- The kept seeds bucketed by snap point at a coarser step for the neighbour
--- search: kept index lists keyed like the merge buckets.
-function M.neighbour_index(kept, bucket_m)
-  local buckets = {}
+-- search: kept index lists keyed like the merge buckets. Empty until
+-- index_seeds fills it, a range at a time, so a sweep can build it under
+-- the budget.
+function M.neighbour_index(bucket_m)
+  return { buckets = {}, bucket_m = bucket_m }
+end
+
+function M.index_seeds(index, kept, from, to)
+  local buckets, bucket_m = index.buckets, index.bucket_m
   local ksx, ksz = kept.sx, kept.sz
-  for k = 1, kept.n do
+  for k = from, to do
     local key = bucket_key(floor(ksx[k] / bucket_m), floor(ksz[k] / bucket_m))
     local list = buckets[key]
     if list == nil then
@@ -5495,7 +5501,6 @@ function M.neighbour_index(kept, bucket_m)
       list[#list + 1] = k
     end
   end
-  return { buckets = buckets, bucket_m = bucket_m }
 end
 
 -- The `count` kept seeds nearest to kept seed k by snap point, nearest
@@ -5778,6 +5783,39 @@ end
 -- is mostly sea does not spend a whole frame in one step.
 local ROAD_PASS_LIMIT = 4096
 
+-- How long a step of many small things runs before yielding, in seconds:
+-- under the frame budget, so the queue still gets to look at the clock.
+M.ROAD_BATCH_S = 0.002
+
+-- Lines on their way to the file. `push` takes a line and appends the batch
+-- once it is full; `flush` appends whatever is waiting. Both answer false
+-- after leaving the reason on the run, which is a refusal for the caller.
+local function line_batch(run, file, path)
+  local lines, pending = {}, 0
+  local batch = {}
+  function batch.flush()
+    if pending == 0 then
+      return true
+    end
+    local ok, err = M.append_file(path, concat(lines, "", 1, pending))
+    lines, pending = {}, 0
+    if not ok then
+      run.refusal = format("%s cannot be written: %s", file, tostring(err))
+      return false
+    end
+    return true
+  end
+  function batch.push(line)
+    pending = pending + 1
+    lines[pending] = line
+    if pending >= M.ROAD_LINE_BATCH then
+      return batch.flush()
+    end
+    return true
+  end
+  return batch
+end
+
 function M.road_seeds_job(kind)
   return {
     name = kind .. ":seeds",
@@ -5865,28 +5903,8 @@ function M.road_seeds_job(kind)
         end
       end
 
-      -- The lines waiting to be appended, and the append.
-      local lines, pending = {}, 0
-      local function flush()
-        if pending == 0 then
-          return true
-        end
-        local ok, err = M.append_file(path, concat(lines, "", 1, pending))
-        lines, pending = {}, 0
-        if not ok then
-          run.refusal = format("%s cannot be written: %s", file, tostring(err))
-          return false
-        end
-        return true
-      end
-      local function push(line)
-        pending = pending + 1
-        lines[pending] = line
-        if pending >= M.ROAD_LINE_BATCH then
-          return flush()
-        end
-        return true
-      end
+      local batch = line_batch(run, file, path)
+      local push, flush = batch.push, batch.flush
 
       local recovered = M.recover_swap(path)
       if recovered then
@@ -6095,6 +6113,259 @@ function M.road_seeds_job(kind)
 end
 
 M.add_job("hook", M.road_seeds_job("roads"))
+
+--------------------------------------------------------------------------------
+-- The paths sweep
+--
+-- One job per network, after its seeds. It finds every kept seed's nearest
+-- neighbours by snap point and, from each, asks the router for a route to
+-- them, one call a step, each unordered pair once. The pairs are never
+-- listed: a cursor over the neighbour array names the next one, and the
+-- pairs the file already holds are passed over by advancing it, with the
+-- last one checked against the file's last line.
+--
+-- The neighbours and the pair count come from one walk over the kept seeds
+-- in order, because a pair is requested by its lower index unless that one
+-- does not list the higher, and by the time the walk reaches a seed every
+-- lower seed's list is done.
+--------------------------------------------------------------------------------
+
+M.ROAD_NEIGHBOUR_BUCKET_M = 1000
+
+function M.road_paths_job(kind)
+  return {
+    name = kind .. ":paths",
+    start = function(run)
+      local function refuse(message)
+        run.refusal = message
+        return function()
+          return M.REFUSED
+        end
+      end
+      local function finished()
+        return function()
+          return M.DONE
+        end
+      end
+
+      local terrain = M.terrain_module()
+      if not terrain then
+        return refuse("the terrain module is not loaded")
+      end
+      local find_path = terrain.findPathOnRoads
+      if type(find_path) ~= "function" then
+        return refuse("terrain.findPathOnRoads is not a function")
+      end
+      if run.manifest and run.manifest.passes.hook.complete == true then
+        if run.roadnets then
+          run.roadnets[kind] = nil
+        end
+        M.log(kind .. ": the hook pass is complete, nothing to route")
+        return finished()
+      end
+      local state = run.roadnets and run.roadnets[kind]
+      if not state then
+        return refuse(format("the %s seeds sweep has not run", kind))
+      end
+
+      local kept = state.kept
+      local n = kept.n
+      local kid, ksx, ksz = kept.id, kept.sx, kept.sz
+      local count = M.ROAD_SEED_NEIGHBOURS
+      local max_m = M.ROAD_NEIGHBOUR_MAX_M
+      local index = M.neighbour_index(M.ROAD_NEIGHBOUR_BUCKET_M)
+      local nbr = {}
+      local file = TABLE_FILES[kind]
+      local path = M.join(run.dir, file)
+      local batch = line_batch(run, file, path)
+      local push, flush = batch.push, batch.flush
+
+      -- The walk: index, then neighbours and the pair count, then the cursor
+      -- past what the file holds, then the calls.
+      local phase = "index"
+      local indexed = 0
+      local walked = 0
+      local total = 0
+      local cursor_k, cursor_s = 0, count
+      local passed = 0
+      local paths, nopaths, failed, malformed, points = 0, 0, 0, 0, 0
+      local out = {}
+
+      local function finish()
+        if not flush() then
+          return M.REFUSED
+        end
+        phase = "done"
+        M.log(format("%s: %d pairs of %d kept seeds, %d paths with %d points, %d with"
+          .. " no path, %d failed, %d not a polyline, %d read back", kind, total, n,
+          paths, points, nopaths, failed, malformed, state.pairs_read))
+        run.roadnets[kind] = nil
+        return M.DONE
+      end
+
+      local function mismatch(why)
+        run.refusal = format("%s does not match this extract's seed plan (%s):"
+          .. " move it aside to sweep %s again", file, why, kind)
+        return M.REFUSED
+      end
+
+      local function until_spent(fn)
+        local started = M.clock()
+        repeat
+          if fn() then
+            return true
+          end
+        until M.clock() - started >= M.ROAD_BATCH_S
+        return false
+      end
+
+      local function index_step()
+        local done = until_spent(function()
+          if indexed >= n then
+            return true
+          end
+          local to = indexed + 256
+          if to > n then
+            to = n
+          end
+          M.index_seeds(index, kept, indexed + 1, to)
+          indexed = to
+          return false
+        end)
+        if done then
+          phase = "walk"
+        end
+        return M.MORE
+      end
+
+      -- One kept seed's neighbours into the array, and its pairs counted.
+      local function walk_one()
+        if walked >= n then
+          return true
+        end
+        local k = walked + 1
+        M.seed_neighbours(kept, index, k, count, max_m, out)
+        local base = (k - 1) * count
+        for s = 1, count do
+          nbr[base + s] = out[s]
+        end
+        for s = 1, count do
+          if M.pair_requested(nbr, count, k, s) then
+            total = total + 1
+          end
+        end
+        walked = k
+        return false
+      end
+
+      local function walk_step()
+        if until_spent(walk_one) then
+          if state.pairs_read > total then
+            return mismatch(format("%d pair lines where the plan has %d pairs",
+              state.pairs_read, total))
+          end
+          phase = "advance"
+        end
+        return M.MORE
+      end
+
+      -- The cursor moved past the pairs the file holds, and the last of them
+      -- held against the file's last line.
+      local function advance_step()
+        local done = until_spent(function()
+          if passed >= state.pairs_read then
+            return true
+          end
+          cursor_k, cursor_s = M.next_pair(nbr, count, n, cursor_k, cursor_s)
+          passed = passed + 1
+          return false
+        end)
+        if done then
+          if passed > 0 then
+            local j = nbr[(cursor_k - 1) * count + cursor_s]
+            local a, b = kid[cursor_k], kid[j]
+            if a > b then
+              a, b = b, a
+            end
+            if a ~= state.last_from or b ~= state.last_to then
+              return mismatch(format("pair line %d is %s-%s where the plan has %d-%d",
+                passed, tostring(state.last_from), tostring(state.last_to), a, b))
+            end
+          end
+          phase = "call"
+        end
+        return M.MORE
+      end
+
+      local function call_step()
+        local k, s, j = M.next_pair(nbr, count, n, cursor_k, cursor_s)
+        if k == nil then
+          return finish()
+        end
+        cursor_k, cursor_s = k, s
+        passed = passed + 1
+        local from, to = kid[k], kid[j]
+        if from > to then
+          from, to = to, from
+        end
+        local ok, pts = pcall(find_path, kind, ksx[k], ksz[k], ksx[j], ksz[j])
+        local line
+        if not ok then
+          failed = failed + 1
+          if failed == 1 then
+            M.log(format("terrain.findPathOnRoads(%s) failed between %d and %d: %s",
+              kind, from, to, tostring(pts)))
+          end
+        elseif pts ~= nil then
+          local why
+          line, why = M.path_line(from, to, pts)
+          if line == nil then
+            malformed = malformed + 1
+            if malformed == 1 then
+              M.log(format("terrain.findPathOnRoads(%s) between %d and %d is not a"
+                .. " polyline: %s", kind, from, to, why))
+            end
+          else
+            paths = paths + 1
+            points = points + #pts
+          end
+        end
+        if line == nil then
+          nopaths = nopaths + 1
+          line = M.nopath_line(from, to)
+        end
+        if not push(line) then
+          return M.REFUSED
+        end
+        return M.MORE
+      end
+
+      local function step()
+        if phase == "done" then
+          return M.DONE
+        elseif phase == "index" then
+          return index_step()
+        elseif phase == "walk" then
+          return walk_step()
+        elseif phase == "advance" then
+          return advance_step()
+        end
+        return call_step()
+      end
+
+      local function progress()
+        if phase == "index" or phase == "walk" then
+          return walked, n
+        end
+        return passed, total
+      end
+
+      return step, progress
+    end,
+  }
+end
+
+M.add_job("hook", M.road_paths_job("roads"))
 
 --------------------------------------------------------------------------------
 -- DCS callbacks
