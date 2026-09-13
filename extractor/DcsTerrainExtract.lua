@@ -4794,9 +4794,12 @@ M.add_job("hook", M.tables_job)
 local WATER_NODATA_BYTES = char(M.WATER_NODATA)
 local SEA_BYTE = char(2)
 
-local function skip_key(tx, tz)
+-- The key a tile has in the skip set, stated once: the tile sweep writes the
+-- set and the road sweeps read it.
+function M.skip_key(tx, tz)
   return format("%d_%d", tx, tz)
 end
+local skip_key = M.skip_key
 
 -- The fill triple as the sweep compares it, or nil when the triple is not
 -- known and no cell can be called fill. The seabed return is 0 on land and
@@ -5150,6 +5153,467 @@ M.water_height_job = {
 }
 
 M.add_job("hook", M.water_height_job)
+
+--------------------------------------------------------------------------------
+-- Roads and railroads: the seed plan, the lines and the geometry
+--
+-- The road network is not readable, but the engine's own router is: asked for
+-- the nearest road to a point it answers a point on one, and asked for a route
+-- between two road points it answers the polyline it would drive. So the sweep
+-- scatters seeds, a lattice every kilometer plus every airdrome and town,
+-- snaps each to its nearest road, and asks for a route from each snap to its
+-- four nearest other snaps. The file records what the router said, one line
+-- per answer; joining the routes into a graph is pack's job.
+--
+-- Seeds are numbered by their position in a fixed plan, lattice row-major
+-- then airdromes by id then towns by name, so a resumed run gives every seed
+-- the id it had without reading anything (ADR 0030). A position whose seed
+-- cannot be placed, off the grid or in a tile the tile sweep left out, keeps
+-- its number and gets no line.
+--
+-- Everything in this section is pure and is what the offline tests hold. The
+-- two jobs that drive the router follow.
+--------------------------------------------------------------------------------
+
+-- Two snaps within the merge distance are one road point, and the seeds that
+-- made them are one seed for pairing: near Kutaisi 126 of 441 merged. A seed
+-- provably farther than ROAD_SEED_MAX_M from every road is on ground the
+-- pre-sweep calls unbuilt (ADR 0027) and is neither asked nor written, and
+-- one whose own answer is that far is written and not paired (ADR 0031). A
+-- seed with fewer than four kept seeds within ROAD_NEIGHBOUR_MAX_M takes the
+-- ones it has. Lines go to the file in batches of ROAD_LINE_BATCH, because an
+-- append is an open, a close and two size checks, and Caucasus writes two
+-- million lines.
+M.ROAD_MERGE_M = 100
+M.ROAD_SEED_MAX_M = 25000
+M.ROAD_NEIGHBOUR_MAX_M = 50000
+M.ROAD_LINE_BATCH = 64
+M.ROAD_KINDS = { "roads", "railroads" }
+
+-- The plan: how many seeds there are and where each one is. The tables are
+-- the rows the tables sweep wrote, airdromes already in ascending id and
+-- towns already sorted by name, so their order here is theirs.
+function M.seed_plan(grid, spacing, airdromes, towns)
+  if type(grid) ~= "table" then
+    error("seed_plan: not a grid: " .. tostring(grid), 2)
+  end
+  if not is_finite(spacing) or spacing <= 0 then
+    error("seed_plan: spacing is not a positive number: " .. tostring(spacing), 2)
+  end
+  airdromes = airdromes or {}
+  towns = towns or {}
+  local rows = ceil(grid.height * grid.cell_size / spacing)
+  local cols = ceil(grid.width * grid.cell_size / spacing)
+  local lattice = rows * cols
+  return {
+    grid = grid,
+    spacing = spacing,
+    rows = rows,
+    cols = cols,
+    lattice = lattice,
+    airdromes = airdromes,
+    towns = towns,
+    total = lattice + #airdromes + #towns,
+  }
+end
+
+-- Where the seed with this id goes, or nil where the position places none:
+-- a table row with no position, a point outside the grid, or a tile in the
+-- skip set. The lattice is anchored on the grid origin, so the last row or
+-- column of seeds can fall past the grid's edge; those are outside like any
+-- other point.
+function M.seed_at(plan, id, skip)
+  local x, z
+  if id <= plan.lattice then
+    local i = floor((id - 1) / plan.cols)
+    local j = (id - 1) - i * plan.cols
+    x = plan.grid.origin_x + (i + 0.5) * plan.spacing
+    z = plan.grid.origin_z + (j + 0.5) * plan.spacing
+  else
+    local row
+    if id <= plan.lattice + #plan.airdromes then
+      row = plan.airdromes[id - plan.lattice]
+    else
+      row = plan.towns[id - plan.lattice - #plan.airdromes]
+    end
+    if type(row) ~= "table" then
+      return nil
+    end
+    x, z = row.x, row.z
+  end
+  if not (is_finite(x) and is_finite(z)) then
+    return nil
+  end
+  local grid = plan.grid
+  local row = floor((x - grid.origin_x) / grid.cell_size)
+  local col = floor((z - grid.origin_z) / grid.cell_size)
+  if not M.cell_in_grid(grid, row, col) then
+    return nil
+  end
+  if skip and skip[M.skip_key(floor(row / grid.tile_size), floor(col / grid.tile_size))] then
+    return nil
+  end
+  return x, z
+end
+
+-- The three line kinds, formatted by hand. Each is byte for byte what M.json
+-- writes for the same record, keys in sorted order and numbers to 17 digits,
+-- and a test holds them to that; the encoder itself sorts keys and walks
+-- tables per line, which at two million lines is minutes.
+local function num_or_null(v)
+  if v == nil then
+    return "null"
+  end
+  return format("%.17g", v)
+end
+
+function M.seed_line(id, x, z, snap_x, snap_z, snap_dist)
+  return format('{"id":%d,"kind":"seed","snap_dist":%s,"snap_x":%s,"snap_z":%s,"x":%.17g,"z":%.17g}\n',
+    id, num_or_null(snap_dist), num_or_null(snap_x), num_or_null(snap_z), x, z)
+end
+
+function M.nopath_line(from, to)
+  return format('{"from":%d,"kind":"nopath","to":%d}\n', from, to)
+end
+
+-- The points as the router gives them, {x=, y=} with y meaning DCS z, and
+-- translated here. Nil and the reason where the array is not one the format
+-- can hold: nothing, or a point that is not two finite numbers.
+function M.path_line(from, to, points)
+  if type(points) ~= "table" then
+    return nil, "not a table: " .. type(points)
+  end
+  local n = #points
+  if n == 0 then
+    return nil, "no points"
+  end
+  local parts = {}
+  for i = 1, n do
+    local p = points[i]
+    if type(p) ~= "table" then
+      return nil, format("point %d is a %s", i, type(p))
+    end
+    local x, y = p.x, p.y
+    if not (is_finite(x) and is_finite(y)) then
+      return nil, format("point %d is not finite", i)
+    end
+    parts[i] = format("[%.17g,%.17g]", x, y)
+  end
+  return format('{"from":%d,"kind":"path","points":[%s],"to":%d}\n',
+    from, concat(parts, ","), to)
+end
+
+-- One line read back: its kind and its numbers, in the order the line
+-- functions above take them, with nil for null. Only the kinds this file
+-- writes are read; anything else is nil with the line's kind, or nil twice
+-- for a line that has none.
+local function field_number(line, key)
+  local text = line:match('"' .. key .. '":([^,}]+)')
+  if text == nil or text == "null" then
+    return nil
+  end
+  return tonumber(text)
+end
+
+function M.parse_road_line(line)
+  local kind = line:match('"kind":"(%a+)"')
+  if kind == "seed" then
+    return "seed", field_number(line, "id"), field_number(line, "x"),
+      field_number(line, "z"), field_number(line, "snap_x"),
+      field_number(line, "snap_z"), field_number(line, "snap_dist")
+  elseif kind == "path" or kind == "nopath" then
+    return kind, field_number(line, "from"), field_number(line, "to")
+  end
+  return nil, kind
+end
+
+-- Buckets on a square lattice with an integer key, so a lookup allocates
+-- nothing. Coordinates are DCS meters within a few thousand kilometers, so
+-- the bucket numbers fit beside each other in one double exactly.
+local BUCKET_SHIFT = 2097152
+
+local function bucket_key(bx, bz)
+  return bx * BUCKET_SHIFT + bz
+end
+
+-- The kept seeds: the ones that snapped, were not merged and were not far.
+-- Parallel arrays rather than a table per seed, because Caucasus keeps
+-- hundreds of thousands, and buckets of the snap points at the merge
+-- distance, so a new snap is compared against the seeds that could be within
+-- it and no others.
+function M.kept_seeds(merge_m)
+  return {
+    n = 0, id = {}, sx = {}, sz = {},
+    merge_m = merge_m, r2 = merge_m * merge_m, buckets = {},
+  }
+end
+
+-- The lowest kept id whose snap lies within the merge distance of this one,
+-- or nil. Kept seeds are added in ascending id, so within one bucket the
+-- first hit is the lowest, and the answer is the least over the nine.
+function M.merge_target(kept, sx, sz)
+  local b, m = kept.buckets, kept.merge_m
+  local bx, bz = floor(sx / m), floor(sz / m)
+  local ksx, ksz, kid = kept.sx, kept.sz, kept.id
+  local r2 = kept.r2
+  local best
+  for dx = -1, 1 do
+    for dz = -1, 1 do
+      local list = b[bucket_key(bx + dx, bz + dz)]
+      if list then
+        for i = 1, #list do
+          local k = list[i]
+          local ex, ez = ksx[k] - sx, ksz[k] - sz
+          if ex * ex + ez * ez <= r2 then
+            local id = kid[k]
+            if best == nil or id < best then
+              best = id
+            end
+            break
+          end
+        end
+      end
+    end
+  end
+  return best
+end
+
+-- Keeps a seed, and returns its kept index.
+function M.keep_seed(kept, id, sx, sz)
+  local n = kept.n + 1
+  kept.n = n
+  kept.id[n], kept.sx[n], kept.sz[n] = id, sx, sz
+  local m = kept.merge_m
+  local key = bucket_key(floor(sx / m), floor(sz / m))
+  local list = kept.buckets[key]
+  if list == nil then
+    kept.buckets[key] = { n }
+  else
+    list[#list + 1] = n
+  end
+  return n
+end
+
+-- The discs far answers clear. A snap that answered a road d away proves no
+-- road lies within d - r of any point r from the query, so a seed nearer
+-- than d - max_m to the query has no road within max_m and is not asked. A
+-- disc too small to reach the next lattice seed is not kept: it would clear
+-- nothing and cost every row a look.
+function M.discs(max_m, spacing)
+  return { n = 0, x = {}, z = {}, r = {}, max_m = max_m, spacing = spacing }
+end
+
+function M.disc_add(discs, x, z, d)
+  local r = d - discs.max_m
+  if r < discs.spacing then
+    return false
+  end
+  local n = discs.n + 1
+  discs.n = n
+  discs.x[n], discs.z[n], discs.r[n] = x, z, r
+  return true
+end
+
+-- Whether a point is inside any disc: the plain scan, for the few seeds that
+-- are not on the lattice.
+function M.disc_covers(discs, x, z)
+  local dx_, dz_, dr = discs.x, discs.z, discs.r
+  for i = 1, discs.n do
+    local ex, ez, r = x - dx_[i], z - dz_[i], dr[i]
+    if ex * ex + ez * ez < r * r then
+      return true
+    end
+  end
+  return false
+end
+
+-- What the discs clear along one lattice row: the row's x cuts each disc
+-- into a span of z, and the spans, sorted and merged, are a flat list
+-- z0, z1, z0, z1, ... in ascending order. A lattice row is then tested by a
+-- cursor that only moves forward, which is a few instructions a seed where
+-- a scan of the discs would be a few hundred.
+function M.disc_row(discs, x)
+  local dx_, dz_, dr = discs.x, discs.z, discs.r
+  local lo, hi, order = {}, {}, {}
+  local n = 0
+  for i = 1, discs.n do
+    local ex, r = x - dx_[i], dr[i]
+    if ex < r and ex > -r then
+      local half = math.sqrt(r * r - ex * ex)
+      n = n + 1
+      lo[n], hi[n], order[n] = dz_[i] - half, dz_[i] + half, n
+    end
+  end
+  if n == 0 then
+    return {}
+  end
+  sort(order, function(a, b) return lo[a] < lo[b] end)
+  local spans = {}
+  local z0, z1 = lo[order[1]], hi[order[1]]
+  for k = 2, n do
+    local i = order[k]
+    if lo[i] < z1 then
+      if hi[i] > z1 then
+        z1 = hi[i]
+      end
+    else
+      spans[#spans + 1] = z0
+      spans[#spans + 1] = z1
+      z0, z1 = lo[i], hi[i]
+    end
+  end
+  spans[#spans + 1] = z0
+  spans[#spans + 1] = z1
+  return spans
+end
+
+-- Whether z lies strictly inside a span, given a cursor at the span the
+-- last z was tested against; z only climbs along a row, so the cursor only
+-- climbs. Returns the answer and the cursor to pass next time.
+function M.span_covers(spans, z, cursor)
+  local n = #spans
+  while cursor < n and spans[cursor + 1] <= z do
+    cursor = cursor + 2
+  end
+  if cursor >= n then
+    return false, cursor
+  end
+  return spans[cursor] < z, cursor
+end
+
+-- The kept seeds bucketed by snap point at a coarser step for the neighbour
+-- search: kept index lists keyed like the merge buckets.
+function M.neighbour_index(kept, bucket_m)
+  local buckets = {}
+  local ksx, ksz = kept.sx, kept.sz
+  for k = 1, kept.n do
+    local key = bucket_key(floor(ksx[k] / bucket_m), floor(ksz[k] / bucket_m))
+    local list = buckets[key]
+    if list == nil then
+      buckets[key] = { k }
+    else
+      list[#list + 1] = k
+    end
+  end
+  return { buckets = buckets, bucket_m = bucket_m }
+end
+
+-- The `count` kept seeds nearest to kept seed k by snap point, nearest
+-- first, ties by id, written into out[1..count] with 0 in the slots left over
+-- where fewer lie within max_m. Rings of buckets outward from k's own: ring
+-- r can hold nothing nearer than (r - 1) buckets, so the search stops once
+-- the count is full and the next ring cannot beat the worst of it.
+function M.seed_neighbours(kept, index, k, count, max_m, out)
+  local ksx, ksz = kept.sx, kept.sz
+  local x, z = ksx[k], ksz[k]
+  local bm = index.bucket_m
+  local buckets = index.buckets
+  local bx, bz = floor(x / bm), floor(z / bm)
+  local best_d = {}
+  local found = 0
+  local function offer(j)
+    if j == k then
+      return
+    end
+    local ex, ez = ksx[j] - x, ksz[j] - z
+    local d = ex * ex + ez * ez
+    if found == count and d >= best_d[count] then
+      -- Equal distance and a higher index loses, and every j after the
+      -- first in a bucket is higher, so >= is the right side.
+      if d > best_d[count] or j > out[count] then
+        return
+      end
+    end
+    local i = found < count and found + 1 or count
+    while i > 1 and (d < best_d[i - 1] or (d == best_d[i - 1] and j < out[i - 1])) do
+      best_d[i], out[i] = best_d[i - 1], out[i - 1]
+      i = i - 1
+    end
+    best_d[i], out[i] = d, j
+    if found < count then
+      found = found + 1
+    end
+  end
+  local max2 = max_m * max_m
+  local ring = 0
+  while true do
+    local inner = (ring - 1) * bm
+    if inner > max_m then
+      break
+    end
+    if found == count and inner > 0 and inner * inner >= best_d[count] then
+      break
+    end
+    for dx = -ring, ring do
+      local edge = dx == -ring or dx == ring
+      local step = edge and 1 or 2 * ring
+      if ring == 0 then
+        step = 1
+      end
+      for dz = -ring, ring, step do
+        local list = buckets[bucket_key(bx + dx, bz + dz)]
+        if list then
+          for i = 1, #list do
+            offer(list[i])
+          end
+        end
+      end
+    end
+    ring = ring + 1
+  end
+  for i = found + 1, count do
+    out[i] = 0
+  end
+  -- Beyond the cap is not a neighbour, however few there were.
+  for i = 1, found do
+    if best_d[i] > max2 then
+      for j = i, count do
+        out[j] = 0
+      end
+      break
+    end
+  end
+  return out
+end
+
+-- Whether the pair (k, j) is requested when the cursor reaches slot s of k,
+-- where j is the kept index in that slot. A pair is requested from its lower
+-- index, unless the lower one does not list the higher, in which case the
+-- higher requests it: every unordered pair once, and no set of seen pairs.
+function M.pair_requested(nbr, count, k, s)
+  local j = nbr[(k - 1) * count + s]
+  if j == 0 then
+    return nil
+  end
+  if j > k then
+    return j
+  end
+  local base = (j - 1) * count
+  for t = 1, count do
+    if nbr[base + t] == k then
+      return nil
+    end
+  end
+  return j
+end
+
+-- The next requested pair after cursor (k, s), as its cursor and the other
+-- kept index; nil past the last. (0, count) is the cursor before the first.
+function M.next_pair(nbr, count, n, k, s)
+  while true do
+    s = s + 1
+    if s > count then
+      k, s = k + 1, 1
+      if k > n then
+        return nil
+      end
+    end
+    local j = M.pair_requested(nbr, count, k, s)
+    if j then
+      return k, s, j
+    end
+  end
+end
 
 --------------------------------------------------------------------------------
 -- DCS callbacks
