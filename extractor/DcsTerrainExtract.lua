@@ -5616,6 +5616,151 @@ function M.next_pair(nbr, count, n, k, s)
 end
 
 --------------------------------------------------------------------------------
+-- A line file read back in pieces, and its tail repaired in pieces
+--
+-- roads.jsonl on Caucasus is hundreds of megabytes and the handles here have
+-- no seek, so a resume reads the file from the top in counted chunks, one a
+-- step, and never holds more than a chunk and the line that straddles it. A
+-- kill mid-append leaves a cut-short last line; the repair copies the file up
+-- to its last newline, again a chunk a step, and swaps the copy in by
+-- renaming the original aside first, so there is no moment with no file.
+--------------------------------------------------------------------------------
+
+M.LINE_CHUNK = 65536
+
+-- A reader over the file: `step(on_line)` reads one chunk and hands each
+-- complete line, without its newline, to on_line, then answers M.MORE, or
+-- M.DONE at the end of the file with the number of bytes of a cut-short
+-- last line, or nil and a message. `read` counts the bytes taken so far.
+function M.line_reader(path, chunk)
+  chunk = chunk or M.LINE_CHUNK
+  local f, err = M.fs.open(path, "rb")
+  if not f then
+    return nil, err or (path .. ": cannot open")
+  end
+  local rest = ""
+  local reader = { read = 0, size = M.fs.size(path) or 0 }
+  local find, sub = string.find, string.sub
+  function reader.step(on_line)
+    local data = f:read(chunk)
+    if data == nil or data == "" then
+      f:close()
+      reader.step = function()
+        return M.DONE, #rest
+      end
+      return M.DONE, #rest
+    end
+    reader.read = reader.read + #data
+    if rest ~= "" then
+      data = rest .. data
+      rest = ""
+    end
+    local at = 1
+    while true do
+      local nl = find(data, "\n", at, true)
+      if nl == nil then
+        break
+      end
+      on_line(sub(data, at, nl - 1))
+      at = nl + 1
+    end
+    if at <= #data then
+      rest = sub(data, at)
+    end
+    return M.MORE
+  end
+  function reader.close()
+    f:close()
+    reader.step = function()
+      return nil, path .. ": closed"
+    end
+  end
+  return reader
+end
+
+-- The stepper that copies the first `keep` bytes of the file to `<path>.tmp`
+-- and swaps it in: `step()` answers M.MORE while copying, M.DONE once the
+-- swap is complete, or nil and a message. A stale `.tmp` from an earlier
+-- attempt is removed first. The swap renames the original to `<path>.old`,
+-- the copy to `<path>`, then removes the `.old`; a kill between the two
+-- renames leaves the `.old` for recover_swap to find.
+function M.copy_head(path, keep, chunk)
+  chunk = chunk or M.LINE_CHUNK
+  local tmp, old = path .. ".tmp", path .. ".old"
+  M.fs.remove(tmp)
+  local f, err = M.fs.open(path, "rb")
+  if not f then
+    return nil, err or (path .. ": cannot open")
+  end
+  local copied = 0
+  local function fail(message)
+    f:close()
+    return nil, message
+  end
+  return function()
+    if copied < keep then
+      local want = keep - copied
+      if want > chunk then
+        want = chunk
+      end
+      local data = f:read(want)
+      if data == nil or data == "" then
+        return fail(format("%s: ended after %d of %d bytes", path, copied, keep))
+      end
+      local ok, aerr = M.append_file(tmp, data)
+      if not ok then
+        return fail(aerr)
+      end
+      copied = copied + #data
+      return M.MORE
+    end
+    f:close()
+    if keep == 0 then
+      -- Nothing to copy means nothing was appended, and the empty file the
+      -- swap needs has to be made.
+      local ok, werr = M.write_file(tmp, "")
+      if not ok then
+        return nil, werr
+      end
+    end
+    M.fs.remove(old)
+    local ok, rerr = M.fs.rename(path, old)
+    if not ok then
+      return nil, rerr or (path .. ": cannot be renamed aside")
+    end
+    ok, rerr = M.fs.rename(tmp, path)
+    if not ok then
+      return nil, rerr or (tmp .. ": cannot be renamed in")
+    end
+    M.fs.remove(old)
+    return M.DONE
+  end
+end
+
+-- Puts a file back after a swap that was cut short: an `.old` with no file
+-- beside it is the file, renamed back; an `.old` beside a file is the swap's
+-- last step, done now. A `.tmp` is always stale here and goes. Returns what
+-- it did, for the log, or nil for nothing.
+function M.recover_swap(path)
+  local tmp, old = path .. ".tmp", path .. ".old"
+  local did
+  if M.fs.size(tmp) ~= nil then
+    M.fs.remove(tmp)
+    did = "a stale copy removed"
+  end
+  if M.fs.size(old) ~= nil then
+    if M.fs.size(path) == nil then
+      M.fs.rename(old, path)
+      did = "the file renamed back from its aside"
+    else
+      M.fs.remove(old)
+      did = "an aside removed"
+    end
+  end
+  return did
+end
+
+--------------------------------------------------------------------------------
 -- DCS callbacks
 --
 -- The four callbacks the run is driven by. onSimulationFrame is the whole
