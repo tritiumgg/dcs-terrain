@@ -61,7 +61,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
 One task. The thing to pick up immediately.
 
 **X8a** — the mission-pass transport and the `surface` sweep: built,
-reviewed and offline-verified on `task/X8a-mission-transport`. The chunk
+reviewed and offline-verified on `task/X8a-mission-transport`, PR **54**. The chunk
 answers one printable character a cell under a length frame. What remains is
 the live half: on the Kutaisi 5 km crop, a surface tile's bytes equal
 `land.getSurfaceType` re-read through the bridge, the band's time against
