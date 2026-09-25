@@ -6467,6 +6467,257 @@ function M.server_call(source)
 end
 
 --------------------------------------------------------------------------------
+-- The surface sweep
+--
+-- land.getSurfaceType at every cell center, in the server state. A whole tile
+-- is one chunk of about 150 ms, so a step is a band of SURFACE_CHUNK_ROWS
+-- rows, a quarter of a 256-cell tile at about 40 ms; the tile is written and
+-- journalled once its last band is in, so a run stopped mid-tile loses the
+-- bands it had and sweeps that tile again.
+--
+-- The chunk answers one character a cell, 1 to 5 for the enum, u for a value
+-- that is not one of those and f for a call that raised; the hook turns both
+-- of the last two into nodata. Printable characters keep the answer a plain
+-- string whatever the transport does with a NUL, and keep a refused answer
+-- readable in the log. A band whose answer is refused is nodata throughout,
+-- logged, and the tile is still written, so it reads as a hole rather than
+-- as a tile not yet swept.
+--
+-- Tiles the tile sweep left out, fill or sea, are not swept. This pass
+-- applies no fill test of its own: the fill triple is a hook-state
+-- measurement, and a reader goes by valid.
+--------------------------------------------------------------------------------
+
+M.SURFACE_CHUNK_ROWS = 64
+
+local SURFACE_CHUNK = [[
+local x0, z0, step, rows, cols = %s, %s, %s, %s, %s
+local get = land.getSurfaceType
+local CODE = { "1", "2", "3", "4", "5" }
+local p = { x = 0, y = 0 }
+local out, row = {}, {}
+local function fast()
+  for c = 1, cols do
+    p.y = z0 + (c - 1) * step
+    row[c] = CODE[get(p)] or "u"
+  end
+end
+for r = 1, rows do
+  p.x = x0 + (r - 1) * step
+  if not pcall(fast) then
+    for c = 1, cols do
+      p.y = z0 + (c - 1) * step
+      local ok, s = pcall(get, p)
+      row[c] = ok and (CODE[s] or "u") or "f"
+    end
+  end
+  out[r] = table.concat(row, "", 1, cols)
+end
+local body = table.concat(out)
+return #body .. ":" .. body
+]]
+
+local SURFACE_BYTES = {
+  ["1"] = char(1), ["2"] = char(2), ["3"] = char(3), ["4"] = char(4),
+  ["5"] = char(5), u = char(0), f = char(0),
+}
+
+-- One band's cells as tile bytes, in rows of cols, or nil and why the answer
+-- was refused. unrecognised and failed count the cells that became nodata.
+function M.surface_band(x0, z0, step, rows, cols)
+  local body, why = M.server_call(M.server_source(SURFACE_CHUNK, x0, z0, step, rows, cols))
+  if body == nil then
+    return nil, why
+  end
+  if #body ~= rows * cols then
+    return nil, format("%d cells asked and %d answered", rows * cols, #body)
+  end
+  if body:find("[^12345uf]") then
+    return nil, format("not a surface answer: %q", body:sub(1, 120))
+  end
+  local _, unrecognised = body:gsub("u", "u")
+  local _, failed = body:gsub("f", "f")
+  return (body:gsub(".", SURFACE_BYTES)), unrecognised, failed
+end
+
+M.surface_job = {
+  name = "surface",
+  start = function(run)
+    local function refuse(message)
+      run.refusal = message
+      return function()
+        return M.REFUSED
+      end
+    end
+
+    if not (run.manifest and type(run.manifest.grid) == "table") then
+      return refuse("no grid was planned")
+    end
+    local grid = run.manifest.grid
+    local skip = run.skip or {}
+    local size = grid.tile_size
+    local cells = size * size
+    local band_rows = M.SURFACE_CHUNK_ROWS
+    if band_rows > size then
+      band_rows = size
+    end
+    local cell_size = grid.cell_size
+    local NODATA = char(0)
+    local high, wide = M.tile_counts(grid)
+    local total = high * wide
+    -- Tiles journalled or left out count as done from the start, so a
+    -- resumed sweep's bar climbs rather than falling back (ADR 0025).
+    local handled = 0
+    for tx, tz in M.each_tile(grid) do
+      if skip[skip_key(tx, tz)] or run.done[M.tile_key("surface", tx, tz)] then
+        handled = handled + 1
+      end
+    end
+    local iter = M.each_tile(grid)
+    local written, reused, skipped, refused_bands = 0, 0, 0, 0
+
+    -- The tile being swept: its bands so far, and the next band's first row.
+    local tile = nil
+
+    local function on_disk(tx, tz)
+      return M.fs.size(M.join(run.dir, M.tile_path("surface", tx, tz))) == cells
+    end
+
+    local function begin(tx, tz)
+      local row0, col0 = M.tile_first_cell(grid, tx, tz)
+      local in_cols = grid.width - col0
+      if in_cols > size then in_cols = size end
+      tile = {
+        tx = tx, tz = tz, row0 = row0, col0 = col0, in_cols = in_cols,
+        next_row = 0, parts = {}, nodata = 0, unrecognised = 0, failed = 0,
+        refused = 0,
+      }
+    end
+
+    -- Rows past the grid are nodata and not asked, and so are columns.
+    local function sweep_band()
+      local t = tile
+      local lr0 = t.next_row
+      local rows = band_rows
+      if lr0 + rows > size then rows = size - lr0 end
+      t.next_row = lr0 + rows
+      local asked = grid.height - (t.row0 + lr0)
+      if asked > rows then asked = rows end
+      if asked < 0 then asked = 0 end
+      local cols = t.in_cols
+      local pad = string.rep(NODATA, size - cols)
+      local parts = t.parts
+      if asked > 0 and cols > 0 then
+        local x0 = grid.origin_x + (t.row0 + lr0 + 0.5) * cell_size
+        local z0 = grid.origin_z + (t.col0 + 0.5) * cell_size
+        local bytes, a, b = M.surface_band(x0, z0, cell_size, asked, cols)
+        if bytes == nil then
+          M.log(format("surface %d_%d rows %d..%d refused: %s", t.tx, t.tz,
+            lr0, lr0 + asked - 1, tostring(a)))
+          t.refused = t.refused + 1
+          refused_bands = refused_bands + 1
+          bytes = string.rep(NODATA, asked * cols)
+          t.nodata = t.nodata + asked * cols
+        else
+          t.unrecognised = t.unrecognised + a
+          t.failed = t.failed + b
+          t.nodata = t.nodata + a + b
+        end
+        if cols == size then
+          parts[#parts + 1] = bytes
+        else
+          for r = 0, asked - 1 do
+            parts[#parts + 1] = bytes:sub(r * cols + 1, (r + 1) * cols)
+            parts[#parts + 1] = pad
+          end
+          t.nodata = t.nodata + asked * (size - cols)
+        end
+      else
+        asked = 0
+      end
+      if rows > asked then
+        parts[#parts + 1] = string.rep(NODATA, (rows - asked) * size)
+        t.nodata = t.nodata + (rows - asked) * size
+      end
+    end
+
+    -- File, then line, then done on the run; a refusal leaves the reason.
+    local function finish_tile()
+      local t = tile
+      tile = nil
+      local data = concat(t.parts)
+      local min, max
+      for code = 1, 5 do
+        if data:find(char(code), 1, true) then
+          min = min or code
+          max = code
+        end
+      end
+      local path = M.tile_path("surface", t.tx, t.tz)
+      local ok, err = M.write_file(M.join(run.dir, path), data)
+      if not ok then
+        run.refusal = format("%s cannot be written: %s", path, tostring(err))
+        return false
+      end
+      local entry = M.tile_entry("surface", t.tx, t.tz, min, max)
+      local appended, aerr = M.append_tile(run.dir, entry)
+      if not appended then
+        run.refusal = format("%s cannot be journalled: %s", path, tostring(aerr))
+        return false
+      end
+      run.entries[#run.entries + 1] = entry
+      run.done[M.tile_key("surface", t.tx, t.tz)] = entry
+      written = written + 1
+      handled = handled + 1
+      M.log(format("tile %d_%d: surface %s..%s, %d nodata, %d unrecognised,"
+        .. " %d failed, %d bands refused", t.tx, t.tz, tostring(min),
+        tostring(max), t.nodata, t.unrecognised, t.failed, t.refused))
+      return true
+    end
+
+    -- A tile already journalled with its file, or one the tile sweep left
+    -- out, costs a step and no call.
+    local function step()
+      if tile == nil then
+        local tx, tz = iter()
+        if tx == nil then
+          M.log(format("surface: %d tiles written, %d journalled, %d left out,"
+            .. " %d bands refused", written, reused, skipped, refused_bands))
+          return M.DONE
+        end
+        if skip[skip_key(tx, tz)] then
+          skipped = skipped + 1
+          return M.MORE
+        end
+        if run.done[M.tile_key("surface", tx, tz)] then
+          if on_disk(tx, tz) then
+            reused = reused + 1
+            return M.MORE
+          end
+          handled = handled - 1
+          M.log(format("tile %d_%d is journalled for surface but its file is"
+            .. " not there or not the size: swept again", tx, tz))
+        end
+        begin(tx, tz)
+      end
+      sweep_band()
+      if tile.next_row >= size and not finish_tile() then
+        return M.REFUSED
+      end
+      return M.MORE
+    end
+
+    local function progress()
+      return handled, total
+    end
+
+    return step, progress
+  end,
+}
+
+M.add_job("mission", M.surface_job)
+
+--------------------------------------------------------------------------------
 -- DCS callbacks
 --
 -- The four callbacks the run is driven by. onSimulationFrame is the whole
