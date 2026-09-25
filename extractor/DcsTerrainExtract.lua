@@ -6383,6 +6383,90 @@ for i = 1, #M.ROAD_KINDS do
 end
 
 --------------------------------------------------------------------------------
+-- The server-state transport
+--
+-- The mission pass calls land.* and world.*, which live in the mission
+-- scripting state and not in this one. The only way across is
+-- net.dostring_in("server", source): the source runs there and one string
+-- comes back, with a boolean that is false when the source raised and the
+-- string is then the error message.
+--
+-- Nothing that comes back is trusted. A chunk frames its answer as the
+-- body's length, a colon and the body, and the hook refuses a body that is
+-- not the length it declares, so a payload cut short on the way reads as
+-- refused rather than as a short tile. An error message never starts with
+-- digits and a colon, so the frame catches a raise even where the boolean
+-- is missing.
+--
+-- Values go into the source only through server_literal, and a chunk keeps
+-- everything local, so a sweep leaves no global behind in the mission state.
+--------------------------------------------------------------------------------
+
+-- A value as Lua source: a number at seventeen significant figures, which
+-- reads back as the same double, a string through %q, a boolean as itself.
+-- Anything else, and a number that is not finite, is a bug in the caller.
+function M.server_literal(v)
+  local kind = type(v)
+  if kind == "number" then
+    if not is_finite(v) then
+      error("server_literal: not a finite number: " .. tostring(v), 2)
+    end
+    return format("%.17g", v)
+  end
+  if kind == "string" then
+    return format("%q", v)
+  end
+  if kind == "boolean" then
+    return tostring(v)
+  end
+  error("server_literal: cannot inject a " .. kind, 2)
+end
+
+-- The template with each %s replaced by the next value as a literal. A
+-- template holds no other format directive.
+function M.server_source(template, ...)
+  local literals = {}
+  for i = 1, select("#", ...) do
+    literals[i] = M.server_literal((select(i, ...)))
+  end
+  return format(template, unpack(literals))
+end
+
+-- The body of a framed answer, or nil and why it was refused.
+function M.unframe(answer)
+  local declared, at = answer:match("^(%d+):()")
+  if declared == nil then
+    return nil, format("no declared length in %q", answer:sub(1, 120))
+  end
+  declared = tonumber(declared)
+  local got = #answer - at + 1
+  if got ~= declared then
+    return nil, format("declared %d bytes and %d arrived", declared, got)
+  end
+  return answer:sub(at)
+end
+
+-- Runs source in the server state and returns the body its framed answer
+-- carries, or nil and why there is none. Never raises.
+function M.server_call(source)
+  local net = rawget(_G, "net")
+  if type(net) ~= "table" or type(net.dostring_in) ~= "function" then
+    return nil, "net.dostring_in is not available"
+  end
+  local called, answer, succeeded = pcall(net.dostring_in, "server", source)
+  if not called then
+    return nil, "net.dostring_in raised: " .. tostring(answer)
+  end
+  if type(answer) ~= "string" then
+    return nil, "net.dostring_in returned a " .. type(answer)
+  end
+  if succeeded == false then
+    return nil, "the chunk raised: " .. answer
+  end
+  return M.unframe(answer)
+end
+
+--------------------------------------------------------------------------------
 -- DCS callbacks
 --
 -- The four callbacks the run is driven by. onSimulationFrame is the whole
