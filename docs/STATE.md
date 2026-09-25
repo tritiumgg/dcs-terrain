@@ -4,7 +4,7 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-25T17:51Z
+**Last updated:** 2026-09-25T18:19Z
 
 ## Done
 
@@ -60,12 +60,13 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
 One task. The thing to pick up immediately.
 
-**X8a** — the mission-pass transport: `net.dostring_in("server", ...)` with
-`%q` escaping, length verification and the `(string, boolean)` return, and
-the `surface` layer in quarter-tile chunks. Only while terrain is loaded
-(ADR 0010). *Verified by:* an agent offline for the escaping and the length
-check; the round trip of one tile through the bridge needs the maintainer's
-DCS.
+**X8a** — the mission-pass transport and the `surface` sweep: built,
+reviewed and offline-verified on `task/X8a-mission-transport`. The chunk
+answers one printable character a cell under a length frame. What remains is
+the live half: on the Kutaisi 5 km crop, a surface tile's bytes equal
+`land.getSurfaceType` re-read through the bridge, the band's time against
+the spec's 40 ms, and a Stop and Start mid-sweep. *Verified by:* the bridge
+steps from a session with the maintainer's DCS.
 
 ## Then
 
