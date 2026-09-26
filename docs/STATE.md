@@ -4,13 +4,21 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-25T18:19Z
+**Last updated:** 2026-09-26T18:13Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **X7: roads and railroads.** Four hook jobs, `<kind>:seeds` then
+1. **X8a: the mission-pass transport and `surface`.** `server_call` runs a
+   chunk through `net.dostring_in("server", ...)` and refuses any answer not
+   framed as its own length; the surface sweep asks 64 rows a step, one
+   printable character a cell, and writes a tile when its last band is in.
+   *Verified by:* an agent offline, then live on Caucasus 2.9.29.27468: ten
+   cells of the Kutaisi crop re-read through the bridge equal the file, a
+   150 km crop stopped twice mid-surface resumed without sweeping a tile
+   again (501 lines, all distinct), about 73 ms a tile. PR **54**.
+2. **X7: roads and railroads.** Four hook jobs, `<kind>:seeds` then
    `<kind>:paths`: seeds numbered by a fixed plan, merged into the lowest kept
    id at 100 m, each unordered pair of four nearest neighbours asked once by
    a cursor, and the file its own journal, read back in chunks on every
@@ -24,7 +32,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    85 and 82 MB), against the spec's 25 min for roads alone, and a Stop
    mid-paths then Start read back 187 567 seeds and 7 744 pairs in 2.5 s
    and asked nothing again. PR **53**.
-2. **X6: the pre-sweep, `water` and `height`.** Prepare is `identity`,
+3. **X6: the pre-sweep, `water` and `height`.** Prepare is `identity`,
    `presweep`, `grid`: the pre-sweep walks a 5 km lattice one cell a step, a
    road snap first and a 2 km line of heights only where a road lies 5 to
    25 km off (ADR **0027**, after the spec's rule authored Caucasus's roadless
@@ -32,47 +40,37 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    a crop run and on a directory whose manifest carries the rectangle. The
    hook pass is `config`, `tables`, then `water+height` as one sweep with both
    calls at each cell (ADR **0028**: measured half the cost of two passes),
-   one tile a step; it builds `run.skip` and a resumed sweep reads journalled
-   tiles back for the sea ones. *Verified by:* an agent offline, then the
-   maintainer on Caucasus 2.9.29.27468: a 5 km Kutaisi crop's cells equal the
-   bridge's, the whole map's rectangle is 470 x 785 km in 19 s (38 km past
-   the hull on the north where roads run, 14 km and 56 km short of it over
-   roadless mountains and sea), and Stop then Start resumed without measuring
-   again; Marianas found Pagan lost to a far snap's disc, fixed. The fused
-   sweep on the call floor: Caucasus 100 s for 2 294 tiles against 189 s as
-   two passes, Marianas 40 s against 47 s, same bytes. PR **52**.
-3. **X5: the grid job, `config.json` and the seven tables.** Prepare is
+   one tile a step; it builds `run.skip`. *Verified by:* the maintainer on
+   Caucasus 2.9.29.27468: crop cells equal the bridge's, the whole map's
+   rectangle is 470 x 785 km in 19 s, and the fused sweep took 100 s for
+   2 294 tiles against 189 s as two passes. PR **52**.
+4. **X5: the grid job, `config.json` and the seven tables.** Prepare is
    `identity` then `grid`; the hook pass is `config` (the theatre's facts,
    twenty lat/lon samples, the fill triple off three corners 500 km out) then
    `tables`, one file a step with `progress()`. No rectangle is read from a
    theatre file: ADR **0026**. Every shaper is terrain agnostic and never
    raises. *Verified by:* an agent offline, then live on Caucasus: all eight
    files re-read through the bridge matched byte for byte.
-4. **X12: the run says where it is, and claims no more.** A job's `start`
+5. **X12: the run says where it is, and claims no more.** A job's `start`
    may return `progress()` beside its step; the run keeps a record refreshed
    every second that the window's line reads, logs a `heartbeat` line every
    ten seconds and one `totals` line at done. ADRs **0024**, **0025**.
-5. **X2b: the run knows what it is extracting, and the build is the terrain's
-   version.** `dcs_build` off `autoupdate.cfg`, `terrain_dir` by the
-   shallowest id in an `entry.lua`, the three data files by path, size and
-   payload field. ADRs **0022**, **0023**. Verified live on Caucasus and Sinai.
 ## Next
 
 One task. The thing to pick up immediately.
 
-**X8a** — the mission-pass transport and the `surface` sweep: built,
-reviewed and offline-verified on `task/X8a-mission-transport`, PR **54**. The chunk
-answers one printable character a cell under a length frame. What remains is
-the live half: on the Kutaisi 5 km crop, a surface tile's bytes equal
-`land.getSurfaceType` re-read through the bridge, the band's time against
-the spec's 40 ms, and a Stop and Start mid-sweep. *Verified by:* the bridge
-steps from a session with the maintainer's DCS.
+**X8b** — the scenery sweep: 15 km spheres on a 20 km lattice through
+`server_call`, de-duplicated by `tostring` id, footprints attached from
+`terrain.getObjectsAtMapPoint`, `scenery.jsonl` appended as spheres
+complete; no helipad check (ADR 0011). *Verified by:* an agent offline for
+the lattice, the de-dup and the line shape; a sphere re-read through the
+bridge on the Kutaisi crop needs the maintainer's DCS.
 
 ## Then
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **X8b / X8c / X9** — scenery, the model catalogue and failure handling.
+1. **X8c / X9** — the model catalogue and failure handling.
    X ends here until `check-extract` exists.
 2. **C1 / C2 / C3** — the Rust interlude X10 needs: scaffold, `synth` on the F2
    constants, `check-extract`. Closes P2 and MS0 past.
