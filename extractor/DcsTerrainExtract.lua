@@ -6718,6 +6718,239 @@ M.surface_job = {
 M.add_job("mission", M.surface_job)
 
 --------------------------------------------------------------------------------
+-- The scenery lattice, its answer and its line
+--
+-- Scenery is searched a box at a time on a lattice anchored on the grid
+-- origin, row-major, each box clipped to the grid and keeping only the
+-- objects whose position lies inside it, lower edges included and upper
+-- edges not (ADR 0032). So every object belongs to exactly one box, and the
+-- file needs no set of ids to stay free of repeats. Afghanistan's cities hold
+-- a million objects in 20 km, so the box is small enough that the densest
+-- one is under a megabyte in one call.
+--
+-- The chunk and the read-back both place a point by comparing it against the
+-- same edges, computed here once, so a point on an edge lands in the same box
+-- on both sides: the edges cross to the server at %.17g, which reads back as
+-- the same double.
+--------------------------------------------------------------------------------
+
+M.SCENERY_BOX_M = 2000
+-- Below the lowest ground and above the highest, so a box is a column.
+M.SCENERY_FLOOR_M = -1000
+M.SCENERY_CEILING_M = 10000
+
+function M.scenery_plan(grid, side)
+  if type(grid) ~= "table" then
+    error("scenery_plan: not a grid: " .. tostring(grid), 2)
+  end
+  if not is_finite(side) or side <= 0 then
+    error("scenery_plan: side is not a positive number: " .. tostring(side), 2)
+  end
+  local rows = ceil(grid.height * grid.cell_size / side)
+  local cols = ceil(grid.width * grid.cell_size / side)
+  return {
+    grid = grid,
+    side = side,
+    rows = rows,
+    cols = cols,
+    total = rows * cols,
+    max_x = grid.origin_x + grid.height * grid.cell_size,
+    max_z = grid.origin_z + grid.width * grid.cell_size,
+  }
+end
+
+-- Edge k of the lattice along one axis, clipped to the grid's far side.
+local function scenery_edge(origin, side, k, max)
+  local e = origin + k * side
+  if e > max then
+    return max
+  end
+  return e
+end
+
+-- Box n, counted from 1: its x and z ranges, each half-open.
+function M.scenery_box(plan, n)
+  local i = floor((n - 1) / plan.cols)
+  local j = (n - 1) - i * plan.cols
+  local g, s = plan.grid, plan.side
+  return scenery_edge(g.origin_x, s, i, plan.max_x), scenery_edge(g.origin_z, s, j, plan.max_z),
+    scenery_edge(g.origin_x, s, i + 1, plan.max_x), scenery_edge(g.origin_z, s, j + 1, plan.max_z)
+end
+
+-- The lattice index along one axis whose half-open range holds v, or nil off
+-- the grid. The division only guesses; the edges decide.
+local function scenery_index(v, origin, side, count, max)
+  if not (v >= origin and v < max) then
+    return nil
+  end
+  local k = floor((v - origin) / side)
+  if k > count - 1 then
+    k = count - 1
+  end
+  if v < scenery_edge(origin, side, k, max) then
+    k = k - 1
+  elseif k + 1 < count and v >= scenery_edge(origin, side, k + 1, max) then
+    k = k + 1
+  end
+  return k
+end
+
+-- The box that holds the point, or nil for a point off the grid.
+function M.scenery_box_of(plan, x, z)
+  local g, s = plan.grid, plan.side
+  local i = scenery_index(x, g.origin_x, s, plan.rows, plan.max_x)
+  local j = scenery_index(z, g.origin_z, s, plan.cols, plan.max_z)
+  if i == nil or j == nil then
+    return nil
+  end
+  return i * plan.cols + j + 1
+end
+
+-- One record per object the box keeps, tab-separated: the id as digits, the
+-- model, then x, altitude and z. getName() answers a Lua number, written at
+-- %.17g, which for an integer id is its digits. A model holding a control
+-- character, which would break the record, is dropped and counted, and an
+-- object whose reads raise is counted. The last line is the two counts.
+local SCENERY_CHUNK = [[
+local x0, z0, x1, z1, y0, y1 = %s, %s, %s, %s, %s, %s
+local fmt, find = string.format, string.find
+local out, n, dropped, raised = {}, 0, 0, 0
+local function read(o)
+  local p = o:getPoint()
+  local x, z = p.x, p.z
+  if x >= x0 and x < x1 and z >= z0 and z < z1 then
+    local id, model = o:getName(), o:getTypeName()
+    if type(model) ~= "string" or find(model, "%%c") then
+      return false
+    end
+    if type(id) == "number" then
+      id = fmt("%%.17g", id)
+    end
+    out[n + 1] = fmt("%%s\t%%s\t%%.17g\t%%.17g\t%%.17g", tostring(id), model, x, p.y, z)
+    n = n + 1
+  end
+  return true
+end
+world.searchObjects(Object.Category.SCENERY,
+  { id = world.VolumeType.BOX,
+    params = { min = { x = x0, y = y0, z = z0 }, max = { x = x1, y = y1, z = z1 } } },
+  function(o)
+    local ok, kept = pcall(read, o)
+    if not ok then
+      raised = raised + 1
+    elseif kept == false then
+      dropped = dropped + 1
+    end
+    return true
+  end)
+out[n + 1] = fmt("%%d %%d", dropped, raised)
+local body = table.concat(out, "\n", 1, n + 1)
+return #body .. ":" .. body
+]]
+
+function M.scenery_chunk(plan, n)
+  local x0, z0, x1, z1 = M.scenery_box(plan, n)
+  return M.server_source(SCENERY_CHUNK, x0, z0, x1, z1, M.SCENERY_FLOOR_M, M.SCENERY_CEILING_M)
+end
+
+-- The records of box n's answer, each { id, model, x, alt, z } with the id
+-- as its digits, then the dropped and raised counts; or nil and why the whole
+-- answer is refused. A record that does not parse, or a point the box does
+-- not hold, refuses the answer: the box is asked again rather than written
+-- in part.
+function M.scenery_answer(body, plan, n)
+  local records = {}
+  local at = 1
+  local find, sub, match = string.find, string.sub, string.match
+  while true do
+    local nl = find(body, "\n", at, true)
+    if nl == nil then
+      break
+    end
+    local line = sub(body, at, nl - 1)
+    local id, model, xs, ys, zs = match(line, "^(%d+)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)$")
+    if id == nil or find(model, "%c") then
+      return nil, format("not a scenery record: %q", sub(line, 1, 120))
+    end
+    local x, alt, z = tonumber(xs), tonumber(ys), tonumber(zs)
+    if not (is_finite(x) and is_finite(alt) and is_finite(z)) then
+      return nil, format("a record with a position that is not finite: %q", sub(line, 1, 120))
+    end
+    -- The line writes the id as a JSON number, so it must read back as the
+    -- same digits.
+    local idn = tonumber(id)
+    if format("%.17g", idn) ~= id then
+      return nil, format("an id that is not a whole number below 2^53: %s", id)
+    end
+    if M.scenery_box_of(plan, x, z) ~= n then
+      return nil, format("object %s at %s %s is not in box %d", id, xs, zs, n)
+    end
+    records[#records + 1] = { id = id, model = model, x = x, alt = alt, z = z }
+    at = nl + 1
+  end
+  local dropped, raised = match(sub(body, at), "^(%d+) (%d+)$")
+  if dropped == nil then
+    return nil, format("no counts at the end: %q", sub(body, at, at + 119))
+  end
+  return records, tonumber(dropped), tonumber(raised)
+end
+
+-- The footprint the hook's terrain module gives for the object with this id:
+-- the obb as { w, d, rotation, cx, cz } and the radius, each nil where the
+-- entry is missing or a value is not finite. The call answers every object
+-- whose footprint holds the point, so only the entry with this id counts,
+-- and its id is a string where getName() was a number.
+function M.scenery_footprint(hits, id)
+  if type(hits) ~= "table" then
+    return nil, nil
+  end
+  for _, h in ipairs(hits) do
+    if type(h) == "table" and tostring(h.id) == id then
+      local size, center = h.sizeOBB, h.center
+      local obb
+      if type(size) == "table" and type(center) == "table" then
+        local w, d, cx, cz, rotation = size[1], size[2], center[1], center[2], h.rotation
+        if is_finite(w) and is_finite(d) and is_finite(cx) and is_finite(cz) and is_finite(rotation) then
+          obb = { w = w, d = d, rotation = rotation, cx = cx, cz = cz }
+        end
+      end
+      local radius = h.radius
+      if not is_finite(radius) then
+        radius = nil
+      end
+      return obb, radius
+    end
+  end
+  return nil, nil
+end
+
+-- The line, formatted by hand like the road lines and held to the encoder's
+-- bytes by a test: a million lines through the encoder is minutes.
+function M.scenery_line(r, obb, radius)
+  local box = "null"
+  if obb then
+    box = format('{"cx":%.17g,"cz":%.17g,"d":%.17g,"rotation":%.17g,"w":%.17g}',
+      obb.cx, obb.cz, obb.d, obb.rotation, obb.w)
+  end
+  return format('{"alt":%.17g,"id":%s,"model":"%s","obb":%s,"radius":%s,"x":%.17g,"z":%.17g}\n',
+    r.alt, r.id, escape(r.model), box, num_or_null(radius), r.x, r.z)
+end
+
+-- A line read back: its id's digits, x and z, or nil for a line this file
+-- does not write.
+function M.parse_scenery_line(line)
+  if line:sub(1, 7) ~= '{"alt":' then
+    return nil
+  end
+  local id = line:match('"id":(%d+),')
+  local x, z = field_number(line, "x"), field_number(line, "z")
+  if id == nil or not (is_finite(x) and is_finite(z)) or line:sub(-1) ~= "}" then
+    return nil
+  end
+  return id, x, z
+end
+
+--------------------------------------------------------------------------------
 -- DCS callbacks
 --
 -- The four callbacks the run is driven by. onSimulationFrame is the whole
