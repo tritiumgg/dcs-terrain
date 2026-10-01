@@ -4,7 +4,7 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-09-26T18:13Z
+**Last updated:** 2026-10-01T21:35Z
 
 ## Done
 
@@ -59,12 +59,14 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
 One task. The thing to pick up immediately.
 
-**X8b** — the scenery sweep: 15 km spheres on a 20 km lattice through
-`server_call`, de-duplicated by `tostring` id, footprints attached from
-`terrain.getObjectsAtMapPoint`, `scenery.jsonl` appended as spheres
-complete; no helipad check (ADR 0011). *Verified by:* an agent offline for
-the lattice, the de-dup and the line shape; a sphere re-read through the
-bridge on the Kutaisi crop needs the maintainer's DCS.
+**X8b** — the scenery sweep: built, reviewed and offline-verified on
+`task/X8b-scenery-sweep`. 2 km boxes in place of spheres (ADR 0032, measured
+on Afghanistan 2.9.30.28536: Kabul holds a million objects in 20 km), the
+file its own journal (ADR 0033); one dense Kabul box through the real chunk
+matched every footprint. What remains is the live half: a crop run whose box
+re-read through the bridge equals its lines, footprints included, and a Stop
+and Start mid-sweep. *Verified by:* the bridge steps from a session with the
+maintainer's DCS, after the maintainer runs the crop.
 
 ## Then
 
