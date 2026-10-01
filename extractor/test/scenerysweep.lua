@@ -214,7 +214,7 @@ local done, total = progress()
 T.eq("progress counts boxes", total, 6)
 T.eq("all of them", done, 6)
 T.eq("the totals", log_has("scenery: 6 boxes, 0 lines read back, 9 objects written,"
-  .. " 4 with a footprint, 0 already in the file, 0 boxes refused, 4 dropped, 1 raised,"
+  .. " 4 with a footprint, 0 already in the file, 4 dropped, 1 raised,"
   .. " 1 footprint calls failed"), true)
 T.eq("the failed footprint call is logged once", log_has("terrain.getObjectsAtMapPoint failed at 2500 2500"), true)
 local left = {}
@@ -235,21 +235,44 @@ T.eq("a step a box and a step a line, and the last", #sliced, 6 + 9 + 1)
 E.SCENERY_SLICE = 4096
 
 --------------------------------------------------------------------------------
-T.group("a refused box writes nothing and the sweep goes on")
+T.group("a refused box refuses the run, and the next Start asks it again")
 --------------------------------------------------------------------------------
+
+-- The lines of the boxes before box k, as a sweep stopped there leaves them.
+local function before(k)
+  local out = {}
+  for n = 1, k - 1 do
+    for _, id in ipairs(BOXES[n]) do out[#out + 1] = line_for(BY_ID[id]) end
+  end
+  return table.concat(out)
+end
 
 chunks = 0
 cut = 3
 fs = FakeFs.new()
-logged = {}
 run = new_run(fs)
 statuses = drive(E.scenery_job, run)
 cut = nil
-T.eq("done", statuses[#statuses], E.DONE)
-T.eq("box 3's object is not there", fs.files[FILE], expected(3))
-T.eq("the box is logged with its edges",
-  log_has("scenery box 3 (x 2000..4000, z 0..2000) refused: declared"), true)
-T.eq("and counted", log_has("1 boxes refused"), true)
+T.eq("refused", statuses[#statuses], E.REFUSED)
+T.eq("naming the box and its edges", run.refusal:find(
+  "scenery box 3 (x 2000..4000, z 0..2000) cannot be read, Start again to ask it again:"
+  .. " declared", 1, true), 1)
+T.eq("the boxes before it are written", fs.files[FILE], before(3))
+statuses = drive(E.scenery_job, new_run(fs))
+T.eq("the next Start finishes", statuses[#statuses], E.DONE)
+T.eq("with every box", fs.files[FILE], WHOLE)
+
+-- Box 1 half written, and its search refused on the Start that resumes it:
+-- the next Start still writes what it lacks.
+fs = FakeFs.new()
+fs.files[FILE] = line_for(BY_ID[101]) .. line_for(BY_ID[80006261])
+chunks = 0
+cut = 1
+statuses = drive(E.scenery_job, new_run(fs))
+cut = nil
+T.eq("a refused resumed box refuses", statuses[#statuses], E.REFUSED)
+statuses = drive(E.scenery_job, new_run(fs))
+T.eq("and the Start after it finishes", fs.files[FILE], WHOLE)
 
 --------------------------------------------------------------------------------
 T.group("what the sweep refuses")

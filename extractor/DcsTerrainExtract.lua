@@ -6961,10 +6961,11 @@ end
 -- One box a step: the chunk searches it in the server state, and the steps
 -- after attach each object's footprint from this state's terrain module and
 -- append the lines a slice at a time, so a dense box's hook-side work does
--- not sit in one frame. A box whose answer is refused is logged and writes
--- nothing, and the sweep goes on to the next. Boxes in the skip set are
--- searched like any other: an empty one costs next to nothing, and a sea
--- tile can hold a bridge.
+-- not sit in one frame. A box whose answer is refused refuses the run: the
+-- resume starts at the last box the file holds lines for, so a box passed
+-- over would never be asked again, and the next Start asks it. Boxes in the
+-- skip set are searched like any other: an empty one costs next to nothing,
+-- and a sea tile can hold a bridge.
 --------------------------------------------------------------------------------
 
 M.SCENERY_SLICE = 4096
@@ -7011,7 +7012,7 @@ M.scenery_job = {
     local phase = "ask"
     local next_box = 1
     local box = nil
-    local written, framed, refused, dropped, raised, failed = 0, 0, 0, 0, 0, 0
+    local written, framed, dropped, raised, failed = 0, 0, 0, 0, 0
     local read_back, already = 0, 0
     local reader, copier, bad
     -- The box of the last line read back and the ids its lines hold; the
@@ -7080,11 +7081,10 @@ M.scenery_job = {
         why = a
       end
       if records == nil then
-        refused = refused + 1
         local x0, z0, x1, z1 = M.scenery_box(plan, n)
-        M.log(format("scenery box %d (x %.17g..%.17g, z %.17g..%.17g) refused: %s",
-          n, x0, x1, z0, z1, tostring(why)))
-        return
+        run.refusal = format("scenery box %d (x %.17g..%.17g, z %.17g..%.17g) cannot be read,"
+          .. " Start again to ask it again: %s", n, x0, x1, z0, z1, tostring(why))
+        return false
       end
       dropped = dropped + a
       raised = raised + b
@@ -7102,6 +7102,7 @@ M.scenery_job = {
       if #records > 0 then
         box = { n = n, records = records, at = 1 }
       end
+      return true
     end
 
     -- One slice of the box: each record's footprint, then its line, then
@@ -7178,12 +7179,14 @@ M.scenery_job = {
       end
       if next_box > plan.total then
         M.log(format("scenery: %d boxes, %d lines read back, %d objects written, %d with a"
-          .. " footprint, %d already in the file, %d boxes refused, %d dropped, %d raised,"
-          .. " %d footprint calls failed", plan.total, read_back, written, framed, already,
-          refused, dropped, raised, failed))
+          .. " footprint, %d already in the file, %d dropped, %d raised, %d footprint"
+          .. " calls failed", plan.total, read_back, written, framed, already, dropped, raised,
+          failed))
         return M.DONE
       end
-      ask()
+      if not ask() then
+        return M.REFUSED
+      end
       return M.MORE
     end
 
