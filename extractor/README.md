@@ -56,9 +56,15 @@ without `seek`.
   nearest by road point, every unordered pair once. The seeds are numbered
   by a fixed plan and the file is its own journal, so a resumed run reads
   it back and asks only what it lacks (ADR 0030); a seed provably farther
-  than 25 km from every road is neither asked nor written (ADR 0031). *The
-  scenery sweep is not built yet, so a run reaches `done` with two layers,
-  the roads and no scenery.*
+  than 25 km from every road is neither asked nor written (ADR 0031). The
+  mission pass then asks the mission state: the `surface` tiles, a band of
+  64 rows a step, and the scenery, one 2 km box a step on a lattice anchored
+  on the grid origin, each box keeping the objects whose position lies inside
+  it, so each object is written once, with its footprint from the hook's own
+  terrain module (ADR 0032). The scenery file is its own journal: a resumed
+  run reads it back and asks its last box again, writing only what the file
+  lacks (ADR 0033). *The model catalogue, `scenery_models.json`, is not
+  built yet, so a run reaches `done` without it.*
   While a run is sweeping, the line names the sweep, which of how many it is
   and its count, refreshed every second, and the bar is that sweep's own count;
   nothing claims to know how far the whole run is (ADR 0025).
@@ -80,4 +86,6 @@ The tests cover only what a running DCS cannot be driven to do on demand: the
 encoders, grid computation, the journal and resume, the frame-budget state
 machine, and injected failures. Each supplies its own fakes, sized to the one
 function under test. The sweeps that read terrain are verified against a
-running theatre instead (ADR 0005), so nothing here stubs a terrain module.
+running theatre instead (ADR 0005): a test that fakes the terrain module or
+the mission state fakes only the calls its sweep makes, and the live run is
+what proves the answers.

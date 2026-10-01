@@ -59,9 +59,9 @@ centre on map** arms the next click you make on the map and fills the centre in.
 logs to `Logs/DcsTerrainExtract.log`, resumes after **Stop**, and never writes
 into your DCS install. *The window and its controls work, and a run writes the
 manifest, `config.json`, the seven tables, the `water`, `height` and `surface`
-tiles and the road and railroad routes, with a whole-map run measuring the built area
-first; the scenery sweep is not built yet, so an extract is not complete and
-nothing reads one.*
+tiles, the road and railroad routes and the scenery, with a whole-map run
+measuring the built area first; the model catalogue is not built yet, so an
+extract is not complete and nothing reads one.*
 
 **Pack** the extract into a single file, then verify it:
 
