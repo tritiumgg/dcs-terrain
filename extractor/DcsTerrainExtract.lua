@@ -6910,7 +6910,13 @@ function M.scenery_footprint(hits, id)
     return nil, nil
   end
   for _, h in ipairs(hits) do
-    if type(h) == "table" and tostring(h.id) == id then
+    -- tostring writes a number past 1e14 with an exponent, so a numeric id
+    -- is compared at the digits the record carries.
+    local hid = type(h) == "table" and h.id
+    if type(hid) == "number" then
+      hid = format("%.17g", hid)
+    end
+    if hid == id then
       local size, center = h.sizeOBB, h.center
       local obb
       if type(size) == "table" and type(center) == "table" then

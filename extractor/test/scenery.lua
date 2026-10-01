@@ -121,6 +121,9 @@ T.eq("center z the second", obb.cz, 269621.28125)
 T.eq("rotation as given", obb.rotation, 2.9027869579643)
 T.eq("and the radius", radius, 39.616166273419)
 
+obb, radius = E.scenery_footprint({ { id = 123456789012345, radius = 3 } }, "123456789012345")
+T.eq("a numeric id matches by its digits", radius, 3)
+
 obb, radius = E.scenery_footprint(nil, "1")
 T.eq("no answer is no obb", obb, nil)
 T.eq("and no radius", radius, nil)
