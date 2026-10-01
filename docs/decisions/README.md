@@ -44,6 +44,7 @@ disagree, the later accepted one wins, and the earlier is marked
 | [0030](0030-road-seeds-follow-a-fixed-plan.md) | Accepted | 2026-09-12 | Road seeds follow a fixed plan, and the file is its own journal | `extractor-hook.md` "Hook-pass sweeps", "Lifecycle"; `extract-format.md` "Tables", "manifest.json" `timing_ms`; `plan.md` X7 |
 | [0031](0031-a-far-seed-is-neither-asked-nor-written.md) | Accepted | 2026-09-12 | A far seed is neither asked nor written | ADR 0029's roads paragraph; `extractor-hook.md` "Hook-pass sweeps"; `extract-format.md` "Tables"; `plan.md` X7 |
 | [0032](0032-the-scenery-sweep-searches-a-2-km-box-lattice.md) | Accepted | 2026-10-01 | The scenery sweep searches a 2 km box lattice | `extractor-hook.md` "Mission-pass sweeps", "Performance targets"; `design-and-facts.md` "Design decisions"; `extract-format.md` "Tables"; `plan.md` X8b |
+| [0033](0033-the-scenery-file-is-its-own-journal.md) | Accepted | 2026-10-01 | The scenery file is its own journal, and its last box is asked again | `extractor-hook.md` "Mission-pass sweeps", "Lifecycle"; `plan.md` X8b, X8c |
 
 Add a row when you add an ADR. This table is the index Claude reads, so an ADR
 missing from it will not be found. Each record's own `Affects` line, at the top
