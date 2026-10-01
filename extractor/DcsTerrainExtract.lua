@@ -6991,15 +6991,79 @@ M.scenery_job = {
     end
     local file = TABLE_FILES.scenery
     local path = M.join(run.dir, file)
-    if M.fs.size(path) ~= nil then
-      return refuse(file .. " is already there: move it aside to sweep the scenery again")
+
+    -- The file is the journal (ADR 0033), so the job reads it back on every
+    -- Start, whatever the manifest says of the pass: a directory extracted
+    -- before this sweep existed has the mission pass complete and no file.
+    local recovered = M.recover_swap(path)
+    if recovered then
+      M.log(format("%s: %s", file, recovered))
     end
 
-    -- The next box to ask, and the box being written: its records and the
-    -- next one to write.
+    -- Where the sweep is: reading the file back, repairing its tail, or
+    -- asking. `next_box` is the next box to ask, and `box` the one being
+    -- written: its records and the next one to write.
+    local phase = "ask"
     local next_box = 1
     local box = nil
     local written, framed, refused, dropped, raised, failed = 0, 0, 0, 0, 0, 0
+    local read_back, already = 0, 0
+    local reader, copier, bad
+    -- The box of the last line read back and the ids its lines hold; the
+    -- sweep resumes at that box and writes only what those ids leave out.
+    local last_box, seen
+    if M.fs.size(path) ~= nil then
+      local rerr
+      reader, rerr = M.line_reader(path)
+      if not reader then
+        return refuse(format("%s cannot be read back: %s", file, tostring(rerr)))
+      end
+      phase = "read"
+    end
+
+    local function on_line(line)
+      if bad then
+        return
+      end
+      local id, x, z = M.parse_scenery_line(line)
+      local n = id and M.scenery_box_of(plan, x, z)
+      if n == nil then
+        bad = format("line %d is not a scenery object on this grid", read_back + 1)
+        return
+      end
+      if last_box ~= nil and n < last_box then
+        bad = format("line %d is in box %d after box %d", read_back + 1, n, last_box)
+        return
+      end
+      if n ~= last_box then
+        last_box, seen = n, {}
+      end
+      seen[id] = true
+      read_back = read_back + 1
+    end
+
+    -- The end of the read-back: the box to resume at, and whether the
+    -- file's tail needs repair before anything is appended after it.
+    local function after_read(tail)
+      M.log(format("%s: %d lines read back, the last in box %s", file, read_back,
+        tostring(last_box)))
+      if last_box ~= nil then
+        next_box = last_box
+      end
+      if tail > 0 then
+        M.log(format("%s: a cut-short last line of %d bytes is dropped", file, tail))
+        local cerr
+        copier, cerr = M.copy_head(path, reader.read - tail)
+        if not copier then
+          run.refusal = format("%s cannot be repaired: %s", file, tostring(cerr))
+          return M.REFUSED
+        end
+        phase = "repair"
+        return M.MORE
+      end
+      phase = "ask"
+      return M.MORE
+    end
 
     local function ask()
       local n = next_box
@@ -7019,6 +7083,17 @@ M.scenery_job = {
       end
       dropped = dropped + a
       raised = raised + b
+      if n == last_box then
+        local fresh = {}
+        for _, r in ipairs(records) do
+          if seen[r.id] then
+            already = already + 1
+          else
+            fresh[#fresh + 1] = r
+          end
+        end
+        records, seen = fresh, nil
+      end
       if #records > 0 then
         box = { n = n, records = records, at = 1 }
       end
@@ -7064,6 +7139,32 @@ M.scenery_job = {
     end
 
     local function step()
+      if phase == "read" then
+        local status, tail = reader.step(on_line)
+        if bad then
+          reader.close()
+          run.refusal = format("%s does not match this extract's box lattice (%s):"
+            .. " move it aside to sweep the scenery again", file, bad)
+          return M.REFUSED
+        end
+        if status == M.MORE then
+          return M.MORE
+        elseif status == M.DONE then
+          return after_read(tail)
+        end
+        run.refusal = format("%s cannot be read back: %s", file, tostring(tail))
+        return M.REFUSED
+      elseif phase == "repair" then
+        local status, err = copier()
+        if status == M.MORE then
+          return M.MORE
+        elseif status == M.DONE then
+          phase = "ask"
+          return M.MORE
+        end
+        run.refusal = format("%s cannot be repaired: %s", file, tostring(err))
+        return M.REFUSED
+      end
       if box ~= nil then
         if not write_slice() then
           return M.REFUSED
@@ -7071,16 +7172,24 @@ M.scenery_job = {
         return M.MORE
       end
       if next_box > plan.total then
-        M.log(format("scenery: %d boxes, %d objects written, %d with a footprint,"
-          .. " %d boxes refused, %d dropped, %d raised, %d footprint calls failed",
-          plan.total, written, framed, refused, dropped, raised, failed))
+        M.log(format("scenery: %d boxes, %d lines read back, %d objects written, %d with a"
+          .. " footprint, %d already in the file, %d boxes refused, %d dropped, %d raised,"
+          .. " %d footprint calls failed", plan.total, read_back, written, framed, already,
+          refused, dropped, raised, failed))
         return M.DONE
       end
       ask()
       return M.MORE
     end
 
+    -- Boxes before the one being asked count as done from the start, so a
+    -- resumed sweep's bar climbs rather than falling back (ADR 0025).
     local function progress()
+      if phase == "read" then
+        return reader.read, reader.size
+      elseif phase == "repair" then
+        return nil
+      end
       if box ~= nil then
         return box.n - 1, plan.total
       end

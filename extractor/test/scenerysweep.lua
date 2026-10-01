@@ -209,8 +209,9 @@ T.eq("and its z side", searches[6].params.max.z, 3000)
 local done, total = progress()
 T.eq("progress counts boxes", total, 6)
 T.eq("all of them", done, 6)
-T.eq("the totals", log_has("scenery: 6 boxes, 8 objects written, 4 with a footprint,"
-  .. " 0 boxes refused, 1 dropped, 1 raised, 1 footprint calls failed"), true)
+T.eq("the totals", log_has("scenery: 6 boxes, 0 lines read back, 8 objects written,"
+  .. " 4 with a footprint, 0 already in the file, 0 boxes refused, 1 dropped, 1 raised,"
+  .. " 1 footprint calls failed"), true)
 T.eq("the failed footprint call is logged once", log_has("terrain.getObjectsAtMapPoint failed at 2500 2500"), true)
 local left = {}
 for k in pairs(server) do left[#left + 1] = k end
@@ -270,5 +271,100 @@ run = new_run(fs)
 statuses = drive(E.scenery_job, run)
 T.eq("a short write refuses", statuses[#statuses], E.REFUSED)
 T.eq("naming the file", run.refusal:find("scenery.jsonl cannot be written", 1, true), 1)
+
+--------------------------------------------------------------------------------
+T.group("a Start reads the file back and resumes at its last box")
+--------------------------------------------------------------------------------
+
+-- A Stop is the stepper abandoned; the next Start is a new run on the same
+-- files. At every point a sweep can stop, a line a step, the resumed file
+-- must be the file a sweep never stopped writes.
+E.SCENERY_SLICE = 1
+local broken = 0
+for stop = 1, #sliced - 1 do
+  fs = FakeFs.new()
+  drive(E.scenery_job, new_run(fs), stop)
+  statuses = drive(E.scenery_job, new_run(fs))
+  if statuses[#statuses] ~= E.DONE or fs.files[FILE] ~= WHOLE then
+    broken = broken + 1
+  end
+end
+T.eq("every stopping point resumes to the same file", broken, 0)
+E.SCENERY_SLICE = 4096
+
+-- Stopped after box 4: box 4 is asked again and adds nothing, and the bar
+-- starts at the boxes before it.
+fs = FakeFs.new()
+fs.files[FILE] = expected():sub(1, #expected() - #line_for(BY_ID[110]) - #line_for(BY_ID[104]))
+logged = {}
+searches = {}
+run = new_run(fs)
+local step
+step, progress = E.scenery_job.start(run)
+T.eq("reading back counts bytes", select(2, progress()), #fs.files[FILE])
+repeat until step() ~= E.MORE or select(2, progress()) == 6
+done, total = progress()
+T.eq("the bar starts at the box resumed", done, 3)
+T.eq("of all of them", total, 6)
+repeat until step() ~= E.MORE
+T.eq("the rest is written", fs.files[FILE], WHOLE)
+T.eq("from the last box on", #searches, 3)
+T.eq("what the file held is read back", log_has("6 lines read back, the last in box 4"), true)
+T.eq("and box 4's object is not written twice", log_has("1 already in the file"), true)
+
+fs = FakeFs.new()
+fs.files[FILE] = WHOLE
+searches = {}
+statuses = drive(E.scenery_job, new_run(fs))
+T.eq("a finished file is done again", statuses[#statuses], E.DONE)
+T.eq("unchanged", fs.files[FILE], WHOLE)
+T.eq("asking only its last box", #searches, 1)
+
+fs = FakeFs.new()
+run = new_run(fs)
+run.manifest.passes.mission.complete = true
+statuses = drive(E.scenery_job, run)
+T.eq("a mission pass marked complete with no file is swept", fs.files[FILE], WHOLE)
+
+--------------------------------------------------------------------------------
+T.group("a cut-short tail is dropped, and a cut-short swap put back")
+--------------------------------------------------------------------------------
+
+fs = FakeFs.new()
+fs.files[FILE] = WHOLE:sub(1, -10)
+logged = {}
+statuses = drive(E.scenery_job, new_run(fs))
+T.eq("done", statuses[#statuses], E.DONE)
+T.eq("the line cut short is written again", fs.files[FILE], WHOLE)
+T.eq("saying so", log_has("a cut-short last line of"), true)
+T.eq("no copy is left", fs.files[FILE .. ".tmp"], nil)
+T.eq("nor an aside", fs.files[FILE .. ".old"], nil)
+
+fs = FakeFs.new()
+fs.files[FILE .. ".old"] = expected(6)
+logged = {}
+statuses = drive(E.scenery_job, new_run(fs))
+T.eq("a file left aside by a swap is put back and finished", fs.files[FILE], WHOLE)
+T.eq("saying so", log_has("the file renamed back from its aside"), true)
+
+--------------------------------------------------------------------------------
+T.group("a file that is not this lattice's is refused")
+--------------------------------------------------------------------------------
+
+local function refused_file(name, contents, want)
+  fs = FakeFs.new()
+  fs.files[FILE] = contents
+  run = new_run(fs)
+  statuses = drive(E.scenery_job, run)
+  T.eq(name, statuses[#statuses], E.REFUSED)
+  T.eq(name .. ", saying why", run.refusal:find(want, 1, true) ~= nil, true)
+  T.eq(name .. ", untouched", fs.files[FILE], contents)
+end
+refused_file("boxes out of order", line_for(BY_ID[102]) .. line_for(BY_ID[101]),
+  "line 2 is in box 1 after box 3")
+refused_file("a line of another kind", line_for(BY_ID[101]) .. E.seed_line(1, 2, 3),
+  "line 2 is not a scenery object on this grid")
+refused_file("an object off the grid", line_for(BY_ID[105]),
+  "line 1 is not a scenery object on this grid")
 
 T.done()
