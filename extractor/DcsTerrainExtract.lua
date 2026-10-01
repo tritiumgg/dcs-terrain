@@ -6951,6 +6951,151 @@ function M.parse_scenery_line(line)
 end
 
 --------------------------------------------------------------------------------
+-- The scenery sweep
+--
+-- One box a step: the chunk searches it in the server state, and the steps
+-- after attach each object's footprint from this state's terrain module and
+-- append the lines a slice at a time, so a dense box's hook-side work does
+-- not sit in one frame. A box whose answer is refused is logged and writes
+-- nothing, and the sweep goes on to the next. Boxes in the skip set are
+-- searched like any other: an empty one costs next to nothing, and a sea
+-- tile can hold a bridge.
+--------------------------------------------------------------------------------
+
+M.SCENERY_SLICE = 4096
+
+M.scenery_job = {
+  name = "scenery",
+  start = function(run)
+    local function refuse(message)
+      run.refusal = message
+      return function()
+        return M.REFUSED
+      end
+    end
+
+    local terrain = M.terrain_module()
+    if not terrain then
+      return refuse("the terrain module is not loaded")
+    end
+    local footprints = terrain.getObjectsAtMapPoint
+    if type(footprints) ~= "function" then
+      return refuse("terrain.getObjectsAtMapPoint is not a function")
+    end
+    if not (run.manifest and type(run.manifest.grid) == "table") then
+      return refuse("no grid was planned")
+    end
+    local planned, plan = pcall(M.scenery_plan, run.manifest.grid, M.SCENERY_BOX_M)
+    if not planned then
+      return refuse("the scenery lattice cannot be made: " .. tostring(plan))
+    end
+    local file = TABLE_FILES.scenery
+    local path = M.join(run.dir, file)
+    if M.fs.size(path) ~= nil then
+      return refuse(file .. " is already there: move it aside to sweep the scenery again")
+    end
+
+    -- The next box to ask, and the box being written: its records and the
+    -- next one to write.
+    local next_box = 1
+    local box = nil
+    local written, framed, refused, dropped, raised, failed = 0, 0, 0, 0, 0, 0
+
+    local function ask()
+      local n = next_box
+      next_box = n + 1
+      local records, a, b = nil, nil, nil
+      local body, why = M.server_call(M.scenery_chunk(plan, n))
+      if body ~= nil then
+        records, a, b = M.scenery_answer(body, plan, n)
+        why = a
+      end
+      if records == nil then
+        refused = refused + 1
+        local x0, z0, x1, z1 = M.scenery_box(plan, n)
+        M.log(format("scenery box %d (x %.17g..%.17g, z %.17g..%.17g) refused: %s",
+          n, x0, x1, z0, z1, tostring(why)))
+        return
+      end
+      dropped = dropped + a
+      raised = raised + b
+      if #records > 0 then
+        box = { n = n, records = records, at = 1 }
+      end
+    end
+
+    -- One slice of the box: each record's footprint, then its line, then
+    -- the slice appended as one write.
+    local function write_slice()
+      local records, at = box.records, box.at
+      local last = at + M.SCENERY_SLICE - 1
+      if last > #records then
+        last = #records
+      end
+      local parts = {}
+      for k = at, last do
+        local r = records[k]
+        local ok, hits = pcall(footprints, r.x, r.z)
+        if not ok then
+          failed = failed + 1
+          if failed == 1 then
+            M.log(format("terrain.getObjectsAtMapPoint failed at %.17g %.17g: %s",
+              r.x, r.z, tostring(hits)))
+          end
+          hits = nil
+        end
+        local obb, radius = M.scenery_footprint(hits, r.id)
+        if obb then
+          framed = framed + 1
+        end
+        parts[#parts + 1] = M.scenery_line(r, obb, radius)
+      end
+      local ok, err = M.append_file(path, concat(parts))
+      if not ok then
+        run.refusal = format("%s cannot be written: %s", file, tostring(err))
+        return false
+      end
+      written = written + (last - at + 1)
+      box.at = last + 1
+      if box.at > #records then
+        box = nil
+      end
+      return true
+    end
+
+    local function step()
+      if box ~= nil then
+        if not write_slice() then
+          return M.REFUSED
+        end
+        return M.MORE
+      end
+      if next_box > plan.total then
+        M.log(format("scenery: %d boxes, %d objects written, %d with a footprint,"
+          .. " %d boxes refused, %d dropped, %d raised, %d footprint calls failed",
+          plan.total, written, framed, refused, dropped, raised, failed))
+        return M.DONE
+      end
+      ask()
+      return M.MORE
+    end
+
+    local function progress()
+      if box ~= nil then
+        return box.n - 1, plan.total
+      end
+      return next_box - 1, plan.total
+    end
+
+    M.log(format("scenery: %d boxes of %.17g m, %d by %d", plan.total, plan.side,
+      plan.rows, plan.cols))
+    return step, progress
+  end,
+}
+
+M.add_job("mission", M.scenery_job)
+
+--------------------------------------------------------------------------------
 -- DCS callbacks
 --
 -- The four callbacks the run is driven by. onSimulationFrame is the whole
