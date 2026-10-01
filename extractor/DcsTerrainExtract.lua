@@ -6968,7 +6968,8 @@ end
 -- and a sea tile can hold a bridge.
 --------------------------------------------------------------------------------
 
-M.SCENERY_SLICE = 4096
+-- About 25 ms of footprints and lines on a dense box, measured in Kabul.
+M.SCENERY_SLICE = 1024
 
 M.scenery_job = {
   name = "scenery",
