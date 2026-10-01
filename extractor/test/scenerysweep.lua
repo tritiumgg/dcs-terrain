@@ -48,6 +48,10 @@ local OBJECTS = {
   { 110, 'Q"UOTE', 4500, 3, 500 },
   { 80006261, "K_BUILDING", 1000.25, 1789.0020751953125, 1500.75 },
   { 112, "HOUSE_C", 150, 0, 150 },
+  { "113", "STRING_ID", 120, 0, 120 },     -- a string of digits: kept
+  { 1e17, "TOO_BIG", 130, 0, 130 },         -- past 2^53: dropped
+  { 1.5, "FRACTION", 140, 0, 140 },         -- not whole: dropped
+  { 114, "", 160, 0, 160 },                 -- no model: dropped
 }
 
 local function object(o)
@@ -83,7 +87,7 @@ local world = {
 local server = {
   world = world, Object = { Category = { SCENERY = 5 } },
   string = string, table = table, pcall = pcall, error = error,
-  tostring = tostring, type = type,
+  tostring = tostring, tonumber = tonumber, type = type,
 }
 local server_keys = {}
 for k in pairs(server) do server_keys[#server_keys + 1] = k end
@@ -161,7 +165,7 @@ end
 -- The file as it should be, each line through the encoder, the objects in
 -- box order and within a box in the order the search answered them.
 local function line_for(o)
-  local t = { id = o[1], model = o[2], x = o[3], alt = o[4], z = o[5],
+  local t = { id = tonumber(o[1]), model = o[2], x = o[3], alt = o[4], z = o[5],
     obb = E.JSON_NULL, radius = E.JSON_NULL }
   if o[1] % 2 == 0 then
     t.obb = { w = 10, d = 20, rotation = 0.5, cx = o[3] + 1, cz = o[5] + 2 }
@@ -169,7 +173,7 @@ local function line_for(o)
   end
   return E.json(t) .. "\n"
 end
-local BOXES = { { 101, 80006261, 112 }, { 103 }, { 102 }, { 109 }, { 110 }, { 104 } }
+local BOXES = { { 101, 80006261, 112, "113" }, { 103 }, { 102 }, { 109 }, { 110 }, { 104 } }
 local BY_ID = {}
 for _, o in ipairs(OBJECTS) do BY_ID[o[1]] = o end
 local function expected(leave_out)
@@ -209,8 +213,8 @@ T.eq("and its z side", searches[6].params.max.z, 3000)
 local done, total = progress()
 T.eq("progress counts boxes", total, 6)
 T.eq("all of them", done, 6)
-T.eq("the totals", log_has("scenery: 6 boxes, 0 lines read back, 8 objects written,"
-  .. " 4 with a footprint, 0 already in the file, 0 boxes refused, 1 dropped, 1 raised,"
+T.eq("the totals", log_has("scenery: 6 boxes, 0 lines read back, 9 objects written,"
+  .. " 4 with a footprint, 0 already in the file, 0 boxes refused, 4 dropped, 1 raised,"
   .. " 1 footprint calls failed"), true)
 T.eq("the failed footprint call is logged once", log_has("terrain.getObjectsAtMapPoint failed at 2500 2500"), true)
 local left = {}
@@ -227,7 +231,7 @@ fs = FakeFs.new()
 run = new_run(fs)
 local sliced = drive(E.scenery_job, run)
 T.eq("the same file", fs.files[FILE], WHOLE)
-T.eq("a step a box and a step a line, and the last", #sliced, 6 + 8 + 1)
+T.eq("a step a box and a step a line, and the last", #sliced, 6 + 9 + 1)
 E.SCENERY_SLICE = 4096
 
 --------------------------------------------------------------------------------
@@ -309,7 +313,7 @@ T.eq("of all of them", total, 6)
 repeat until step() ~= E.MORE
 T.eq("the rest is written", fs.files[FILE], WHOLE)
 T.eq("from the last box on", #searches, 3)
-T.eq("what the file held is read back", log_has("6 lines read back, the last in box 4"), true)
+T.eq("what the file held is read back", log_has("7 lines read back, the last in box 4"), true)
 T.eq("and box 4's object is not written twice", log_has("1 already in the file"), true)
 
 fs = FakeFs.new()

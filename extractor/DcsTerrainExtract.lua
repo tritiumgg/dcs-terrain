@@ -6808,9 +6808,11 @@ end
 
 -- One record per object the box keeps, tab-separated: the id as digits, the
 -- model, then x, altitude and z. getName() answers a Lua number, written at
--- %.17g, which for an integer id is its digits. A model holding a control
--- character, which would break the record, is dropped and counted, and an
--- object whose reads raise is counted. The last line is the two counts.
+-- %.17g, which for an integer id is its digits. An object the line could not
+-- carry, an id that is not a whole number below 2^53 or a model that is empty
+-- or holds a control character, is dropped and counted here, so one odd
+-- object never costs its box; an object whose reads raise is counted. The
+-- last line is the two counts.
 local SCENERY_CHUNK = [[
 local x0, z0, x1, z1, y0, y1 = %s, %s, %s, %s, %s, %s
 local fmt, find = string.format, string.find
@@ -6820,13 +6822,16 @@ local function read(o)
   local x, z = p.x, p.z
   if x >= x0 and x < x1 and z >= z0 and z < z1 then
     local id, model = o:getName(), o:getTypeName()
-    if type(model) ~= "string" or find(model, "%%c") then
+    if type(model) ~= "string" or model == "" or find(model, "%%c") then
       return false
     end
-    if type(id) == "number" then
-      id = fmt("%%.17g", id)
+    if type(id) == "string" and find(id, "^%%d+$") then
+      id = tonumber(id)
     end
-    out[n + 1] = fmt("%%s\t%%s\t%%.17g\t%%.17g\t%%.17g", tostring(id), model, x, p.y, z)
+    if type(id) ~= "number" or id < 0 or id >= 9007199254740992 or id %% 1 ~= 0 then
+      return false
+    end
+    out[n + 1] = fmt("%%.17g\t%%s\t%%.17g\t%%.17g\t%%.17g", id, model, x, p.y, z)
     n = n + 1
   end
   return true
