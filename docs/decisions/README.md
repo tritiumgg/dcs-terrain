@@ -43,6 +43,7 @@ disagree, the later accepted one wins, and the earlier is marked
 | [0029](0029-a-disc-settles-a-cell-only-within-the-theatres-reach.md) | Accepted | 2026-09-12 | A disc settles a cell only within the theatre's reach | ADR 0027's disc paragraph; `extractor-hook.md` "Lifecycle", roads seeds; `plan.md` X6, X7 |
 | [0030](0030-road-seeds-follow-a-fixed-plan.md) | Accepted | 2026-09-12 | Road seeds follow a fixed plan, and the file is its own journal | `extractor-hook.md` "Hook-pass sweeps", "Lifecycle"; `extract-format.md` "Tables", "manifest.json" `timing_ms`; `plan.md` X7 |
 | [0031](0031-a-far-seed-is-neither-asked-nor-written.md) | Accepted | 2026-09-12 | A far seed is neither asked nor written | ADR 0029's roads paragraph; `extractor-hook.md` "Hook-pass sweeps"; `extract-format.md` "Tables"; `plan.md` X7 |
+| [0032](0032-the-scenery-sweep-searches-a-2-km-box-lattice.md) | Accepted | 2026-10-01 | The scenery sweep searches a 2 km box lattice | `extractor-hook.md` "Mission-pass sweeps", "Performance targets"; `design-and-facts.md` "Design decisions"; `extract-format.md` "Tables"; `plan.md` X8b |
 
 Add a row when you add an ADR. This table is the index Claude reads, so an ADR
 missing from it will not be found. Each record's own `Affects` line, at the top
