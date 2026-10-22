@@ -3,8 +3,9 @@
 //! fails here until the copy is regenerated, and the regenerated copy is the
 //! reviewable diff.
 //!
-//! To accept a change, run the test with `DCSTERRAIN_UPDATE_SNAPSHOTS=1` and
-//! commit the rewritten file.
+//! To accept a change, run the test with `DCSTERRAIN_UPDATE_SNAPSHOTS=1`
+//! (that value only, so a stray `=0` cannot rewrite it) and commit the
+//! rewritten file.
 
 use std::path::Path;
 use std::process::Command;
@@ -33,7 +34,7 @@ fn the_schema_matches_its_snapshot() {
     );
 
     let snapshot = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/schema.json");
-    if std::env::var_os("DCSTERRAIN_UPDATE_SNAPSHOTS").is_some() {
+    if std::env::var_os("DCSTERRAIN_UPDATE_SNAPSHOTS").is_some_and(|v| v == "1") {
         std::fs::write(&snapshot, &printed).unwrap();
         return;
     }

@@ -4,6 +4,7 @@
 //! be piped; warnings and progress go to stderr, more of them with
 //! `--verbose`. A subcommand the build has not reached says so and exits 2.
 
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -130,6 +131,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
+        .with_ansi(std::io::stderr().is_terminal())
         .with_max_level(if cli.verbose {
             Level::DEBUG
         } else {
