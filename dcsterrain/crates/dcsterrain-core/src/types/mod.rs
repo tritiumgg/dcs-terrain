@@ -10,9 +10,11 @@
 
 mod criteria;
 mod ops;
+mod schema;
 
 pub use criteria::*;
 pub use ops::*;
+pub use schema::{OPERATIONS, Operation, UnknownOperation, schema};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
