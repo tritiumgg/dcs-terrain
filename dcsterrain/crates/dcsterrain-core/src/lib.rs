@@ -7,3 +7,4 @@
 // asks for the feature.
 #[cfg(any(test, feature = "synth"))]
 pub mod synth;
+pub mod types;
