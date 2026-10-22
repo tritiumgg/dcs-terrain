@@ -44,14 +44,16 @@ jobs:
   # rust-toolchain.toml on the first cargo call; no toolchain action is used,
   # because that would be a second place the version is written.
   #
-  # No dependency cache: the workspace has no dependencies yet, so saving and
-  # restoring one costs more than the build it would skip. Add one when C1
-  # lands clap, serde and schemars.
+  # The dependency cache keys on Cargo.lock and the toolchain, so a change to
+  # either rebuilds from scratch and every other run skips the dependencies.
   linux:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: dcsterrain
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
@@ -68,4 +70,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: dcsterrain
       - run: cargo test --workspace
