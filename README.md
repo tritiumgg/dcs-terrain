@@ -59,8 +59,8 @@ dcsterrain extract --install "/path/to/DCS World" --map Caucasus --out ./extract
 It reads the map's files and never writes into your DCS install. Four airdrome
 fields only a running DCS knows — the ICAO code, and whether a field is civilian,
 abandoned, and its class — come from an optional Lua hook run once at the
-Mission Editor; without it they are left empty (the hook's reduced form is
-planned, not usable yet).
+Mission Editor and passed to `extract` as `--hook <dir>`; without it they are
+left empty (the hook's reduced form is planned, not usable yet).
 
 **Pack** the extract into a single file, then verify it:
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR 0040](0040-the-extractor-fits-the-projection.md)
 
 ## Context
 
