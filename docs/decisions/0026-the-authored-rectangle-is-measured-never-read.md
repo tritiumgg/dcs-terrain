@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR 0034](0034-the-extract-is-decoded-from-the-terrain-files.md)
 
 ## Context
 
