@@ -4,13 +4,24 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-10-01T21:35Z
+**Last updated:** 2026-10-22T21:57Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **X8a: the mission-pass transport and `surface`.** `server_call` runs a
+1. **The extract is decoded from the terrain files.** Read-only decoding of
+   every Caucasus map file reproduced the live extract with no DCS running:
+   heights 99.95 % exact, water all but 67 of 141 M cells, 900 of 900 stands,
+   roads within 1.5 m of the router. The same decoders ran on Nevada (scene
+   format v8) and Syria. ADRs **0034** to **0038**: the files are the source,
+   decoders dispatch on class and version, 50 m on every map, the hook keeps
+   only an optional tables pass, the projection is fitted from the beacons.
+   Plan rewritten: E, F3, X15, C15, Q10. *Verified by:* the maintainer's
+   session on 2.9.30.28738, against the live extract from 2.9.29.27468.
+2. **X8b: the scenery sweep**, merged as built and reviewed (PR **55**). Its
+   live half never ran: ADR 0034 retires it.
+3. **X8a: the mission-pass transport and `surface`.** `server_call` runs a
    chunk through `net.dostring_in("server", ...)` and refuses any answer not
    framed as its own length; the surface sweep asks 64 rows a step, one
    printable character a cell, and writes a tile when its last band is in.
@@ -18,7 +29,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    cells of the Kutaisi crop re-read through the bridge equal the file, a
    150 km crop stopped twice mid-surface resumed without sweeping a tile
    again (501 lines, all distinct), about 73 ms a tile. PR **54**.
-2. **X7: roads and railroads.** Four hook jobs, `<kind>:seeds` then
+4. **X7: roads and railroads.** Four hook jobs, `<kind>:seeds` then
    `<kind>:paths`: seeds numbered by a fixed plan, merged into the lowest kept
    id at 100 m, each unordered pair of four nearest neighbours asked once by
    a cursor, and the file its own journal, read back in chunks on every
@@ -32,7 +43,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    85 and 82 MB), against the spec's 25 min for roads alone, and a Stop
    mid-paths then Start read back 187 567 seeds and 7 744 pairs in 2.5 s
    and asked nothing again. PR **53**.
-3. **X6: the pre-sweep, `water` and `height`.** Prepare is `identity`,
+5. **X6: the pre-sweep, `water` and `height`.** Prepare is `identity`,
    `presweep`, `grid`: the pre-sweep walks a 5 km lattice one cell a step, a
    road snap first and a 2 km line of heights only where a road lies 5 to
    25 km off (ADR **0027**, after the spec's rule authored Caucasus's roadless
@@ -44,53 +55,33 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    Caucasus 2.9.29.27468: crop cells equal the bridge's, the whole map's
    rectangle is 470 x 785 km in 19 s, and the fused sweep took 100 s for
    2 294 tiles against 189 s as two passes. PR **52**.
-4. **X5: the grid job, `config.json` and the seven tables.** Prepare is
-   `identity` then `grid`; the hook pass is `config` (the theatre's facts,
-   twenty lat/lon samples, the fill triple off three corners 500 km out) then
-   `tables`, one file a step with `progress()`. No rectangle is read from a
-   theatre file: ADR **0026**. Every shaper is terrain agnostic and never
-   raises. *Verified by:* an agent offline, then live on Caucasus: all eight
-   files re-read through the bridge matched byte for byte.
-5. **X12: the run says where it is, and claims no more.** A job's `start`
-   may return `progress()` beside its step; the run keeps a record refreshed
-   every second that the window's line reads, logs a `heartbeat` line every
-   ten seconds and one `totals` line at done. ADRs **0024**, **0025**.
+
 ## Next
 
 One task. The thing to pick up immediately.
 
-**X8b** — the scenery sweep: built, reviewed and offline-verified on
-`task/X8b-scenery-sweep`. 2 km boxes in place of spheres (ADR 0032, measured
-on Afghanistan 2.9.30.28536: Kabul holds a million objects in 20 km), the
-file its own journal (ADR 0033); one dense Kabul box through the real chunk
-matched every footprint. What remains is the live half: a crop run whose box
-re-read through the bridge equals its lines, footprints included, and a Stop
-and Start mid-sweep. *Verified by:* the bridge steps from a session with the
-maintainer's DCS, after the maintainer runs the crop.
+**F3** — extract format v2, as an ADR: the layers the files add, the file
+classes and versions, the authored rectangle read from the files, which
+`config.json` fields survive without the sim, beacon `latlon_samples`. Walk
+every field to its decoder and to the C task that reads it. The format
+reference `docs/data/file-formats.md` describes each structure. *Verified
+by:* the maintainer reading the ADR; nothing runs.
 
 ## Then
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **X8c / X9** — the model catalogue and failure handling.
-   X ends here until `check-extract` exists.
-2. **C1 / C2 / C3** — the Rust interlude X10 needs: scaffold, `synth` on the F2
-   constants, `check-extract`. Closes P2 and MS0 past.
-3. **X10** — the 10 x 10 km Kutaisi crop that `check-extract` accepts; its
-   authored pair is null (ADR 0009, ADR 0026).
-4. **C4** — `pack` reads the extract: the first consumer of the X10 crop, and
-   where carry 1 is discharged.
-5. **C5a** — `pack` skeleton: schema, `meta` with the authored rectangle
-   (ADR 0008), one transaction.
+1. **C1 / C2** — workspace scaffold, then `synth` writing v2 on the F2 constants.
+2. **C3 / E1** — `check-extract` on v2, and the container reader that classifies
+   every file of an install and refuses an unknown version.
+3. **E2** — `surface5`: heights, water, surface to 50 m tiles.
+4. **E3 / E4 / E5 / E6** — roads, scenery, airfields, Lua tables: independent,
+   each against its opt-in Caucasus figures.
+5. **C4** — `pack` reads the extract; where carry 1 is discharged.
 
-Milestone in view: **MS0 Contract** (P1, P2, F1, F2, C1, C2, C3, X1, X3).
-Proof is `check-extract` accepting the Rust synthetic extract and the hook's
-encoders and grid computation reproducing the F2 constants byte for byte.
-
-First real data: **X10**, a 10 x 10 km Kutaisi extract that `check-extract`
-accepts, which is where X ends for now. X11 still waits for C4 onward to read
-that crop, so a field missing from the frozen format costs a crop re-run and
-not a theatre. Everything from C4 on is built on macOS against the crop.
+Milestone in view: **MS0 Contract** (P1, P2, F1, F2, F3, C1, C2, C3, E1).
+Proof is `check-extract` accepting the Rust synthetic v2 extract, and E1
+classifying every terrain file of an install.
 
 ## Carries
 
@@ -99,5 +90,3 @@ Things a later task must not lose. Max 10 — `CLAUDE.md` has the rules.
 | # | Carry | Discharged by |
 |---|---|---|
 | 1 | `synth` produces no all-fill tile at any size: the fill margin is 2 km and a tile is 12.8 km, so no tile is fill throughout. Test the absent-fill-tile read against a hand-built manifest, not against a generated extract. The all-sea case is generated, as one interior tile. | C4 |
-| 2 | Measured authored rectangles: Afghanistan 855 x 1105 km, 945 000 km², its roads reaching the bounds rectangle's west edge; Cold War Germany 810 x 750 km, 607 500 km², roads within 5 km of 11 036 of its 11 063 authored cells. The size rule packs both at 100 m, where the design's 176 M-cell estimate for Afghanistan assumed 440 000 km². Whether the 500 000 km² threshold stands is C5b's to decide, as an ADR if it moves. | C5b |
-| 3 | The router's first route point is 0.5 to 2 m from the seed's snap on both networks (Caucasus, six routes checked), so the design's 1 m vertex snap in the graph build would not join a route to its seed's road point; snap seeds and route ends with a few metres of tolerance. | C9 |
