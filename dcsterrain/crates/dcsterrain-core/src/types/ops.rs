@@ -117,6 +117,7 @@ pub struct ScoreSiteRequest {
     pub x: f64,
     pub z: f64,
     pub footprint: Footprint,
+    #[serde(deserialize_with = "super::criteria::deserialize_criteria")]
     pub criteria: Vec<Criterion>,
 }
 
@@ -146,6 +147,7 @@ pub struct Term {
 pub struct FindSitesRequest {
     pub region: Region,
     pub footprint: Footprint,
+    #[serde(deserialize_with = "super::criteria::deserialize_criteria")]
     pub criteria: Vec<Criterion>,
     /// Candidate lattice spacing; twice the cell size when omitted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -413,6 +415,7 @@ fn default_max_detour_factor() -> f64 {
     3.0
 }
 
+/// The route found, with the file that answered.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RouteResponse {
     #[serde(flatten)]
@@ -716,6 +719,27 @@ mod tests {
         let r: NearestRequest =
             serde_json::from_value(json!({"kind": "town", "x": 0, "z": 0})).unwrap();
         assert_eq!(r.n, 1);
+    }
+
+    #[test]
+    fn valid_reads_with_or_without_an_empty_params() {
+        let r: ScoreSiteRequest = serde_json::from_value(json!({
+            "x": 0, "z": 0, "footprint": {"width": 60, "depth": 40},
+            "criteria": [
+                {"name": "valid"}, {"name": "valid", "params": {}},
+                {"name": "valid", "params": null}, {"name": "slope_max", "params": {"deg": 8}}
+            ]
+        }))
+        .unwrap();
+        assert_eq!(
+            r.criteria[..3],
+            [Criterion::Valid, Criterion::Valid, Criterion::Valid]
+        );
+        let bad = serde_json::from_value::<ScoreSiteRequest>(json!({
+            "x": 0, "z": 0, "footprint": {"width": 60, "depth": 40},
+            "criteria": [{"name": "valid", "params": {"deg": 8}}]
+        }));
+        assert!(bad.is_err());
     }
 
     #[test]

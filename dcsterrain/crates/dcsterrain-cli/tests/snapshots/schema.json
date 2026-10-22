@@ -1906,7 +1906,7 @@
       "type": "object"
     },
     "RouteResponse": {
-      "description": "A route over the network between the two snapped endpoints.",
+      "description": "The route found, with the file that answered.",
       "properties": {
         "ascent": {
           "format": "double",

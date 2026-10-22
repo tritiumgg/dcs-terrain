@@ -99,6 +99,31 @@ pub enum Criterion {
     Valid,
 }
 
+/// Reads a criteria list, taking `valid` with an empty `params` object as
+/// well as with none. A caller that writes `params` for every criterion is
+/// not wrong, but serde reads a variant without fields only from an absent
+/// or null `params`.
+pub(super) fn deserialize_criteria<'de, D>(d: D) -> Result<Vec<Criterion>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    use serde_json::Value;
+
+    let mut list = Vec::<Value>::deserialize(d)?;
+    for c in &mut list {
+        if let Value::Object(m) = c {
+            let empty = matches!(m.get("params"), Some(Value::Object(p)) if p.is_empty());
+            if empty && m.get("name").and_then(Value::as_str) == Some("valid") {
+                m.remove("params");
+            }
+        }
+    }
+    list.into_iter()
+        .map(|c| serde_json::from_value(c).map_err(D::Error::custom))
+        .collect()
+}
+
 fn default_clearing_radius() -> f64 {
     150.0
 }
