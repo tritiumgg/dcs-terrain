@@ -9,8 +9,10 @@
 //! Positions are DCS `x` (north) and `z` (east).
 
 mod criteria;
+mod ops;
 
 pub use criteria::*;
+pub use ops::*;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
