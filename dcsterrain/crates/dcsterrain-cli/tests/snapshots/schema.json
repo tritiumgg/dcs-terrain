@@ -1,0 +1,3095 @@
+{
+  "$defs": {
+    "Alternative": {
+      "description": "One alternative: a full route, and how it relates to the others.",
+      "properties": {
+        "ascent": {
+          "format": "double",
+          "type": "number"
+        },
+        "chokepoints": {
+          "description": "Edges of this route in the top decile of betweenness.",
+          "items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "descent": {
+          "format": "double",
+          "type": "number"
+        },
+        "legs": {
+          "items": {
+            "$ref": "#/$defs/Leg"
+          },
+          "type": "array"
+        },
+        "length": {
+          "description": "Planar length of the road geometry.",
+          "format": "double",
+          "type": "number"
+        },
+        "max_grade_pct": {
+          "description": "The steepest 100 m window.",
+          "format": "double",
+          "type": "number"
+        },
+        "overlap_with": {
+          "description": "Shared length fraction against each other returned route, in order.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "shared_edges_with_all": {
+          "description": "Edges every alternative uses: the pair's true chokepoints.",
+          "items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "snapped_from": {
+          "$ref": "#/$defs/Point"
+        },
+        "snapped_to": {
+          "$ref": "#/$defs/Point"
+        },
+        "straight_line": {
+          "description": "The distance between the endpoints, so `length / straight_line` is the\ndetour factor.",
+          "format": "double",
+          "type": "number"
+        },
+        "stretch": {
+          "description": "Length over the shortest route's.",
+          "format": "double",
+          "type": "number"
+        },
+        "waypoints": {
+          "description": "At most one point per 500 m, and every graph node kept.",
+          "items": {
+            "$ref": "#/$defs/Point"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "waypoints",
+        "length",
+        "ascent",
+        "descent",
+        "max_grade_pct",
+        "legs",
+        "snapped_from",
+        "snapped_to",
+        "straight_line",
+        "stretch",
+        "overlap_with",
+        "shared_edges_with_all",
+        "chokepoints"
+      ],
+      "type": "object"
+    },
+    "ApproachSpectrumRequest": {
+      "properties": {
+        "alt_bands_agl": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "azimuth_step_deg": {
+          "default": 5.0,
+          "format": "double",
+          "type": "number"
+        },
+        "min_masked_range": {
+          "default": 8000.0,
+          "format": "double",
+          "type": "number"
+        },
+        "radius": {
+          "description": "The engagement or search radius each radial is marched in from.",
+          "format": "double",
+          "type": "number"
+        },
+        "sector": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sector"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Summaries are also returned restricted to this sector."
+        },
+        "site": {
+          "$ref": "#/$defs/Observer"
+        }
+      },
+      "required": [
+        "site",
+        "radius",
+        "alt_bands_agl"
+      ],
+      "type": "object"
+    },
+    "ApproachSpectrumResponse": {
+      "properties": {
+        "bands": {
+          "description": "One per requested band, in order.",
+          "items": {
+            "$ref": "#/$defs/SpectrumBand"
+          },
+          "type": "array"
+        },
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "theatre": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "theatre",
+        "dcs_build",
+        "cell_size",
+        "elapsed_ms",
+        "bands"
+      ],
+      "type": "object"
+    },
+    "Box": {
+      "description": "An axis-aligned box in DCS metres, the canonical region.",
+      "properties": {
+        "max_x": {
+          "format": "double",
+          "type": "number"
+        },
+        "max_z": {
+          "format": "double",
+          "type": "number"
+        },
+        "min_x": {
+          "format": "double",
+          "type": "number"
+        },
+        "min_z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "min_x",
+        "min_z",
+        "max_x",
+        "max_z"
+      ],
+      "type": "object"
+    },
+    "Candidate": {
+      "properties": {
+        "orientation_deg": {
+          "format": "double",
+          "type": "number"
+        },
+        "score": {
+          "format": "double",
+          "type": "number"
+        },
+        "terms": {
+          "items": {
+            "$ref": "#/$defs/Term"
+          },
+          "type": "array"
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "z",
+        "orientation_deg",
+        "score",
+        "terms"
+      ],
+      "type": "object"
+    },
+    "Chokepoint": {
+      "properties": {
+        "betweenness": {
+          "format": "double",
+          "type": "number"
+        },
+        "crosses_water": {
+          "type": "boolean"
+        },
+        "edge_id": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "midpoint": {
+          "$ref": "#/$defs/Point"
+        },
+        "tpi_300_mean": {
+          "description": "Mean `tpi_300` along the edge's geometry.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "edge_id",
+        "betweenness",
+        "crosses_water",
+        "tpi_300_mean",
+        "midpoint"
+      ],
+      "type": "object"
+    },
+    "ChokepointsRequest": {
+      "properties": {
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "network": {
+          "$ref": "#/$defs/Network"
+        },
+        "region": {
+          "$ref": "#/$defs/Region"
+        }
+      },
+      "required": [
+        "region",
+        "network",
+        "limit"
+      ],
+      "type": "object"
+    },
+    "ChokepointsResponse": {
+      "properties": {
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "edges": {
+          "description": "Highest betweenness first.",
+          "items": {
+            "$ref": "#/$defs/Chokepoint"
+          },
+          "type": "array"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "theatre": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "theatre",
+        "dcs_build",
+        "cell_size",
+        "elapsed_ms",
+        "edges"
+      ],
+      "type": "object"
+    },
+    "CoverageBand": {
+      "properties": {
+        "alt_agl": {
+          "format": "double",
+          "type": "number"
+        },
+        "asset_covered_fraction": {
+          "description": "Present when the request named an `asset`.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "blind_approach_exists": {
+          "description": "Some radial stays masked from the envelope's radius to inside\n`min_masked_range`.",
+          "type": "boolean"
+        },
+        "covered_fraction": {
+          "format": "double",
+          "type": "number"
+        },
+        "dead_zones": {
+          "items": {
+            "$ref": "#/$defs/Polygon"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "alt_agl",
+        "covered_fraction",
+        "dead_zones",
+        "blind_approach_exists"
+      ],
+      "type": "object"
+    },
+    "CoverageRequest": {
+      "properties": {
+        "asset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Region"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An area whose coverage is reported on its own."
+        },
+        "envelope": {
+          "$ref": "#/$defs/Envelope"
+        },
+        "min_masked_range": {
+          "default": 8000.0,
+          "format": "double",
+          "type": "number"
+        },
+        "site": {
+          "$ref": "#/$defs/Observer"
+        }
+      },
+      "required": [
+        "site",
+        "envelope"
+      ],
+      "type": "object"
+    },
+    "CoverageResponse": {
+      "properties": {
+        "bands": {
+          "description": "One per requested band, in order.",
+          "items": {
+            "$ref": "#/$defs/CoverageBand"
+          },
+          "type": "array"
+        },
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "theatre": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "theatre",
+        "dcs_build",
+        "cell_size",
+        "elapsed_ms",
+        "bands"
+      ],
+      "type": "object"
+    },
+    "Criterion": {
+      "description": "One criterion, written `{\"name\": \"slope_max\", \"params\": {\"deg\": 8}}`.\n`valid` takes no params and is applied whether asked for or not.",
+      "oneOf": [
+        {
+          "description": "Steepest slope over the footprint, at most `deg`.",
+          "properties": {
+            "name": {
+              "const": "slope_max",
+              "type": "string"
+            },
+            "params": {
+              "properties": {
+                "deg": {
+                  "format": "double",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "deg"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Highest minus lowest height over the footprint's corners and centre,\nat most `m`.",
+          "properties": {
+            "name": {
+              "const": "span_max",
+              "type": "string"
+            },
+            "params": {
+              "properties": {
+                "m": {
+                  "format": "double",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "m"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Every footprint cell's water class is one of `classes`.",
+          "properties": {
+            "name": {
+              "const": "surface_in",
+              "type": "string"
+            },
+            "params": {
+              "properties": {
+                "classes": {
+                  "items": {
+                    "$ref": "#/$defs/WaterClass"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "classes"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Every footprint cell's `surface` code is one of `values`.",
+          "properties": {
+            "name": {
+              "const": "surface_enum_in",
+              "type": "string"
+            },
+            "params": {
+              "properties": {
+                "values": {
+                  "items": {
+                    "format": "uint8",
+                    "maximum": 255,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "values"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "dist_road_band",
+              "type": "string"
+            },
+            "params": {
+              "properties": {
+                "max": {
+                  "format": "double",
+                  "type": "number"
+                },
+                "min": {
+                  "format": "double",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "min",
+                "max"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "dist_rail_band",
+              "type": "string"
+            },
+            "params": {
+              "properties": {
+                "max": {
+                  "format": "double",
+                  "type": "number"
+                },
+                "min": {
+                  "format": "double",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "min",
+                "max"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "dist_water_min",
+              "type": "string"
+            },
+            "params": {
+              "properties": {
+                "m": {
+                  "format": "double",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "m"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Distance to the nearest airdrome, or to `airdrome_id` when given.",
+          "properties": {
+            "name": {
+              "const": "dist_airdrome_band",
+              "type": "string"
+            },
+            "params": {
+              "properties": {
+                "airdrome_id": {
+                  "format": "int64",
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "max": {
+                  "format": "double",
+                  "type": "number"
+                },
+                "min": {
+                  "format": "double",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "min",
+                "max"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Scenery objects of `class` within `radius`, at most `max`.",
+          "properties": {
+            "name": {
+              "const": "scenery_max",
+              "type": "string"
+            },
+            "params": {
+              "properties": {
+                "class": {
+                  "type": "string"
+                },
+                "max": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "radius": {
+                  "format": "double",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "class",
+                "radius",
+                "max"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Scenery objects overlapping the footprint, at most `max`.",
+          "properties": {
+            "name": {
+              "const": "scenery_in_footprint_max",
+              "type": "string"
+            },
+            "params": {
+              "properties": {
+                "max": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "max"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Objects of any class within `radius`: what a heliport static would\nremove at spawn.",
+          "properties": {
+            "name": {
+              "const": "clearing_max",
+              "type": "string"
+            },
+            "params": {
+              "properties": {
+                "max": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "radius": {
+                  "default": 150.0,
+                  "format": "double",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "max"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "enclosure_min",
+              "type": "string"
+            },
+            "params": {
+              "properties": {
+                "deg": {
+                  "format": "double",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "deg"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A ridge that way: every horizon bin in the sector rises at least\n`min_elev_deg`.",
+          "properties": {
+            "name": {
+              "const": "masked_from",
+              "type": "string"
+            },
+            "params": {
+              "properties": {
+                "bearing_deg": {
+                  "format": "double",
+                  "type": "number"
+                },
+                "half_width_deg": {
+                  "format": "double",
+                  "type": "number"
+                },
+                "min_elev_deg": {
+                  "format": "double",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "bearing_deg",
+                "half_width_deg",
+                "min_elev_deg"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The fraction of `observers` that can see the site at `own_alt_agl`,\nat most `max_fraction`.",
+          "properties": {
+            "name": {
+              "const": "not_visible_from",
+              "type": "string"
+            },
+            "params": {
+              "properties": {
+                "max_fraction": {
+                  "format": "double",
+                  "type": "number"
+                },
+                "observers": {
+                  "items": {
+                    "$ref": "#/$defs/Observer"
+                  },
+                  "type": "array"
+                },
+                "own_alt_agl": {
+                  "default": 2.0,
+                  "format": "double",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "observers",
+                "max_fraction"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The fraction of `targets` the site sees from `own_alt_agl`, at least\n`min_fraction`.",
+          "properties": {
+            "name": {
+              "const": "visible_to",
+              "type": "string"
+            },
+            "params": {
+              "properties": {
+                "min_fraction": {
+                  "format": "double",
+                  "type": "number"
+                },
+                "own_alt_agl": {
+                  "default": 2.0,
+                  "format": "double",
+                  "type": "number"
+                },
+                "targets": {
+                  "items": {
+                    "$ref": "#/$defs/Point3"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "targets",
+                "min_fraction"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The site's landform class is one of `classes`, judged at\n`threshold_m` of local and regional relief.",
+          "properties": {
+            "name": {
+              "const": "tpi_class_in",
+              "type": "string"
+            },
+            "params": {
+              "properties": {
+                "classes": {
+                  "items": {
+                    "$ref": "#/$defs/TpiClass"
+                  },
+                  "type": "array"
+                },
+                "threshold_m": {
+                  "default": 10.0,
+                  "format": "double",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "classes"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "const": "valid",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DescribeRequest": {
+      "type": "object"
+    },
+    "DescribeResponse": {
+      "description": "Everything the packed file says about itself.",
+      "properties": {
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "grids": {
+          "items": {
+            "$ref": "#/$defs/GridInfo"
+          },
+          "type": "array"
+        },
+        "layers_dropped": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "meta": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Every `meta` key and its stored text.",
+          "type": "object"
+        },
+        "row_counts": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "description": "Rows in each vector table, by table name.",
+          "type": "object"
+        },
+        "theatre": {
+          "type": "string"
+        },
+        "validation": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "The `validation_*` keys, when the file has been stamped.",
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "theatre",
+        "dcs_build",
+        "cell_size",
+        "elapsed_ms",
+        "meta",
+        "grids",
+        "row_counts",
+        "layers_dropped"
+      ],
+      "type": "object"
+    },
+    "Envelope": {
+      "properties": {
+        "alt_bands_agl": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "radius": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "radius",
+        "alt_bands_agl"
+      ],
+      "type": "object"
+    },
+    "FindSitesRequest": {
+      "properties": {
+        "criteria": {
+          "items": {
+            "$ref": "#/$defs/Criterion"
+          },
+          "type": "array"
+        },
+        "footprint": {
+          "$ref": "#/$defs/Footprint"
+        },
+        "limit": {
+          "default": 20,
+          "description": "At most 200.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "region": {
+          "$ref": "#/$defs/Region"
+        },
+        "spacing": {
+          "description": "No two candidates returned are closer than this.",
+          "format": "double",
+          "type": "number"
+        },
+        "step": {
+          "description": "Candidate lattice spacing; twice the cell size when omitted.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "weights": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "default": {},
+          "description": "Weight per criterion name in the ranking sum; 1 for any not named.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "region",
+        "footprint",
+        "criteria",
+        "spacing"
+      ],
+      "type": "object"
+    },
+    "FindSitesResponse": {
+      "properties": {
+        "candidates": {
+          "description": "Best first.",
+          "items": {
+            "$ref": "#/$defs/Candidate"
+          },
+          "type": "array"
+        },
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "stats": {
+          "$ref": "#/$defs/FindSitesStats"
+        },
+        "theatre": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "theatre",
+        "dcs_build",
+        "cell_size",
+        "elapsed_ms",
+        "candidates",
+        "stats"
+      ],
+      "type": "object"
+    },
+    "FindSitesStats": {
+      "properties": {
+        "cells_considered": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cells_passed": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tiles_skipped": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cells_considered",
+        "cells_passed",
+        "tiles_skipped"
+      ],
+      "type": "object"
+    },
+    "Footprint": {
+      "description": "A rectangle to be placed, tried at each of its orientations.",
+      "properties": {
+        "depth": {
+          "format": "double",
+          "type": "number"
+        },
+        "orientations_deg": {
+          "default": [
+            0.0,
+            90.0
+          ],
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "width": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "width",
+        "depth"
+      ],
+      "type": "object"
+    },
+    "FootprintAt": {
+      "properties": {
+        "footprint": {
+          "$ref": "#/$defs/Footprint"
+        },
+        "orientation_deg": {
+          "format": "double",
+          "type": "number"
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "z",
+        "footprint",
+        "orientation_deg"
+      ],
+      "type": "object"
+    },
+    "GeoRequest": {
+      "properties": {
+        "to_latlon": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Point"
+          },
+          "type": "array"
+        },
+        "to_xz": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/LatLon"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "GeoResponse": {
+      "description": "Each list in the order of the request's.",
+      "properties": {
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "theatre": {
+          "type": "string"
+        },
+        "to_latlon": {
+          "items": {
+            "$ref": "#/$defs/LatLon"
+          },
+          "type": "array"
+        },
+        "to_xz": {
+          "items": {
+            "$ref": "#/$defs/Point"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "theatre",
+        "dcs_build",
+        "cell_size",
+        "elapsed_ms",
+        "to_latlon",
+        "to_xz"
+      ],
+      "type": "object"
+    },
+    "GridInfo": {
+      "description": "One row of the packed file's `grid` table.",
+      "properties": {
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "derived_from": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dtype": {
+          "type": "string"
+        },
+        "height": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "nodata": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "origin_x": {
+          "format": "double",
+          "type": "number"
+        },
+        "origin_z": {
+          "format": "double",
+          "type": "number"
+        },
+        "params": {
+          "description": "The parameters that produced the grid, as the JSON text stored.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tile_size": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "width": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "cell_size",
+        "origin_x",
+        "origin_z",
+        "width",
+        "height",
+        "dtype",
+        "tile_size"
+      ],
+      "type": "object"
+    },
+    "Issue": {
+      "description": "One thing wrong with a request or with the file it was asked of. An\noperation returns a full result or a list of these, never a partial.",
+      "properties": {
+        "code": {
+          "description": "Stable, machine-readable: `snake_case`, never reworded once shipped.",
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "description": "Where in the request, dotted: `criteria.2.params.deg`. Empty when the\nissue is not about one field.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "path"
+      ],
+      "type": "object"
+    },
+    "LatLon": {
+      "properties": {
+        "lat": {
+          "format": "double",
+          "type": "number"
+        },
+        "lon": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "lat",
+        "lon"
+      ],
+      "type": "object"
+    },
+    "Leg": {
+      "properties": {
+        "ascent": {
+          "format": "double",
+          "type": "number"
+        },
+        "descent": {
+          "format": "double",
+          "type": "number"
+        },
+        "exposure": {
+          "description": "The fraction of the leg the exposure observers see.",
+          "format": "double",
+          "type": "number"
+        },
+        "from": {
+          "$ref": "#/$defs/Point"
+        },
+        "length": {
+          "format": "double",
+          "type": "number"
+        },
+        "max_grade_pct": {
+          "format": "double",
+          "type": "number"
+        },
+        "to": {
+          "$ref": "#/$defs/Point"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "length",
+        "ascent",
+        "descent",
+        "max_grade_pct",
+        "exposure"
+      ],
+      "type": "object"
+    },
+    "Nearby": {
+      "description": "For road and rail, the closest point on the nearest edge, and `id` is the\nedge's.",
+      "properties": {
+        "distance": {
+          "format": "double",
+          "type": "number"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "x",
+        "z",
+        "distance"
+      ],
+      "type": "object"
+    },
+    "NearestKind": {
+      "description": "`node` matches both sides' nodes; each result's `kind` says which.",
+      "enum": [
+        "road",
+        "rail",
+        "airdrome",
+        "town",
+        "node",
+        "beacon",
+        "scenery"
+      ],
+      "type": "string"
+    },
+    "NearestRequest": {
+      "properties": {
+        "class": {
+          "description": "Scenery class filter, for `kind` `scenery`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/NearestKind"
+        },
+        "n": {
+          "default": 1,
+          "description": "At most 50.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "x",
+        "z"
+      ],
+      "type": "object"
+    },
+    "NearestResponse": {
+      "properties": {
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "results": {
+          "description": "Nearest first.",
+          "items": {
+            "$ref": "#/$defs/Nearby"
+          },
+          "type": "array"
+        },
+        "theatre": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "theatre",
+        "dcs_build",
+        "cell_size",
+        "elapsed_ms",
+        "results"
+      ],
+      "type": "object"
+    },
+    "Network": {
+      "description": "A road network an operation runs over.",
+      "enum": [
+        "roads",
+        "railroads"
+      ],
+      "type": "string"
+    },
+    "Observer": {
+      "description": "Someone looking: a position and an eye height above the ground.",
+      "properties": {
+        "alt_agl": {
+          "format": "double",
+          "type": "number"
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "z",
+        "alt_agl"
+      ],
+      "type": "object"
+    },
+    "Point": {
+      "properties": {
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "z"
+      ],
+      "type": "object"
+    },
+    "Point3": {
+      "description": "A point with a height, given either absolute or above the ground.\n\nExactly one of `alt` and `alt_agl` is set; `Point3::check` reports both or\nneither as an issue. The pair is two fields rather than an enum so the JSON\nreads `{\"x\": .., \"z\": .., \"alt_agl\": 2}`, the way a caller writes it.",
+      "properties": {
+        "alt": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "alt_agl": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "z"
+      ],
+      "type": "object"
+    },
+    "Polygon": {
+      "description": "A simple polygon as `[x, z]` vertices, closed by its first point.",
+      "properties": {
+        "points": {
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "points"
+      ],
+      "type": "object"
+    },
+    "Radial": {
+      "properties": {
+        "bearing_deg": {
+          "format": "double",
+          "type": "number"
+        },
+        "blind": {
+          "description": "Masked from the radius in to `min_masked_range`.",
+          "type": "boolean"
+        },
+        "masked_fraction": {
+          "format": "double",
+          "type": "number"
+        },
+        "unmask_dist": {
+          "description": "The range of the first step the site sees; null when the whole radial\nis masked.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "bearing_deg",
+        "masked_fraction",
+        "blind"
+      ],
+      "type": "object"
+    },
+    "Region": {
+      "description": "A region a request is bounded by. Each form is converted to its bounding\nbox plus a membership test before any grid is read.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Box": {
+              "$ref": "#/$defs/Box"
+            }
+          },
+          "required": [
+            "Box"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Circle": {
+              "properties": {
+                "radius": {
+                  "format": "double",
+                  "type": "number"
+                },
+                "x": {
+                  "format": "double",
+                  "type": "number"
+                },
+                "z": {
+                  "format": "double",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "z",
+                "radius"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "Circle"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Polygon": {
+              "$ref": "#/$defs/Polygon"
+            }
+          },
+          "required": [
+            "Polygon"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The ring between two distances from an airdrome's reference point.",
+          "properties": {
+            "AirdromeBand": {
+              "properties": {
+                "airdrome_id": {
+                  "format": "int64",
+                  "type": "integer"
+                },
+                "max_dist": {
+                  "format": "double",
+                  "type": "number"
+                },
+                "min_dist": {
+                  "format": "double",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "airdrome_id",
+                "min_dist",
+                "max_dist"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "AirdromeBand"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RouteAlternativesRequest": {
+      "properties": {
+        "avoid": {
+          "default": [],
+          "description": "No edge crossing any of these is used.",
+          "items": {
+            "$ref": "#/$defs/Region"
+          },
+          "type": "array"
+        },
+        "exposure_observers": {
+          "default": [],
+          "description": "Edges these observers see cost more, by `exposure_weight`.",
+          "items": {
+            "$ref": "#/$defs/Observer"
+          },
+          "type": "array"
+        },
+        "exposure_weight": {
+          "default": 1.0,
+          "format": "double",
+          "type": "number"
+        },
+        "from": {
+          "$ref": "#/$defs/Point"
+        },
+        "k": {
+          "default": 3,
+          "description": "At most 10.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_detour_factor": {
+          "default": 3.0,
+          "format": "double",
+          "type": "number"
+        },
+        "max_overlap": {
+          "default": 0.5,
+          "description": "No two alternatives share more than this fraction of their length.",
+          "format": "double",
+          "type": "number"
+        },
+        "max_stretch": {
+          "default": 1.5,
+          "description": "No alternative longer than this times the shortest.",
+          "format": "double",
+          "type": "number"
+        },
+        "network": {
+          "$ref": "#/$defs/Network"
+        },
+        "penalty": {
+          "default": 1.6,
+          "description": "The weight multiplier on edges already used.",
+          "format": "double",
+          "type": "number"
+        },
+        "to": {
+          "$ref": "#/$defs/Point"
+        }
+      },
+      "required": [
+        "network",
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "RouteAlternativesResponse": {
+      "properties": {
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "routes": {
+          "description": "Shortest first.",
+          "items": {
+            "$ref": "#/$defs/Alternative"
+          },
+          "type": "array"
+        },
+        "theatre": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "theatre",
+        "dcs_build",
+        "cell_size",
+        "elapsed_ms",
+        "routes"
+      ],
+      "type": "object"
+    },
+    "RouteRequest": {
+      "properties": {
+        "avoid": {
+          "default": [],
+          "description": "No edge crossing any of these is used.",
+          "items": {
+            "$ref": "#/$defs/Region"
+          },
+          "type": "array"
+        },
+        "exposure_observers": {
+          "default": [],
+          "description": "Edges these observers see cost more, by `exposure_weight`.",
+          "items": {
+            "$ref": "#/$defs/Observer"
+          },
+          "type": "array"
+        },
+        "exposure_weight": {
+          "default": 1.0,
+          "format": "double",
+          "type": "number"
+        },
+        "from": {
+          "$ref": "#/$defs/Point"
+        },
+        "max_detour_factor": {
+          "default": 3.0,
+          "format": "double",
+          "type": "number"
+        },
+        "network": {
+          "$ref": "#/$defs/Network"
+        },
+        "to": {
+          "$ref": "#/$defs/Point"
+        }
+      },
+      "required": [
+        "network",
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "RouteResponse": {
+      "description": "A route over the network between the two snapped endpoints.",
+      "properties": {
+        "ascent": {
+          "format": "double",
+          "type": "number"
+        },
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "descent": {
+          "format": "double",
+          "type": "number"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "legs": {
+          "items": {
+            "$ref": "#/$defs/Leg"
+          },
+          "type": "array"
+        },
+        "length": {
+          "description": "Planar length of the road geometry.",
+          "format": "double",
+          "type": "number"
+        },
+        "max_grade_pct": {
+          "description": "The steepest 100 m window.",
+          "format": "double",
+          "type": "number"
+        },
+        "snapped_from": {
+          "$ref": "#/$defs/Point"
+        },
+        "snapped_to": {
+          "$ref": "#/$defs/Point"
+        },
+        "straight_line": {
+          "description": "The distance between the endpoints, so `length / straight_line` is the\ndetour factor.",
+          "format": "double",
+          "type": "number"
+        },
+        "theatre": {
+          "type": "string"
+        },
+        "waypoints": {
+          "description": "At most one point per 500 m, and every graph node kept.",
+          "items": {
+            "$ref": "#/$defs/Point"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "theatre",
+        "dcs_build",
+        "cell_size",
+        "elapsed_ms",
+        "waypoints",
+        "length",
+        "ascent",
+        "descent",
+        "max_grade_pct",
+        "legs",
+        "snapped_from",
+        "snapped_to",
+        "straight_line"
+      ],
+      "type": "object"
+    },
+    "RouteSpan": {
+      "description": "A stretch of a route, as distances along it from its first point.",
+      "properties": {
+        "from": {
+          "format": "double",
+          "type": "number"
+        },
+        "to": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "SampleRequest": {
+      "description": "Either `region` with `step`, or `points`.",
+      "properties": {
+        "layers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_rows": {
+          "default": 10000,
+          "description": "More rows than this is an error, never a truncated answer.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "points": {
+          "items": {
+            "$ref": "#/$defs/Point"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "region": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Region"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "step": {
+          "description": "Lattice spacing inside `region`, at least the cell size.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "layers"
+      ],
+      "type": "object"
+    },
+    "SampleResponse": {
+      "properties": {
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/SampleRow"
+          },
+          "type": "array"
+        },
+        "theatre": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "theatre",
+        "dcs_build",
+        "cell_size",
+        "elapsed_ms",
+        "rows"
+      ],
+      "type": "object"
+    },
+    "SampleRow": {
+      "description": "`height` is sampled bilinearly, every other layer at the nearest cell.\nA value is null where the layer is nodata.",
+      "properties": {
+        "values": {
+          "additionalProperties": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "type": "object"
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "z",
+        "values"
+      ],
+      "type": "object"
+    },
+    "SceneryInRequest": {
+      "description": "Either `region`, or `footprint_at` for exact overlap with a placed\nfootprint.",
+      "properties": {
+        "footprint_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FootprintAt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "region": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Region"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SceneryInResponse": {
+      "description": "More than 5 000 objects is an error, never a truncated answer.",
+      "properties": {
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "counts_by_class": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "objects": {
+          "items": {
+            "$ref": "#/$defs/SceneryObject"
+          },
+          "type": "array"
+        },
+        "theatre": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "theatre",
+        "dcs_build",
+        "cell_size",
+        "elapsed_ms",
+        "objects",
+        "counts_by_class"
+      ],
+      "type": "object"
+    },
+    "SceneryObject": {
+      "description": "`obb_w` and `obb_d` are null for a model with no footprint.",
+      "properties": {
+        "class": {
+          "type": "string"
+        },
+        "id": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "obb_d": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "obb_w": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "rotation_deg": {
+          "format": "double",
+          "type": "number"
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "model",
+        "class",
+        "x",
+        "z",
+        "rotation_deg"
+      ],
+      "type": "object"
+    },
+    "ScoreSiteRequest": {
+      "properties": {
+        "criteria": {
+          "items": {
+            "$ref": "#/$defs/Criterion"
+          },
+          "type": "array"
+        },
+        "footprint": {
+          "$ref": "#/$defs/Footprint"
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "z",
+        "footprint",
+        "criteria"
+      ],
+      "type": "object"
+    },
+    "ScoreSiteResponse": {
+      "description": "The site at its best orientation.",
+      "properties": {
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hard_fail": {
+          "type": "boolean"
+        },
+        "orientation_deg": {
+          "format": "double",
+          "type": "number"
+        },
+        "terms": {
+          "items": {
+            "$ref": "#/$defs/Term"
+          },
+          "type": "array"
+        },
+        "theatre": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "theatre",
+        "dcs_build",
+        "cell_size",
+        "elapsed_ms",
+        "orientation_deg",
+        "terms",
+        "hard_fail"
+      ],
+      "type": "object"
+    },
+    "Sector": {
+      "description": "An arc of bearings, clockwise from `from_deg` to `to_deg`.",
+      "properties": {
+        "from_deg": {
+          "format": "double",
+          "type": "number"
+        },
+        "to_deg": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "from_deg",
+        "to_deg"
+      ],
+      "type": "object"
+    },
+    "SpectrumBand": {
+      "properties": {
+        "alt_agl": {
+          "format": "double",
+          "type": "number"
+        },
+        "blind_arc_fraction": {
+          "format": "double",
+          "type": "number"
+        },
+        "blind_arcs": {
+          "items": {
+            "$ref": "#/$defs/Sector"
+          },
+          "type": "array"
+        },
+        "radials": {
+          "items": {
+            "$ref": "#/$defs/Radial"
+          },
+          "type": "array"
+        },
+        "sector_summary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpectrumSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The same summaries over the requested `sector` only."
+        },
+        "unmask_dist_max": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "unmask_dist_median": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "unmask_dist_min": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "widest_blind_arc_deg": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "alt_agl",
+        "radials",
+        "blind_arc_fraction",
+        "widest_blind_arc_deg",
+        "blind_arcs"
+      ],
+      "type": "object"
+    },
+    "SpectrumSummary": {
+      "properties": {
+        "blind_arc_fraction": {
+          "format": "double",
+          "type": "number"
+        },
+        "blind_arcs": {
+          "items": {
+            "$ref": "#/$defs/Sector"
+          },
+          "type": "array"
+        },
+        "unmask_dist_max": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "unmask_dist_median": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "unmask_dist_min": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "widest_blind_arc_deg": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "blind_arc_fraction",
+        "widest_blind_arc_deg",
+        "blind_arcs"
+      ],
+      "type": "object"
+    },
+    "Term": {
+      "description": "One criterion's contribution: the measured `value`, whether the hard test\npassed, and the soft score from 0 to 1.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "pass": {
+          "type": "boolean"
+        },
+        "score": {
+          "format": "double",
+          "type": "number"
+        },
+        "value": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "value",
+        "pass",
+        "score"
+      ],
+      "type": "object"
+    },
+    "TpiClass": {
+      "description": "A landform class from local relief, then regional relief, then slope:\nthe first that holds of `ridge`, `valley`, `upper`, `lower`, `mid`, and\n`flat` otherwise.",
+      "enum": [
+        "ridge",
+        "valley",
+        "upper",
+        "lower",
+        "mid",
+        "flat"
+      ],
+      "type": "string"
+    },
+    "TrafficabilityRequest": {
+      "properties": {
+        "max_slope_deg": {
+          "format": "double",
+          "type": "number"
+        },
+        "network": {
+          "$ref": "#/$defs/Network"
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "z",
+        "max_slope_deg",
+        "network"
+      ],
+      "type": "object"
+    },
+    "TrafficabilityResponse": {
+      "description": "Judged along the straight line to the nearest road, sampled every 25 m\nfor slope and water.",
+      "properties": {
+        "blocking": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Point"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The first sample that fails, when one does."
+        },
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "distance": {
+          "format": "double",
+          "type": "number"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "nearest_road": {
+          "$ref": "#/$defs/Point"
+        },
+        "reachable": {
+          "type": "boolean"
+        },
+        "reason": {
+          "description": "Why the line is or is not passable, for a reader.",
+          "type": "string"
+        },
+        "theatre": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "theatre",
+        "dcs_build",
+        "cell_size",
+        "elapsed_ms",
+        "reachable",
+        "nearest_road",
+        "distance",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "UnmaskProfileRequest": {
+      "properties": {
+        "route": {
+          "items": {
+            "$ref": "#/$defs/Point3"
+          },
+          "type": "array"
+        },
+        "site": {
+          "$ref": "#/$defs/Observer"
+        },
+        "step": {
+          "default": 100.0,
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "site",
+        "route"
+      ],
+      "type": "object"
+    },
+    "UnmaskProfileResponse": {
+      "properties": {
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "first_seen": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Point3"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where along the route the site first sees it; null when never."
+        },
+        "first_seen_dist_along_route": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "first_seen_dist_from_site": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "masked_segments": {
+          "items": {
+            "$ref": "#/$defs/RouteSpan"
+          },
+          "type": "array"
+        },
+        "theatre": {
+          "type": "string"
+        },
+        "visible_fraction": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "theatre",
+        "dcs_build",
+        "cell_size",
+        "elapsed_ms",
+        "masked_segments",
+        "visible_fraction"
+      ],
+      "type": "object"
+    },
+    "ViewshedRequest": {
+      "properties": {
+        "as_polygons": {
+          "default": false,
+          "type": "boolean"
+        },
+        "observer": {
+          "$ref": "#/$defs/Observer"
+        },
+        "radius": {
+          "format": "double",
+          "type": "number"
+        },
+        "resolution": {
+          "description": "Mask cell size; the file's cell size when omitted, and may be coarser.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "target_alt_agl": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "observer",
+        "radius",
+        "target_alt_agl"
+      ],
+      "type": "object"
+    },
+    "ViewshedResponse": {
+      "description": "The mask is `width` × `height` bits, row-major from the origin corner,\nbase64-encoded.",
+      "properties": {
+        "bits": {
+          "type": "string"
+        },
+        "cell": {
+          "format": "double",
+          "type": "number"
+        },
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "height": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "origin_x": {
+          "format": "double",
+          "type": "number"
+        },
+        "origin_z": {
+          "format": "double",
+          "type": "number"
+        },
+        "rings": {
+          "description": "The mask's outlines, when `as_polygons` was asked for.",
+          "items": {
+            "$ref": "#/$defs/Polygon"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "theatre": {
+          "type": "string"
+        },
+        "visible_fraction": {
+          "format": "double",
+          "type": "number"
+        },
+        "width": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "theatre",
+        "dcs_build",
+        "cell_size",
+        "elapsed_ms",
+        "origin_x",
+        "origin_z",
+        "cell",
+        "width",
+        "height",
+        "bits",
+        "visible_fraction"
+      ],
+      "type": "object"
+    },
+    "VisibleRequest": {
+      "properties": {
+        "a": {
+          "$ref": "#/$defs/Point3"
+        },
+        "b": {
+          "$ref": "#/$defs/Point3"
+        }
+      },
+      "required": [
+        "a",
+        "b"
+      ],
+      "type": "object"
+    },
+    "VisibleResponse": {
+      "properties": {
+        "blocking": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Point3"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The first terrain point in the way, with an absolute `alt`."
+        },
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "clearance_m": {
+          "description": "The least vertical gap between sightline and terrain; negative when\nblocked.",
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "theatre": {
+          "type": "string"
+        },
+        "visible": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "theatre",
+        "dcs_build",
+        "cell_size",
+        "elapsed_ms",
+        "visible",
+        "clearance_m"
+      ],
+      "type": "object"
+    },
+    "WaterClass": {
+      "description": "The `water` layer's classes by name.",
+      "enum": [
+        "land",
+        "lake",
+        "sea",
+        "river"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "error": {
+      "items": {
+        "$ref": "#/$defs/Issue"
+      },
+      "type": "array"
+    },
+    "operations": {
+      "properties": {
+        "approach_spectrum": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/ApproachSpectrumRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/ApproachSpectrumResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
+        "chokepoints": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/ChokepointsRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/ChokepointsResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
+        "coverage": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/CoverageRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/CoverageResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
+        "describe": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/DescribeRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/DescribeResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
+        "find_sites": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/FindSitesRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/FindSitesResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
+        "geo": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/GeoRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/GeoResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
+        "nearest": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/NearestRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/NearestResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
+        "route": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/RouteRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/RouteResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
+        "route_alternatives": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/RouteAlternativesRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/RouteAlternativesResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
+        "sample": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/SampleRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/SampleResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
+        "scenery_in": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/SceneryInRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/SceneryInResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
+        "score_site": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/ScoreSiteRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/ScoreSiteResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
+        "trafficability": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/TrafficabilityRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/TrafficabilityResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
+        "unmask_profile": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/UnmaskProfileRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/UnmaskProfileResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
+        "viewshed": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/ViewshedRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/ViewshedResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
+        "visible": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/VisibleRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/VisibleResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "describe",
+        "sample",
+        "geo",
+        "score_site",
+        "find_sites",
+        "visible",
+        "viewshed",
+        "coverage",
+        "approach_spectrum",
+        "unmask_profile",
+        "route",
+        "route_alternatives",
+        "nearest",
+        "scenery_in",
+        "chokepoints",
+        "trafficability"
+      ],
+      "type": "object"
+    }
+  },
+  "title": "dcsterrain",
+  "type": "object"
+}
