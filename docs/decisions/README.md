@@ -49,6 +49,7 @@ disagree, the later accepted one wins, and the earlier is marked
 | [0035](0035-a-decoder-is-chosen-by-class-and-version.md) | Accepted | 2026-10-22 | A decoder is chosen by the file's class and version, and an unknown one is refused | `design-and-facts.md` "Two version stamps, not one"; ADR 0034 |
 | [0036](0036-the-packed-base-is-50-m-on-every-map.md) | Accepted | 2026-10-22 | The packed base is 50 m on every map | `core.md` "Grids"; `design-and-facts.md` "Design decisions"; `plan.md` C5b |
 | [0037](0037-the-hook-keeps-only-an-optional-tables-pass.md) | Accepted | 2026-10-22 | The hook keeps only an optional tables pass | `extractor-hook.md` throughout; `extract-format.md` "airdromes.json", "config.json"; `core.md` the `airdrome` table; `validation.md`; `plan.md` component X |
+| [0038](0038-the-projection-is-fitted-from-the-beacons.md) | Accepted | 2026-10-22 | The projection is fitted from the map's beacons | `extract-format.md` "config.json"; `core.md` "Projection"; `design-and-facts.md` the projection table; `validation.md`; `plan.md` C10, V2 |
 
 Add a row when you add an ADR. This table is the index Claude reads, so an ADR
 missing from it will not be found. Each record's own `Affects` line, at the top
