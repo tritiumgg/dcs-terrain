@@ -116,9 +116,10 @@ and the ledgers are the part that stays useful.
 |---|---|
 | `caucasus-scenery-catalogue.tsv` | The whole-theatre scenery census: 888 859 objects over 263 models |
 | `classes-Caucasus.toml` | Drafted scenery class overrides for Caucasus |
+| `file-formats.md` | The terrain file formats the decoders read, measured on 2.9.30.28738: layouts, derivations, what is confirmed and what is guessed |
 
-These are measurements and a model census, not extracted terrain data, so they
-are committed. Extracts and packed files never are.
+These are measurements, a model census and format notes, not extracted terrain
+data, so they are committed. Extracts and packed files never are.
 
 `classes-Caucasus.toml` moves to `dcsterrain/crates/dcsterrain-core/classes/Caucasus.toml`
 when task C8a runs. Until then it lives here.
