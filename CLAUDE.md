@@ -16,7 +16,7 @@ docs/spec/             frozen: nine documents, with ledger/ beside them
 docs/decisions/        ADRs, and the only place divergence is recorded
 docs/data/             measured reference data and a model census
 dcsterrain/            Cargo workspace: core, cli, mcp                (partial)
-extractor/             the Lua GameGUI hook and its offline Lua tests
+extractor/             the Lua GameGUI hook (tables pass) and its offline tests
 tools/                 ledger.sh, statecheck.sh, nospecrefs.sh,
                        readmeopen.sh, hooktest.sh, luatest.sh
 tools/lua51/           builds Lua 5.1.5 for Windows with MSVC
@@ -35,11 +35,14 @@ index to `docs/`.
 Developed on Windows, macOS and Linux from one checkout. Windows is
 distinguished by one thing only: **DCS runs there**.
 
-- **Windows, with DCS installed.** Component X (the Lua extractor hook), the V
-  validation sortie through the bridge, and the live acceptance steps X10,
-  X11, Q9 and V1. Anything that talks to a running DCS happens only here.
-- **macOS and Linux.** Everything else — the Rust workspace, the query
-  operations, the MCP server, and every document tool. No DCS, no GPU.
+- **Windows, with DCS installed.** Component X (the Lua hook, now only its
+  optional tables pass, ADR 0037), the V validation sortie through the bridge,
+  and the live steps of E9, Q9 and V1. Anything that talks to a running DCS
+  happens only here. The install's terrain files are here too, so the
+  decoders' opt-in checks run here unless the files are copied elsewhere.
+- **macOS and Linux.** Everything else — the Rust workspace including the file
+  decoders (ADR 0034), the query operations, the MCP server, and every
+  document tool. No DCS, no GPU.
 
 The longest dependency chain needs no DCS at all. So do not assume a shell, a
 path separator or a tool is present because another platform has it: check
@@ -348,13 +351,16 @@ every ledger stamp breaks on a Windows checkout.
   closed-form extract; almost every done test in the plan is stated against it.
 - Real data is touched only in the opt-in local test group (gated on
   `DCSTERRAIN_EXTRACT`, skipped in CI) and the live acceptance steps
-  (X10, X11, Q9, V1).
-- **The extractor is verified live, not against a vendored harness.** X1 to X4
-  and X9 keep offline Lua tests, because encoders, grid arithmetic, the
-  frame-budget driver and injected failures cannot be exercised against a real
-  DCS on demand. The sweeps X5 to X8c are checked through the bridge against a
-  running theatre. Nothing named `StubHarness.lua` is vendored into this
-  repository.
+  (E9, Q9, V1).
+- **The decoders are checked against real files and a live extract.** Their
+  offline tests run on byte buffers the test builds. The opt-in group, gated
+  on `DCSTERRAIN_INSTALL`, reads an install's files, and compares against the
+  live Caucasus extract when `DCSTERRAIN_EXTRACT` names it. Never commit a
+  fixture cut from an ED file: it is terrain data.
+- **The hook is verified live, not against a vendored harness.** Its offline
+  Lua tests cover encoders, the frame-budget driver and injected failures; its
+  tables pass is checked through the bridge. Nothing named `StubHarness.lua` is
+  vendored into this repository.
 
 ## Version control
 
@@ -480,13 +486,17 @@ Cited so they can be checked, not so they replace reading the spec.
   versioned separately by ED. Every extract, packed file, query response and
   file name carries both.
 - **Cell size.** The extract is always 50 m. The packed base is a pack
-  parameter: 50 m under 500 000 km² of authored area, 100 m above.
+  parameter: 50 m by default on every map, 100 m only when asked (ADR 0036).
 - **Fill is `nodata`.** The extractor tests each cell against the exact fill
   triple before rounding. An absent tile is sea (`height` 0, `surface` 3), not
   a hole — reading absent tiles as `nodata` made every sightline across a bay
   fail.
 - **Hook-state Lua is 5.1** with no `string.pack`, no `bit`, no LuaJIT, and file
   handles with no `seek` (sizes come from `lfs.attributes`).
-- **No vegetation.** DCS exposes no tree layer to query, so the schema has no
-  tree class. Concealment is terrain masking plus building density, stored
-  separately and never fused.
+- **Vegetation is in the files, not the API.** DCS exposes no tree layer to
+  query, but the scene file carries every tree and the ground mesh marks forest
+  (ADR 0034); F3 decides how they enter the schema. Concealment layers are
+  stored separately and never fused.
+- **Every map file states its format.** A container header, a class name and a
+  format version; a decoder declares the pairs it reads and an unknown one
+  stops the run (ADR 0035). Never open a `.crypt` file.

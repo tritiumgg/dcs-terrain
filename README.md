@@ -12,16 +12,17 @@ fields, through a command line or an MCP server for assistants.
 extract is derived from Eagle Dynamics terrain data and stays on your machine;
 publishing one is your own call against the ED EULA.
 
-> **Not usable yet.** The specification is complete and the extractor hook is
-> part built, so nothing below runs today. The commands are the specified
-> interface, kept here so the shape is visible. Progress is in
-> [docs/STATE.md](docs/STATE.md).
+> **Not usable yet.** The specification is complete and the extractor is being
+> rebuilt to read the terrain files directly, so nothing below runs today. The
+> commands are the planned interface, kept here so the shape is visible.
+> Progress is in [docs/STATE.md](docs/STATE.md).
 
 ## Requirements
 
-Extracting needs Windows with DCS World installed. Everything after that —
-packing, querying, serving — runs on Windows, macOS or Linux with no DCS and no
-GPU.
+Extracting needs a DCS World install, which does not have to be running: the
+extractor reads the terrain files from it. It runs on Windows, macOS or Linux,
+wherever it can read those files. Packing, querying and serving need no DCS and
+no GPU.
 
 Building needs [mise](https://mise.jdx.dev), which installs the Python pinned
 in `mise.toml` and the Rust pinned in `rust-toolchain.toml`. The extractor's
@@ -45,23 +46,21 @@ The binary lands at `dcsterrain/target/release/dcsterrain`.
 
 ## Use it
 
-Three steps: extract a theatre from DCS, pack it, then query it. Only the first
-needs DCS.
+Three steps: extract a theatre from your DCS install, pack it, then query it.
+Only the first needs DCS, and only its files.
 
-**Extract.** Copy the hook to `Scripts/Hooks/DcsTerrainExtract.lua` in your DCS
-Saved Games folder and put `enabled = true` in a config at
-`Config/DcsTerrainExtract.lua`; without that it does nothing. Start DCS and open
-the theatre in the Mission Editor — a mission is not needed, and one with a FARP
-or heliport in it would leave holes in the scenery. A window then asks where to
-write the extract and, optionally, a crop — a centre and a radius, where **Pick
-centre on map** arms the next click you make on the map and fills the centre in.
-**Start** begins the run, which sweeps across frames, shows how far it has got,
-logs to `Logs/DcsTerrainExtract.log`, resumes after **Stop**, and never writes
-into your DCS install. *The window and its controls work, and a run writes the
-manifest, `config.json`, the seven tables, the `water`, `height` and `surface`
-tiles, the road and railroad routes and the scenery, with a whole-map run
-measuring the built area first; the model catalogue is not built yet, so an
-extract is not complete and nothing reads one.*
+**Extract** a theatre from the install into a directory (planned, not usable
+yet):
+
+```bash
+dcsterrain extract --install "/path/to/DCS World" --map Caucasus --out ./extract-caucasus
+```
+
+It reads the map's files and never writes into your DCS install. Four airdrome
+fields only a running DCS knows — the ICAO code, and whether a field is civilian,
+abandoned, and its class — come from an optional Lua hook run once at the
+Mission Editor; without it they are left empty (the hook's reduced form is
+planned, not usable yet).
 
 **Pack** the extract into a single file, then verify it:
 

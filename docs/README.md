@@ -25,7 +25,7 @@ the ADR wins. Everything outside `spec/` is living and edited directly.
 | [spec/probe-log-2.9.29.27278.md](spec/probe-log-2.9.29.27278.md) | Raw measurements on DCS 2.9.29.27278 |
 | [spec/using-the-data.md](spec/using-the-data.md) | What every returned metric means, and how a campaign turns metrics into difficulty. Task M1 generates `terrain_metrics_help` from its "The metrics" section |
 | [spec/extract-format.md](spec/extract-format.md) | The directory the extractor writes and `pack` reads; the Lua/Rust contract |
-| [spec/extractor-hook.md](spec/extractor-hook.md) | The Lua GameGUI hook that sweeps a theatre |
+| [spec/extractor-hook.md](spec/extractor-hook.md) | The Lua GameGUI hook that sweeps a theatre. Only its tables pass survives (ADR 0037); the extract is decoded from the terrain files (ADR 0034) |
 | [spec/core.md](spec/core.md) | The Rust workspace, packed file schema, derived layers, `pack`, `check` |
 | [spec/query-operations.md](spec/query-operations.md) | The operations, criteria, and their tests |
 | [spec/mcp-server.md](spec/mcp-server.md) | `dcsterrain serve` |

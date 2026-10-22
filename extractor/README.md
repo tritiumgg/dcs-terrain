@@ -1,5 +1,11 @@
 # extractor
 
+> **Being cut back.** The extract is now decoded from the terrain files
+> ([ADR 0034](../docs/decisions/0034-the-extract-is-decoded-from-the-terrain-files.md)),
+> and only the hook's tables pass survives
+> ([ADR 0037](../docs/decisions/0037-the-hook-keeps-only-an-optional-tables-pass.md)). The
+> sweeps described below are retired and leave with task X15.
+
 The DCS extractor hook and its offline Lua tests. Lua 5.1, because that is what
 the DCS hook state runs: no `string.pack`, no `bit`, no LuaJIT, and file handles
 without `seek`.

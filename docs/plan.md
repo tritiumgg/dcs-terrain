@@ -14,8 +14,8 @@ users extract their own theatres.
 | `probe-log-2.9.29.27278.md` | Raw measurements on DCS 2.9.29.27278: Caucasus in depth, projection and fill for all eight theatres |
 | `using-the-data.md` | What every returned metric means and how a campaign turns them into easy, medium, hard and unfair missions |
 | `tools/probe-theatre/fit.py` | Fits a theatre projection from 20 measured lat/lon samples |
-| `extract-format.md` | The directory the extractor writes and `pack` reads; the Lua/Rust contract |
-| `extractor-hook.md` | The Lua GameGUI hook that sweeps a theatre |
+| `extract-format.md` | The directory the extractor writes and `pack` reads; the contract between them |
+| `extractor-hook.md` | The Lua GameGUI hook. Since ADR 0034 and ADR 0037 only its tables pass is live, and the extract is decoded from the terrain files |
 | `core.md` | The Rust workspace, packed file schema, derived layers, `pack`, `check` |
 | `query-operations.md` | The operations, criteria, and their tests |
 | `mcp-server.md` | `dcsterrain serve` |
@@ -29,8 +29,9 @@ exist because a call crashed DCS during the measurements.
 
 | Id | Component | Language | Platform | Spec |
 |---|---|---|---|---|
-| X | Extractor hook | Lua 5.1 | Windows with DCS | `extractor-hook.md` |
-| F | Extract format | contract | both | `extract-format.md` |
+| E | Extractor: file decoders and `dcsterrain extract` | Rust | any, with an install's terrain files | ADRs 0034, 0035 |
+| X | Extractor hook, tables pass only, optional | Lua 5.1 | Windows with DCS | `extractor-hook.md`, ADR 0037 |
+| F | Extract format | contract | any | `extract-format.md` |
 | C | `dcsterrain-core` and `pack`/`check` | Rust | any | `core.md` |
 | Q | Query operations | Rust | any | `query-operations.md` |
 | M | MCP server | Rust | any | `mcp-server.md` |
@@ -38,10 +39,11 @@ exist because a call crashed DCS during the measurements.
 | D | Documentation | — | any | this file |
 | P | Project infrastructure | — | any | this file |
 
-The work splits across machines at F: X runs where DCS is, everything
-after it runs anywhere, and only V comes back to DCS. X and C can be
-built in parallel once F is fixed, because both are tested against the
-same synthetic theatre and neither needs the other to exist.
+F is the contract between E and C. E needs a DCS install's terrain files
+but never a running sim; X and V are the only components that do. E and C
+can be built in parallel once F3 is fixed, because C is tested against the
+synthetic theatre and E against the install's files, and neither needs the
+other to exist.
 
 ## Tasks
 
@@ -66,54 +68,62 @@ component are in build order.
 |---|---|---|---|
 | F1 | Freeze the extract format v1: confirm every field against the probe log, decide `water` codes and `nodata` values, write the manifest example by hand | Done; ADR 0007 records the field sources measured on 2.9.29.27468, the `water` codes and the manifest example, and both authors' walk of every field C5c, C7, C8, C9 and C10 read back. Any later change bumps `format_version` | — |
 | F2 | Reference constants for the synthetic theatre, one file per language (`synth_constants.lua`, `synth.rs`), same numbers | Both files exist and a comment in each names the other | F1 |
+| F3 | Extract format v2, recorded as an ADR: the layers the files add (road class and kind per edge, the road network's own nodes, forest and built-up ground from the mesh's materials, the tree and line pools, per-model boxes), the class and version of every file read (ADR 0035), the authored rectangle read from the files in place of ADR 0026's measurement, which `config.json` fields survive without the sim and which come only from the hook's tables pass (ADR 0037), the beacon-pair `latlon_samples` (ADR 0038), and the `pass` field's new meaning | The ADR walks every field to its decoder and to the C task that reads it; `format_version` is 2 | F1 |
 
-### X: extractor hook
+### E: extractor, the file decoders
+
+Each decoder reads one file class at the versions it declares (ADR 0035).
+Their offline tests run on byte buffers built in the test. The real-file
+checks are an opt-in group gated on `DCSTERRAIN_INSTALL`, skipped in CI, and
+compare against the live Caucasus extract (heights, water, roads and
+tables), gated on `DCSTERRAIN_EXTRACT`.
 
 | Id | Deliverable | Done | Depends on |
 |---|---|---|---|
-| X1 | Encoders `i16le`, `u8`, `json`, and the list normalisation of ADR 0007; offline tests on boundary values, on nested tables, strings with quotes, unicode, empty arrays and objects, and on a DCS table keyed from 0 | Offline Lua tests pass | F1, P1 |
-| X2a | Config validation over the three fields of ADR 0011, progress log, `dcs.log` lines. Reading and writing the config file belong to X13, which owns it | Every bad config field produces one log line and its default in place; a missing `output_dir` produces one line and no run (ADR 0012) | X1 |
-| X2b | `dcs_build` from `autoupdate.cfg`; `terrain_dir` derived by scanning `Mods/terrains/*/entry.lua` for the id `GetTerrainConfig` returns (ADR 0011), passing over a directory with no entry file; `terrain_fingerprint` as a record of each data file's path, size and container payload size, nothing hashed and no digest, because the DCS build is the terrain version (ADR 0023), each file found by its extension because the base names follow no one rule (ADR 0022); a prepare job may refuse, which stops the run with the reason on it | Each recorded size and payload size equals what `stat` and `od` report for the real file, and the directory is found for a theatre whose id is not its directory name | X2a |
-| X3 | Grid computation from crop, authored bounds, or the pre-sweep, including the pre-sweep lattice, its authored-cell bounds derivation and its base64 bitmask record; tile addressing; `tiles.jsonl` journal, manifest write and resume | Offline tests for each bounds source, for the bitmask's row padding and its base64 against the RFC 4648 vectors, and for resume with half the tiles journalled | F1, X1 |
-| X4 | State machine and frame budget: idle → prepare → hook pass → mission pass → done; `onSimulationFrame` slicing with `os.clock()` | An offline fake driver runs 10 000 frames and the manifest advances monotonically | X3 |
-| X5 | Config and tables sweep: `config.json` with the fill triple, `airdromes.json`, `runways.json`, `stands.json`, `beacons.json`, `radio.json`, `towns.json`, `nodes.json`, including the sandboxed table reader. The two Lua paths are derived from X2b's `terrain_dir` as `Map/towns.lua` and `MissionGenerator/nodes.lua` (ADR 0011); `config.json.crs` is always null, because C10 fits the projection. Also the `grid` prepare job that plans the grid from the crop or the pre-sweep and opens or resumes the output directory; no rectangle is read from a theatre file (ADR 0026), so until X6 a whole-map run refuses and asks for a crop. Every table works the same on every theatre: a shape nobody measured is null with a log line, a table the theatre cannot give is empty, never a raise and never a refusal | Every swept table matches the same table read back through the bridge | X2b, X4 |
-| X6 | Pre-sweep sampling (post density or road proximity) over X3's lattice, as the only source of the authored rectangle on every theatre, Caucasus included (ADR 0026), as a prepare job between `identity` and `grid`; `water` and `height` sweeps with the fill and sea skip set, the fill test and per-tile min/max | Tile cells match heights and water re-read through the bridge on a small crop; the fill margin is omitted | X4, F2 |
-| X7 | Roads and railroads sweep: seed lattice, snaps (nil accepted), seed merging at 100 m, neighbour pairing, path lines, path calls under the frame budget | Every pair appears once, and a sampled path matches the same path re-read through the bridge | X6, X7a |
-| X7a | Short-path cost | Done; measured, probe log "Plan measurements X7a and C8a": 0.61 ms per 1 km path, `road_seed_spacing` 1000, merge radius 100 m | — |
-| X8a | Mission-pass transport: `net.dostring_in("server", ...)` with `%q` escaping, length verification, `(string, boolean)` return handling; `surface` quarter-tile chunks | A tile round-trips through the live bridge; a truncated payload is rejected | X4 |
-| X8b | Scenery sweep: 2 km boxes on a lattice anchored on the grid origin, each keeping the objects inside it (ADR 0032), the file its own journal (ADR 0033), `getObjectsAtMapPoint` footprint attach by `tostring` id. No helipad check: ADR 0011 drops it with `allow_helipads`, because the tool is run from the Mission Editor where no statics exist | Scenery lines match the same box re-read through the bridge, with footprints attached | X8a |
-| X8c | `scenery_models.json` catalogue: counts, `getDesc` fields, `type_bits`, OBB and radius medians | Catalogue counts and medians match the swept scenery lines | X8b |
-| X9 | Failure handling: `pcall` everywhere, `notes` entries, terrain change mid-run | Offline tests inject failures and the run completes with `nodata` cells and notes | X4 |
-| X10 | Live run, cropped: 10 × 10 km around Kutaisi, both passes, ten cells spot-checked through the bridge | Acceptance 2 and 3 in the spec; `check-extract` passes | X5, X6, X7, X8c, X9, C3 |
-| X11 | Live run, full Caucasus, both passes; timings recorded in the probe log | Acceptance 4, and the pre-sweep's rectangle agrees with the hull Caucasus ships in `entry.lua` to within the 10 km margin (ADR 0026) | X10 |
-| X12 | Progress reporting: `start` returns `step, progress` and `progress()` answers `(done, total)` or nil; a wall-clock heartbeat naming phase, sweep, which sweep of how many, the sweep's count and elapsed; no fraction of the whole run, because the per-sweep minutes the spec gives are one machine's per-call costs times guessed counts and a bar weighted by them would describe the guess (ADR 0025); totals at done. The sweeps from X5 on implement `progress()`, counting journalled tiles as done. ADR 0024 records the third kind of log line, the totals line and the two cadences, the window's line every second and the log every ten. Fills in the bar X13 already shows, which until then moved only at a phase change | An offline driver over 10 000 frames emits one heartbeat per interval, never reports a fraction above 1, and names the phase it is actually in; a sweep that cannot count its work still gets a heartbeat | X2a, X4, X13 |
-| X13 | Control window (ADR 0011), and the only surface the config has: `output_dir` and the crop as a centre and a radius, one line per validation problem against the field it belongs to, Start (writes `Config/DcsTerrainExtract.lua`, then leaves the stopped state) and Stop (halts and saves the manifest, so the run resumes). Never closable, shown only when `enabled` is true. Reads the config file at load to fill the controls. Opens with a spike: whether `CheckBox` and `EditBox` construct from the hook state, whether a `Window` can refuse to close, and whether the Mission Editor can be told from the main menu and from a running mission. Adds a stopped state to X4's machine, since the run now begins waiting for Start. The crop is switched on by a tick, so an empty crop and a crop nobody asked for are not the same thing, and the window carries the bar X12 later fills in. Start re-points the run at what the boxes now say, and accepts a finished run (ADR 0017). Stretch goal, taken: read the crop centre off the map through `MapWindow.getCurPosition` rather than typing the X and Z the editor shows under the cursor | The window appears with the Mission Editor open, a value edited in it survives a DCS restart, Start begins a run and Stop leaves one that resumes; forcing every widget call to fail leaves the run going and the extract identical | X2a |
-| X14 | Style and usability pass over the control window, done live with a maintainer watching rather than guessed at in a commit. The stock skins it ships with are the generic defaults; the `_ME` family (`windowSkin_ME`, `staticSkin_ME`, `editBoxSkin_ME`, `buttonSkin_ME`, `checkBoxSkin_ME`, `panelMESkin`) is what the Mission Editor itself draws with, and a custom skin only where the stock ME set has no fit. Usability rides along: field widths that fit the numbers they hold, alignment and spacing, label wording, tab order between the boxes, tooltips through `Widget.setTooltipText`, where the window opens and whether it remembers being dragged, and which controls make sense while a run is going. Built through the bridge as variants the maintainer reacts to, and only the settled result committed | A maintainer looking at the window in the Mission Editor accepts it as belonging there, and can set a directory and a crop without asking what a control means | X13 |
+| E1 | Container reader: header, class name, format version, and dispatch to a decoder that declares the pair; an unknown pair stops the run, naming the file, class and version; the terrain fingerprint and the file list with versions for the manifest | Offline tests on built headers, including a refused version; opt-in: every map file in an install is classified, and Nevada's scene file reads as version 8 | C1 |
+| E2 | `surface5`: blocks, field descriptors, the finest mesh level, a point sampler, and rasterization of `height` (water surface, road strips win), `water` and `surface` to 50 m tiles | Offline tests on a built two-triangle block; opt-in: Caucasus heights 99.95 % exact and water all but 67 cells against the live extract | E1, F3 |
+| E3 | `rn4` road network: edges with class and kind, the node table, polylines; roads and railroads written per F3 | Offline tests on a built edge; opt-in: Caucasus router points within 1.5 m of a decoded edge at p90, and every rail-kind edge carries a rail class | E1, F3 |
+| E4 | `scn5` versions 8 and 9: model table with boxes, placement blocks, the object, line and tree pools, instance ids | Offline tests on a built block for each version; opt-in: Caucasus objects equal the reference decode row for row, and Nevada's runway lights align with their runways | E1, F3 |
+| E5 | Airfields: airfield `rn4` and `rn5`, runway ends and their pairing, stands with class, stand parameters from `misc/assets.assets` | Opt-in: Caucasus 900 of 900 stands on all parameters and 21 of 21 runways against the live extract | E1, F3 |
+| E6 | Lua tables: beacons, radio with airdrome ids, towns, mission nodes, read without executing the files; `latlon_samples` from the beacons (ADR 0038) | Opt-in: Caucasus counts and values equal the live extract; the beacon fit reproduces the design table on every installed map | E1, F3 |
+| E7 | Ground materials: forest and built-up regions from the mesh's material subsets, as F3 defines them | Opt-in: on Caucasus, built-up ground holds over 90 % of scenery objects on under 10 % of land | E2, E4 |
+| E8 | `dcsterrain extract --install <dir> --map <Map> --out <dir>`: runs the decoders, the sanity checks of ADR 0035, merges a hook `airdromes.json` from the same build when given one (ADR 0037), writes the manifest | `check-extract` accepts the output; a hook file from another build is refused; a decoded road lifted 10 m off the ground fails the run | E2–E7, C3 |
+| E9 | Live comparison: a full Caucasus decode against the live extract, Nevada and Syria cross-checks, and a live crop for the `surface` layer and Syria's road and rail heights; figures recorded in `docs/data/` | Every layer within the E2 to E6 figures, and each Syria and `surface` question answered with an ADR where the decode differs from the game | E8, C4 |
+
+### X: extractor hook, tables pass only
+
+ADR 0037 keeps the tables pass and nothing else. X1 to X5, X9 and X12 to X14
+are done. X6, X7, X7a, X8a, X8b, X8c, X10 and X11 are retired by ADR 0034.
+
+| Id | Deliverable | Done | Depends on |
+|---|---|---|---|
+| X15 | Strip the hook to `identity`, `config` and `tables`: delete the pre-sweep, the water and height, road and scenery sweeps, the mission-pass transport and their offline tests; a run needs no crop and no grid; the control window and progress reporting (X12 to X14) lose the crop, grid and per-sweep controls | Offline Lua tests pass; a live run at the menu writes the tables and nothing else, and the window says so | X5, F3 |
 
 ### C: core and pack
 
 | Id | Deliverable | Done | Depends on |
 |---|---|---|---|
 | C1 | Workspace scaffold, `types`, `clap` CLI with subcommand stubs, `schemars` on all request/response types, stderr logging with `--verbose`; the schema is snapshot-tested, so a change to it is a deliberate diff | `dcsterrain schema` prints valid JSON schema, and the snapshot test fails on any change to it | P1 |
-| C2 | `synth`: closed-form theatre and extract-directory writer including the fill margin; `dcsterrain synth` | Writes a directory `check-extract` accepts once C3 exists; constants match F2 | F2, C1 |
-| C3 | `extract`: manifest and journal parse, validation, tile reader; `dcsterrain check-extract` | Accepts the synthetic extract; rejects each corrupted variant (wrong size, missing tile, extra file, bad min/max, unknown version, journal ahead of manifest) | F1, C1 |
+| C2 | `synth`: closed-form theatre and extract-directory writer including the fill margin; `dcsterrain synth` | Writes a v2 directory, the F3 layers included, that `check-extract` accepts once C3 exists; constants match F2 | F2, F3, C1 |
+| C3 | `extract`: manifest and journal parse, validation, tile reader; `dcsterrain check-extract` | Accepts the synthetic extract; rejects each corrupted variant (wrong size, missing tile, extra file, bad min/max, unknown version, journal ahead of manifest) | F3, C1 |
 | C4 | `grid`: tile addressing, cross-tile window reads, bilinear sample, absent-tile rules (fill, sea), nodata handling | Window tests at every edge and corner; absent fill and sea tiles read per the spec | C3 |
 | C5a | `pack` skeleton: schema creation, `meta` (ADR 0008 adds the authored-rectangle keys and makes the bounds keys metres), pragmas, one transaction per grid, `VACUUM` | Empty packed file opens and `check` reports every `meta` key | C1 |
-| C5b | Base grids: re-tiled to the pack `tile_size` with min/max, fill and sea tile omission, `cell_size` 50 or 100 by the size rule with resampling | Synthetic file opens; `describe` matches the manifest at both cell sizes | C4, C5a |
+| C5b | Base grids: re-tiled to the pack `tile_size` with min/max, fill and sea tile omission, `cell_size` 50 by default on every map and 100 when asked for, with resampling (ADR 0036) | Synthetic file opens; `describe` matches the manifest at the default and at an explicit 100 | C4, C5a |
 | C5c | Vector tables from JSON (airdromes, runways, stands, beacons, radio, `poi`) and their R-trees | Row counts and R-tree counts match the extract; `nearest` on `poi` finds towns and nodes | C3, C5a |
 | C6 | `derive` stored local layers `valid` and `tpi_2000`, and the query-time window layers `slope`, `aspect`, `roughness`, `tpi_300` with their `grid` rows | Closed-form tolerances in the spec; the synthetic fill margin is `valid = 0` | C5b |
 | C7 | `derive` distance transforms: road, rail, water, built-up; road rasterisation from edge geometry | Brute-force comparison on 64 × 64 | C5b, C8b, C9 |
-| C8 | Scenery classification: rules over `scenery_models.json` (`nofootprint`, `wall`, `misc`, regex, `building`) with per-theatre overrides; `scenery` table; catalogue report with class and reason | Each rule has a positive and negative catalogue test; the report lists every model with its source | C3, C5a |
+| C8 | Scenery classification: rules over `scenery_models.json`, which E4 writes from the scene file's model table (`nofootprint`, `wall`, `misc`, regex, `building`) with per-theatre overrides; `scenery` table; catalogue report with class and reason | Each rule has a positive and negative catalogue test; the report lists every model with its source | C3, C5a |
 | C8a | Caucasus class overrides | Done for the draft; move `classes-Caucasus.toml` to `classes/Caucasus.toml` in the crate and confirm the pack report shows every override applied | C8 |
 | C8b | SATs (`sat_building`, `sat_industrial`) and `scenery_idx` | SAT totals match the generator's object list; SAT window sums match brute force | C8, C5b |
-| C9 | `graph`: build from path lines (snap, split, contract), `crosses_water`, Brandes betweenness with sampling, coverage report | Hand-drawn polyline cases; bridge has max betweenness | C3, C5c |
-| C10 | Projection fit from `latlon_samples`; `crs_proj4` in `meta`; residual check | Fitted Caucasus parameters match the design doc table within 1 m on the synthetic samples generated from those parameters | C3, C5a |
-| C11 | `derive` horizon and enclosure with early exit, parallel tiles, `--drop` | Brute-force ray march comparison on a small grid; closed-form hill angle within 0.25°; the horizon pack time on the X11 extract is recorded against acceptance 2 of the core spec, and a miss is a decision, not a failure of C11 | C6 |
+| C9 | `graph`: build from the road network's own edges and nodes with their class (E3), contract, `crosses_water`, Brandes betweenness with sampling, coverage report | Hand-drawn polyline cases; bridge has max betweenness | C3, C5c |
+| C10 | Projection fit from `latlon_samples`, the map's beacon pairs (ADR 0038); `crs_proj4` in `meta`; residual check | Fitted Caucasus parameters match the design doc table within 1 m on the synthetic samples generated from those parameters | C3, C5a |
+| C11 | `derive` horizon and enclosure with early exit, parallel tiles, `--drop` | Brute-force ray march comparison on a small grid; closed-form hill angle within 0.25°; the horizon pack time on the E9 Caucasus extract is recorded against acceptance 2 of the core spec, and a miss is a decision, not a failure of C11 | C6 |
 | C12a | `file` reader: `Theatre::open`, tile LRU, `grid::Window`, table reads | Regional query touches each tile once; nothing resident after the call | C5b |
 | C12b | `dcsterrain check` including `--install <dir>` fingerprint comparison | Passes on the synthetic file, fails on each injected corruption, reports a changed fingerprint | C12a, C5c |
 | C12c | `dcsterrain stamp`; default output naming `<theatre>-<dcs_build>-<cell>m.sqlite`, with no terrain digest because the build is the terrain version (ADR 0023); overwrite refusal | Stamped keys appear in `describe`; a differing file is not overwritten without `--force` | C12a |
 | C13 | Pack report and performance: `rayon` per tile, timings, `--threads`, `--json` | Synthetic 100 × 100 km at 50 m packs in under two minutes on a laptop | C5b, C11 |
-| C14 | Opt-in real-extract test group under `DCSTERRAIN_EXTRACT`, skipped when unset | Skipped in CI; passes locally on the X10 crop | C12b, X10 |
+| C14 | Opt-in real-extract test group under `DCSTERRAIN_EXTRACT`, skipped when unset | Skipped in CI; passes locally on the E9 Caucasus extract | C12b, E8 |
+| C15 | The layers F3 adds: road class and kind on `road_edge`, forest and built-up regions, tree and line density SATs | Synthetic tests for each layer; SAT window sums match brute force | F3, C5b, C8b |
 
 ### Q: query operations
 
@@ -129,7 +139,8 @@ component are in build order.
 | Q6c | `trafficability` and `chokepoints` | Blocking sample reported on the lake edge; bridge ranked first | Q6a, C6 |
 | Q7 | `dcsterrain query` CLI over all ops with JSON in and out and `--max-rows` | Every op callable from the shell | Q1, Q2, Q4, Q5, Q6b, Q6c |
 | Q8 | Benchmarks on the scaled synthetic theatre with CI upper bounds | Targets in the spec met at 3×; a miss is a decision about the target | Q7 |
-| Q9 | Opt-in real-data replay of the FARP and SAM examples from the design doc | Acceptance 2 in the spec | Q4, Q2, X11, C13 |
+| Q9 | Opt-in real-data replay of the FARP and SAM examples from the design doc | Acceptance 2 in the spec | Q4, Q2, E9, C13 |
+| Q10 | Criteria over the F3 layers: forest cover, tree density, built-up region, road class on routes and `nearest` | Each criterion has a positive and negative synthetic test | C15, Q3, Q6a |
 
 ### M: MCP server
 
@@ -145,60 +156,47 @@ component are in build order.
 | Id | Deliverable | Done | Depends on |
 |---|---|---|---|
 | V0 | Fill and hull on the land-fill and sea-fill theatres | Done; measured, probe log "Plan measurement V0": fill lies outside every bounds rectangle; the pre-sweep uses post density or road proximity | — |
-| V1 | `tools/validate/`: `validate.lua` chunks and the driver script; height, water, surface, LOS and route comparisons; `stamp` | A Caucasus file stamps within the spec's thresholds | X11, C12c, Q7 |
-| V2 | `tools/probe-theatre/`: the per-map hook chunk beside the `fit.py` already there, packaged so a new theatre or build is measured in one step | Re-running it on Caucasus reproduces the projection table | — |
+| V1 | `tools/validate/`: `validate.lua` chunks and the driver script; height, water, surface, LOS and route comparisons; `stamp` | A Caucasus file stamps within the spec's thresholds | E9, C12c, Q7 |
+| V2 | `tools/probe-theatre/`: the per-map hook chunk beside the `fit.py` already there, packaged so a new theatre or build is checked in one step; a check, not a requirement, since ADR 0038 fits the projection from the beacons | Re-running it on Caucasus reproduces the projection table | — |
 
 ### D: documentation
 
 | Id | Deliverable | Done | Depends on |
 |---|---|---|---|
-| D1 | `docs/guide.md`: install the hook, run an extract, pack it, query it, read the results, and the failure modes of each step. Written against real output, never against the specs; links to `using-the-data.md` for metric definitions rather than restating them | A reader who has not seen the project extracts a theatre and answers one siting question from it, following only the guide | Q7, M4, X11 |
+| D1 | `docs/guide.md`: run `dcsterrain extract` on an install, optionally the hook's tables pass, pack it, query it, read the results, and the failure modes of each step. Written against real output, never against the specs; links to `using-the-data.md` for metric definitions rather than restating them | A reader who has not seen the project extracts a theatre and answers one siting question from it, following only the guide | Q7, M4, E9 |
 
 ## Order and milestones
 
-Build order is P1, F1, F2, then X1 to X9, then C1 to C3, then X10, then
-the rest of C, then Q, M, V. X leads because the Windows machine is the
-scarce resource and X is the only component that needs it. Twelve X
-tasks, X1 through X9 counting the sub-tasks, depend on nothing outside
-the component, and the
-only thing X ever needs from C is `check-extract` at X10, so C1 to C3
-are the whole Rust interlude that finishing the extractor costs.
+Build order is P1, F1, F2, then F3, then C1 and C2, then C3 and E1, then
+E2 to E8 beside the rest of C, then E9, Q, M and V. F3 comes first because
+both E and C are written against it: it settles the layers the files add
+before either side encodes or reads them.
 
 The longest dependency chain is P1 → C1 → C3 → C4 → C5b → C6 → C11 →
-Q3 → Q4 → Q7 → M1 → M2 (twelve tasks; C5b → C8b → C7 → Q3 is a chain
-of the same length), and nothing on it needs DCS. C11 sits on the chain
-only because Q3 tests the horizon criteria; building Q3 with
-`--drop horizon` first and adding those two criteria last takes it off.
-The `Depends on` column is the graph: a task may start when every task
-it names is done, and tasks that share no chain run in parallel.
+Q3 → Q4 → Q7 → M1 → M2 (twelve tasks; C5b → C8b → C7 → Q3 is a chain of
+the same length), and nothing on it needs DCS or its files. C11 sits on the
+chain only because Q3 tests the horizon criteria; building Q3 with
+`--drop horizon` first and adding those two criteria last takes it off. The
+`Depends on` column is the graph: a task may start when every task it names
+is done, and tasks that share no chain run in parallel.
 
-The work is also staged by machine. Component X is developed on the
-Windows machine, because ADR 0005 verifies the sweeps against a running
-theatre through the `dcs-api-bridge` MCP rather than against a stub of
-one; only the offline tests in X1 to X4 and X9 would run anywhere. The
-Rust and MCP work is otherwise developed on macOS, but the Windows
-machine does carry the pinned Rust toolchain, so C1 to C3 are built
-there when they are reached as the X10 interlude and `check-extract`
-runs on the crop where it was extracted.
-
-X11, the full Caucasus sweep, waits until C4 onward have read the X10
-crop. A field missing from F1 then costs a re-run of a 10 x 10 km crop
-rather than of a whole theatre. So the machine is never free for good
-before MS5: X11 calls it back once the C tasks have read the crop, Q9
-replays the design doc's examples against that full extract, and V1
-returns at MS5 because the validation sortie compares the packed file
-against live DCS.
+The work is staged by what each task needs. E needs an install's terrain
+files and nothing else, so its opt-in checks run on the Windows machine,
+or on any machine the files are copied to; its offline tests run anywhere.
+Only X15, E9's live crop and V1 need a running DCS, so the Windows machine
+is no longer the scarce resource the plan is ordered around. E9 waits for
+C4 onward to read the first decoded extract, so a field missing from F3
+costs a decoder change rather than a live session.
 
 The milestones below are proof points, not a schedule. MS2 already
-depends on C11, which MS3 contains, so deferring X11 past the C tasks
-changes nothing about them.
+depends on C11, which MS3 contains, through C13.
 
 | Milestone | Contains | Proof |
 |---|---|---|
-| MS0 Contract | P1, P2, F1, F2, C1, C2, C3, X1, X3 | `check-extract` accepts the Rust synthetic extract, and the hook's encoders and grid computation reproduce the F2 constants byte for byte on the same inputs (ADR 0005: the full-format contract is proven at X10) |
-| MS1 Packed file | C4, C5a–C5c, C6–C10, C8a, C8b, C12a–C12c, X2a, X2b, X4–X9, X12 | `pack` and `check` pass on the synthetic extract; the hook completes a live cropped sweep |
-| MS2 Real extract | X10, X11, X13, C13, C14 | A full Caucasus extract exists, packs, and `check` passes |
-| MS3 Queries | Q1–Q5, Q6a–Q6c, Q7, Q8, C11 | Every operation tested on the synthetic theatre; benchmarks within target |
+| MS0 Contract | P1, P2, F1, F2, F3, C1, C2, C3, E1 | `check-extract` accepts the Rust synthetic v2 extract, and E1 classifies every terrain file of an install |
+| MS1 Packed file | C4, C5a–C5c, C6–C10, C8a, C8b, C12a–C12c, C15, E2–E7, X15 | `pack` and `check` pass on the synthetic extract; every decoder passes its opt-in checks on Caucasus |
+| MS2 Real extract | E8, E9, C13, C14 | A decoded full Caucasus extract exists, packs, and `check` passes |
+| MS3 Queries | Q1–Q5, Q6a–Q6c, Q7, Q8, Q10, C11 | Every operation tested on the synthetic theatre; benchmarks within target |
 | MS4 Server | M1–M4, Q9 | The assistant answers the FARP example, and `query` returns the same result for it as the server does |
 | MS5 Validated | V1, V2, P3, P4, D1 | A stamped Caucasus file, release binaries, and a guide a newcomer can follow |
 
@@ -215,3 +213,6 @@ changes nothing about them.
 - When a measurement contradicts the design doc, a spec, or the probe
   log, record an ADR in `docs/decisions/` with the build string. Those
   documents are frozen. This plan is not: edit it directly.
+- The decoders open the install's files for reading only, and never
+  touch a `.crypt` file: what only the encrypted files hold comes from
+  the hook's tables pass or is left null (ADR 0037).
