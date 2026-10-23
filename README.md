@@ -13,9 +13,9 @@ extract is derived from Eagle Dynamics terrain data and stays on your machine;
 publishing one is your own call against the ED EULA.
 
 > **Not usable yet.** The specification is complete and the extractor is being
-> rebuilt to read the terrain files directly, so nothing below runs today. The
-> commands are the planned interface, kept here so the shape is visible.
-> Progress is in [docs/STATE.md](docs/STATE.md).
+> rebuilt to read the terrain files directly, so of the commands below only
+> `dcsterrain synth` runs today. The rest are the planned interface, kept here
+> so the shape is visible. Progress is in [docs/STATE.md](docs/STATE.md).
 
 ## Requirements
 
@@ -76,8 +76,9 @@ dcsterrain query caucasus.sqlite find_sites '{"...": "..."}'
 dcsterrain serve caucasus.sqlite
 ```
 
-The file is stock SQLite, so any client can read it. `dcsterrain synth` writes a
-synthetic theatre if you want to try the tools without DCS.
+The file is stock SQLite, so any client can read it. To try the tools without
+DCS, `dcsterrain synth ./extract-synth` writes a synthetic theatre in place of
+an extract.
 
 ## Understanding the results
 
