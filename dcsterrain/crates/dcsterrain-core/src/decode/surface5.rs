@@ -32,6 +32,7 @@ pub use raster::{
     RUNWAY_MATERIAL, SURFACE_LAND, SURFACE_ROAD, SURFACE_RUNWAY, SURFACE_WATER, Tile, grid_for,
     rasterize, write_tiles,
 };
+pub(crate) use raster::{entry as tile_entry, put as put_tile};
 
 /// The words that follow the version. N, the fourth, varies by map; the
 /// others are the same on every map seen.

@@ -303,7 +303,7 @@ where
     Ok(())
 }
 
-fn put(dir: &Path, rel: &str, bytes: &[u8]) -> io::Result<()> {
+pub(crate) fn put(dir: &Path, rel: &str, bytes: &[u8]) -> io::Result<()> {
     let path = dir.join(rel);
     fs::create_dir_all(path.parent().unwrap())?;
     let tmp = dir.join(format!("{rel}.tmp"));
@@ -311,7 +311,7 @@ fn put(dir: &Path, rel: &str, bytes: &[u8]) -> io::Result<()> {
     fs::rename(&tmp, &path)
 }
 
-fn entry(name: &str, tx: u32, tz: u32, values: impl Iterator<Item = i64>) -> TileEntry {
+pub(crate) fn entry(name: &str, tx: u32, tz: u32, values: impl Iterator<Item = i64>) -> TileEntry {
     let nodata = i64::from(layer(name).unwrap().nodata);
     let present: Vec<i64> = values.filter(|&v| v != nodata).collect();
     TileEntry {
