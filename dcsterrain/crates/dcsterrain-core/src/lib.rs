@@ -8,3 +8,6 @@
 #[cfg(any(test, feature = "synth"))]
 pub mod synth;
 pub mod types;
+
+#[cfg(test)]
+mod scratch;
