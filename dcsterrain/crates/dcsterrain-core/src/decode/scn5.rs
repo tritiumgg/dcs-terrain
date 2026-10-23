@@ -23,8 +23,8 @@
 //! ```
 //!
 //! An instance id is `node << S | index`, S being 15 in a file with a node
-//! of more than 8 192 instances and 13 in any other. Group record `i`
-//! takes the id that follows the last node's, `(nodes << S) + i`.
+//! of more than 8 192 instances and 13 in any other (ADR 0045). Group
+//! record `i` takes the id that follows the last node's, `(nodes << S) + i`.
 
 use std::fmt;
 use std::fs::File;
@@ -119,10 +119,10 @@ struct Layout {
     axis_stride: u16,
 }
 
-/// The bits of an id that hold an instance's index: 13 where every node
-/// holds at most 8 192 instances, else 15. The version does not decide it:
-/// Nevada, version 8, and PersianGulf, version 9, each have a node past
-/// 8 192 and take 15; the six other maps seen take 13.
+/// ADR 0045: the bits of an id that hold an instance's index are 13 where
+/// every node holds at most 8 192 instances, else 15. The version does not
+/// decide it: Nevada, version 8, and PersianGulf, version 9, each have a
+/// node past 8 192 and take 15; the six other maps seen take 13.
 pub(crate) fn shift_for(largest: u32) -> Option<u32> {
     [13, 15].into_iter().find(|s| u64::from(largest) <= 1 << s)
 }
