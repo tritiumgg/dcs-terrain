@@ -14,8 +14,9 @@ publishing one is your own call against the ED EULA.
 
 > **Not usable yet.** The specification is complete and the extractor is being
 > rebuilt to read the terrain files directly, so of the commands below only
-> `dcsterrain synth` runs today. The rest are the planned interface, kept here
-> so the shape is visible. Progress is in [docs/STATE.md](docs/STATE.md).
+> `dcsterrain synth` and `dcsterrain check-extract` run today. The rest are
+> the planned interface, kept here so the shape is visible. Progress is in
+> [docs/STATE.md](docs/STATE.md).
 
 ## Requirements
 
@@ -61,6 +62,13 @@ fields only a running DCS knows — the ICAO code, and whether a field is civili
 abandoned, and its class — come from an optional Lua hook run once at the
 Mission Editor and passed to `extract` as `--hook <dir>`; without it they are
 left empty (the hook's reduced form is planned, not usable yet).
+
+Before moving an extract to another machine, check it; this lists every
+problem with its file and exits 1 when there is one:
+
+```bash
+dcsterrain check-extract ./extract-caucasus
+```
 
 **Pack** the extract into a single file, then verify it:
 

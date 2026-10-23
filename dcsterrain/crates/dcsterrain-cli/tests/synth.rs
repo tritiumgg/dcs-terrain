@@ -64,3 +64,32 @@ fn refuses_a_cell_other_than_fifty() {
     assert_eq!(out.status.code(), Some(2));
     assert!(!s.0.exists());
 }
+
+#[test]
+fn check_extract_passes_the_synthetic_extract_and_names_a_broken_file() {
+    let s = Scratch::new("check");
+    assert!(run(&["synth", s.arg()]).status.success());
+
+    let ok = run(&["check-extract", s.arg()]);
+    assert!(
+        ok.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ok.stdout)
+    );
+    assert!(String::from_utf8_lossy(&ok.stdout).contains("passes: Synth"));
+
+    std::fs::write(s.0.join("tiles/water/0_0.bin"), b"short").unwrap();
+    let bad = run(&["check-extract", s.arg()]);
+    assert_eq!(bad.status.code(), Some(1));
+    let report = String::from_utf8_lossy(&bad.stdout);
+    assert!(report.contains("tiles/water/0_0.bin: 5 bytes"), "{report}");
+}
+
+#[test]
+fn check_extract_refuses_a_directory_with_no_manifest() {
+    let s = Scratch::new("nomanifest");
+    std::fs::create_dir_all(&s.0).unwrap();
+    let out = run(&["check-extract", s.arg()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("manifest.json: missing"));
+}

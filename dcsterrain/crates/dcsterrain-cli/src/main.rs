@@ -161,7 +161,7 @@ fn main() -> ExitCode {
             }
         },
         Command::Extract { .. } => not_yet("extract"),
-        Command::CheckExtract { .. } => not_yet("check-extract"),
+        Command::CheckExtract { dir } => run_check_extract(&dir),
         Command::Pack { .. } => not_yet("pack"),
         Command::Check { .. } => not_yet("check"),
         Command::Stamp { .. } => not_yet("stamp"),
@@ -196,6 +196,33 @@ fn run_synth(dir: &Path, seed: u32, size_km: u32, cell: u32) -> ExitCode {
         }
         Err(e) => {
             tracing::error!("cannot write {}: {e}", dir.display());
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_check_extract(dir: &Path) -> ExitCode {
+    match dcsterrain_core::extract::check(dir) {
+        Ok(s) => {
+            println!(
+                "{}: passes: {} on DCS {}, {} tiles, {} tables",
+                dir.display(),
+                s.theatre,
+                s.dcs_build,
+                s.tiles,
+                s.tables
+            );
+            ExitCode::SUCCESS
+        }
+        Err(failures) => {
+            for f in &failures {
+                println!("{f}");
+            }
+            tracing::error!(
+                "{} fails: {} problems, each listed with its path",
+                dir.display(),
+                failures.len()
+            );
             ExitCode::FAILURE
         }
     }
