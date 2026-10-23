@@ -239,8 +239,8 @@ fn config(t: &Theatre) -> Value {
         "crs": {
             "proj4": CRS_PROJ4,
             "lon_0": CRS_LON_0_DEG,
-            "easting": -CRS_EASTING_OFFSET_M,
-            "northing": -CRS_NORTHING_OFFSET_M,
+            "easting": CRS_EASTING_OFFSET_M,
+            "northing": CRS_NORTHING_OFFSET_M,
             "k_0": CRS_K_0,
             "n": null, "rms_m": null, "max_m": null,
             "source": CRS_SOURCE,
@@ -806,6 +806,15 @@ mod tests {
             .map(|r| r["counts"]["objects"].as_u64().unwrap())
             .sum();
         assert_eq!(objects, u64::from(SCENERY_COUNT));
+    }
+
+    #[test]
+    fn the_crs_offsets_are_what_proj4_negates() {
+        let crs = config(&theatre())["crs"].clone();
+        let proj4 = crs["proj4"].as_str().unwrap();
+        let x_0 = format!("+x_0={}", -crs["easting"].as_f64().unwrap());
+        let y_0 = format!("+y_0={}", -crs["northing"].as_f64().unwrap());
+        assert!(proj4.contains(&x_0) && proj4.contains(&y_0), "{crs}");
     }
 
     #[test]
