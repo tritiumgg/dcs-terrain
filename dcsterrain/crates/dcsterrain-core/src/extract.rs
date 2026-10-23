@@ -13,6 +13,10 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde_json::Value;
 
+mod check;
+
+pub use check::{Summary, check};
+
 /// The only version this build reads.
 pub const FORMAT_VERSION: u32 = 2;
 pub const CELL_SIZE_M: u32 = 50;
