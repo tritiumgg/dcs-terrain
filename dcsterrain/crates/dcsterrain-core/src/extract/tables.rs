@@ -4,6 +4,7 @@
 //! DCS knows.
 
 use std::fs;
+use std::io::{self, BufRead, BufReader};
 use std::path::{Component, Path};
 
 use serde_json::Value;
@@ -176,65 +177,90 @@ pub(super) fn check_tables(x: &Extract, out: &mut Vec<Failure>) {
             out.push(Failure::new(name, "not a file in the extract"));
             continue;
         }
-        let text = match fs::read_to_string(&path) {
-            Ok(t) => t,
-            Err(e) => {
-                out.push(Failure::new(name, format!("cannot read: {e}")));
-                continue;
-            }
-        };
-        match rows(&text, shape) {
-            Ok(rows) => check_keys(name, &rows, keys, out),
-            Err(why) => out.push(Failure::new(name, why)),
+        let mut keyed = Keyed::new(keys);
+        if let Err(why) = read_rows(&path, shape, &mut keyed) {
+            out.push(Failure::new(name, why));
+        } else if let Some(why) = keyed.report() {
+            out.push(Failure::new(name, why));
         }
     }
 }
 
-/// The table's rows, each with its 1-based position: the array index or the
-/// line number.
-fn rows(text: &str, shape: Shape) -> Result<Vec<(usize, Value)>, String> {
+/// Feeds each row to `keyed`, with its 1-based position: the array index or
+/// the line number. A JSON Lines table can run to millions of rows, so it is
+/// read a line at a time and no row is kept.
+fn read_rows(path: &Path, shape: Shape, keyed: &mut Keyed) -> Result<(), String> {
+    let cannot = |e: io::Error| format!("cannot read: {e}");
     let parse = |s: &str| serde_json::from_str::<Value>(s).map_err(|e| format!("not JSON: {e}"));
     match shape {
-        Shape::Object => Ok(vec![(1, parse(text)?)]),
-        Shape::Array => match parse(text)? {
-            Value::Array(a) => Ok(a.into_iter().zip(1..).map(|(v, i)| (i, v)).collect()),
-            _ => Err("not a JSON array".into()),
+        Shape::Object => keyed.row(1, &parse(&fs::read_to_string(path).map_err(cannot)?)?),
+        Shape::Array => match parse(&fs::read_to_string(path).map_err(cannot)?)? {
+            Value::Array(a) => a.iter().zip(1..).for_each(|(v, n)| keyed.row(n, v)),
+            _ => return Err("not a JSON array".into()),
         },
-        Shape::Lines => text
-            .lines()
-            .zip(1..)
-            .filter(|(l, _)| !l.trim().is_empty())
-            .map(|(l, n)| {
-                serde_json::from_str(l)
-                    .map(|v| (n, v))
-                    .map_err(|e| format!("line {n} is not JSON: {e}"))
-            })
-            .collect(),
+        Shape::Lines => {
+            let file = fs::File::open(path).map_err(cannot)?;
+            for (line, n) in BufReader::new(file).lines().zip(1..) {
+                let line = line.map_err(cannot)?;
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let v = serde_json::from_str(&line)
+                    .map_err(|e| format!("line {n} is not JSON: {e}"))?;
+                keyed.row(n, &v);
+            }
+        }
     }
+    Ok(())
 }
 
-/// Reports the first row that lacks a key, and how many more do, so one bad
-/// writer does not bury the report under a line per row.
-fn check_keys(name: &str, rows: &[(usize, Value)], keys: &[&str], out: &mut Vec<Failure>) {
-    let mut bad = rows.iter().filter_map(|(n, row)| {
-        let Some(obj) = row.as_object() else {
-            return Some(format!("row {n} is not an object"));
+/// The first row that lacks a key, and how many more do, so one bad writer
+/// does not bury the report under a line per row.
+struct Keyed<'a> {
+    keys: &'a [&'a str],
+    first: Option<String>,
+    more: usize,
+}
+
+impl<'a> Keyed<'a> {
+    fn new(keys: &'a [&'a str]) -> Self {
+        Keyed {
+            keys,
+            first: None,
+            more: 0,
+        }
+    }
+
+    fn row(&mut self, n: usize, row: &Value) {
+        let why = match row.as_object() {
+            None => format!("row {n} is not an object"),
+            Some(obj) => {
+                let missing: Vec<&str> = self
+                    .keys
+                    .iter()
+                    .copied()
+                    .filter(|k| !obj.contains_key(*k))
+                    .collect();
+                if missing.is_empty() {
+                    return;
+                }
+                format!("row {n} lacks {}", missing.join(", "))
+            }
         };
-        let missing: Vec<&str> = keys
-            .iter()
-            .copied()
-            .filter(|k| !obj.contains_key(*k))
-            .collect();
-        (!missing.is_empty()).then(|| format!("row {n} lacks {}", missing.join(", ")))
-    });
-    if let Some(first) = bad.next() {
-        let more = bad.count();
-        let tail = if more > 0 {
-            format!(", and {more} more rows are wrong")
+        if self.first.is_none() {
+            self.first = Some(why);
         } else {
-            String::new()
-        };
-        out.push(Failure::new(name, format!("{first}{tail}")));
+            self.more += 1;
+        }
+    }
+
+    fn report(&self) -> Option<String> {
+        let first = self.first.as_ref()?;
+        Some(if self.more > 0 {
+            format!("{first}, and {} more rows are wrong", self.more)
+        } else {
+            first.clone()
+        })
     }
 }
 
