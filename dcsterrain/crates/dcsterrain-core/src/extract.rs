@@ -14,6 +14,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 mod check;
+mod tables;
 
 pub use check::{Summary, check};
 

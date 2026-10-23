@@ -32,6 +32,7 @@ pub fn check(dir: &Path) -> Result<Summary, Vec<Failure>> {
         // is itself wrong.
         check_tiles(&x, &mut out);
     }
+    super::tables::check_tables(&x, &mut out);
     if out.is_empty() {
         Ok(Summary {
             theatre: x.manifest.theatre.clone(),
@@ -240,14 +241,14 @@ fn check_unlisted(x: &Extract, out: &mut Vec<Failure>) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::extract::MANIFEST;
     use crate::scratch::Scratch;
     use crate::synth;
     use serde_json::Value;
 
-    fn synth_extract() -> Scratch {
+    pub(crate) fn synth_extract() -> Scratch {
         let s = Scratch::new();
         let t =
             synth::Theatre::new(synth::DEFAULT_SEED, synth::DEFAULT_SIZE_KM, CELL_SIZE_M).unwrap();
@@ -255,18 +256,18 @@ mod tests {
         s
     }
 
-    fn edit_manifest(dir: &Path, f: impl FnOnce(&mut Value)) {
+    pub(crate) fn edit_manifest(dir: &Path, f: impl FnOnce(&mut Value)) {
         let path = dir.join(MANIFEST);
         let mut m: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         f(&mut m);
         fs::write(&path, serde_json::to_string_pretty(&m).unwrap()).unwrap();
     }
 
-    fn failures(dir: &Path) -> Vec<Failure> {
+    pub(crate) fn failures(dir: &Path) -> Vec<Failure> {
         check(dir).expect_err("the extract should fail")
     }
 
-    fn has(list: &[Failure], path: &str, words: &str) -> bool {
+    pub(crate) fn has(list: &[Failure], path: &str, words: &str) -> bool {
         list.iter()
             .any(|f| f.path == path && f.message.contains(words))
     }
