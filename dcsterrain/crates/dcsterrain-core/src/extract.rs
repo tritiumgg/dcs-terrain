@@ -111,6 +111,9 @@ const MANIFEST_KEYS: [&str; 17] = [
     "notes",
 ];
 
+const TILE_KEYS: [&str; 6] = ["layer", "tx", "tz", "path", "min", "max"];
+const FILE_KEYS: [&str; 6] = ["role", "path", "class", "version", "size", "payload_size"];
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Manifest {
     pub format_version: u32,
@@ -316,6 +319,24 @@ impl Extract {
                 format!("lacks {}", missing.join(", ")),
             ));
         }
+        // An `Option` field reads an absent key as null, so the nullable keys
+        // of each entry are required here, before serde can excuse them.
+        for (list, keys) in [("tiles", &TILE_KEYS[..]), ("files", &FILE_KEYS[..])] {
+            let entries = obj[list].as_array().map(Vec::as_slice).unwrap_or_default();
+            for (i, e) in entries.iter().enumerate() {
+                let lacks: Vec<&str> = keys
+                    .iter()
+                    .copied()
+                    .filter(|k| e.get(*k).is_none())
+                    .collect();
+                if !lacks.is_empty() {
+                    return Err(Failure::new(
+                        MANIFEST,
+                        format!("{list}[{i}] lacks {}", lacks.join(", ")),
+                    ));
+                }
+            }
+        }
         let manifest: Manifest =
             serde_json::from_value(doc).map_err(|e| Failure::new(MANIFEST, e.to_string()))?;
         Ok(Extract {
@@ -438,6 +459,26 @@ mod tests {
             "{f}"
         );
         assert!(!f.message.contains("theatre"), "{f}");
+    }
+
+    #[test]
+    fn a_nullable_entry_key_must_still_be_present() {
+        let s = synth_extract();
+        let path = s.0.join(MANIFEST);
+        let mut m: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        m["tiles"][2].as_object_mut().unwrap().remove("max");
+        m["files"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("payload_size");
+        fs::write(&path, m.to_string()).unwrap();
+        let f = Extract::open(&s.0).unwrap_err();
+        assert!(f.message.contains("tiles[2] lacks max"), "{f}");
+
+        m["tiles"][2]["max"] = Value::Null;
+        fs::write(&path, m.to_string()).unwrap();
+        let f = Extract::open(&s.0).unwrap_err();
+        assert!(f.message.contains("files[0] lacks payload_size"), "{f}");
     }
 
     #[test]
