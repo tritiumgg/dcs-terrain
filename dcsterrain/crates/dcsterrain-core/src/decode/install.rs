@@ -66,20 +66,21 @@ pub fn read_build(install: &Path) -> Result<Build, Refusal> {
 /// is never a bare `id`. Braces inside strings and comments count toward the
 /// depth, which is wrong for Lua in general and right for these files, whose
 /// strings are names and paths.
+///
+/// Ties go as the hook's reader broke them, so the two agree on any file: by
+/// form, in the order `['id'] = "…"`, `["id"] = "…"`, `['id'] = '…'`,
+/// `["id"] = '…'`, `id = "…"`, `id = '…'`, then the first in the file.
 pub fn entry_id(text: &str) -> Option<String> {
     let b = text.as_bytes();
-    // (depth, bare, position, id): the least wins.
-    let mut best: Option<(i64, bool, usize, String)> = None;
+    // (depth, form, id): the least wins, and the first of equals.
+    let mut best: Option<(i64, u8, String)> = None;
     let mut depth = 0i64;
     let mut counted = 0;
     for i in 0..b.len() {
         if !b[i..].starts_with(b"id") {
             continue;
         }
-        let found = bracketed(b, i)
-            .map(|(at, id)| (at, false, id))
-            .or_else(|| bare(b, i).map(|id| (i, true, id)));
-        let Some((at, is_bare, id)) = found else {
+        let Some((at, form, id)) = bracketed(b, i).or_else(|| bare(b, i)) else {
             continue;
         };
         if id.is_empty() {
@@ -94,9 +95,8 @@ pub fn entry_id(text: &str) -> Option<String> {
             }
         }
         counted = at;
-        let cand = (depth, is_bare, at, id);
-        if best.as_ref().is_none_or(|b| (cand.0, cand.1) < (b.0, b.1)) {
-            best = Some(cand);
+        if best.as_ref().is_none_or(|b| (depth, form) < (b.0, b.1)) {
+            best = Some((depth, form, id));
         }
     }
     best.map(|(.., id)| id)
@@ -109,8 +109,9 @@ fn skip_ws(b: &[u8], mut i: usize) -> usize {
     i
 }
 
-/// `= "value"` or `= 'value'` from `i`, after optional space.
-fn assigned(b: &[u8], i: usize) -> Option<String> {
+/// `= "value"` or `= 'value'` from `i`, after optional space: the value and
+/// whether it was double-quoted.
+fn assigned(b: &[u8], i: usize) -> Option<(String, bool)> {
     let i = skip_ws(b, i);
     if b.get(i) != Some(&b'=') {
         return None;
@@ -121,11 +122,13 @@ fn assigned(b: &[u8], i: usize) -> Option<String> {
         return None;
     }
     let len = b[i + 1..].iter().position(|&c| c == q)?;
-    String::from_utf8(b[i + 1..i + 1 + len].to_vec()).ok()
+    let value = String::from_utf8_lossy(&b[i + 1..i + 1 + len]).into_owned();
+    Some((value, q == b'"'))
 }
 
-/// `['id'] = "..."` with `id` at `i`; returns the `[` position and the value.
-fn bracketed(b: &[u8], i: usize) -> Option<(usize, String)> {
+/// `['id'] = "..."` with `id` at `i`: the `[` position, the form's rank and
+/// the value.
+fn bracketed(b: &[u8], i: usize) -> Option<(usize, u8, String)> {
     let q = *b.get(i.checked_sub(1)?)?;
     if (q != b'"' && q != b'\'') || b.get(i + 2) != Some(&q) {
         return None;
@@ -142,16 +145,24 @@ fn bracketed(b: &[u8], i: usize) -> Option<(usize, String)> {
     if b.get(close) != Some(&b']') {
         return None;
     }
-    assigned(b, close + 1).map(|id| (open, id))
+    let (id, double) = assigned(b, close + 1)?;
+    let form = match (q == b'"', double) {
+        (false, true) => 0,
+        (true, true) => 1,
+        (false, false) => 2,
+        (true, false) => 3,
+    };
+    Some((open, form, id))
 }
 
 /// `id = "..."` with `id` at `i` and no word character before it.
-fn bare(b: &[u8], i: usize) -> Option<String> {
+fn bare(b: &[u8], i: usize) -> Option<(usize, u8, String)> {
     let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
     if i > 0 && word(b[i - 1]) {
         return None;
     }
-    assigned(b, i + 2)
+    let (id, double) = assigned(b, i + 2)?;
+    Some((i, if double { 4 } else { 5 }, id))
 }
 
 pub const TERRAINS_DIR: &str = "Mods/terrains";
@@ -248,8 +259,11 @@ pub fn read_map(install: &Path, map: &str) -> Result<Map, Refusal> {
 
     let entry = child(&root, ENTRY_FILE)
         .ok_or_else(|| Refusal(format!("{rel_root} has no {ENTRY_FILE}: not a map")))?;
-    let text = fs::read_to_string(root.join(&entry))
+    // Bytes, not UTF-8: a localized name in another encoding must not hide
+    // the id beside it.
+    let bytes = fs::read(root.join(&entry))
         .map_err(|e| Refusal(format!("{rel_root}/{entry} cannot be read: {e}")))?;
+    let text = String::from_utf8_lossy(&bytes);
     let theatre =
         entry_id(&text).ok_or_else(|| Refusal(format!("{rel_root}/{entry} declares no id")))?;
 
@@ -386,6 +400,36 @@ mod tests {
     fn a_bracketed_key_beats_a_bare_one_at_the_same_depth() {
         let text = "t = {\n id = 'bare';\n [\"id\"] = 'bracketed';\n}\n";
         assert_eq!(entry_id(text).as_deref(), Some("bracketed"));
+    }
+
+    #[test]
+    fn ties_break_by_form_then_position_as_the_hook_breaks_them() {
+        assert_eq!(
+            entry_id("t = { [\"id\"] = \"A\"; ['id'] = \"B\" }").as_deref(),
+            Some("B")
+        );
+        assert_eq!(
+            entry_id("t = { id = 'x'; id = \"y\" }").as_deref(),
+            Some("y")
+        );
+        assert_eq!(
+            entry_id("t = { ['id'] = 'p'; ['id'] = 'q' }").as_deref(),
+            Some("p")
+        );
+        assert_eq!(
+            entry_id("t = { [ 'id' ] = \"spaced\" }").as_deref(),
+            Some("spaced")
+        );
+    }
+
+    #[test]
+    fn an_entry_file_in_another_encoding_still_gives_its_id() {
+        let m = "Mods/terrains/Synth";
+        let (_i, r) = install();
+        let mut bytes = b"theatre = {\n\t['localizedName'] = \"Caf\xe9\";\n".to_vec();
+        bytes.extend_from_slice(b"\t['id'] = \"Synth\";\n}\n");
+        put(&r, &format!("{m}/entry.lua"), &bytes);
+        assert_eq!(read_map(&r, "Synth").unwrap().theatre, "Synth");
     }
 
     #[test]
