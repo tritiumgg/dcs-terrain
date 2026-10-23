@@ -176,9 +176,10 @@ fn field_at(toc: &[u8], i: usize) -> Option<Field> {
     if !name[0].is_ascii_alphabetic() || !name.iter().all(word) {
         return None;
     }
-    // The name is a whole word: one that runs on is something else.
+    // The length delimits the name; the format code that follows may be any
+    // byte, a letter included.
     let q = i + 8 + len;
-    if toc.get(q).is_some_and(word) || toc.len() < q + FIELD_TAIL {
+    if toc.len() < q + FIELD_TAIL {
         return None;
     }
     let stride = u16_at(toc, q + 2);
@@ -444,7 +445,7 @@ mod tests {
     }
 
     #[test]
-    fn skips_a_one_letter_name_and_a_run_on_name() {
+    fn skips_a_one_letter_name_and_reads_a_letter_format() {
         let mut b = finest([0.0; 3]);
         b.arrays.insert(2, vec3("N", &[[0.0; 3]; 4]));
         let toc = scan_file(&file(&[b], 1)).unwrap();
@@ -453,9 +454,11 @@ mod tests {
         let mut head = vec![0u8; 8];
         head.extend_from_slice(&1u32.to_le_bytes());
         head.extend_from_slice(&3u32.to_le_bytes());
-        head.extend_from_slice(b"TRIX");
-        head.extend_from_slice(&[0; FIELD_TAIL]);
-        assert!(field_at(&head, 8).is_none());
+        head.extend_from_slice(b"TRI");
+        head.push(b'X');
+        head.extend_from_slice(&[0; FIELD_TAIL - 1]);
+        let f = field_at(&head, 8).unwrap();
+        assert_eq!((f.name.as_str(), f.format), ("TRI", u16::from(b'X')));
     }
 
     #[test]
