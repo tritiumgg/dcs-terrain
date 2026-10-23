@@ -193,6 +193,11 @@ impl Scene {
                     heading(c(0), c(2))
                 };
                 let pos = self.world(k, &p, i);
+                if !(rotation.is_finite() && pos.iter().all(|v| v.is_finite())) {
+                    return Err(malformed(format!(
+                        "instance {id} has a position or axis that is not a number"
+                    )));
+                }
                 for (b, &pool) in Pool::ALL.iter().enumerate() {
                     if tag & 1 << b != 0 {
                         f(&Instance {
@@ -343,6 +348,14 @@ mod tests {
             e.contains("split at bit 13, lie inside their own boxes"),
             "{e}"
         );
+    }
+
+    #[test]
+    fn refuses_an_axis_that_is_not_a_number() {
+        let mut built = scene(8);
+        built.nodes[0].axis[1] = [f32::NAN, 0.0];
+        let e = walk(&built.file()).unwrap_err().to_string();
+        assert_eq!(e, "instance 1 has a position or axis that is not a number");
     }
 
     #[test]
