@@ -8,6 +8,7 @@
 use std::fmt;
 
 pub mod container;
+pub mod install;
 
 use container::Header;
 
