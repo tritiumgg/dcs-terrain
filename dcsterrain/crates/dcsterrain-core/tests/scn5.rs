@@ -1,14 +1,20 @@
 //! Opt-in: decodes real `.scn5` files. Set `DCSTERRAIN_INSTALL` to the DCS
-//! install root; without it these pass without reading anything, which is
-//! what CI does. Run them optimized, `cargo test --release --test scn5`. The
-//! install is only read.
+//! install root, and `DCSTERRAIN_SCENE_REFERENCE` to the reference decode's
+//! output directory to compare against; without them these pass without
+//! reading anything, which is what CI does. Run them optimized,
+//! `cargo test --release --test scn5`. The install is only read.
 
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
+
+use serde_json::Value;
 
 use dcsterrain_core::decode::install::{self, TERRAINS_DIR};
 use dcsterrain_core::decode::scn5::{self, Pool, Scene};
+use dcsterrain_core::decode::surface5;
 
 fn install_root() -> Option<PathBuf> {
     match std::env::var_os("DCSTERRAIN_INSTALL") {
@@ -238,4 +244,182 @@ fn every_installed_scene_walks_with_each_pool_counted() {
         eprintln!("{dir}: shift {}, {got:?}", s.shift());
         assert_eq!(got, want, "{dir}");
     }
+}
+
+/// A fresh directory under the system temp, removed when dropped.
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new(name: &str) -> TempDir {
+        let dir =
+            std::env::temp_dir().join(format!("dcsterrain-scn5-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        TempDir(dir)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn surface(root: &Path, dir: &str) -> (PathBuf, surface5::Surface5) {
+    let map = install::read_map(root, dir).unwrap();
+    let path = root.join(&map.files.iter().find(|f| f.role == "surface").unwrap().path);
+    let file = surface5::open(&path).unwrap_or_else(|e| panic!("{dir}: {e}"));
+    (path, file)
+}
+
+/// Writes Caucasus's water tiles, then its scenery, and checks what landed.
+#[test]
+fn caucasus_writes_its_scenery_and_counts() {
+    let Some(root) = install_root() else { return };
+    let out = TempDir::new("caucasus");
+    let (spath, sfile) = surface(&root, "Caucasus");
+    let grid = surface5::grid_for(&sfile.bounds());
+    let started = Instant::now();
+    let tiles = surface5::write_tiles(&sfile, || surface5::reader(&spath), &grid, &out.0).unwrap();
+    eprintln!("ground tiles in {:.1} s", started.elapsed().as_secs_f64());
+
+    let path = scene_path(&root, "Caucasus");
+    let mut r = scn5::reader(&path).unwrap();
+    let s = Scene::open(&mut r, "Caucasus").unwrap();
+    let started = Instant::now();
+    let w = scn5::write(&s, &mut r, &grid, &tiles, &out.0).unwrap();
+    eprintln!(
+        "scenery in {:.1} s: {} objects, {} lines, {} trees, {} models, {} count tiles",
+        started.elapsed().as_secs_f64(),
+        w.objects,
+        w.lines,
+        w.trees,
+        w.models,
+        w.tiles.len()
+    );
+    assert_eq!(w.objects, 917_847 + 18_976);
+    assert_eq!((w.lines, w.trees), (1_069_315, 12_967_324));
+
+    let rows = BufReader::new(File::open(out.0.join(scn5::SCENERY_FILE)).unwrap())
+        .lines()
+        .count() as u64;
+    assert_eq!(rows, w.objects);
+    let models: Value =
+        serde_json::from_str(&fs::read_to_string(out.0.join(scn5::MODELS_FILE)).unwrap()).unwrap();
+    let models = models.as_array().unwrap();
+    assert_eq!(models.len(), w.models);
+    let sum = |k: &str| {
+        models
+            .iter()
+            .map(|m| m["counts"][k].as_u64().unwrap())
+            .sum::<u64>()
+    };
+    assert_eq!(
+        (sum("objects"), sum("lines"), sum("trees")),
+        (w.objects, w.lines, w.trees)
+    );
+
+    for (name, total) in [("trees", w.trees), ("lines", w.lines)] {
+        let mut counted = 0u64;
+        for t in w.tiles.iter().filter(|t| t.layer == name) {
+            let b = fs::read(out.0.join(&t.path)).unwrap();
+            counted += b
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .filter(|&c| c != 65535)
+                .map(u64::from)
+                .sum::<u64>();
+        }
+        let share = counted as f64 / total as f64;
+        eprintln!(
+            "{name}: {counted} of {total} counted into covered cells, {:.4} %",
+            100.0 * share
+        );
+        assert!(share > 0.999, "{name}");
+    }
+}
+
+/// Folds an angle in degrees to its distance from the nearest multiple of
+/// 90°: edge lights face along or across their runway.
+fn fold(deg: f64) -> f64 {
+    let a = deg.rem_euclid(90.0);
+    a.min(90.0 - a)
+}
+
+/// Nevada's runway lights face along or across their runway. The runways
+/// are the reference decode's, `<Map>/airfields.json`, paired ends read
+/// from the airfield files. A light is an object or line whose model names
+/// one or is an in-pavement light, within 60 m of a centerline and between
+/// its ends. Only runways at least 15° off the grid's axes are scored,
+/// where an axis read the wrong way round would show.
+#[test]
+fn nevada_runway_lights_align_with_their_runways() {
+    let (Some(root), Some(refdir)) = (install_root(), reference()) else {
+        return;
+    };
+    let airfields: Value = serde_json::from_str(
+        &fs::read_to_string(refdir.join("Nevada").join("airfields.json")).unwrap(),
+    )
+    .unwrap();
+    // Each runway as its first end, unit course, length and course.
+    let mut runways = Vec::new();
+    for rw in airfields
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|a| a["runways"].as_array().unwrap())
+    {
+        let f = |k: &str| rw[k].as_f64().unwrap();
+        let (x1, z1, x2, z2) = (f("edge1_x"), f("edge1_z"), f("edge2_x"), f("edge2_z"));
+        let len = (x2 - x1).hypot(z2 - z1);
+        let course = (z2 - z1).atan2(x2 - x1).to_degrees();
+        if fold(course) >= 15.0 {
+            runways.push(([x1, z1], [(x2 - x1) / len, (z2 - z1) / len], len, course));
+        }
+    }
+
+    let path = scene_path(&root, "Nevada");
+    let mut r = scn5::reader(&path).unwrap();
+    let s = Scene::open(&mut r, "Nevada").unwrap();
+    let (mut scored, mut aligned, mut swapped) = (0u64, 0u64, 0u64);
+    let mut models: HashMap<String, u64> = HashMap::new();
+    let mut last = None;
+    s.walk(&mut r, |i| {
+        let model = &s.models[i.model as usize].name;
+        // In-pavement lights are lines, and some are objects too: each is
+        // scored once.
+        let light = model.contains("light") || model.starts_with("in_pavement");
+        if i.pool == Pool::Trees || !light || last == Some(i.id) {
+            return Ok(());
+        }
+        last = Some(i.id);
+        let Some(&(_, _, _, course)) = runways.iter().find(|(p, u, len, _)| {
+            let (dx, dz) = (i.pos[0] - p[0], i.pos[2] - p[1]);
+            let along = dx * u[0] + dz * u[1];
+            along > 0.0 && along < *len && (dz * u[0] - dx * u[1]).abs() < 60.0
+        }) else {
+            return Ok(());
+        };
+        let h = i.rotation.to_degrees();
+        scored += 1;
+        aligned += u64::from(fold(h - course) < 2.0);
+        swapped += u64::from(fold(90.0 - h - course) < 2.0);
+        *models.entry(model.clone()).or_default() += 1;
+        Ok(())
+    })
+    .unwrap();
+    let mut top: Vec<(String, u64)> = models.into_iter().collect();
+    top.sort_by_key(|m| std::cmp::Reverse(m.1));
+    top.truncate(6);
+    let pct = |n: u64| 100.0 * n as f64 / scored as f64;
+    eprintln!(
+        "Nevada: {} runways off the axes, {scored} lights on them, {:.1} % within 2° of the course, \
+         {:.1} % with the axes swapped; {top:?}",
+        runways.len(),
+        pct(aligned),
+        pct(swapped)
+    );
+    assert!(scored >= 500, "too few lights scored");
+    assert!(pct(aligned) >= 85.0, "lights aligned");
+    assert!(pct(swapped) <= 5.0, "lights aligned with the axes swapped");
 }
