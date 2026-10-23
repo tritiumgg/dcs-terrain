@@ -23,8 +23,11 @@
 //!   absolute metres, tile counts) is computed by the generator
 
 mod theatre;
+mod tmerc;
+mod write;
 
 pub use theatre::{Cell, Edge, Object, SynthError, Theatre};
+pub use write::{Written, write};
 
 // Extract format, v2 (ADR 0039). The tile layout, the water codes and the
 // height, water and surface nodata values are ADR 0007's. The two count
@@ -302,6 +305,8 @@ pub const STAND_NORTH_OFFSET_M: f64 = 300.0;
 pub const STAND_SPACING_M: f64 = 100.0;
 pub const STAND_CLASS: &str = "stand_40x40m";
 pub const STAND_HEADING_RAD: f64 = 0.0;
+pub const STAND_WIDTH_M: f64 = 40.0;
+pub const STAND_LENGTH_M: f64 = 40.0;
 
 pub const BEACON_COUNT: u32 = 2;
 pub const BEACON_1_FREQUENCY_HZ: u64 = 750000;
