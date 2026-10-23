@@ -346,7 +346,8 @@ each map's own file and never parse dimensions from the class name.
 ```
 container header, class name ("landscape5::Scene5File")
 u32 version                  9 (Caucasus, Syria) or 8 (Nevada)
-u32 M, M × str               model names, lowercase; model index = position
+u32 M, M × str               model names, lowercase UTF-8 (Syria spells 62 with a Cyrillic letter, and one
+                             GermanyColdWar name ends in a space); model index = position
 u32 M (again), M × f32[6]    model bbox min x,y,z, max x,y,z (model-local). Width = x extent, depth = z extent,
                              height = y extent; zero for models placed elsewhere (vehicles)
 u32 count, material descriptors  u32 2, str "HwInstancer5.2", str "Undef", u32 k,
@@ -390,9 +391,10 @@ sum of `n` over the nodes before it.
 
 ### Instance id and collision pools
 
-`id = node << S | index`, where **S = 13 for version 9 and 15 for version 8**. Nevada nodes hold up to 8 808
-instances (more than 8 191), and bits 13-14 of its ids are never set. Decoders choose S per pool from 12..17:
-the shift that puts the most decoded positions inside the pool's own AABB (±0.5 m in x and z).
+`id = node << S | index`, where **S = 13 when every node holds at most 8 192 instances, else 15** (ADR 0045).
+The version does not decide it: Nevada (version 8, largest node 8 808) and PersianGulf (version 9, 14 872) use
+15, and bits 13-14 of their ids are never set; the six other installed maps use 13. A decoder checks S by the
+pool's own AABBs: an id split at the right S puts its instance inside its box (±0.5 m in x and z).
 
 The section table lies between the end of the last node and B. Its entries are 14 bytes each, `u64 count,
 u48 offset`, three to a pool:
@@ -414,7 +416,10 @@ Find a pool by its structure: equal counts, `0 < count < 2^32`, and `offset2 - o
 | trees | 12 967 324 | 889 299 | 25 809 719 | trees and shrubs |
 
 The u64 pools are named by order: objects, lines, trees. The contents agree on all three maps. Instances in no
-pool (light halos, lamps, small plants) are not scenery objects.
+pool (light halos, lamps, small plants) are not scenery objects. No pool lists an id twice on any installed map,
+but a few instances are in both the objects and the lines pool: 391 in-pavement lights on Caucasus and 9 439
+`leaf_wall` on Nevada, the only two maps measured for it, and none in another pair. Each pool keeps its own, so
+such an instance is a scenery object and counts as a line.
 
 ### Non-instanced group
 
@@ -426,7 +431,8 @@ records below. The test: `h < M`, `0 < count < 1e7`, the next 4 bytes zero, a fi
 count × 140-byte record:  u32 0, u32 model index, f64[16] matrix (row 3 = x, y, z, 1), f32 (unknown)
 ```
 
-The id of record `i` is `(node_count << S) + i`, which is the list in `NotInstances.lua`. The models include
+The id of record `i` is `(node_count << S) + i`, a flat range that does not split into node and index past
+`2^S - 1` records, and the list in `NotInstances.lua`. The models include
 smoke stacks, nasos, ukrytie and kamaz/ural/gaz vehicles.
 
 ### Deriving the extract
