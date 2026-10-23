@@ -431,6 +431,113 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn refuses_a_tile_listed_twice() {
+        let s = synth_extract();
+        edit_manifest(&s.0, |m| {
+            let a = m["tiles"].as_array_mut().unwrap();
+            a.push(a[0].clone());
+        });
+        let f = failures(&s.0);
+        assert!(has(&f, "tiles/height/0_0.bin", "listed twice"), "{f:?}");
+    }
+
+    #[test]
+    fn refuses_a_tile_outside_the_grid() {
+        let s = synth_extract();
+        let p = "tiles/height/6_0.bin";
+        fs::write(s.0.join(p), vec![0u8; 256 * 256 * 2]).unwrap();
+        edit_manifest(&s.0, |m| {
+            let a = m["tiles"].as_array_mut().unwrap();
+            let mut t = a[0].clone();
+            t["tx"] = 6.into();
+            t["path"] = p.into();
+            a.push(t);
+        });
+        let f = failures(&s.0);
+        assert!(has(&f, p, "outside the grid's 6 by 6"), "{f:?}");
+    }
+
+    #[test]
+    fn refuses_a_tile_of_an_unknown_layer() {
+        let s = synth_extract();
+        edit_manifest(&s.0, |m| {
+            let a = m["tiles"].as_array_mut().unwrap();
+            let mut t = a[0].clone();
+            t["layer"] = "depth".into();
+            t["path"] = "tiles/depth/0_0.bin".into();
+            a.push(t);
+        });
+        let f = failures(&s.0);
+        assert!(has(&f, "tiles/depth/0_0.bin", "unknown layer"), "{f:?}");
+    }
+
+    #[test]
+    fn refuses_a_grid_of_another_cell_or_tile_size() {
+        let s = synth_extract();
+        edit_manifest(&s.0, |m| {
+            m["grid"]["cell_size"] = 100.into();
+            m["grid"]["tile_size"] = 128.into();
+        });
+        let f = failures(&s.0);
+        assert!(has(&f, MANIFEST, "grid.cell_size 100"), "{f:?}");
+        assert!(has(&f, MANIFEST, "grid.tile_size 128"), "{f:?}");
+    }
+
+    #[test]
+    fn refuses_layers_the_format_does_not_have() {
+        let s = synth_extract();
+        edit_manifest(&s.0, |m| {
+            let layers = m["layers"].as_object_mut().unwrap();
+            let lines = layers.remove("lines").unwrap();
+            layers.insert("depth".into(), lines);
+            layers["height"]["nodata"] = 0.into();
+        });
+        let f = failures(&s.0);
+        assert!(has(&f, MANIFEST, "layers lacks lines"), "{f:?}");
+        assert!(has(&f, MANIFEST, "layers names depth"), "{f:?}");
+        assert!(
+            has(&f, MANIFEST, "layers.height is i16 with nodata 0"),
+            "{f:?}"
+        );
+    }
+
+    #[test]
+    fn refuses_a_surface_value_above_runway() {
+        let s = synth_extract();
+        let p = "tiles/surface/0_0.bin";
+        let mut bytes = fs::read(s.0.join(p)).unwrap();
+        bytes[0] = 6;
+        fs::write(s.0.join(p), &bytes).unwrap();
+        let f = failures(&s.0);
+        assert!(has(&f, p, "sample 0 is 6"), "{f:?}");
+    }
+
+    #[test]
+    fn an_all_sea_tile_needs_its_height_when_sea_tiles_are_kept() {
+        let s = synth_extract();
+        edit_manifest(&s.0, |m| m["omit_sea_tiles"] = false.into());
+        let f = failures(&s.0);
+        assert!(has(&f, "tiles/height/1_1.bin", "not all sea"), "{f:?}");
+    }
+
+    #[test]
+    fn refuses_a_stray_file_anywhere_under_the_tiles() {
+        let s = synth_extract();
+        fs::create_dir_all(s.0.join("tiles/bogus")).unwrap();
+        fs::write(s.0.join("tiles/bogus/0_0.bin"), b"x").unwrap();
+        fs::write(s.0.join("tiles/water/notes.txt"), b"x").unwrap();
+        fs::write(s.0.join("tiles/water/0_0.bin.tmp"), b"x").unwrap();
+        let f = failures(&s.0);
+        for p in [
+            "tiles/bogus/0_0.bin",
+            "tiles/water/notes.txt",
+            "tiles/water/0_0.bin.tmp",
+        ] {
+            assert!(has(&f, p, "not in the manifest"), "{p}: {f:?}");
+        }
+    }
+
+    #[test]
     fn refuses_a_leftover_temporary_file() {
         let s = synth_extract();
         fs::write(s.0.join("towns.json.tmp"), "[]").unwrap();
