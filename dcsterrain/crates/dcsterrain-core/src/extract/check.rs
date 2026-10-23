@@ -103,6 +103,7 @@ fn check_layers(x: &Extract, out: &mut Vec<Failure>) {
 /// layer's tile to another's.
 struct Read {
     all_sea: bool,
+    all_nodata: bool,
 }
 
 fn check_tiles(x: &Extract, out: &mut Vec<Failure>) {
@@ -179,6 +180,7 @@ fn check_samples(t: &TileEntry, s: &Samples, out: &mut Vec<Failure>) -> Option<R
     }
     Some(Read {
         all_sea: s.iter().all(|v| v == WATER_SEA),
+        all_nodata: s.iter().all(|v| v == l.nodata),
     })
 }
 
@@ -200,6 +202,14 @@ fn check_absent(
     for (&(_, tx, tz), read) in seen.iter().filter(|(k, _)| k.0 == "water") {
         // A water tile that could not be read is already reported.
         let Some(read) = read else { continue };
+        // Its absence is what says every cell is outside the mesh; a reader
+        // that finds it present takes the cells beside it as terrain.
+        if read.all_nodata {
+            out.push(Failure::new(
+                format!("tiles/water/{tx}_{tz}.bin"),
+                "every cell is outside the mesh, so the tile is omitted, not written",
+            ));
+        }
         let sea = read.all_sea && x.manifest.omit_sea_tiles;
         for name in ["height", "surface"] {
             if !sea && !seen.contains_key(&(name, tx, tz)) {
@@ -399,6 +409,25 @@ pub(super) mod tests {
         edit_manifest(&s.0, |m| m["layers"]["trees"]["dtype"] = "u8".into());
         let f = failures(&s.0);
         assert!(has(&f, MANIFEST, "layers.trees is u8"), "{f:?}");
+    }
+
+    #[test]
+    fn refuses_a_water_tile_with_no_cell_in_the_mesh() {
+        let s = synth_extract();
+        let p = "tiles/water/1_1.bin";
+        fs::write(s.0.join(p), vec![255u8; 256 * 256]).unwrap();
+        edit_manifest(&s.0, |m| {
+            let t = m["tiles"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|t| t["path"] == p)
+                .unwrap();
+            t["min"] = Value::Null;
+            t["max"] = Value::Null;
+        });
+        let f = failures(&s.0);
+        assert!(has(&f, p, "omitted, not written"), "{f:?}");
     }
 
     #[test]
