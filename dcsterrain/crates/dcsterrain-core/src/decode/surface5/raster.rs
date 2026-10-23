@@ -244,8 +244,8 @@ fn centres(origin: f64, cs: f64, ts: u32, k: u32, limit: u32) -> (f64, f64) {
 }
 
 /// Rasterizes every tile of `grid` from `file`, handing each to `sink` in
-/// order of `tx`, then `tz`. `open` gives a fresh reader of the file, one
-/// per thread.
+/// order of `tx`, then `tz`. `open` gives a fresh reader of the file for each
+/// block read, so threads never share one.
 pub fn rasterize<R, O, S>(file: &Surface5, open: O, grid: &Grid, mut sink: S) -> Result<(), Error>
 where
     R: Read + Seek,
@@ -347,7 +347,12 @@ where
         let w = entry("water", tx, tz, t.water.iter().map(|&v| i64::from(v)));
         put(dir, &w.path, &t.water)?;
         entries.push(w);
-        if t.water.iter().all(|&w| w == WATER_SEA) {
+        // Omitted only where the rebuilt tile, height 0 and surface WATER,
+        // would be what was rasterized: a sea tile that differs keeps its data.
+        let sea = t.water.iter().all(|&w| w == WATER_SEA)
+            && t.height.iter().all(|&h| h == 0)
+            && t.surface.iter().all(|&s| s == SURFACE_WATER);
+        if sea {
             return Ok(());
         }
         let h = entry("height", tx, tz, t.height.iter().map(|&v| i64::from(v)));
@@ -528,6 +533,72 @@ mod tests {
     }
 
     #[test]
+    fn blocks_across_bands_and_partial_tiles_rasterize_as_sampled() {
+        // Two 20 km blocks, the second offset 10 km north and east: a 30 km
+        // grid of 600 cells, so three bands of tiles, the last partial on
+        // both axes, and blocks held from one band into the next.
+        let block = |t: [f32; 3], tritype: [u32; 2]| {
+            let s = 20000.0;
+            build::Block {
+                t,
+                bbox: [0.0, 0.0, 0.0, s, 1000.0, s],
+                arrays: vec![
+                    u32s("TRITYPE", &tritype),
+                    tri(&[[0, 1, 2], [1, 3, 2]], None),
+                    vec3(
+                        "Pbase",
+                        &[
+                            [0.0, 0.0, 0.0],
+                            [s, 1000.0, 0.0],
+                            [0.0, 500.0, s],
+                            [s, 200.0, s],
+                        ],
+                    ),
+                ],
+            }
+        };
+        let blocks = [
+            block([0.0; 3], [0, LAKE]),
+            block([10000.0, 0.0, 10000.0], [ROAD_STRIP, 0]),
+        ];
+        let (f, grid) = one(&blocks);
+        assert_eq!((grid.height, grid.width, grid.tiles()), (600, 600, (3, 3)));
+        let mesh = Surface5::open(&mut Cursor::new(&f[..]), "t")
+            .unwrap()
+            .read_all(&mut Cursor::new(&f[..]), &[])
+            .unwrap();
+        let tiles = tiles(&f, &grid);
+        assert_eq!(tiles.len(), 9);
+        for t in &tiles {
+            for i in 0..256 * 256 {
+                let (r, c) = (t.tx * 256 + i / 256, t.tz * 256 + i % 256);
+                let (x, z) = (f64::from(r) * 50.0 + 25.0, f64::from(c) * 50.0 + 25.0);
+                let got = (
+                    t.height[i as usize],
+                    t.water[i as usize],
+                    t.surface[i as usize],
+                );
+                let want = match mesh.sample(x, z) {
+                    _ if r >= 600 || c >= 600 => (HEIGHT_NODATA, WATER_NODATA, SURFACE_NODATA),
+                    None => (HEIGHT_NODATA, WATER_NODATA, SURFACE_NODATA),
+                    Some(h) => {
+                        let w = water_class(h.tritype);
+                        let s = if h.tritype & ROAD_STRIP != 0 {
+                            SURFACE_ROAD
+                        } else if w != 0 {
+                            SURFACE_WATER
+                        } else {
+                            SURFACE_LAND
+                        };
+                        (round_height(h.h), w, s)
+                    }
+                };
+                assert_eq!(got, want, "({r}, {c})");
+            }
+        }
+    }
+
+    #[test]
     fn a_lake_wins_over_a_later_land_block() {
         let mut land = square([0, 0]);
         land.t[1] = 50.0;
@@ -550,6 +621,16 @@ mod tests {
         let water = fs::read(s.0.join("tiles/water/0_0.bin")).unwrap();
         assert_eq!(water.len(), 256 * 256);
         assert!(!s.0.join("tiles/water/0_0.bin.tmp").exists());
+
+        // A sea tile whose surface is not at 0 m keeps its height.
+        let s = Scratch::new();
+        let mut high = sea();
+        high.arrays[3] = f32s("depth", &[41.0; 4]);
+        let (f, grid) = one(&[high]);
+        let file = Surface5::open(&mut Cursor::new(&f[..]), "t").unwrap();
+        let entries = write_tiles(&file, || Ok(Cursor::new(&f[..])), &grid, &s.0).unwrap();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].max, Some(1));
 
         let s = Scratch::new();
         let (f, grid) = one(&[square([0, LAKE])]);
