@@ -22,8 +22,8 @@
 //! section table       the instances' world boxes, a hierarchy not read
 //! ```
 //!
-//! An instance id is `node << S | index`, S being 13 in version 9 and 15 in
-//! version 8, whose nodes hold more than 8 191 instances. Group record `i`
+//! An instance id is `node << S | index`, S being 15 in a file with a node
+//! of more than 8 192 instances and 13 in any other. Group record `i`
 //! takes the id that follows the last node's, `(nodes << S) + i`.
 
 use std::fmt;
@@ -33,6 +33,9 @@ use std::path::Path;
 
 use super::container::{self, MAX_HEAD};
 use super::{Decoder, dispatch};
+
+mod walk;
+pub use walk::Instance;
 
 /// The version 9 model index is 16 bits wide.
 const MAX_MODELS: u32 = 1 << 16;
@@ -103,8 +106,7 @@ impl Pool {
     }
 }
 
-/// Where each version keeps an instance's model and heading, and how wide
-/// its index is in an id.
+/// Where each version keeps an instance's model and heading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Layout {
     /// v9's low 16 bits are the model, the high 16 options; v8's whole word.
@@ -113,7 +115,14 @@ struct Layout {
     /// v8: f32 (x, z) of the local X axis.
     axis: &'static str,
     axis_stride: u16,
-    shift: u32,
+}
+
+/// The bits of an id that hold an instance's index: 13 where every node
+/// holds at most 8 192 instances, else 15. The version does not decide it:
+/// Nevada, version 8, and PersianGulf, version 9, each have a node past
+/// 8 192 and take 15; the six other maps seen take 13.
+pub(crate) fn shift_for(largest: u32) -> Option<u32> {
+    [13, 15].into_iter().find(|s| u64::from(largest) <= 1 << s)
 }
 
 fn layout(version: u32) -> Layout {
@@ -122,14 +131,12 @@ fn layout(version: u32) -> Layout {
             model: "TYPE",
             axis: "AXISX",
             axis_stride: 8,
-            shift: 15,
         }
     } else {
         Layout {
             model: "TYPE_OPTIONS",
             axis: "AXIS",
             axis_stride: 12,
-            shift: 13,
         }
     }
 }
@@ -201,6 +208,7 @@ pub struct Scene {
     /// Objects, lines, trees.
     pub pools: [PoolToc; 3],
     layout: Layout,
+    shift: u32,
     data_base: u64,
     len: u64,
 }
@@ -514,6 +522,17 @@ impl Scene {
                 )));
             }
         }
+        let (k, largest) = nodes
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, n)| n.n)
+            .map(|(k, n)| (k, n.n))
+            .unwrap();
+        let Some(shift) = shift_for(largest) else {
+            return Err(malformed(format!(
+                "node {k} holds {largest} instances, more than an id's 15 index bits number"
+            )));
+        };
         let scene = Scene {
             version: h.version,
             models,
@@ -521,6 +540,7 @@ impl Scene {
             group,
             pools,
             layout,
+            shift,
             data_base: h.data_base,
             len,
         };
@@ -530,7 +550,7 @@ impl Scene {
 
     /// Bits of an id that hold the instance's index in its node.
     pub fn shift(&self) -> u32 {
-        self.layout.shift
+        self.shift
     }
 
     pub fn instances(&self) -> u64 {
@@ -596,7 +616,6 @@ pub fn open(path: &Path) -> Result<Scene, Error> {
 #[cfg(test)]
 pub mod build {
     use super::super::container;
-    use super::layout;
 
     pub struct Node {
         pub t: [f64; 3],
@@ -622,7 +641,8 @@ pub mod build {
         /// Objects, lines, trees: each instance as (node, index), in the
         /// order the pool lists them.
         pub pools: [Vec<(u64, u64)>; 3],
-        /// The shift ids are written with, when not the version's own.
+        /// The shift ids are written with, when not the one the nodes' sizes
+        /// give.
         pub shift: Option<u32>,
     }
 
@@ -672,12 +692,22 @@ pub mod build {
     impl Scene {
         pub fn world(&self, (node, i): (u64, u64)) -> [f64; 3] {
             let n = &self.nodes[node as usize];
-            let p = n.p[i as usize];
+            // An index past the node, for a test that lists one.
+            let p = n.p.get(i as usize).copied().unwrap_or_default();
             [0, 1, 2].map(|k| n.t[k] + f64::from(p[k]))
         }
 
         pub fn id(&self, (node, i): (u64, u64)) -> u64 {
-            node << self.shift.unwrap_or(layout(self.version).shift) | i
+            let largest = self
+                .nodes
+                .iter()
+                .map(|n| n.p.len() as u32)
+                .max()
+                .unwrap_or(0);
+            node << self
+                .shift
+                .unwrap_or_else(|| super::shift_for(largest).unwrap())
+                | i
         }
 
         pub fn file(&self) -> Vec<u8> {
@@ -749,9 +779,12 @@ pub mod build {
                     attr(&mut toc, &mut data, "OPTIONS", 4, 4, &options);
                 }
                 // The models the node uses, then framing.
+                let mut used = n.model.clone();
+                used.sort_unstable();
+                used.dedup();
                 toc.extend_from_slice(&0u32.to_le_bytes());
-                toc.extend_from_slice(&(n.model.len() as u32).to_le_bytes());
-                put(&mut toc, &n.model, u32::to_le_bytes);
+                toc.extend_from_slice(&(used.len() as u32).to_le_bytes());
+                put(&mut toc, &used, u32::to_le_bytes);
                 toc.extend_from_slice(&3u32.to_le_bytes());
                 toc.extend_from_slice(&(-1i32).to_le_bytes());
             }
@@ -844,7 +877,7 @@ mod tests {
 
     const BOX: [f32; 6] = [-5.0, 0.0, -10.0, 5.0, 8.0, 10.0];
 
-    fn scene(version: u32) -> build::Scene {
+    pub(super) fn scene(version: u32) -> build::Scene {
         let (c, s) = (0.6f32, 0.8f32);
         build::Scene {
             version,
@@ -894,7 +927,7 @@ mod tests {
             let built = scene(version);
             let s = open_bytes(&built.file()).unwrap();
             assert_eq!(s.version, version);
-            assert_eq!(s.shift(), if version == 8 { 15 } else { 13 });
+            assert_eq!(s.shift(), 13);
             let names: Vec<&str> = s.models.iter().map(|m| m.name.as_str()).collect();
             assert_eq!(names, ["sklad_new", "oak_1", "wire"]);
             assert_eq!(s.models[0].bbox, BOX);
@@ -909,6 +942,33 @@ mod tests {
             assert_eq!(s.group[0].model, 2);
             assert_eq!(s.group[0].pos, [-130_000.25, 40.5, 470_000.75]);
             assert!((s.group[0].rotation - 1.0).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn a_node_past_8192_instances_widens_the_index_to_15_bits() {
+        assert_eq!(shift_for(8192), Some(13));
+        assert_eq!(shift_for(8193), Some(15));
+        assert_eq!(shift_for(32768), Some(15));
+        assert_eq!(shift_for(32769), None);
+        for version in [8, 9] {
+            let mut built = scene(version);
+            let n = &mut built.nodes[1];
+            n.p.resize(8193, [0.0; 3]);
+            n.model.resize(8193, 0);
+            n.axis.resize(8193, [1.0, 0.0]);
+            built.pools[0].push((1, 8192));
+            let b = built.file();
+            let mut r = Cursor::new(&b[..]);
+            let s = Scene::open(&mut r, "X.scn5").unwrap();
+            assert_eq!(s.shift(), 15, "v{version}");
+            let mut last = None;
+            s.walk(&mut r, |i| {
+                last = (i.id >> 15 == 1).then_some(i.id).or(last);
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(last, Some(1 << 15 | 8192));
         }
     }
 
