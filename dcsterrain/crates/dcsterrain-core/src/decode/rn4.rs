@@ -1,0 +1,428 @@
+//! `landscape4::lRoadNetwork`, version 5, the map-wide `roads/<Map>.rn4`:
+//! the road and rail network as edges between node ids, each a polyline of
+//! f64 vertices.
+//!
+//! The file opens with the class table, then a node table, the edges and a
+//! spatial index, packed with no alignment. Only the class table's framing
+//! is understood, so the edges are found by scanning for their point runs:
+//!
+//! ```text
+//! after the version   u32 count, count × (u32 len, len bytes)   classes
+//! an edge, q being the offset of its point count:
+//!   q-14  u8   kind: 2 road, 1 rail, 0 airfield line
+//!   q-13  u8   class, an index into the class table
+//!   q-12  u32  node a
+//!   q-8   u32  node b
+//!   q-4   u32  0
+//!   q     u32  n, then n × f64 (x, y, z)
+//! ```
+//!
+//! A run is a point count followed by that many triples that all lie within
+//! reach of the ground. The zero before the count is what tells an edge from
+//! the short connector runs of the node table, which carry no class. Tangents
+//! follow the points as unit vectors, so no tangent array passes for a run.
+
+use std::fmt;
+use std::fs;
+use std::io;
+use std::path::Path;
+
+use super::container::{self, MAX_HEAD};
+use super::surface5::Surface5;
+use super::{Decoder, dispatch};
+
+pub const KIND_AIRFIELD: u8 = 0;
+pub const KIND_RAIL: u8 = 1;
+pub const KIND_ROAD: u8 = 2;
+
+/// A run is at least a segment, and no road is longer than this many
+/// vertices: a larger count is bytes that happen to precede plausible
+/// floats.
+const MIN_POINTS: u32 = 2;
+const MAX_POINTS: u32 = 100_000;
+/// How far past the mesh's extent a vertex may lie, sideways and in height.
+/// Wide, because the box only has to refuse bytes that are not coordinates.
+const REACH_XZ_M: f64 = 20_000.0;
+const REACH_Y_M: f64 = 500.0;
+/// No vertex sits on the x = 0 line of any map, while zeroed bytes read as
+/// a triple of zeros there.
+const MIN_ABS_X_M: f64 = 1.0;
+/// The class table is short; a larger count is not one.
+const MAX_CLASSES: u32 = 256;
+const MAX_CLASS_LEN: u32 = 64;
+
+/// What makes a road network unreadable, in words that name the part.
+#[derive(Debug)]
+pub enum Error {
+    Io(io::Error),
+    Malformed(String),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::Io(e) => write!(f, "cannot be read: {e}"),
+            Error::Malformed(m) => f.write_str(m),
+        }
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Self {
+        Error::Io(e)
+    }
+}
+
+fn malformed(s: String) -> Error {
+    Error::Malformed(s)
+}
+
+/// The box a vertex must lie in: the mesh's extent widened by a reach.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Reach {
+    pub min_x: f64,
+    pub max_x: f64,
+    pub min_y: f64,
+    pub max_y: f64,
+    pub min_z: f64,
+    pub max_z: f64,
+}
+
+impl Reach {
+    /// The finest blocks' boxes, widened.
+    pub fn around(s: &Surface5) -> Reach {
+        let b = s.bounds();
+        let (mut min_y, mut max_y) = (f64::INFINITY, f64::NEG_INFINITY);
+        for blk in &s.blocks {
+            let ty = f64::from(blk.t[1]);
+            min_y = min_y.min(ty + f64::from(blk.bbox[1]));
+            max_y = max_y.max(ty + f64::from(blk.bbox[4]));
+        }
+        Reach {
+            min_x: b.min_x - REACH_XZ_M,
+            max_x: b.max_x + REACH_XZ_M,
+            min_y: min_y - REACH_Y_M,
+            max_y: max_y + REACH_Y_M,
+            min_z: b.min_z - REACH_XZ_M,
+            max_z: b.max_z + REACH_XZ_M,
+        }
+    }
+
+    fn holds(&self, [x, y, z]: [f64; 3]) -> bool {
+        x.abs() > MIN_ABS_X_M
+            && (self.min_x..=self.max_x).contains(&x)
+            && (self.min_z..=self.max_z).contains(&z)
+            && y > self.min_y
+            && y < self.max_y
+    }
+}
+
+/// One edge as the file holds it. `points` are `[x, y, z]`, `y` up.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Edge {
+    /// The ordinal among the edges of the scan, every kind counted.
+    pub id: u32,
+    pub kind: u8,
+    pub class: u8,
+    pub a: u32,
+    pub b: u32,
+    pub points: Vec<[f64; 3]>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Network {
+    pub classes: Vec<String>,
+    pub edges: Vec<Edge>,
+}
+
+impl Network {
+    pub fn class(&self, e: &Edge) -> &str {
+        &self.classes[usize::from(e.class)]
+    }
+}
+
+fn u32_at(b: &[u8], at: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(b.get(at..at + 4)?.try_into().ok()?))
+}
+
+fn f64_at(b: &[u8], at: usize) -> f64 {
+    f64::from_le_bytes(b[at..at + 8].try_into().unwrap())
+}
+
+/// Reads the class table at `at`, returning it and where it ends.
+fn classes(b: &[u8], mut at: usize) -> Result<(Vec<String>, usize), Error> {
+    let short = || malformed("the class table runs past the end of the file".into());
+    let count = u32_at(b, at).ok_or_else(short)?;
+    if count == 0 || count > MAX_CLASSES {
+        return Err(malformed(format!("a class table of {count} entries")));
+    }
+    at += 4;
+    let mut out = Vec::with_capacity(count as usize);
+    for i in 0..count {
+        let len = u32_at(b, at).ok_or_else(short)?;
+        if len == 0 || len > MAX_CLASS_LEN {
+            return Err(malformed(format!("class {i} has a name of {len} bytes")));
+        }
+        let name = b.get(at + 4..at + 4 + len as usize).ok_or_else(short)?;
+        if !name.iter().all(|c| c.is_ascii_graphic()) {
+            return Err(malformed(format!(
+                "class {i}'s name is not printable ASCII"
+            )));
+        }
+        out.push(String::from_utf8(name.to_vec()).expect("checked ASCII"));
+        at += 4 + len as usize;
+    }
+    Ok((out, at))
+}
+
+/// The points of the run whose count is at `q`, if one is there.
+fn run(b: &[u8], q: usize, reach: &Reach) -> Option<Vec<[f64; 3]>> {
+    let n = u32_at(b, q)?;
+    if !(MIN_POINTS..=MAX_POINTS).contains(&n) {
+        return None;
+    }
+    let start = q + 4;
+    if start + 24 * n as usize > b.len() {
+        return None;
+    }
+    let mut points = Vec::with_capacity(n as usize);
+    for k in 0..n as usize {
+        let at = start + 24 * k;
+        let p = [f64_at(b, at), f64_at(b, at + 8), f64_at(b, at + 16)];
+        if !reach.holds(p) {
+            return None;
+        }
+        points.push(p);
+    }
+    Some(points)
+}
+
+/// Decodes a whole road network file. `name` is how an error names it.
+pub fn parse(b: &[u8], name: &str, reach: &Reach) -> Result<Network, Error> {
+    let head = &b[..b.len().min(MAX_HEAD)];
+    let h = container::parse(head).map_err(|e| malformed(format!("not a container: {e}")))?;
+    match dispatch(name, &h) {
+        Ok(Decoder::RoadNetwork) => {}
+        Ok(d) => {
+            return Err(malformed(format!(
+                "{} version {} is read by the {d:?} decoder, not this one",
+                h.class, h.version
+            )));
+        }
+        Err(e) => return Err(malformed(e.to_string())),
+    }
+    let (classes, mut i) = classes(b, h.body())?;
+    let mut edges = Vec::new();
+    // Greedy from the left: a candidate that starts inside an accepted run
+    // is that run's own bytes.
+    while i + 4 <= b.len() {
+        let Some(points) = run(b, i, reach) else {
+            i += 1;
+            continue;
+        };
+        let q = i;
+        i = q + 4 + 24 * points.len();
+        if q < 14 || u32_at(b, q - 4) != Some(0) {
+            continue;
+        }
+        let (kind, class) = (b[q - 14], b[q - 13]);
+        let id = edges.len() as u32;
+        if kind > KIND_ROAD {
+            return Err(malformed(format!(
+                "edge {id} at byte {q} has kind {kind}, where 0, 1 and 2 are read"
+            )));
+        }
+        if usize::from(class) >= classes.len() {
+            return Err(malformed(format!(
+                "edge {id} at byte {q} has class {class}, past the {} the table holds",
+                classes.len()
+            )));
+        }
+        edges.push(Edge {
+            id,
+            kind,
+            class,
+            a: u32_at(b, q - 12).unwrap(),
+            b: u32_at(b, q - 8).unwrap(),
+            points,
+        });
+    }
+    Ok(Network { classes, edges })
+}
+
+/// Reads and decodes the road network at `path`.
+pub fn read(path: &Path, reach: &Reach) -> Result<Network, Error> {
+    parse(&fs::read(path)?, &path.to_string_lossy(), reach)
+}
+
+#[cfg(test)]
+pub mod build {
+    //! Road network files as the decoder reads them, for tests.
+
+    use super::super::container;
+
+    pub struct Edge {
+        pub kind: u8,
+        pub class: u8,
+        pub a: u32,
+        pub b: u32,
+        pub points: Vec<[f64; 3]>,
+    }
+
+    fn run(out: &mut Vec<u8>, points: &[[f64; 3]]) {
+        out.extend_from_slice(&(points.len() as u32).to_le_bytes());
+        for p in points {
+            for v in p {
+                out.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+    }
+
+    /// A file of `classes`, a node-table connector, then each edge with its
+    /// unit tangents after it, then filler.
+    pub fn file(classes: &[&str], edges: &[Edge]) -> Vec<u8> {
+        let mut b = container::build("landscape4::lRoadNetwork", 5, 0);
+        b.extend_from_slice(&(classes.len() as u32).to_le_bytes());
+        for c in classes {
+            b.extend_from_slice(&(c.len() as u32).to_le_bytes());
+            b.extend_from_slice(c.as_bytes());
+        }
+        // A connector run: plausible points with no zero before the count.
+        b.extend_from_slice(&[3, 0, 0, 0, 7, 0, 0, 0, 8, 0, 0, 0]);
+        run(&mut b, &[[5000.0, 10.0, 5000.0], [5010.0, 10.0, 5000.0]]);
+        for e in edges {
+            // Bytes before the kind that the decoder does not read.
+            b.extend_from_slice(&[0xEE; 5]);
+            b.push(e.kind);
+            b.push(e.class);
+            b.extend_from_slice(&e.a.to_le_bytes());
+            b.extend_from_slice(&e.b.to_le_bytes());
+            b.extend_from_slice(&0u32.to_le_bytes());
+            run(&mut b, &e.points);
+            let tangents: Vec<[f64; 3]> = e.points.iter().map(|_| [1.0, 0.0, 0.0]).collect();
+            run(&mut b, &tangents);
+        }
+        b.extend_from_slice(&[0; 64]);
+        b
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build::{self, file};
+    use super::*;
+
+    const REACH: Reach = Reach {
+        min_x: -100_000.0,
+        max_x: 100_000.0,
+        min_y: -100.0,
+        max_y: 3000.0,
+        min_z: -100_000.0,
+        max_z: 100_000.0,
+    };
+
+    fn edge(kind: u8, class: u8, a: u32, b: u32, x: f64) -> build::Edge {
+        build::Edge {
+            kind,
+            class,
+            a,
+            b,
+            points: vec![
+                [x, 101.5, 2000.0],
+                [x + 5.0, 102.25, 2003.0],
+                [x + 9.0, 103.0, 2004.5],
+            ],
+        }
+    }
+
+    #[test]
+    fn reads_a_built_edge() {
+        let b = file(&["road", "rw"], &[edge(KIND_ROAD, 0, 10411, 10412, 1000.0)]);
+        let net = parse(&b, "X.rn4", &REACH).unwrap();
+        assert_eq!(net.classes, ["road", "rw"]);
+        assert_eq!(
+            net.edges,
+            [Edge {
+                id: 0,
+                kind: KIND_ROAD,
+                class: 0,
+                a: 10411,
+                b: 10412,
+                points: vec![
+                    [1000.0, 101.5, 2000.0],
+                    [1005.0, 102.25, 2003.0],
+                    [1009.0, 103.0, 2004.5]
+                ],
+            }]
+        );
+        assert_eq!(net.class(&net.edges[0]), "road");
+    }
+
+    #[test]
+    fn numbers_every_edge_in_file_order_and_skips_connectors() {
+        let edges = [
+            edge(KIND_ROAD, 0, 1, 2, 1000.0),
+            edge(KIND_AIRFIELD, 2, 3, 4, 2000.0),
+            edge(KIND_RAIL, 1, 2, 5, 3000.0),
+        ];
+        let net = parse(&file(&["road", "rw", "vpp"], &edges), "X.rn4", &REACH).unwrap();
+        let got: Vec<(u32, u8, u8, u32, u32)> = net
+            .edges
+            .iter()
+            .map(|e| (e.id, e.kind, e.class, e.a, e.b))
+            .collect();
+        assert_eq!(got, [(0, 2, 0, 1, 2), (1, 0, 2, 3, 4), (2, 1, 1, 2, 5)]);
+    }
+
+    #[test]
+    fn a_run_out_of_reach_is_not_an_edge() {
+        let mut far = edge(KIND_ROAD, 0, 1, 2, 1000.0);
+        far.points[1][1] = 5000.0;
+        let net = parse(
+            &file(&["road"], &[far, edge(KIND_ROAD, 0, 2, 3, 4000.0)]),
+            "X.rn4",
+            &REACH,
+        )
+        .unwrap();
+        assert_eq!(net.edges.len(), 1);
+        assert_eq!((net.edges[0].id, net.edges[0].a), (0, 2));
+    }
+
+    #[test]
+    fn refuses_a_class_past_the_table_and_an_unknown_kind() {
+        let b = file(&["road"], &[edge(KIND_ROAD, 1, 1, 2, 1000.0)]);
+        let e = parse(&b, "X.rn4", &REACH).unwrap_err().to_string();
+        assert!(e.contains("has class 1, past the 1 the table holds"), "{e}");
+
+        let b = file(&["road"], &[edge(3, 0, 1, 2, 1000.0)]);
+        let e = parse(&b, "X.rn4", &REACH).unwrap_err().to_string();
+        assert!(e.contains("has kind 3"), "{e}");
+    }
+
+    #[test]
+    fn refuses_another_class_of_file() {
+        let mut b = container::build("t5::rn5file", 0, 0);
+        b.extend_from_slice(&[0; 32]);
+        let e = parse(&b, "X.rn5", &REACH).unwrap_err().to_string();
+        assert!(e.contains("read by the Rn5 decoder"), "{e}");
+
+        let b = container::build("landscape4::lRoadNetwork", 6, 0);
+        let e = parse(&b, "X.rn4", &REACH).unwrap_err().to_string();
+        assert!(e.contains("version 6 has no decoder"), "{e}");
+    }
+
+    #[test]
+    fn refuses_a_class_table_that_is_not_one() {
+        let mut b = container::build("landscape4::lRoadNetwork", 5, 0);
+        b.extend_from_slice(&100_000u32.to_le_bytes());
+        let e = parse(&b, "X.rn4", &REACH).unwrap_err().to_string();
+        assert_eq!(e, "a class table of 100000 entries");
+
+        let mut b = container::build("landscape4::lRoadNetwork", 5, 0);
+        b.extend_from_slice(&2u32.to_le_bytes());
+        b.extend_from_slice(&4u32.to_le_bytes());
+        b.extend_from_slice(b"road");
+        let e = parse(&b, "X.rn4", &REACH).unwrap_err().to_string();
+        assert_eq!(e, "the class table runs past the end of the file");
+    }
+}
