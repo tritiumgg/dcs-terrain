@@ -27,6 +27,11 @@ mod mesh;
 pub use mesh::{Block, BlockInfo, Error, Mesh, Subset, Surface5, open, reader};
 mod sample;
 pub use sample::{Hit, LAKE, RIVER, ROAD_STRIP, SEA, cover, water_class};
+mod raster;
+pub use raster::{
+    RUNWAY_MATERIAL, SURFACE_LAND, SURFACE_ROAD, SURFACE_RUNWAY, SURFACE_WATER, Tile, grid_for,
+    rasterize, write_tiles,
+};
 
 /// The words that follow the version. N, the fourth, varies by map; the
 /// others are the same on every map seen.
