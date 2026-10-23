@@ -31,6 +31,13 @@ pub struct Header {
     pub version: u32,
 }
 
+impl Header {
+    /// Where the class's own body starts, after its format version.
+    pub fn body(&self) -> usize {
+        CLASS_AT + 4 + self.class.len() + 4
+    }
+}
+
 /// Why a file's head is not a container header.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NotContainer {
