@@ -5,10 +5,11 @@
 //! `--verbose`. A subcommand the build has not reached says so and exits 2.
 
 use std::io::IsTerminal;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use dcsterrain_core::synth;
 use tracing::Level;
 
 #[derive(Parser)]
@@ -117,13 +118,17 @@ enum Command {
     },
     /// Write the synthetic theatre as an extract directory.
     Synth {
+        /// An empty or absent directory to write the extract to.
         dir: PathBuf,
-        #[arg(long)]
-        seed: Option<u64>,
-        #[arg(long)]
-        size_km: Option<u32>,
-        #[arg(long)]
-        cell: Option<u32>,
+        /// Places the town's buildings; everything else ignores it.
+        #[arg(long, default_value_t = synth::DEFAULT_SEED)]
+        seed: u32,
+        /// The side of the square grid.
+        #[arg(long, default_value_t = synth::DEFAULT_SIZE_KM)]
+        size_km: u32,
+        /// The cell size in metres; the extract is always 50.
+        #[arg(long, default_value_t = synth::CELL_SIZE_M)]
+        cell: u32,
     },
 }
 
@@ -162,7 +167,37 @@ fn main() -> ExitCode {
         Command::Stamp { .. } => not_yet("stamp"),
         Command::Query { .. } => not_yet("query"),
         Command::Serve { .. } => not_yet("serve"),
-        Command::Synth { .. } => not_yet("synth"),
+        Command::Synth {
+            dir,
+            seed,
+            size_km,
+            cell,
+        } => run_synth(&dir, seed, size_km, cell),
+    }
+}
+
+fn run_synth(dir: &Path, seed: u32, size_km: u32, cell: u32) -> ExitCode {
+    let theatre = match synth::Theatre::new(seed, size_km, cell) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!("{e}");
+            return ExitCode::from(2);
+        }
+    };
+    match synth::write(&theatre, dir) {
+        Ok(w) => {
+            tracing::info!(
+                "wrote the synthetic theatre to {}: {} files, {} of them tiles",
+                dir.display(),
+                w.files,
+                w.tiles
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            tracing::error!("cannot write {}: {e}", dir.display());
+            ExitCode::FAILURE
+        }
     }
 }
 
