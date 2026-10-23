@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use dcsterrain_core::decode::install::{self, TERRAINS_DIR};
-use dcsterrain_core::decode::rn4::{self, KIND_RAIL, KIND_ROAD, Network, Reach};
+use dcsterrain_core::decode::rn4::{self, KIND_AIRFIELD, KIND_RAIL, KIND_ROAD, Network, Reach};
 use dcsterrain_core::decode::surface5;
 
 fn install_root() -> Option<PathBuf> {
@@ -234,7 +234,7 @@ fn caucasus_router_points_lie_on_decoded_edges() {
 /// The ends that name each junction, road and rail together.
 fn junctions(net: &Network) -> HashMap<u32, Vec<[f64; 2]>> {
     let mut ends: HashMap<u32, Vec<[f64; 2]>> = HashMap::new();
-    for e in net.edges.iter().filter(|e| e.kind != 0) {
+    for e in net.edges.iter().filter(|e| e.kind != KIND_AIRFIELD) {
         let (first, last) = (e.points[0], e.points[e.points.len() - 1]);
         for (id, p) in [(e.a, first), (e.b, last)] {
             if let Some(id) = id {
@@ -256,7 +256,7 @@ fn every_map_has_one_catch_all_and_tight_junctions() {
         let cleared = net
             .edges
             .iter()
-            .filter(|e| e.kind != 0)
+            .filter(|e| e.kind != KIND_AIRFIELD)
             .map(|e| usize::from(e.a.is_none()) + usize::from(e.b.is_none()))
             .sum::<usize>();
         let mut spreads: Vec<f64> = junctions(&net)
@@ -275,6 +275,11 @@ fn every_map_has_one_catch_all_and_tight_junctions() {
             spreads[spreads.len() - 1]
         );
         assert_eq!(net.catch_all.len(), 1, "{dir}: catch-all ids");
+        // The widest real junction measured spans 2.2 km.
+        assert!(
+            spreads[spreads.len() - 1] <= 5000.0,
+            "{dir}: widest junction"
+        );
     }
 }
 
@@ -286,7 +291,7 @@ fn caucasus_ends_that_coincide_share_their_id() {
     let net = decode(&root, "Caucasus");
     let key = |p: [f64; 3]| ((p[0] * 2.0).round() as i64, (p[2] * 2.0).round() as i64);
     let mut at: HashMap<(i64, i64), Vec<Option<u32>>> = HashMap::new();
-    for e in net.edges.iter().filter(|e| e.kind != 0) {
+    for e in net.edges.iter().filter(|e| e.kind != KIND_AIRFIELD) {
         at.entry(key(e.points[0])).or_default().push(e.a);
         at.entry(key(e.points[e.points.len() - 1]))
             .or_default()
