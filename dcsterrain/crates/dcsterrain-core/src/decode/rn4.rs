@@ -23,9 +23,11 @@
 //! follow the points as unit vectors, so no tangent array passes for a run.
 
 use std::fmt;
-use std::fs;
-use std::io;
+use std::fs::{self, File};
+use std::io::{self, BufWriter, Write};
 use std::path::Path;
+
+use serde_json::json;
 
 use super::container::{self, MAX_HEAD};
 use super::surface5::Surface5;
@@ -34,6 +36,9 @@ use super::{Decoder, dispatch};
 pub const KIND_AIRFIELD: u8 = 0;
 pub const KIND_RAIL: u8 = 1;
 pub const KIND_ROAD: u8 = 2;
+
+pub const ROADS_FILE: &str = "roads.jsonl";
+pub const RAILROADS_FILE: &str = "railroads.jsonl";
 
 /// A run is at least a segment, and no road is longer than this many
 /// vertices: a larger count is bytes that happen to precede plausible
@@ -255,6 +260,37 @@ pub fn read(path: &Path, reach: &Reach) -> Result<Network, Error> {
     parse(&fs::read(path)?, &path.to_string_lossy(), reach)
 }
 
+/// Writes the road and rail edges under `dir`, one JSON object a line, each
+/// file as a `.tmp` renamed into place, and returns how many of each. An
+/// airfield line is not written: its `y` is not a height.
+pub fn write_tables(net: &Network, dir: &Path) -> io::Result<(usize, usize)> {
+    let roads = write_kind(net, KIND_ROAD, &dir.join(ROADS_FILE))?;
+    let rail = write_kind(net, KIND_RAIL, &dir.join(RAILROADS_FILE))?;
+    Ok((roads, rail))
+}
+
+fn write_kind(net: &Network, kind: u8, path: &Path) -> io::Result<usize> {
+    let tmp = path.with_file_name(format!(
+        "{}.tmp",
+        path.file_name().unwrap().to_string_lossy()
+    ));
+    let mut out = BufWriter::new(File::create(&tmp)?);
+    let mut n = 0;
+    for e in net.edges.iter().filter(|e| e.kind == kind) {
+        // The extract's points are `[x, z, alt]`; the file's are `[x, y, z]`.
+        let points: Vec<[f64; 3]> = e.points.iter().map(|&[x, y, z]| [x, z, y]).collect();
+        let row = json!({
+            "id": e.id, "class": net.class(e), "a": e.a, "b": e.b, "points": points,
+        });
+        serde_json::to_writer(&mut out, &row)?;
+        out.write_all(b"\n")?;
+        n += 1;
+    }
+    out.into_inner().map_err(|e| e.into_error())?.sync_all()?;
+    fs::rename(&tmp, path)?;
+    Ok(n)
+}
+
 #[cfg(test)]
 pub mod build {
     //! Road network files as the decoder reads them, for tests.
@@ -309,8 +345,11 @@ pub mod build {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::Value;
+
     use super::build::{self, file};
     use super::*;
+    use crate::scratch::Scratch;
 
     const REACH: Reach = Reach {
         min_x: -100_000.0,
@@ -424,5 +463,46 @@ mod tests {
         b.extend_from_slice(b"road");
         let e = parse(&b, "X.rn4", &REACH).unwrap_err().to_string();
         assert_eq!(e, "the class table runs past the end of the file");
+    }
+
+    #[test]
+    fn writes_roads_and_rail_apart_with_alt_last_and_no_airfield_lines() {
+        let edges = [
+            edge(KIND_ROAD, 0, 10411, 10412, 1000.0),
+            edge(KIND_AIRFIELD, 2, 3, 4, 2000.0),
+            edge(KIND_RAIL, 1, 10412, 5, 3000.0),
+            edge(KIND_ROAD, 0, 10412, 6, 4000.0),
+        ];
+        let net = parse(&file(&["road", "rw", "vpp"], &edges), "X.rn4", &REACH).unwrap();
+        let s = Scratch::new();
+        fs::create_dir_all(&s.0).unwrap();
+        assert_eq!(write_tables(&net, &s.0).unwrap(), (2, 1));
+        let rows = |name: &str| -> Vec<Value> {
+            fs::read_to_string(s.0.join(name))
+                .unwrap()
+                .lines()
+                .map(|l| serde_json::from_str(l).unwrap())
+                .collect()
+        };
+        let roads = rows(ROADS_FILE);
+        assert_eq!(
+            roads[0],
+            json!({
+                "id": 0, "class": "road", "a": 10411, "b": 10412,
+                "points": [[1000.0, 2000.0, 101.5], [1005.0, 2003.0, 102.25], [1009.0, 2004.5, 103.0]],
+            })
+        );
+        assert_eq!(roads[1]["id"], 3);
+        let rail = rows(RAILROADS_FILE);
+        assert_eq!(
+            (rail.len(), &rail[0]["id"], &rail[0]["class"]),
+            (1, &json!(2), &json!("rw"))
+        );
+        let left: Vec<_> = fs::read_dir(&s.0)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(left.len(), 2, "{left:?}");
     }
 }
