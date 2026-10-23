@@ -24,7 +24,9 @@
 //!
 //! An instance id is `node << S | index`, S being 15 in a file with a node
 //! of more than 8 192 instances and 13 in any other (ADR 0045). Group
-//! record `i` takes the id that follows the last node's, `(nodes << S) + i`.
+//! record `i` takes the id that follows the last node's, `(nodes << S) + i`:
+//! a flat range, so a group id past 2^S - 1 above the first does not split
+//! into a node and an index.
 
 use std::fmt;
 use std::fs::File;
@@ -495,7 +497,13 @@ impl Scene {
         let Some(last) = nodes.last() else {
             return Err(malformed("no instancer node was found".into()));
         };
-        let (group, after) = group(&head, last.end, models.len()).unwrap_or((Vec::new(), last.end));
+        // The last node lists the models it uses after its attributes, 4
+        // bytes each, and the group follows that list.
+        let from = match (u32_at(&head, last.end), u32_at(&head, last.end + 4)) {
+            (Some(0), Some(k)) if (k as usize) <= models.len() => last.end + 8 + 4 * k as usize,
+            _ => last.end,
+        };
+        let (group, after) = group(&head, from, models.len()).unwrap_or((Vec::new(), from));
         let found = pools(&head, after, len - h.data_base);
         let pools = match (group.len(), found.as_slice()) {
             (0, [o, l, t]) | (_, [_, o, l, t]) if [o, l, t].iter().all(|p| p.id_width == 8) => {
@@ -972,6 +980,24 @@ mod tests {
             .unwrap();
             assert_eq!(last, Some(1 << 15 | 8192));
         }
+    }
+
+    #[test]
+    fn finds_the_group_after_a_last_node_using_many_models() {
+        // 2 000 models in the last node's list put the group 8 kB past its
+        // attributes.
+        let mut built = scene(9);
+        for i in 0..2000 {
+            built
+                .models
+                .push((Box::leak(format!("m{i}").into_boxed_str()), [0.0; 6]));
+        }
+        let n = &mut built.nodes[1];
+        n.model = (0..2000).map(|i| 3 + i).collect();
+        n.p.resize(2000, [0.0; 3]);
+        n.axis.resize(2000, [1.0, 0.0]);
+        let s = open_bytes(&built.file()).unwrap();
+        assert_eq!(s.group.len(), 2);
     }
 
     #[test]
