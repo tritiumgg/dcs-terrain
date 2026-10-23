@@ -4,6 +4,7 @@
 //! DCS knows.
 
 use std::fs;
+use std::path::{Component, Path};
 
 use serde_json::Value;
 
@@ -155,16 +156,27 @@ pub(super) fn check_tables(x: &Extract, out: &mut Vec<Failure>) {
             out.push(Failure::new(super::MANIFEST, format!("tables lacks {key}")));
             continue;
         };
-        // A table sits beside the manifest; a name with a separator could
-        // point anywhere.
-        if name.is_empty() || name.contains(['/', '\\']) || name == "." || name == ".." {
+        // A table sits beside the manifest. A separator, a parent step or,
+        // on Windows, a drive prefix such as `C:x.json` would point anywhere.
+        let mut parts = Path::new(name).components();
+        let plain = matches!(
+            (parts.next(), parts.next()),
+            (Some(Component::Normal(_)), None)
+        );
+        if !plain || name.contains([':', '/', '\\']) {
             out.push(Failure::new(
                 super::MANIFEST,
                 format!("tables.{key} is {name:?}, not a file name"),
             ));
             continue;
         }
-        let text = match fs::read_to_string(x.dir.join(name)) {
+        let path = x.dir.join(name);
+        // A device name such as `CON` is no file, and reading one can block.
+        if !path.is_file() {
+            out.push(Failure::new(name, "not a file in the extract"));
+            continue;
+        }
+        let text = match fs::read_to_string(&path) {
             Ok(t) => t,
             Err(e) => {
                 out.push(Failure::new(name, format!("cannot read: {e}")));
@@ -275,15 +287,25 @@ mod tests {
         let s = synth_extract();
         fs::remove_file(s.0.join("radio.json")).unwrap();
         let f = failures(&s.0);
-        assert!(has(&f, "radio.json", "cannot read"), "{f:?}");
+        assert!(has(&f, "radio.json", "not a file"), "{f:?}");
     }
 
     #[test]
     fn refuses_a_table_name_that_leaves_the_directory() {
+        for name in ["../nodes.json", "C:nodes.json", "/nodes.json", ".", ""] {
+            let s = synth_extract();
+            edit_manifest(&s.0, |m| m["tables"]["nodes"] = name.into());
+            let f = failures(&s.0);
+            assert!(has(&f, MANIFEST, "tables.nodes"), "{name}: {f:?}");
+        }
+    }
+
+    #[test]
+    fn refuses_a_table_that_is_a_directory() {
         let s = synth_extract();
-        edit_manifest(&s.0, |m| m["tables"]["nodes"] = "../nodes.json".into());
+        edit_manifest(&s.0, |m| m["tables"]["nodes"] = "tiles".into());
         let f = failures(&s.0);
-        assert!(has(&f, MANIFEST, "tables.nodes"), "{f:?}");
+        assert!(has(&f, "tiles", "not a file"), "{f:?}");
     }
 
     #[test]
