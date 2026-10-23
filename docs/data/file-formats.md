@@ -101,9 +101,16 @@ detail) are not needed.
 
 After the full `TRI` come render subsets, each made of a `baseIndex` (u32 per subset vertex, an index into
 `Pbase`) and **then** its own `TRI` (u32×3 indices into that `baseIndex` list). Optional `parametricUVW`, `N` and
-`materialParamsIndex` arrays can sit between them. To pair them, take the nearest `baseIndex` among the 7
-descriptors before the subset `TRI`, with no other `TRI` in between. A subset vertex is
-`Pbase[baseIndex[TRI[i]]]`.
+`materialParamsIndex` arrays can sit between them. To pair them, take the nearest `baseIndex` before the
+subset `TRI`, with no other `TRI` in between. On Caucasus, Nevada and Syria it is always within 7 descriptors,
+but Afghanistan puts about 22 vertex attribute arrays (`mainTexCoord`, `closeup0Tangent`, …) between the two,
+so the distance is no guide. A subset vertex is `Pbase[baseIndex[TRI[i]]]`.
+
+A subset with no `baseIndex` before it is a decal over a vertex list of its own, not part of the ground. On
+Afghanistan, `RunwayOnlay5.1/Runway` subsets carry their own `parametricUVW` arrays (local coordinates in
+meters) and index those. A decoder skips them.
+
+Every finest-block vertex lies inside its block's stated box, on all eight maps installed on 2.9.30.28738.
 
 The material follows each `TRI` descriptor, within 160 bytes of its name. The observed framing is
 `u32 (0 or 3), u32 2, str shader, str material, u32 k, k × {str key, u32 0, u32 1, str value}, i32 -1`, then

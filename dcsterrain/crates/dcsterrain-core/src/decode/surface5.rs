@@ -23,6 +23,9 @@
 
 use std::fmt;
 
+mod mesh;
+pub use mesh::{Block, BlockInfo, Error, Mesh, Subset, Surface5, open, reader};
+
 /// The words that follow the version. N, the fourth, varies by map; the
 /// others are the same on every map seen.
 const LAYOUT_WORDS: [Option<u32>; 5] = [Some(4), Some(0), Some(0), None, Some(7)];
@@ -368,7 +371,7 @@ pub mod build {
 
 #[cfg(test)]
 mod tests {
-    use super::build::*;
+    use super::build::{Block, f32s, file, tri, u32s, vec3};
     use super::*;
     use crate::decode::container;
 
