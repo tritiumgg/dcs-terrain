@@ -9,7 +9,7 @@
 //! closed-form terrain with no DCS in the loop. This file holds only the
 //! numbers that define it, never the functions that evaluate them, because two
 //! languages have to agree on the numbers and only one of them generates the
-//! extract. The generator lands here later.
+//! extract. The generator is beside them, in `synth/`.
 //!
 //! Positions are offsets from the grid origin, in metres: `_NORTH_M` grows
 //! with DCS x, `_EAST_M` grows with DCS z. Nothing here is absolute, so
@@ -21,6 +21,10 @@
 //! * no trailing comments
 //! * primitives only; anything derivable (grid extents, feature positions in
 //!   absolute metres, tile counts) is computed by the generator
+
+mod theatre;
+
+pub use theatre::{Cell, Edge, Object, SynthError, Theatre};
 
 // Extract format, v2 (ADR 0039). The tile layout, the water codes and the
 // height, water and surface nodata values are ADR 0007's. The two count
