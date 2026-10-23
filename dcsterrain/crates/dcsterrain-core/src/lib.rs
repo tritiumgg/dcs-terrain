@@ -2,6 +2,7 @@
 //!
 //! The modules this crate exposes arrive with the tasks that fill them.
 
+pub mod extract;
 // Constants only for now; the generator lands beside them. Tests always see
 // the module, and a consumer that wants `dcsterrain synth` in a release build
 // asks for the feature.
