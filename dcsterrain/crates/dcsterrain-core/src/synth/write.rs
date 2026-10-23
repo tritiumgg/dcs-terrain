@@ -652,7 +652,10 @@ mod tests {
                 std::process::id(),
                 N.fetch_add(1, Ordering::Relaxed)
             );
-            Scratch(std::env::temp_dir().join(name))
+            // A crashed run may have left one under a reused pid.
+            let dir = std::env::temp_dir().join(name);
+            let _ = fs::remove_dir_all(&dir);
+            Scratch(dir)
         }
     }
 
@@ -682,18 +685,10 @@ mod tests {
         for (_, name) in m["tables"].as_object().unwrap() {
             assert!(s.0.join(name.as_str().unwrap()).is_file(), "{name}");
         }
-        let mut stray = Vec::new();
-        let mut stack = vec![s.0.clone()];
-        while let Some(d) = stack.pop() {
-            for e in fs::read_dir(d).unwrap() {
-                let p = e.unwrap().path();
-                if p.is_dir() {
-                    stack.push(p);
-                } else if p.extension().is_some_and(|x| x == "tmp") {
-                    stray.push(p);
-                }
-            }
-        }
+        let stray: Vec<_> = files_under(&s.0)
+            .into_iter()
+            .filter(|p| p.extension().is_some_and(|x| x == "tmp"))
+            .collect();
         assert!(stray.is_empty(), "{stray:?}");
 
         // Each listed tile is exactly a tile of its dtype.
@@ -833,13 +828,33 @@ mod tests {
         let (a, b) = (Scratch::new(), Scratch::new());
         write(&theatre(), &a.0).unwrap();
         write(&theatre(), &b.0).unwrap();
-        for name in ["manifest.json", "scenery.jsonl", "tiles/height/2_2.bin"] {
-            assert_eq!(
-                fs::read(a.0.join(name)).unwrap(),
-                fs::read(b.0.join(name)).unwrap(),
-                "{name}"
+        let names = files_under(&a.0);
+        assert_eq!(names, files_under(&b.0));
+        for name in &names {
+            assert!(
+                fs::read(a.0.join(name)).unwrap() == fs::read(b.0.join(name)).unwrap(),
+                "{} differs",
+                name.display()
             );
         }
+    }
+
+    /// Every file under `dir`, relative to it, sorted.
+    fn files_under(dir: &Path) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            for e in fs::read_dir(d).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else {
+                    out.push(p.strip_prefix(dir).unwrap().to_path_buf());
+                }
+            }
+        }
+        out.sort();
+        out
     }
 
     #[test]
