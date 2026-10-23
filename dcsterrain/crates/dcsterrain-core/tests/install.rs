@@ -52,7 +52,14 @@ fn every_map_reads_with_a_decoder_for_each_file() {
     eprintln!("DCS {} ({})", build.version, build.timestamp);
     let maps = maps(&root);
     assert!(!maps.is_empty(), "no maps under {}", root.display());
-    let mut scenes = BTreeMap::new();
+    // Nevada's scene file is the one version 8 on the install, so it is the
+    // check that the version is read rather than assumed. Its directory has
+    // shipped without an `entry.lua` before; then it is not a map, and the
+    // check cannot run, which is said rather than passed.
+    let nevada = maps.iter().find(|d| d.eq_ignore_ascii_case("Nevada"));
+    if nevada.is_none() {
+        eprintln!("no Nevada map on this install: its scene version 8 is NOT checked");
+    }
     for dir in &maps {
         let map = install::read_map(&root, dir).unwrap_or_else(|e| panic!("{dir}: {e}"));
         let scene = map.files.iter().find(|f| f.role == "scene").unwrap();
@@ -62,10 +69,9 @@ fn every_map_reads_with_a_decoder_for_each_file() {
             map.files.len(),
             scene.version.unwrap()
         );
-        scenes.insert(map.theatre.clone(), scene.version.unwrap());
-    }
-    if let Some(&v) = scenes.get("Nevada") {
-        assert_eq!(v, 8, "Nevada's scene file");
+        if Some(dir) == nevada {
+            assert_eq!(scene.version, Some(8), "Nevada's scene file");
+        }
     }
 }
 
@@ -83,9 +89,13 @@ fn every_container_of_a_class_a_decoder_reads_dispatches() {
             if name.to_ascii_lowercase().ends_with(".crypt") {
                 continue;
             }
-            let Ok(Ok(h)) = container::read(&path) else {
-                plain += 1;
-                continue;
+            let h = match container::read(&path) {
+                Ok(Ok(h)) => h,
+                Ok(Err(_)) => {
+                    plain += 1;
+                    continue;
+                }
+                Err(e) => panic!("{name} cannot be read: {e}"),
             };
             *seen.entry((h.class.clone(), h.version)).or_default() += 1;
             let read = Decoder::ALL.iter().any(|d| d.class() == h.class);
