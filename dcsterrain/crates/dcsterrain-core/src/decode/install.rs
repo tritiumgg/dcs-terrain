@@ -1,10 +1,15 @@
-//! What an install says about itself: the DCS build, and a map's theatre id.
+//! What an install says about itself: the DCS build, a map's theatre id, and
+//! the map's files with the class and version each one states.
 
 use std::fmt;
 use std::fs;
 use std::path::Path;
 
 use serde_json::Value;
+
+use super::container;
+use super::{Decoder, dispatch};
+use crate::extract::FileEntry;
 
 pub const BUILD_FILE: &str = "autoupdate.cfg";
 pub const ENTRY_FILE: &str = "entry.lua";
@@ -149,6 +154,203 @@ fn bare(b: &[u8], i: usize) -> Option<String> {
     assigned(b, i + 2)
 }
 
+pub const TERRAINS_DIR: &str = "Mods/terrains";
+
+/// A map as the install holds it: what it is, which build, and every file
+/// the decoders will read, each classified from its own header.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Map {
+    /// The directory under `Mods/terrains`, spelled as the disk spells it.
+    pub dir: String,
+    pub theatre: String,
+    pub build: Build,
+    pub files: Vec<FileEntry>,
+}
+
+/// Where a role's files live under the map directory, and how many.
+enum Find {
+    /// Exactly one file with this extension in this directory (ADR 0022).
+    One(&'static str, &'static str),
+    /// Every file with this extension in this directory, perhaps none.
+    All(&'static str, &'static str),
+    /// This path, if it is there.
+    Named(&'static [&'static str]),
+}
+
+/// Each role, where its files are, and the decoder its container must name.
+/// A role without a decoder is plain: Lua source, or `assets.assets`, which
+/// has no container header.
+const ROLES: [(&str, Find, Option<Decoder>); 10] = [
+    (
+        "surface",
+        Find::One("Surface", ".surface5"),
+        Some(Decoder::Surface5),
+    ),
+    (
+        "roads",
+        Find::One("roads", ".rn4"),
+        Some(Decoder::RoadNetwork),
+    ),
+    ("scene", Find::One("Scenes", ".scn5"), Some(Decoder::Scene5)),
+    (
+        "airfield_rn4",
+        Find::All("AirfieldsTaxiways", ".rn4"),
+        Some(Decoder::RoadNetwork),
+    ),
+    (
+        "airfield_rn5",
+        Find::All("AirfieldsTaxiways", ".rn5"),
+        Some(Decoder::Rn5),
+    ),
+    ("assets", Find::Named(&["misc", "assets.assets"]), None),
+    ("lua", Find::Named(&["Beacons.lua"]), None),
+    ("lua", Find::Named(&["Radio.lua"]), None),
+    ("lua", Find::Named(&["Map", "towns.lua"]), None),
+    ("lua", Find::Named(&["MissionGenerator", "nodes.lua"]), None),
+];
+
+/// The entry of `parent` named `name` without regard to case, spelled as the
+/// disk spells it: `Surface` on one map is `surface` on another.
+fn child(parent: &Path, name: &str) -> Option<String> {
+    fs::read_dir(parent)
+        .ok()?
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .find(|n| n.eq_ignore_ascii_case(name))
+}
+
+/// Every file in `dir` whose name ends in `ext`, without regard to case,
+/// sorted.
+fn with_ext(dir: &Path, ext: &str) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.len() > ext.len() && n.to_ascii_lowercase().ends_with(ext))
+        .collect();
+    names.sort();
+    names
+}
+
+/// Reads `map`, the directory name under `Mods/terrains`, from the install
+/// at `install`. Opens only the files a decoder reads, and those only to
+/// read a header: never an encrypted `.crypt` file.
+pub fn read_map(install: &Path, map: &str) -> Result<Map, Refusal> {
+    let build = read_build(install)?;
+    let terrains = install.join(TERRAINS_DIR);
+    let dir = child(&terrains, map)
+        .ok_or_else(|| Refusal(format!("no map {map} under {TERRAINS_DIR}")))?;
+    let root = terrains.join(&dir);
+    let rel_root = format!("{TERRAINS_DIR}/{dir}");
+
+    let entry = child(&root, ENTRY_FILE)
+        .ok_or_else(|| Refusal(format!("{rel_root} has no {ENTRY_FILE}: not a map")))?;
+    let text = fs::read_to_string(root.join(&entry))
+        .map_err(|e| Refusal(format!("{rel_root}/{entry} cannot be read: {e}")))?;
+    let theatre =
+        entry_id(&text).ok_or_else(|| Refusal(format!("{rel_root}/{entry} declares no id")))?;
+
+    let mut files = Vec::new();
+    for (role, find, decoder) in ROLES {
+        for rel in locate(&root, &rel_root, &find)? {
+            files.push(classify(install, role, &rel, decoder)?);
+        }
+    }
+    Ok(Map {
+        dir,
+        theatre,
+        build,
+        files,
+    })
+}
+
+/// The paths, relative to the install, that `find` names under the map.
+fn locate(root: &Path, rel_root: &str, find: &Find) -> Result<Vec<String>, Refusal> {
+    match *find {
+        Find::One(sub, ext) | Find::All(sub, ext) => {
+            let Some(sub) = child(root, sub) else {
+                return match find {
+                    Find::One(..) => Err(Refusal(format!("{rel_root} has no {sub} directory"))),
+                    _ => Ok(Vec::new()),
+                };
+            };
+            let names = with_ext(&root.join(&sub), ext);
+            if matches!(find, Find::One(..)) && names.len() != 1 {
+                let found = if names.is_empty() {
+                    "none".to_string()
+                } else {
+                    names.join(", ")
+                };
+                return Err(Refusal(format!(
+                    "{rel_root}/{sub} must hold one {ext} file, and holds {found}"
+                )));
+            }
+            Ok(names
+                .into_iter()
+                .map(|n| format!("{rel_root}/{sub}/{n}"))
+                .collect())
+        }
+        Find::Named(parts) => {
+            let mut at = root.to_path_buf();
+            let mut rel = rel_root.to_string();
+            for part in parts {
+                let Some(name) = child(&at, part) else {
+                    return Ok(Vec::new());
+                };
+                at.push(&name);
+                rel = format!("{rel}/{name}");
+            }
+            Ok(if at.is_file() { vec![rel] } else { Vec::new() })
+        }
+    }
+}
+
+/// The manifest's entry for one file: its size, and for a container its
+/// class and version, refused unless they name the decoder its role needs.
+fn classify(
+    install: &Path,
+    role: &str,
+    rel: &str,
+    decoder: Option<Decoder>,
+) -> Result<FileEntry, Refusal> {
+    let path = install.join(rel);
+    let size = fs::metadata(&path)
+        .map_err(|e| Refusal(format!("{rel} cannot be read: {e}")))?
+        .len();
+    let Some(want) = decoder else {
+        return Ok(FileEntry {
+            role: role.to_string(),
+            path: rel.to_string(),
+            class: None,
+            version: None,
+            size,
+            payload_size: None,
+        });
+    };
+    let header = container::read(&path)
+        .map_err(|e| Refusal(format!("{rel} cannot be read: {e}")))?
+        .map_err(|why| Refusal(format!("{rel} is not a map file: {why}")))?;
+    let got = dispatch(rel, &header)?;
+    if got != want {
+        return Err(Refusal(format!(
+            "{rel} is a {}, where a {role} file is a {}",
+            header.class,
+            want.class()
+        )));
+    }
+    Ok(FileEntry {
+        role: role.to_string(),
+        path: rel.to_string(),
+        class: Some(header.class),
+        version: Some(header.version),
+        size,
+        payload_size: got.has_data_base().then_some(header.data_base),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,5 +416,188 @@ mod tests {
         let e = parse_build("{\"version\": \"1\"}").unwrap_err();
         assert_eq!(e.0, "autoupdate.cfg has no timestamp");
         assert!(parse_build("version=1").unwrap_err().0.contains("not JSON"));
+    }
+
+    use crate::scratch::Scratch;
+    use std::path::PathBuf;
+
+    const BUILD: &str = "{\"version\": \"0.0.0.0\", \"timestamp\": \"00000000-000000\"}\n";
+
+    /// Writes `bytes` at `rel` under `root`, making its directories.
+    fn put(root: &Path, rel: &str, bytes: &[u8]) {
+        let p = root.join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, bytes).unwrap();
+    }
+
+    fn head(class: &str, version: u32, base: u64, pad: usize) -> Vec<u8> {
+        let mut b = container::build(class, version, base);
+        b.resize(b.len() + pad, 0);
+        b
+    }
+
+    /// An install holding one map, `Synth`, with its folders spelled as the
+    /// installed maps vary them.
+    fn install() -> (Scratch, PathBuf) {
+        let s = Scratch::new();
+        let r = s.0.clone();
+        let m = "Mods/terrains/Synth";
+        put(&r, "autoupdate.cfg", BUILD.as_bytes());
+        put(&r, &format!("{m}/entry.lua"), entry("Synth").as_bytes());
+        put(
+            &r,
+            &format!("{m}/surface/Synth.surface5"),
+            &head("landscape5::Surface5File", 5, 4096, 100),
+        );
+        put(
+            &r,
+            &format!("{m}/roads/Synth.rn4"),
+            &head("landscape4::lRoadNetwork", 5, 77, 10),
+        );
+        put(
+            &r,
+            &format!("{m}/roads/Synth.routes"),
+            &head("landscape4::lRoutesFile", 3, 0, 0),
+        );
+        put(
+            &r,
+            &format!("{m}/Scenes/Synth.scn5"),
+            &head("landscape5::Scene5File", 9, 512, 0),
+        );
+        put(
+            &r,
+            &format!("{m}/AirfieldsTaxiways/B.rn4"),
+            &head("landscape4::lRoadNetwork", 5, 0, 0),
+        );
+        put(
+            &r,
+            &format!("{m}/AirfieldsTaxiways/A.rn4"),
+            &head("landscape4::lRoadNetwork", 5, 0, 0),
+        );
+        put(
+            &r,
+            &format!("{m}/AirfieldsTaxiways/A.rn5"),
+            &head("t5::rn5file", 0, 0, 0),
+        );
+        put(&r, &format!("{m}/misc/assets.assets"), b"stand");
+        put(&r, &format!("{m}/Beacons.lua"), b"beacons = {}\n");
+        put(&r, &format!("{m}/map/towns.lua"), b"towns = {}\n");
+        put(
+            &r,
+            &format!("{m}/terrain.cfg.lua.pak.crypt"),
+            b"\x02\x00\x00\x00",
+        );
+        (s, r)
+    }
+
+    #[test]
+    fn lists_every_file_a_decoder_reads_with_its_header() {
+        let (_s, r) = install();
+        let map = read_map(&r, "synth").unwrap();
+        assert_eq!((map.dir.as_str(), map.theatre.as_str()), ("Synth", "Synth"));
+        assert_eq!(map.build.version, "0.0.0.0");
+        let rows: Vec<(&str, &str)> = map
+            .files
+            .iter()
+            .map(|f| (f.role.as_str(), f.path.as_str()))
+            .collect();
+        let m = "Mods/terrains/Synth";
+        assert_eq!(
+            rows,
+            [
+                ("surface", format!("{m}/surface/Synth.surface5").as_str()),
+                ("roads", format!("{m}/roads/Synth.rn4").as_str()),
+                ("scene", format!("{m}/Scenes/Synth.scn5").as_str()),
+                (
+                    "airfield_rn4",
+                    format!("{m}/AirfieldsTaxiways/A.rn4").as_str()
+                ),
+                (
+                    "airfield_rn4",
+                    format!("{m}/AirfieldsTaxiways/B.rn4").as_str()
+                ),
+                (
+                    "airfield_rn5",
+                    format!("{m}/AirfieldsTaxiways/A.rn5").as_str()
+                ),
+                ("assets", format!("{m}/misc/assets.assets").as_str()),
+                ("lua", format!("{m}/Beacons.lua").as_str()),
+                ("lua", format!("{m}/map/towns.lua").as_str()),
+            ]
+        );
+        let surface = &map.files[0];
+        assert_eq!(surface.class.as_deref(), Some("landscape5::Surface5File"));
+        assert_eq!(
+            (surface.version, surface.payload_size),
+            (Some(5), Some(4096))
+        );
+        // The road network's u64 at 0x08 is not a data base.
+        assert_eq!(map.files[1].payload_size, None);
+        assert_eq!(map.files[6].size, 5);
+        assert_eq!(map.files[6].class, None);
+    }
+
+    #[test]
+    fn refuses_a_version_no_decoder_reads_naming_file_class_and_version() {
+        let (_s, r) = install();
+        put(
+            &r,
+            "Mods/terrains/Synth/Scenes/Synth.scn5",
+            &head("landscape5::Scene5File", 10, 0, 0),
+        );
+        let e = read_map(&r, "Synth").unwrap_err();
+        assert!(
+            e.0.starts_with(
+                "Mods/terrains/Synth/Scenes/Synth.scn5: landscape5::Scene5File version 10"
+            ),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn refuses_a_role_holding_another_class() {
+        let (_s, r) = install();
+        put(
+            &r,
+            "Mods/terrains/Synth/roads/Synth.rn4",
+            &head("t5::rn5file", 0, 0, 0),
+        );
+        let e = read_map(&r, "Synth").unwrap_err();
+        assert!(e.0.contains("is a t5::rn5file, where a roads file"), "{e}");
+    }
+
+    #[test]
+    fn refuses_two_files_where_a_role_takes_one() {
+        let (_s, r) = install();
+        put(
+            &r,
+            "Mods/terrains/Synth/surface/Old.surface5",
+            &head("landscape5::Surface5File", 5, 0, 0),
+        );
+        let e = read_map(&r, "Synth").unwrap_err();
+        assert!(e.0.contains("holds Old.surface5, Synth.surface5"), "{e}");
+    }
+
+    #[test]
+    fn refuses_a_map_without_its_required_files() {
+        let (_s, r) = install();
+        fs::remove_file(r.join("Mods/terrains/Synth/roads/Synth.rn4")).unwrap();
+        let e = read_map(&r, "Synth").unwrap_err();
+        assert!(e.0.contains("one .rn4 file, and holds none"), "{e}");
+
+        let (_s, r) = install();
+        fs::remove_file(r.join("Mods/terrains/Synth/entry.lua")).unwrap();
+        assert!(read_map(&r, "Synth").unwrap_err().0.contains("not a map"));
+
+        let (_s, r) = install();
+        assert!(read_map(&r, "Kola").unwrap_err().0.contains("no map Kola"));
+    }
+
+    #[test]
+    fn refuses_a_file_that_is_not_a_container() {
+        let (_s, r) = install();
+        put(&r, "Mods/terrains/Synth/Scenes/Synth.scn5", b"-- lua\n");
+        let e = read_map(&r, "Synth").unwrap_err();
+        assert!(e.0.contains("Synth.scn5 is not a map file"), "{e}");
     }
 }
