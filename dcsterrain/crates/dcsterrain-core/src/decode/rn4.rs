@@ -190,16 +190,16 @@ fn run(b: &[u8], q: usize, reach: &Reach) -> Option<Vec<[f64; 3]>> {
     if start + 24 * n as usize > b.len() {
         return None;
     }
-    let mut points = Vec::with_capacity(n as usize);
-    for k in 0..n as usize {
+    let point = |k: usize| {
         let at = start + 24 * k;
-        let p = [f64_at(b, at), f64_at(b, at + 8), f64_at(b, at + 16)];
-        if !reach.holds(p) {
-            return None;
-        }
-        points.push(p);
+        [f64_at(b, at), f64_at(b, at + 8), f64_at(b, at + 16)]
+    };
+    // Nearly every offset fails on its first point, so nothing is allocated
+    // until the whole run has passed.
+    if !(0..n as usize).all(|k| reach.holds(point(k))) {
+        return None;
     }
-    Some(points)
+    Some((0..n as usize).map(point).collect())
 }
 
 /// Decodes a whole road network file. `name` is how an error names it.
