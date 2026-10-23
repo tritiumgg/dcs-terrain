@@ -145,6 +145,7 @@ M.OMIT_SEA_TILES = true
 -- Terrain. Height is the plane plus both hills, overridden by the lake level
 -- inside the lake and by sea level beyond the coast. The coastline is the line
 -- north + east = COAST_M, so the sea is a triangle in the south-west corner.
+-- A point on that line is land, and a diagonal of cell centres lies on it.
 
 M.PLANE_BASE_M = -30.0
 M.PLANE_SLOPE = 0.01
@@ -170,10 +171,14 @@ M.SEA_LEVEL_M = 0.0
 
 -- Roads, railway and runway. The two roads cross at
 -- (ROAD_EW_NORTH_M, ROAD_NS_EAST_M); only the east-west one meets the river,
--- on the bridge, so the bridge is the single cut edge of the road graph and
--- carries maximal betweenness. The north-south road runs over the col between
--- the two hills. The railway is not in the road graph and crosses the river
--- without a bridge.
+-- on the bridge. The north-south road runs over the col between the two
+-- hills. The railway is not in the road graph and crosses the river without
+-- a bridge.
+--
+-- The road network is a tree, so every edge is a cut edge and the bridge
+-- does not carry the most betweenness on its own: the edge from the junction
+-- to the bridge carries more, and once nodes of degree two are contracted the
+-- four arms from the junction tie.
 --
 -- Every road, the railway and the runway's centre line run along cell
 -- centres, which sit a half cell off every multiple of CELL_SIZE_M. A strip
