@@ -262,6 +262,11 @@ pub fn parse(b: &[u8], name: &str, reach: &Reach) -> Result<Network, Error> {
             points,
         });
     }
+    // An empty mesh, or a file of another layout, leaves every run out of
+    // reach: no map has no roads, so that is an error, not an empty table.
+    if !edges.iter().any(|e| e.kind != KIND_AIRFIELD) {
+        return Err(malformed("no road or rail edge was found".into()));
+    }
     let catch_all = unjoin_catch_alls(&mut edges);
     Ok(Network {
         classes,
@@ -539,6 +544,13 @@ mod tests {
         let b = container::build("landscape4::lRoadNetwork", 6, 0);
         let e = parse(&b, "X.rn4", &REACH).unwrap_err().to_string();
         assert!(e.contains("version 6 has no decoder"), "{e}");
+    }
+
+    #[test]
+    fn refuses_a_file_with_no_road_or_rail_edge() {
+        let b = file(&["vpp"], &[edge(KIND_AIRFIELD, 0, 1, 2, 1000.0)]);
+        let e = parse(&b, "X.rn4", &REACH).unwrap_err().to_string();
+        assert_eq!(e, "no road or rail edge was found");
     }
 
     #[test]
