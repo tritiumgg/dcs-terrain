@@ -4,69 +4,67 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-10-23T17:10Z
+**Last updated:** 2026-10-23T19:05Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **C3: `check-extract` validates a v2 extract.** Manifest keys and
+1. **E1: the container reader.** Every map file's header gives class and
+   version; a decoder is chosen by the pair, and an unknown one is refused
+   naming file, class and version. A map's files are found by role and
+   listed for the manifest, with the build and the `entry.lua` id.
+   *Verified by:* an agent, through `mise run check`, and the opt-in check
+   on all eight installed maps of 2.9.30.28738: Nevada's scene is v8.
+2. **C3: `check-extract` validates a v2 extract.** Manifest keys and
    version first, then grid, layers, every tile's size, min/max and value
    domain, the absent-tile rules, unlisted tiles and stray `.tmp` files,
    and every table's keys; all failures listed with their path, exit 1.
    *Verified by:* an agent, through `mise run check`.
-2. **C2: the synthetic theatre writes a v2 extract.** `dcsterrain synth`
+3. **C2: the synthetic theatre writes a v2 extract.** `dcsterrain synth`
    writes every layer, table and polygon of ADR 0039 from closed forms,
    manifest last and byte-identical between runs; roads, the runway and
    the power line sit on cell centres; a transverse Mercator gives towns
    and beacons positions that project back. *Verified by:* an agent,
    through `mise run check`.
-3. **C1: workspace scaffold and types.** Every operation's request and
+4. **C1: workspace scaffold and types.** Every operation's request and
    response in `types`, with the closed criteria set; `OPERATIONS` is the
    one list of names; `dcsterrain schema` prints one draft 2020-12 document,
    held to a committed snapshot; every subcommand parses its flags and the
    rest say "not built yet"; stderr logging, debug with `--verbose`.
    *Verified by:* an agent, through `mise run check`.
-4. **F3: extract format v2.** ADR **0039** walks every field to its decoder
+5. **F3: extract format v2.** ADR **0039** walks every field to its decoder
    and reader: no journal or resume, a manifest written last, `files` with
    class and version, the mesh edge as coverage, `trees` and `lines` count
    layers, road edges with class and node ids, model boxes, forest and
    built-up polygons in `ground.jsonl`, hook-only fields null. ADR **0040**
    moves the projection fit into the extractor. *Verified by:* the maintainer
    reading the ADRs.
-5. **The extract is decoded from the terrain files.** Read-only decoding of
-   every Caucasus map file reproduced the live extract with no DCS running:
-   heights 99.95 % exact, water all but 67 of 141 M cells, 900 of 900 stands,
-   roads within 1.5 m of the router. The same decoders ran on Nevada (scene
-   format v8) and Syria. ADRs **0034** to **0038**: the files are the source,
-   decoders dispatch on class and version, 50 m on every map, the hook keeps
-   only an optional tables pass, the projection is fitted from the beacons.
-   Plan rewritten: E, F3, X15, C15, Q10. *Verified by:* the maintainer's
-   session on 2.9.30.28738, against the live extract from 2.9.29.27468.
 
 ## Next
 
 One task. The thing to pick up immediately.
 
-**E1** — the container reader that classifies every file of an install,
-refusing an unknown class and version. *Verified by:* an agent through
-`mise run check` for the offline tests; the opt-in check needs an install's
-files, so the maintainer on Windows.
+**E2** — `surface5`: blocks, field descriptors, the finest mesh, and
+`height`, `water` and `surface` rasterized to 50 m tiles. *Verified by:* an
+agent through `mise run check` for the built-block tests; the opt-in
+Caucasus comparison needs the live extract, so an agent on the Windows
+machine with `DCSTERRAIN_EXTRACT` set.
 
 ## Then
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **E2** — `surface5`: heights, water, surface to 50 m tiles.
-3. **E3 / E4 / E5 / E6** — roads, scenery, airfields, Lua tables: independent,
+1. **E3 / E4 / E5 / E6** — roads, scenery, airfields, Lua tables: independent,
    each against its opt-in Caucasus figures.
-4. **C4** — `pack` reads the extract; where carry 1 is discharged.
-5. **C5a / C5b / C5c** — the packed file's `meta`, base grids and tables.
-5. **C8** — scenery classification from the model boxes.
+2. **C4** — `pack` reads the extract; where carry 1 is discharged.
+3. **C5a / C5b / C5c** — the packed file's `meta`, base grids and tables.
+4. **C8** — scenery classification from the model boxes.
+5. **E7** — forest and built-up polygons from the mesh's materials.
 
-Milestone in view: **MS0 Contract** (P1, P2, F1, F2, F3, C1, C2, C3, E1).
-Proof is `check-extract` accepting the Rust synthetic v2 extract, and E1
-classifying every terrain file of an install.
+Milestone in view: **MS1 Packed file**. Proof is `pack` and `check` passing
+on the synthetic extract, and every decoder passing its opt-in checks on
+Caucasus.
 
 ## Carries
 
