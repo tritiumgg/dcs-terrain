@@ -127,11 +127,15 @@ material. Pairs seen include `Surface5.0/Land` (the full mesh), `Road5.1/Beach`,
 - **Height at (x, z):** find every finest-mesh triangle containing the point in the x–z plane. Use barycentric
   `u, v` with tolerance `u ≥ -1e-7, v ≥ -1e-7, u + v ≤ 1 + 1e-7`, and skip triangles whose determinant is 0.
   Interpolate `h` linearly.
-- **Precedence where triangles overlap:** a triangle with `TRITYPE & 8` (road strip) wins. Among equals the
-  higher block index wins, then the higher triangle index. Without this rule the Roki tunnel area is off by
-  729 m, because a road strip runs under a mountain triangle and the live terrain reports the road.
-- **Height layer:** `floor(h + 0.5)` at the center of each 50 m cell.
-- **Water class:** `TRITYPE & 1` → sea (2); else `& 2` → lake (1); else `& 4` → river (3); else land (0).
+- **Precedence where triangles overlap:** a triangle with `TRITYPE & 8` (road strip) wins, then a water
+  triangle (`TRITYPE & 7`), then the higher block index, then the higher triangle index (ADR 0041). Without the
+  road rule the Roki tunnel area is off by 729 m, because a road strip runs under a mountain triangle and the
+  live terrain reports the road. Without the water rule, lake triangles laid over a land triangle of the same
+  block read as land on 43 Caucasus cells.
+- **Height layer:** `floor(h + 0.5)` at the center of each 50 m cell, with `h` rounded to f32 first, which
+  matches the game on more cells than rounding the f64.
+- **Water class:** `TRITYPE & 4` → river (3); else `& 1` → sea (2); else `& 2` → lake (1); else land (0). A
+  river bit wins over a lake or sea bit on the same triangle (types 5, 6, 70): 42 Caucasus cells.
 
 | TRITYPE bit | meaning | status |
 |---|---|---|
@@ -495,9 +499,12 @@ according to the live table.
 
 ## Key validation figures
 
-- Caucasus heights: 99.949 % of 141.19 M cells exact, 99.9986 % within 1 m, and 1 709 cells off by more than
-  2 m (lake clusters). Land only: 99.919 % exact.
-- Caucasus water class: 141 189 968 of 141 190 035 cells agree (99.99995 %).
+- Caucasus heights, by the rules above (ADR 0041): 99.9485 % of 141.19 M cells exact, 99.99859 % within 1 m,
+  and 1 707 cells off by more than 2 m (lake clusters), worst 29 m. Land only: 99.9195 % exact.
+- Caucasus water class: all but 4 of 141 190 035 cells agree. The 4 are land 0.5 m over a lake, where the game
+  reports land.
+- Caucasus coverage: no cell the live extract wrote lies outside the mesh. The 6.39 M cells it wrote as fill are
+  flat mesh land at exactly 5 m, which the sim reports with its off-map value (ADR 0042).
 - Caucasus road polylines against the live road router: p50 1.42 m, p99 4.3 m. Rail: p50 2.18 m. Both look like
   a lane or track offset from the stored centerline.
 - Road vertices within 0.5 m of the sampled ground: Caucasus 99.5 %, Nevada 99.0 %, Syria 92.5 %. On Syria the

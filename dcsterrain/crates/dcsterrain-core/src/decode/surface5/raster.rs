@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use super::mesh::{Block, Error, Surface5};
-use super::sample::{ROAD_STRIP, cover, water_class};
+use super::sample::{ROAD_STRIP, cover, rank, round_height, water_class};
 use crate::extract::{Bounds, CELL_SIZE_M, Grid, TILE_SIZE, TileEntry, layer};
 
 /// The material whose subset marks a runway.
@@ -117,13 +117,6 @@ fn cells(
     Some((span(0, tx * ts, g.height)?, span(1, tz * ts, g.width)?))
 }
 
-/// A cell's precedence: a road strip, then the later block, then the later
-/// triangle.
-fn rank(b: &Prepared, t: usize) -> u64 {
-    let road = u64::from(b.tritype[t] & ROAD_STRIP != 0);
-    (road << 63) | ((b.index as u64) << 32) | t as u64
-}
-
 fn raster_tile(blocks: &[&Prepared], g: &Grid, tx: u32, tz: u32) -> Tile {
     let ts = g.tile_size;
     let n = (ts * ts) as usize;
@@ -140,7 +133,7 @@ fn raster_tile(blocks: &[&Prepared], g: &Grid, tx: u32, tz: u32) -> Tile {
             let Some((rows, cols)) = cells(g, tx, tz, p) else {
                 continue;
             };
-            let k = rank(b, t);
+            let k = rank(b.tritype[t], b.index, t);
             for r in rows {
                 for c in cols.clone() {
                     let Some((u, v)) = cover(p[0], p[1], p[2], [f64::from(r), f64::from(c)]) else {
@@ -182,8 +175,7 @@ fn raster_tile(blocks: &[&Prepared], g: &Grid, tx: u32, tz: u32) -> Tile {
         if best[i] == NONE {
             continue;
         }
-        // Clamped short of nodata, which no ground reaches.
-        tile.height[i] = (h[i] + 0.5).floor().clamp(-32767.0, 32767.0) as i16;
+        tile.height[i] = round_height(h[i]);
         let w = water_class(ty[i]);
         tile.water[i] = w;
         tile.surface[i] = if runway[i] {
@@ -510,7 +502,7 @@ mod tests {
                 let (x, z) = (f64::from(r) * 50.0 + 25.0, f64::from(c) * 50.0 + 25.0);
                 let hit = mesh.sample(x, z).unwrap();
                 let (h, w, _) = cell(t, r as usize, c as usize);
-                assert_eq!(h, (hit.h + 0.5).floor() as i16, "({r}, {c})");
+                assert_eq!(h, round_height(hit.h), "({r}, {c})");
                 assert_eq!(w, water_class(hit.tritype), "({r}, {c})");
             }
         }
@@ -533,6 +525,15 @@ mod tests {
             low
         }]);
         assert_eq!(cell(&tiles(&f, &grid)[0], 0, 0).0, 53);
+    }
+
+    #[test]
+    fn a_lake_wins_over_a_later_land_block() {
+        let mut land = square([0, 0]);
+        land.t[1] = 50.0;
+        let (f, grid) = one(&[square([LAKE, LAKE]), land]);
+        let t = &tiles(&f, &grid)[0];
+        assert_eq!(cell(t, 0, 0), (103, 1, SURFACE_WATER));
     }
 
     #[test]

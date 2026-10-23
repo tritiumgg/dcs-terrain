@@ -1,10 +1,11 @@
 //! The ground at a point: which finest-mesh triangle covers it, and the
 //! height there.
 //!
-//! Triangles overlap where a road or rail strip is laid over the ground, and
-//! the game reports the strip: through the Roki tunnel a road runs under a
-//! mountain triangle, and taking the mountain puts the road 729 m too high.
-//! So a road strip wins, then the later block, then the later triangle.
+//! Triangles overlap where a strip is laid over the ground, and the game
+//! reports the strip. Through the Roki tunnel a road runs under a mountain
+//! triangle, and taking the mountain puts the road 729 m too high; where a
+//! lake is laid over land, the game reports the lake. So a road strip wins,
+//! then water, then the later block, then the later triangle (ADR 0041).
 
 use super::mesh::{Block, Mesh};
 
@@ -13,6 +14,7 @@ pub const SEA: u32 = 1;
 pub const LAKE: u32 = 2;
 pub const RIVER: u32 = 4;
 pub const ROAD_STRIP: u32 = 8;
+const WATER: u32 = SEA | LAKE | RIVER;
 
 /// How far outside a triangle, in barycentric terms, a point may lie and
 /// still be covered, so a point on a shared edge is covered by both.
@@ -36,17 +38,31 @@ pub fn cover(a: [f64; 2], b: [f64; 2], c: [f64; 2], p: [f64; 2]) -> Option<(f64,
 }
 
 /// The `water` layer's class for a triangle type: 0 land, 1 lake, 2 sea,
-/// 3 river.
+/// 3 river. A river bit wins over a lake or sea bit beside it (ADR 0041).
 pub fn water_class(tritype: u32) -> u8 {
-    if tritype & SEA != 0 {
+    if tritype & RIVER != 0 {
+        3
+    } else if tritype & SEA != 0 {
         2
     } else if tritype & LAKE != 0 {
         1
-    } else if tritype & RIVER != 0 {
-        3
     } else {
         0
     }
+}
+
+/// Where two triangles cover a point, the one of higher rank is reported.
+pub fn rank(tritype: u32, block: usize, tri: usize) -> u64 {
+    let road = u64::from(tritype & ROAD_STRIP != 0);
+    let water = u64::from(tritype & WATER != 0);
+    (road << 63) | (water << 62) | ((block as u64) << 32) | tri as u64
+}
+
+/// The `height` layer's metres: rounded at the game's own precision, f32,
+/// which matches it on more cells than rounding the f64 (ADR 0041).
+pub fn round_height(h: f64) -> i16 {
+    // Clamped short of nodata, which no ground reaches.
+    ((h as f32) + 0.5).floor().clamp(-32767.0, 32767.0) as i16
 }
 
 /// A triangle covering a point, and the height it gives there.
@@ -60,18 +76,13 @@ pub struct Hit {
 }
 
 impl Hit {
-    fn rank(&self) -> (bool, usize, usize) {
-        (self.tritype & ROAD_STRIP != 0, self.block, self.tri)
-    }
-
     /// Whether this triangle is the one reported where both cover a point.
     pub fn beats(&self, other: &Hit) -> bool {
-        self.rank() > other.rank()
+        rank(self.tritype, self.block, self.tri) > rank(other.tritype, other.block, other.tri)
     }
 }
 
-/// The heights of a triangle's corners, its corners in the x–z plane, and
-/// its type.
+/// The heights of a triangle's corners, and the corners in the x–z plane.
 pub fn corners(b: &Block, t: usize) -> ([f64; 3], [[f64; 2]; 3]) {
     let w = b.tri[t].map(|i| b.world(i));
     (w.map(|v| v[1]), w.map(|v| [v[0], v[2]]))
@@ -179,10 +190,31 @@ mod tests {
     }
 
     #[test]
-    fn water_bits_rank_sea_then_lake_then_river() {
-        assert_eq!(water_class(SEA | LAKE | RIVER), 2);
-        assert_eq!(water_class(LAKE | RIVER), 1);
-        assert_eq!(water_class(RIVER | ROAD_STRIP), 3);
+    fn water_bits_rank_river_then_sea_then_lake() {
+        assert_eq!(water_class(SEA | LAKE | RIVER), 3);
+        assert_eq!(water_class(LAKE | RIVER), 3);
+        assert_eq!(water_class(SEA | LAKE), 2);
+        assert_eq!(water_class(LAKE | 64), 1);
         assert_eq!(water_class(ROAD_STRIP | 64), 0);
+    }
+
+    #[test]
+    fn water_wins_over_a_later_land_triangle_and_a_road_over_both() {
+        let mesh = Mesh {
+            blocks: vec![square(0, [LAKE, LAKE]), square(1, [0, 0])],
+        };
+        assert_eq!(mesh.sample(1010.0, 2010.0).unwrap().block, 0);
+        let mesh = Mesh {
+            blocks: vec![square(0, [LAKE, LAKE]), square(1, [ROAD_STRIP, 0])],
+        };
+        assert_eq!(mesh.sample(1010.0, 2010.0).unwrap().block, 1);
+    }
+
+    #[test]
+    fn heights_round_at_f32() {
+        // 2.4999999999 is 2.5 in f32, so it rounds up as the game rounds it.
+        assert_eq!(round_height(2.499_999_999_9), 3);
+        assert_eq!(round_height(-0.5), 0);
+        assert_eq!(round_height(1e9), 32767);
     }
 }
