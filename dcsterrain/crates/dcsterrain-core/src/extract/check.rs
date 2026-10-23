@@ -223,7 +223,9 @@ fn check_unlisted(x: &Extract, out: &mut Vec<Failure>) {
         };
         for e in entries.flatten() {
             let name = format!("{rel}/{}", e.file_name().to_string_lossy());
-            if e.path().is_dir() {
+            // The entry's own type, not its target's: a link back to an
+            // ancestor would otherwise be walked until the OS refused.
+            if e.file_type().is_ok_and(|t| t.is_dir()) {
                 stack.push((e.path(), name));
             } else if !listed.contains(name.as_str()) {
                 out.push(Failure::new(name, "on disk but not in the manifest"));
