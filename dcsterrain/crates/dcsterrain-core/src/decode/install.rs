@@ -238,7 +238,9 @@ fn with_ext(dir: &Path, ext: &str) -> Vec<String> {
     };
     let mut names: Vec<String> = entries
         .flatten()
-        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        // The target's type, as a named file is found: a linked map file is
+        // still the map's file.
+        .filter(|e| e.path().is_file())
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .filter(|n| n.len() > ext.len() && n.to_ascii_lowercase().ends_with(ext))
         .collect();
@@ -350,8 +352,9 @@ fn classify(
     let got = dispatch(rel, &header)?;
     if got != want {
         return Err(Refusal(format!(
-            "{rel} is a {}, where a {role} file is a {}",
+            "{rel} is a {} version {}, where a {role} file is a {}",
             header.class,
+            header.version,
             want.class()
         )));
     }
@@ -607,7 +610,10 @@ mod tests {
             &head("t5::rn5file", 0, 0, 0),
         );
         let e = read_map(&r, "Synth").unwrap_err();
-        assert!(e.0.contains("is a t5::rn5file, where a roads file"), "{e}");
+        assert!(
+            e.0.contains("is a t5::rn5file version 0, where a roads file"),
+            "{e}"
+        );
     }
 
     #[test]
