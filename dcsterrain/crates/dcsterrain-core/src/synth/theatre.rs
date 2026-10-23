@@ -85,10 +85,11 @@ impl Theatre {
                 PRNG_MODULUS - 1
             )));
         }
-        if f64::from(size_km) * 1000.0 <= 2.0 * MESH_MARGIN_M {
+        // Smaller would cut features off the north-east while the model
+        // counts and polygons still describe all of them.
+        if size_km < DEFAULT_SIZE_KM {
             return Err(SynthError(format!(
-                "a {size_km} km theatre is all margin; it needs more than {} km",
-                2.0 * MESH_MARGIN_M / 1000.0
+                "the theatre needs at least {DEFAULT_SIZE_KM} km to hold every feature, not {size_km}"
             )));
         }
         Ok(Theatre {
@@ -413,7 +414,8 @@ mod tests {
     fn refuses_what_it_cannot_write() {
         assert!(Theatre::new(1, 70, 100).is_err());
         assert!(Theatre::new(0, 70, 50).is_err());
-        assert!(Theatre::new(1, 4, 50).is_err());
+        assert!(Theatre::new(1, 69, 50).is_err());
+        assert!(Theatre::new(1, 100, 50).is_ok());
     }
 
     #[test]
