@@ -55,6 +55,7 @@ disagree, the later accepted one wins, and the earlier is marked
 | [0041](0041-water-wins-over-land-and-river-over-lake-and-sea.md) | Accepted | 2026-10-23 | Water wins over land, and river over lake and sea, at a cell | ADR 0039 "Tile layers"; `plan.md` E2 |
 | [0042](0042-the-mesh-edge-is-coverage-and-flat-5-m-ground-is-land.md) | Accepted | 2026-10-23 | The mesh edge is coverage, and flat 5 m ground is land | ADR 0039 "Coverage"; ADR 0007; `plan.md` E2 |
 | [0043](0043-router-points-lie-within-a-lane-of-the-centerline.md) | Accepted | 2026-10-23 | Router points lie within a lane of the decoded centerline | ADR 0034 roads row; `plan.md` E3 |
+| [0044](0044-a-road-node-id-names-a-junction-not-a-point.md) | Accepted | 2026-10-23 | A road node id names a junction, not a point, and the catch-all id is written null | ADR 0039 "roads.jsonl", "Consequences"; `plan.md` E3, C9 |
 
 Add a row when you add an ADR. This table is the index Claude reads, so an ADR
 missing from it will not be found. Each record's own `Affects` line, at the top

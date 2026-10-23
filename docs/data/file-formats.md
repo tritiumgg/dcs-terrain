@@ -175,8 +175,8 @@ Edge record, as seen around each polyline (`q` = offset of the point count):
 …      not decoded
 q-14   u8   kind: 2 road, 1 rail, 0 airfield line
 q-13   u8   class: index into the class table
-q-12   u32  nodeA
-q-8    u32  nodeB
+q-12   u32  node at the first vertex, or 0xFFFFFFFF for none
+q-8    u32  node at the last vertex, likewise
 q-4    u32  0           (this zero is what marks a run as a graph edge)
 q      u32  n
        n × f64[3]  points (x, y, z)
@@ -185,8 +185,11 @@ q      u32  n
        …              further per-vertex data, not decoded
 ```
 
-Runs that are not edges (no zero at `q-4`) are short connectors in the node table. In airfield files they read
-`u32 3, u32 a, u32 b, u32 n, points`.
+Runs that are not edges (no zero at `q-4`) are short connectors. In airfield files they read
+`u32 3, u32 a, u32 b, u32 n, points`. The map file has them too, after the edges: Caucasus 27 955 of 3 to 5
+points, framed `u32 3, u32, u32, u32 n`, whose two u32 range over the edge count. They draw the inside of
+junctions (guessed: they join one edge to the next).
+
 
 ### Finding the polylines
 
@@ -201,17 +204,26 @@ The record framing between polylines is not fully decoded, so the decoder scans 
 
 This reproduces the earlier fixed-box scan exactly: Caucasus 43 010 runs and 1 184 993 vertices. The
 data-derived box finds 43 224 runs; the extra runs are airfield-line edges whose y alternates ±524.825.
+Of the 43 224, 15 267 are edges (12 221 roads and rail), 27 955 connectors and 2 neither.
 
 ### Deriving the extract
 
 A road or rail polyline is an edge with kind 2 or 1. Its class name is `classes[class]`, and its vertices are
 the points. `y` is a height for kinds 1 and 2 only. For kind 0 it is not: the median is -200 m.
 
+The node ids name junctions, and an edge stops short of its junction: the ends naming one id lie p50 27 m,
+p99 176 m from their mean on Caucasus roads, and at most 2.2 km on any of the eight installed maps. Each
+map also has one catch-all id, named by dozens to hundreds of ends spread across the whole map (Caucasus 1697),
+which is no junction; the extract writes it, and 0xFFFFFFFF, as null (ADR 0044).
+
 **Confirmed:** the class table, the point and tangent arrays, and that `y` is a height for roads and rail
 (Caucasus road vertices: 99.5 % within 0.5 m of the sampled ground; rail 98.8 %). The kind byte is confirmed
 because kind 1 equals exactly the rail classes on all three maps (Nevada `rail_two` 214 = kind-1 count 214;
-Syria 4 701).
-**Guessed:** the node table, the spatial index, the bytes before `kind`, and the per-vertex data after the
+Syria 4 701). On all eight installed maps every kind-1 edge has a rail class; the converse fails once, on
+MarianasWWII, whose 1 401 `rail_narrow` edges are kind 2 and are written as roads.
+**Confirmed (Caucasus):** `a` is the node at the first vertex: of 35 places where two edge ends coincide,
+34 name one id read that way and none read the other way.
+**Guessed:** the node table, the connectors, the spatial index, the bytes before `kind`, and the per-vertex data after the
 tangents.
 
 ## `landscape4::lRoadNetwork`, airfield (`AirfieldsTaxiways/<name>.rn4`)

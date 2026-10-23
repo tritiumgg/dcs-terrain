@@ -22,6 +22,7 @@
 //! the short connector runs of the node table, which carry no class. Tangents
 //! follow the points as unit vectors, so no tangent array passes for a run.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, BufWriter, Write};
@@ -55,6 +56,11 @@ const MIN_ABS_X_M: f64 = 1.0;
 /// The class table is short; a larger count is not one.
 const MAX_CLASSES: u32 = 256;
 const MAX_CLASS_LEN: u32 = 64;
+/// The value an end takes where the file names no junction.
+const NO_NODE: u32 = u32::MAX;
+/// How far from their mean the ends of one junction may lie. The widest real
+/// junction on any map measured spans 2.2 km; each catch-all, hundreds.
+const JUNCTION_REACH_M: f64 = 10_000.0;
 
 /// What makes a road network unreadable, in words that name the part.
 #[derive(Debug)]
@@ -129,8 +135,10 @@ pub struct Edge {
     pub id: u32,
     pub kind: u8,
     pub class: u8,
-    pub a: u32,
-    pub b: u32,
+    /// The junction at the first vertex, and at the last. The edge stops short
+    /// of it; none where the file names no junction.
+    pub a: Option<u32>,
+    pub b: Option<u32>,
     pub points: Vec<[f64; 3]>,
 }
 
@@ -138,6 +146,8 @@ pub struct Edge {
 pub struct Network {
     pub classes: Vec<String>,
     pub edges: Vec<Edge>,
+    /// The ids whose ends spread across the map, written as no junction.
+    pub catch_all: Vec<u32>,
 }
 
 impl Network {
@@ -247,12 +257,62 @@ pub fn parse(b: &[u8], name: &str, reach: &Reach) -> Result<Network, Error> {
             id,
             kind,
             class,
-            a: u32_at(b, q - 12).unwrap(),
-            b: u32_at(b, q - 8).unwrap(),
+            a: node(u32_at(b, q - 12).unwrap()),
+            b: node(u32_at(b, q - 8).unwrap()),
             points,
         });
     }
-    Ok(Network { classes, edges })
+    let catch_all = unjoin_catch_alls(&mut edges);
+    Ok(Network {
+        classes,
+        edges,
+        catch_all,
+    })
+}
+
+fn node(id: u32) -> Option<u32> {
+    (id != NO_NODE).then_some(id)
+}
+
+/// Clears every end naming an id whose road and rail ends do not all lie
+/// within reach of their mean, and returns those ids. ADR 0044: each map has
+/// one id whose ends are spread across it, and joined through one node they
+/// would weld its dead ends together.
+fn unjoin_catch_alls(edges: &mut [Edge]) -> Vec<u32> {
+    let mut ends: HashMap<u32, Vec<[f64; 2]>> = HashMap::new();
+    for e in edges.iter().filter(|e| e.kind != KIND_AIRFIELD) {
+        let (first, last) = (e.points[0], e.points[e.points.len() - 1]);
+        for (id, p) in [(e.a, first), (e.b, last)] {
+            if let Some(id) = id {
+                ends.entry(id).or_default().push([p[0], p[2]]);
+            }
+        }
+    }
+    let mut wide: Vec<u32> = ends
+        .into_iter()
+        .filter(|(_, l)| spread(l) > JUNCTION_REACH_M)
+        .map(|(id, _)| id)
+        .collect();
+    wide.sort_unstable();
+    for e in edges.iter_mut().filter(|e| e.kind != KIND_AIRFIELD) {
+        for end in [&mut e.a, &mut e.b] {
+            if end.is_some_and(|id| wide.binary_search(&id).is_ok()) {
+                *end = None;
+            }
+        }
+    }
+    wide
+}
+
+/// How far the farthest of `points` lies from their mean.
+pub fn spread(points: &[[f64; 2]]) -> f64 {
+    let n = points.len() as f64;
+    let mx = points.iter().map(|p| p[0]).sum::<f64>() / n;
+    let mz = points.iter().map(|p| p[1]).sum::<f64>() / n;
+    points
+        .iter()
+        .map(|p| (p[0] - mx).hypot(p[1] - mz))
+        .fold(0.0, f64::max)
 }
 
 /// Reads and decodes the road network at `path`.
@@ -385,8 +445,8 @@ mod tests {
                 id: 0,
                 kind: KIND_ROAD,
                 class: 0,
-                a: 10411,
-                b: 10412,
+                a: Some(10411),
+                b: Some(10412),
                 points: vec![
                     [1000.0, 101.5, 2000.0],
                     [1005.0, 102.25, 2003.0],
@@ -405,12 +465,43 @@ mod tests {
             edge(KIND_RAIL, 1, 2, 5, 3000.0),
         ];
         let net = parse(&file(&["road", "rw", "vpp"], &edges), "X.rn4", &REACH).unwrap();
-        let got: Vec<(u32, u8, u8, u32, u32)> = net
+        let got: Vec<_> = net
             .edges
             .iter()
             .map(|e| (e.id, e.kind, e.class, e.a, e.b))
             .collect();
-        assert_eq!(got, [(0, 2, 0, 1, 2), (1, 0, 2, 3, 4), (2, 1, 1, 2, 5)]);
+        assert_eq!(
+            got,
+            [
+                (0, 2, 0, Some(1), Some(2)),
+                (1, 0, 2, Some(3), Some(4)),
+                (2, 1, 1, Some(2), Some(5))
+            ]
+        );
+    }
+
+    #[test]
+    fn an_id_spread_across_the_map_and_the_none_value_are_no_junction() {
+        let edges = [
+            // 7 joins two ends 4.5 m apart; 9 joins ends 30 km apart.
+            edge(KIND_ROAD, 0, 9, 7, 1000.0),
+            edge(KIND_RAIL, 1, 7, 9, 1009.0),
+            edge(KIND_ROAD, 0, 9, NO_NODE, 31_000.0),
+            // An airfield line naming 9 is neither measured nor cleared.
+            edge(KIND_AIRFIELD, 2, 9, 9, 60_000.0),
+        ];
+        let net = parse(&file(&["road", "rw", "vpp"], &edges), "X.rn4", &REACH).unwrap();
+        let ends: Vec<_> = net.edges.iter().map(|e| (e.a, e.b)).collect();
+        assert_eq!(
+            ends,
+            [
+                (None, Some(7)),
+                (Some(7), None),
+                (None, None),
+                (Some(9), Some(9))
+            ]
+        );
+        assert_eq!(net.catch_all, [9]);
     }
 
     #[test]
@@ -424,7 +515,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(net.edges.len(), 1);
-        assert_eq!((net.edges[0].id, net.edges[0].a), (0, 2));
+        assert_eq!((net.edges[0].id, net.edges[0].a), (0, Some(2)));
     }
 
     #[test]
