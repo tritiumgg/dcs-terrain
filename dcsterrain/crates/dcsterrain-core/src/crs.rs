@@ -130,15 +130,224 @@ impl Tmerc {
     }
 }
 
+/// Each measured map's projection, by theatre id, for a map whose files
+/// carry too few positioned beacons to fit one. Nevada's row is the fit of
+/// ADR 0038; the rest were measured in a running sim.
+pub const TABLE: [(&str, Tmerc); 9] = [
+    ("Afghanistan", tm(63, 300150.0, 3759657.0)),
+    ("Caucasus", tm(33, 99517.0, 4998115.0)),
+    ("GermanyCW", tm(21, -35427.62, 6061633.128)),
+    ("MarianaIslands", tm(147, -238418.0, 1491840.0)),
+    ("MarianaIslandsWWII", tm(147, -238418.0, 1491840.0)),
+    ("Nevada", tm(-117, 193996.81, 4410028.06)),
+    ("PersianGulf", tm(57, -75756.0, 2894933.0)),
+    ("SinaiMap", tm(33, -169222.0, 3325313.0)),
+    ("Syria", tm(39, -282801.0, 3879866.0)),
+];
+
+const fn tm(lon_0: i32, easting: f64, northing: f64) -> Tmerc {
+    Tmerc {
+        lon_0,
+        easting,
+        northing,
+    }
+}
+
+pub fn table(theatre: &str) -> Option<Tmerc> {
+    TABLE.iter().find(|(id, _)| *id == theatre).map(|(_, t)| *t)
+}
+
+/// One point given both ways: DCS metres and degrees.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Pair {
+    pub x: f64,
+    pub z: f64,
+    pub lat: f64,
+    pub lon: f64,
+}
+
+/// A projection fitted to pairs, and how well it fits the ones it kept.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Fit {
+    pub tmerc: Tmerc,
+    /// The pairs the fit kept, distinct and in the order given.
+    pub kept: Vec<Pair>,
+    pub rms_m: f64,
+    pub max_m: f64,
+}
+
+/// The fewest distinct pairs a fit is made from.
+pub const MIN_PAIRS: usize = 3;
+
+/// A pair this far from the best meridian's offsets is not used: a wrong
+/// meridian misses by kilometres, and six-decimal degrees by centimetres.
+const OUTLIER_M: f64 = 5.0;
+
+/// The longitudes either side of the pairs' span that are tried as the
+/// central meridian. A map sits within a few degrees of its own.
+const MERIDIAN_REACH_DEG: i32 = 12;
+
+fn median(mut v: Vec<f64>) -> f64 {
+    v.sort_by(f64::total_cmp);
+    let m = v.len() / 2;
+    if v.len() % 2 == 1 {
+        v[m]
+    } else {
+        (v[m - 1] + v[m]) / 2.0
+    }
+}
+
+/// Fits the central meridian and the offsets to `pairs`. Each whole-degree
+/// meridian near them is scored by the RMS of the residuals about the median
+/// offsets; the best one's offsets are then the means over the pairs within
+/// 5 m, rounded to the millimetre. `None` with fewer than three distinct
+/// pairs, before or after that cut.
+pub fn fit(pairs: &[Pair]) -> Option<Fit> {
+    let mut unique: Vec<Pair> = Vec::new();
+    for p in pairs {
+        if !unique.contains(p) {
+            unique.push(*p);
+        }
+    }
+    if unique.len() < MIN_PAIRS {
+        return None;
+    }
+    let (lo, hi) = unique.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| {
+        (lo.min(p.lon), hi.max(p.lon))
+    });
+    // How far each pair's projection sits from its DCS position, per axis.
+    let offsets = |lon_0: i32| -> Vec<(f64, f64)> {
+        unique
+            .iter()
+            .map(|p| {
+                let (n, e) = forward(p.lat, p.lon - f64::from(lon_0));
+                (e - p.z, n - p.x)
+            })
+            .collect()
+    };
+    let residuals = |d: &[(f64, f64)], e: f64, n: f64| -> Vec<f64> {
+        d.iter().map(|(de, dn)| (de - e).hypot(dn - n)).collect()
+    };
+    let rms = |r: &[f64]| (r.iter().map(|r| r * r).sum::<f64>() / r.len() as f64).sqrt();
+
+    let first = lo.floor() as i32 - MERIDIAN_REACH_DEG;
+    let last = hi.ceil() as i32 + MERIDIAN_REACH_DEG;
+    let (lon_0, d, e, n) = (first..=last)
+        .map(|l| {
+            let d = offsets(l);
+            let e = median(d.iter().map(|o| o.0).collect());
+            let n = median(d.iter().map(|o| o.1).collect());
+            let score = rms(&residuals(&d, e, n));
+            (score, l, d, e, n)
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, l, d, e, n)| (l, d, e, n))?;
+
+    let near: Vec<usize> = residuals(&d, e, n)
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| **r < OUTLIER_M)
+        .map(|(i, _)| i)
+        .collect();
+    if near.len() < MIN_PAIRS {
+        return None;
+    }
+    let mean = |f: fn(&(f64, f64)) -> f64| {
+        let s: f64 = near.iter().map(|&i| f(&d[i])).sum();
+        (s / near.len() as f64 * 1000.0).round() / 1000.0
+    };
+    let tmerc = Tmerc {
+        lon_0,
+        easting: mean(|o| o.0),
+        northing: mean(|o| o.1),
+    };
+    let kept_d: Vec<(f64, f64)> = near.iter().map(|&i| d[i]).collect();
+    let r = residuals(&kept_d, tmerc.easting, tmerc.northing);
+    Some(Fit {
+        tmerc,
+        kept: near.iter().map(|&i| unique[i]).collect(),
+        rms_m: rms(&r),
+        max_m: r.iter().copied().fold(0.0, f64::max),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const CAUCASUS: Tmerc = Tmerc {
-        lon_0: 33,
-        easting: 99517.0,
-        northing: 4998115.0,
-    };
+    const CAUCASUS: Tmerc = tm(33, 99517.0, 4998115.0);
+
+    /// Pairs as `Beacons.lua` gives them: degrees to six decimals.
+    fn pairs(t: &Tmerc, at: &[(f64, f64)]) -> Vec<Pair> {
+        let six = |v: f64| (v * 1e6).round() / 1e6;
+        at.iter()
+            .map(|&(x, z)| {
+                let (lat, lon) = t.to_latlon(x, z);
+                Pair {
+                    x,
+                    z,
+                    lat: six(lat),
+                    lon: six(lon),
+                }
+            })
+            .collect()
+    }
+
+    const SPREAD: [(f64, f64); 6] = [
+        (-1321.8, 246748.5),
+        (-356584.8, 618472.4),
+        (-300000.0, 900000.0),
+        (-50000.0, 400000.0),
+        (-200000.0, 700000.0),
+        (-120000.0, 300000.0),
+    ];
+
+    #[test]
+    fn recovers_the_meridian_and_offsets_from_rounded_degrees() {
+        for (id, t) in TABLE {
+            // Each map's own spread, in its own frame.
+            let at: Vec<(f64, f64)> = SPREAD
+                .iter()
+                .map(|&(x, z)| (x / 4.0, (z - 500000.0) / 4.0))
+                .collect();
+            let f = fit(&pairs(&t, &at)).unwrap();
+            assert_eq!(f.tmerc.lon_0, t.lon_0, "{id}");
+            assert!(
+                (f.tmerc.easting - t.easting).abs() < 0.05
+                    && (f.tmerc.northing - t.northing).abs() < 0.05,
+                "{id}: {f:?}"
+            );
+            assert!(f.max_m < 0.1 && f.rms_m <= f.max_m, "{id}: {f:?}");
+            assert_eq!(f.kept.len(), at.len());
+        }
+    }
+
+    #[test]
+    fn drops_a_pair_far_from_the_rest_and_a_repeated_one() {
+        let mut p = pairs(&CAUCASUS, &SPREAD);
+        p.push(p[0]);
+        p[1].x += 40.0;
+        let f = fit(&p).unwrap();
+        assert_eq!(f.tmerc.lon_0, 33);
+        assert_eq!(f.kept.len(), SPREAD.len() - 1);
+        assert!(!f.kept.contains(&p[1]));
+        assert!((f.tmerc.northing - CAUCASUS.northing).abs() < 0.05, "{f:?}");
+    }
+
+    #[test]
+    fn fewer_than_three_distinct_pairs_fit_nothing() {
+        let p = pairs(&CAUCASUS, &SPREAD[..2]);
+        assert_eq!(fit(&p), None);
+        assert_eq!(fit(&[p[0], p[0], p[1]]), None);
+        assert_eq!(fit(&[]), None);
+    }
+
+    #[test]
+    fn looks_up_a_theatre_in_the_table() {
+        assert_eq!(table("Caucasus"), Some(CAUCASUS));
+        assert_eq!(table("MarianaIslandsWWII").map(|t| t.lon_0), Some(147));
+        assert_eq!(table("Kola"), None);
+    }
 
     // Published UTM figures, which share k_0 = 0.9996: 3 degrees east of the
     // central meridian on the equator is 333 978.556 m east of it, and 45
