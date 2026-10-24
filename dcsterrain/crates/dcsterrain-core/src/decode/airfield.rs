@@ -22,6 +22,11 @@ use std::path::Path;
 use super::Decoder;
 use super::rn4::{self, Error, f64_at, u32_at};
 
+mod tables;
+pub use tables::{
+    Params, RUNWAYS_FILE, RunwayRow, STANDS_FILE, StandRow, runway_rows, stand_rows, write_rows,
+};
+
 /// The bytes of a node's matrix.
 pub const MATRIX_BYTES: usize = 128;
 /// A rotation entry, scaled by at most rounding.
