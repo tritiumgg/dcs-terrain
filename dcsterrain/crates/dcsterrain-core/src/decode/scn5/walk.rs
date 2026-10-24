@@ -83,8 +83,8 @@ impl Scene {
             while i < toc.count {
                 let n = CHUNK.min(toc.count - i);
                 let ids = read_at(r, self.data_base + toc.ids + 8 * i, 8 * n as usize)?;
-                for (j, id) in ids.chunks_exact(8).enumerate() {
-                    let id = u64::from_le_bytes(id.try_into().unwrap());
+                for (j, id) in ids.as_chunks::<8>().0.iter().enumerate() {
+                    let id = u64::from_le_bytes(*id);
                     let Some((node, index)) = self.locate(id) else {
                         return Err(malformed(format!(
                             "id {id}, entry {} of the {} pool, names an instance the nodes do not hold",

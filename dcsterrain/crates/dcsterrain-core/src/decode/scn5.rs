@@ -523,14 +523,14 @@ impl Scene {
         };
         // The group's width is not checked: one u32 id padded to 8 bytes
         // reads as one u64.
-        if let [g, _, _, _] = found.as_slice() {
-            if g.count != group.len() as u64 {
-                return Err(malformed(format!(
-                    "the group places {} models, and its pool lists {}",
-                    group.len(),
-                    g.count
-                )));
-            }
+        if let [g, _, _, _] = found.as_slice()
+            && g.count != group.len() as u64
+        {
+            return Err(malformed(format!(
+                "the group places {} models, and its pool lists {}",
+                group.len(),
+                g.count
+            )));
         }
         let (k, largest) = nodes
             .iter()

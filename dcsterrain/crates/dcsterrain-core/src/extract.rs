@@ -259,7 +259,7 @@ impl Samples {
     }
 
     fn decode(dtype: Dtype, bytes: &[u8]) -> Samples {
-        let pairs = || bytes.chunks_exact(2).map(|b| [b[0], b[1]]);
+        let pairs = || bytes.as_chunks::<2>().0.iter().copied();
         match dtype {
             Dtype::U8 => Samples::U8(bytes.to_vec()),
             Dtype::I16 => Samples::I16(pairs().map(i16::from_le_bytes).collect()),

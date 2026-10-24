@@ -362,7 +362,7 @@ impl Surface5 {
                 a.stride
             )));
         }
-        if a.size % u64::from(stride) != 0 {
+        if !a.size.is_multiple_of(u64::from(stride)) {
             return Err(malformed(format!(
                 "{} holds {} bytes, not a whole number of elements",
                 what(),
@@ -390,9 +390,7 @@ impl Surface5 {
         conv: fn([u8; 4]) -> T,
     ) -> Result<Vec<T>, Error> {
         let b = self.bytes(r, what, a, 4)?;
-        Ok(b.chunks_exact(4)
-            .map(|c| conv(c.try_into().unwrap()))
-            .collect())
+        Ok(b.as_chunks::<4>().0.iter().map(|c| conv(*c)).collect())
     }
 
     fn triples<R: Read + Seek, T>(
@@ -403,7 +401,9 @@ impl Surface5 {
         conv: fn([u8; 4]) -> T,
     ) -> Result<Vec<[T; 3]>, Error> {
         let b = self.bytes(r, what, a, 12)?;
-        Ok(b.chunks_exact(12)
+        Ok(b.as_chunks::<12>()
+            .0
+            .iter()
             .map(|c| [0, 4, 8].map(|k| conv(c[k..k + 4].try_into().unwrap())))
             .collect())
     }

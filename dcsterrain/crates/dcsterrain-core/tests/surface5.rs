@@ -142,8 +142,10 @@ fn caucasus_matches_the_live_extract() {
             };
             let h: Vec<i16> = match live_tile(&live, "height", t.tx, t.tz) {
                 Some(b) => b
-                    .chunks_exact(2)
-                    .map(|c| i16::from_le_bytes([c[0], c[1]]))
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|c| i16::from_le_bytes(*c))
                     .collect(),
                 None => vec![0; n],
             };

@@ -311,8 +311,10 @@ mod tests {
     fn tile(dir: &Path, layer: &str) -> Option<Vec<u16>> {
         let b = fs::read(dir.join(format!("tiles/{layer}/0_0.bin"))).ok()?;
         Some(
-            b.chunks_exact(2)
-                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            b.as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| u16::from_le_bytes(*c))
                 .collect(),
         )
     }

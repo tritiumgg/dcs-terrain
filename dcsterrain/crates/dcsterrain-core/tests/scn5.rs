@@ -325,8 +325,10 @@ fn caucasus_writes_its_scenery_and_counts() {
         for t in w.tiles.iter().filter(|t| t.layer == name) {
             let b = fs::read(out.0.join(&t.path)).unwrap();
             counted += b
-                .chunks_exact(2)
-                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| u16::from_le_bytes(*c))
                 .filter(|&c| c != 65535)
                 .map(u64::from)
                 .sum::<u64>();
