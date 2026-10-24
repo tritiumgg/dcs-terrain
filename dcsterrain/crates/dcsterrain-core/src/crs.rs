@@ -125,9 +125,16 @@ impl Tmerc {
     pub fn proj4(&self) -> String {
         format!(
             "+proj=tmerc +lat_0=0 +lon_0={} +k_0={K_0} +x_0={} +y_0={} +datum=WGS84 +units=m",
-            self.lon_0, -self.easting, -self.northing
+            self.lon_0,
+            negated(self.easting),
+            negated(self.northing)
         )
     }
+}
+
+/// `-v`, without the sign a zero would print with.
+fn negated(v: f64) -> f64 {
+    if v == 0.0 { 0.0 } else { -v }
 }
 
 /// Each measured map's projection, by theatre id, for a map whose files
@@ -187,6 +194,10 @@ const OUTLIER_M: f64 = 5.0;
 /// central meridian. A map sits within a few degrees of its own.
 const MERIDIAN_REACH_DEG: i32 = 12;
 
+/// The widest span of longitude a fit is tried over. Every map spans a few
+/// degrees; much wider is not one map, or not degrees.
+const MAX_SPAN_DEG: f64 = 30.0;
+
 fn median(mut v: Vec<f64>) -> f64 {
     v.sort_by(f64::total_cmp);
     let m = v.len() / 2;
@@ -201,7 +212,8 @@ fn median(mut v: Vec<f64>) -> f64 {
 /// meridian near them is scored by the RMS of the residuals about the median
 /// offsets; the best one's offsets are then the means over the pairs within
 /// 5 m, rounded to the millimetre. `None` with fewer than three distinct
-/// pairs, before or after that cut.
+/// pairs, before or after that cut, with a latitude past a pole, or with
+/// longitudes spanning more than 30 degrees.
 pub fn fit(pairs: &[Pair]) -> Option<Fit> {
     let mut unique: Vec<Pair> = Vec::new();
     for p in pairs {
@@ -215,6 +227,11 @@ pub fn fit(pairs: &[Pair]) -> Option<Fit> {
     let (lo, hi) = unique.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| {
         (lo.min(p.lon), hi.max(p.lon))
     });
+    // NaN fails both comparisons, so it is off the earth too.
+    let on_earth = |p: &Pair| p.lat.abs() <= 90.0 && p.lon.abs() <= 180.0;
+    if !unique.iter().all(on_earth) || hi - lo > MAX_SPAN_DEG {
+        return None;
+    }
     // How far each pair's projection sits from its DCS position, per axis.
     let offsets = |lon_0: i32| -> Vec<(f64, f64)> {
         unique
@@ -340,6 +357,25 @@ mod tests {
         assert_eq!(fit(&p), None);
         assert_eq!(fit(&[p[0], p[0], p[1]]), None);
         assert_eq!(fit(&[]), None);
+    }
+
+    #[test]
+    fn degrees_no_map_could_hold_fit_nothing() {
+        let mut p = pairs(&CAUCASUS, &SPREAD);
+        p[0].lon = 1e10;
+        assert_eq!(fit(&p), None);
+        p[0].lon = f64::INFINITY;
+        assert_eq!(fit(&p), None);
+        p[0].lon = f64::NAN;
+        assert_eq!(fit(&p), None);
+        let mut p = pairs(&CAUCASUS, &SPREAD);
+        p[0].lat = 91.0;
+        assert_eq!(fit(&p), None);
+    }
+
+    #[test]
+    fn a_zero_offset_prints_without_a_sign() {
+        assert!(tm(0, 0.0, 0.0).proj4().contains("+x_0=0 +y_0=0 "));
     }
 
     #[test]

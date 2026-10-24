@@ -343,6 +343,17 @@ fn numbers(t: &Table, key: &str, n: usize) -> Option<Vec<f64>> {
     (v.len() == n).then_some(v)
 }
 
+/// A latitude and longitude on the earth, or why they are not.
+fn degrees(lat: f64, lon: f64) -> Result<(), String> {
+    if lat.abs() <= 90.0 && lon.abs() <= 180.0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "latitude {lat} and longitude {lon} are not on the earth"
+        ))
+    }
+}
+
 fn beacons(t: &Table) -> Result<Vec<BeaconRow>, String> {
     entries(t, "beacon")?
         .into_iter()
@@ -351,6 +362,11 @@ fn beacons(t: &Table) -> Result<Vec<BeaconRow>, String> {
             let at = |e: String| format!("beacon {i}: {e}");
             let pos = numbers(b, "position", 3);
             let geo = b.table("positionGeo");
+            let lat = geo.and_then(|g| g.num("latitude"));
+            let lon = geo.and_then(|g| g.num("longitude"));
+            if let (Some(lat), Some(lon)) = (lat, lon) {
+                degrees(lat, lon).map_err(at)?;
+            }
             Ok(BeaconRow {
                 beacon_id: b.str("beaconId").map(str::to_string),
                 callsign: b.str("callsign").map(str::to_string),
@@ -362,8 +378,8 @@ fn beacons(t: &Table) -> Result<Vec<BeaconRow>, String> {
                 x: pos.as_ref().map(|p| p[0]),
                 alt: pos.as_ref().map(|p| p[1]),
                 z: pos.as_ref().map(|p| p[2]),
-                lat: geo.and_then(|g| g.num("latitude")),
-                lon: geo.and_then(|g| g.num("longitude")),
+                lat,
+                lon,
                 scene_objects: strings(b, "sceneObjects").map_err(at)?,
             })
         })
@@ -434,6 +450,7 @@ fn towns(t: &Table, crs: &Tmerc) -> Result<Vec<TownRow>, String> {
         let (Some(lat), Some(lon)) = (town.num("latitude"), town.num("longitude")) else {
             return Err(format!("town {name} has no latitude and longitude"));
         };
+        degrees(lat, lon).map_err(|e| format!("town {name}: {e}"))?;
         let (x, z) = crs.to_xz(lat, lon);
         rows.push(TownRow {
             name: name.clone(),
@@ -818,6 +835,31 @@ mod tests {
         );
         let e = decode(&s.0, "Caucasus", &files).unwrap_err();
         assert!(e.0.contains("dofile names Scripts/Missing.lua"), "{e}");
+    }
+
+    #[test]
+    fn refuses_degrees_off_the_earth() {
+        let (s, files) = install(4);
+        let path = s.0.join(format!("{MAP}/Beacons.lua"));
+        let text = fs::read_to_string(&path).unwrap();
+        // The digits after the replaced "37." stay, so "1e999" reads as 1e999396435.
+        for lon in ["1937.", "1e999", "-1e999"] {
+            let bad = text.replacen("longitude = 37.", &format!("longitude = {lon}"), 1);
+            fs::write(&path, bad).unwrap();
+            let e = decode(&s.0, "Caucasus", &files).unwrap_err();
+            assert!(e.0.contains("beacon 1: latitude 45."), "{lon}: {e}");
+            assert!(e.0.contains("not on the earth"), "{lon}: {e}");
+        }
+        fs::write(&path, &text).unwrap();
+        let towns = s.0.join(format!("{MAP}/map/towns.lua"));
+        let text = fs::read_to_string(&towns).unwrap();
+        fs::write(
+            &towns,
+            text.replace("latitude = 42.221963", "latitude = -91"),
+        )
+        .unwrap();
+        let e = decode(&s.0, "Caucasus", &files).unwrap_err();
+        assert!(e.0.contains("town ABASHA: latitude -91"), "{e}");
     }
 
     #[test]
