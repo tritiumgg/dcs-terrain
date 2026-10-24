@@ -1,0 +1,180 @@
+//! `t5::rn5file`, version 0, an airfield's `AirfieldsTaxiways/<name>.rn5`:
+//! the class of every stand, which names its record in `assets.assets`.
+//!
+//! ```text
+//! after the version   u32 count, count × (u32 len, len bytes)   road classes
+//!                     u32 count, count × (u32 len, len bytes)   stand classes
+//! a node              u32 node, u32 class, u32 k, k × u32,
+//!                     f64[16] matrix, f64[16] its inverse
+//! ```
+//!
+//! The nodes are the `.rn4`'s, laid flat at `y` 0. As there, the framing
+//! between them is not understood, so each is found by its matrix, matched
+//! to its `.rn4` node by position, and its class read back from the matrix.
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
+
+use super::Decoder;
+use super::airfield::{self, Airfield, MATRIX_BYTES};
+use super::rn4::{self, Error, u32_at};
+
+/// How close a flat node lies to its `.rn4` node, in metres on each axis.
+const MATCH_M: f64 = 1e-3;
+/// The longest list seen before a matrix is shorter than this.
+const MAX_LIST: usize = 5;
+
+/// An airfield's stand classes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StandClasses {
+    pub classes: Vec<String>,
+    /// The class of each `.rn4` node the file gives one, by node index.
+    pub by_node: BTreeMap<u32, u32>,
+}
+
+impl StandClasses {
+    /// The class name of the `.rn4` node `index`, if the file gives one.
+    pub fn of(&self, index: u32) -> Option<&str> {
+        self.by_node
+            .get(&index)
+            .map(|&c| self.classes[c as usize].as_str())
+    }
+}
+
+/// The class that the node, `index` in the `.rn4`, whose matrix is at `o`
+/// is given: `node, class, k` then `k` list entries end at the matrix. The
+/// longest list is tried first, since a short one can read a list entry as
+/// its count.
+fn class_before(b: &[u8], o: usize, index: u32, classes: usize) -> Option<u32> {
+    (0..=MAX_LIST).rev().find_map(|k| {
+        let at = |back: usize| o.checked_sub(back + 4 * k).and_then(|p| u32_at(b, p));
+        (at(4) == Some(k as u32) && at(12) == Some(index))
+            .then(|| at(8))
+            .flatten()
+            .filter(|&c| (c as usize) < classes)
+    })
+}
+
+/// Decodes an airfield's `.rn5` against its decoded `.rn4`. `name` is how
+/// an error names it.
+pub fn parse(b: &[u8], name: &str, rn4: &Airfield) -> Result<StandClasses, Error> {
+    let h = rn4::header(b, name, Decoder::Rn5)?;
+    let (_, at) = rn4::classes(b, h.body())?;
+    let (classes, mut i) = rn4::classes(b, at)?;
+    let mut by_node = BTreeMap::new();
+    while i + MATRIX_BYTES <= b.len() {
+        let Some(m) = airfield::matrix_at(b, i) else {
+            i += 1;
+            continue;
+        };
+        let (x, y, z) = (m[12], m[13], m[14]);
+        let node = rn4.nodes.iter().find(|n| {
+            let [nx, _, nz] = n.position();
+            y == 0.0 && (nx - x).abs() < MATCH_M && (nz - z).abs() < MATCH_M
+        });
+        if let Some(n) = node
+            && let Some(c) = class_before(b, i, n.index, classes.len())
+        {
+            by_node.insert(n.index, c);
+        }
+        i += MATRIX_BYTES;
+    }
+    Ok(StandClasses { classes, by_node })
+}
+
+/// Reads and decodes the `.rn5` at `path` against its decoded `.rn4`.
+pub fn read(path: &Path, rn4: &Airfield) -> Result<StandClasses, Error> {
+    parse(&fs::read(path)?, &path.to_string_lossy(), rn4)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::airfield::build::{self as afb, matrix, put_matrix};
+    use super::super::container;
+    use super::*;
+
+    fn names(b: &mut Vec<u8>, list: &[&str]) {
+        b.extend_from_slice(&(list.len() as u32).to_le_bytes());
+        for s in list {
+            b.extend_from_slice(&(s.len() as u32).to_le_bytes());
+            b.extend_from_slice(s.as_bytes());
+        }
+    }
+
+    /// An `.rn5` of two stand classes and a node for each of `nodes`, as
+    /// `(node, class, list, x, z)`.
+    fn file(nodes: &[(u32, u32, &[u32], f64, f64)]) -> Vec<u8> {
+        let mut b = container::build("t5::rn5file", 0, 0);
+        names(&mut b, &["vpp", "taxiway"]);
+        names(&mut b, &["stand_shelter", "stand_end_24m"]);
+        for &(node, class, list, x, z) in nodes {
+            for v in [node, class, list.len() as u32].iter().chain(list) {
+                b.extend_from_slice(&v.to_le_bytes());
+            }
+            let m = matrix([x, 0.0, z], 0.3);
+            put_matrix(&mut b, &m);
+            // The inverse, whose translation lies on no node.
+            put_matrix(&mut b, &matrix([-x, 0.0, -z], -0.3));
+        }
+        b.extend_from_slice(&[0; 16]);
+        b
+    }
+
+    fn rn4() -> Airfield {
+        let node = |name, x, z| afb::Node {
+            name: Some(name),
+            at: [x, 18.25, z],
+            heading: 0.3,
+            links: vec![],
+        };
+        let b = afb::file(
+            &["vpp"],
+            &[
+                node("1#22", -4427.9, 243_999.5),
+                node("40", -4829.5, 244_622.0),
+                node("90", -5155.0, 244_536.25),
+            ],
+        );
+        airfield::parse(&b, "Anapa.rn4").unwrap()
+    }
+
+    #[test]
+    fn reads_each_stand_class_by_its_rn4_node() {
+        let b = file(&[
+            (1, 1, &[7, 8], -4829.5, 244_622.0),
+            (2, 0, &[], -5155.0, 244_536.25),
+        ]);
+        let c = parse(&b, "Anapa.rn5", &rn4()).unwrap();
+        assert_eq!(c.classes, ["stand_shelter", "stand_end_24m"]);
+        assert_eq!(c.of(1), Some("stand_end_24m"));
+        assert_eq!(c.of(2), Some("stand_shelter"));
+        assert_eq!(c.of(0), None);
+    }
+
+    #[test]
+    fn a_list_of_one_zero_is_not_read_as_an_empty_list() {
+        // Node 0 of class 0 listing [0]: read as an empty list, the list's
+        // count 1 would pass as the class.
+        let b = file(&[(0, 0, &[0], -4427.9, 243_999.5)]);
+        let c = parse(&b, "Anapa.rn5", &rn4()).unwrap();
+        assert_eq!(c.of(0), Some("stand_shelter"));
+    }
+
+    #[test]
+    fn a_node_off_every_rn4_node_or_with_a_class_past_the_table_is_unread() {
+        let b = file(&[
+            (1, 1, &[], -4829.0, 244_622.0),
+            (2, 2, &[], -5155.0, 244_536.25),
+        ]);
+        let c = parse(&b, "Anapa.rn5", &rn4()).unwrap();
+        assert!(c.by_node.is_empty(), "{:?}", c.by_node);
+    }
+
+    #[test]
+    fn refuses_another_class_of_file() {
+        let b = container::build("landscape4::lRoadNetwork", 5, 0);
+        let e = parse(&b, "X.rn4", &rn4()).unwrap_err().to_string();
+        assert!(e.contains("read by the RoadNetwork decoder"), "{e}");
+    }
+}

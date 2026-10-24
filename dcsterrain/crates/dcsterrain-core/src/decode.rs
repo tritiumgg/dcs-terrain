@@ -11,6 +11,7 @@ pub mod airfield;
 pub mod container;
 pub mod install;
 pub mod rn4;
+pub mod rn5;
 pub mod scn5;
 pub mod surface5;
 
