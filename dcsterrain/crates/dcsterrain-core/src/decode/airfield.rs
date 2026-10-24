@@ -76,9 +76,9 @@ pub fn matrix_at(b: &[u8], i: usize, largest: f64) -> Option<[f64; 16]> {
 }
 
 /// The name that ends exactly at `i`: a length, then that many printable
-/// bytes. The shortest that fits wins.
-fn name_before(b: &[u8], i: usize) -> Option<String> {
-    (1..=MAX_NAME_LEN.min(i.saturating_sub(4))).find_map(|len| {
+/// bytes, all at or after `from`. The shortest that fits wins.
+fn name_before(b: &[u8], from: usize, i: usize) -> Option<String> {
+    (1..=MAX_NAME_LEN.min(i.saturating_sub(from + 4))).find_map(|len| {
         let bytes = &b[i - len..i];
         (u32_at(b, i - len - 4) == Some(len as u32) && bytes.iter().all(|c| c.is_ascii_graphic()))
             .then(|| String::from_utf8(bytes.to_vec()).expect("checked ASCII"))
@@ -113,6 +113,10 @@ impl Node {
 fn nodes(b: &[u8], from: usize) -> Result<Vec<Node>, Error> {
     let mut out = Vec::new();
     let mut i = from;
+    // Where the last node's links end. A name never starts inside them,
+    // though a last link naming node 4, at a distance whose bytes are
+    // printable, reads as a length and a four-letter name.
+    let mut last_end = from;
     while i + MATRIX_BYTES <= b.len() {
         let Some(matrix) = matrix_at(b, i, UNIT) else {
             i += 1;
@@ -136,10 +140,11 @@ fn nodes(b: &[u8], from: usize) -> Result<Vec<Node>, Error> {
             .collect();
         out.push(Node {
             index,
-            name: name_before(b, i),
+            name: name_before(b, last_end, i),
             matrix,
             links,
         });
+        last_end = at + 4 + 8 * count as usize;
         i = at;
     }
     Ok(out)
@@ -487,6 +492,24 @@ mod tests {
         );
         assert_eq!(a.nodes[1].position(), [-4829.5, 18.5, 244_600.0]);
         assert!((a.nodes[1].heading() - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_link_that_reads_as_a_name_is_not_one() {
+        // Node 1's last link names node 4 at a distance whose bytes spell
+        // ABCD, and node 2 follows it unnamed.
+        let abcd = f32::from_le_bytes(*b"ABCD");
+        let b = file(
+            &["vpp"],
+            &[
+                node(Some("40"), -4829.5, vec![]),
+                node(None, -4800.0, vec![(4, abcd)]),
+                node(None, -4790.0, vec![]),
+            ],
+        );
+        let a = parse(&b, "X.rn4").unwrap();
+        assert_eq!(a.nodes[1].links, [(4, abcd)]);
+        assert_eq!(a.nodes[2].name, None);
     }
 
     #[test]
