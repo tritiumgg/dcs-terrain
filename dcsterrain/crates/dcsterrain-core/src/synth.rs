@@ -23,7 +23,6 @@
 //!   absolute metres, tile counts) is computed by the generator
 
 mod theatre;
-mod tmerc;
 mod write;
 
 pub use theatre::{Cell, Edge, Object, SynthError, Theatre};

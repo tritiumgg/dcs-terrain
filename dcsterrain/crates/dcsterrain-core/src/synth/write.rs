@@ -16,6 +16,13 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use super::*;
+use crate::crs::Tmerc;
+
+const CRS: Tmerc = Tmerc {
+    lon_0: CRS_LON_0_DEG,
+    easting: CRS_EASTING_OFFSET_M,
+    northing: CRS_NORTHING_OFFSET_M,
+};
 
 const EXTRACTED_AT: &str = "2000-01-01T00:00:00Z";
 
@@ -213,7 +220,7 @@ fn runway_ends(t: &Theatre) -> [(f64, f64); 2] {
 }
 
 fn latlon(x: f64, z: f64) -> (f64, f64) {
-    tmerc::to_latlon(x, z)
+    CRS.to_latlon(x, z)
 }
 
 fn beacon_id(k: u32) -> String {
@@ -376,7 +383,7 @@ fn towns(t: &Theatre) -> Value {
             // constants give, and the town lands within a millimetre of it.
             let (x0, z0) = t.abs(north, TOWNS_FIRST_EAST_M);
             let (lat, lon) = latlon(x0, z0);
-            let (x, z) = tmerc::to_xz(lat, lon);
+            let (x, z) = CRS.to_xz(lat, lon);
             json!({
                 "name": format!("TOWN{}", k + 1),
                 "display_name": format!("Town {}", k + 1),
@@ -793,7 +800,7 @@ mod tests {
         let samples = config(&theatre())["latlon_samples"].clone();
         assert_eq!(samples.as_array().unwrap().len(), BEACON_COUNT as usize);
         for s in samples.as_array().unwrap() {
-            let (x, z) = tmerc::to_xz(s["lat"].as_f64().unwrap(), s["lon"].as_f64().unwrap());
+            let (x, z) = CRS.to_xz(s["lat"].as_f64().unwrap(), s["lon"].as_f64().unwrap());
             assert!((x - s["x"].as_f64().unwrap()).abs() < 1e-3);
             assert!((z - s["z"].as_f64().unwrap()).abs() < 1e-3);
         }

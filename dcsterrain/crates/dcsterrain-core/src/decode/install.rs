@@ -230,6 +230,19 @@ fn child(parent: &Path, name: &str) -> Option<String> {
         .find(|n| n.eq_ignore_ascii_case(name))
 }
 
+/// `rel`, a `/`-separated path under `root`, spelled as the disk spells it,
+/// if a file is there. Each part is matched without regard to case.
+pub fn resolve(root: &Path, rel: &str) -> Option<String> {
+    let mut at = root.to_path_buf();
+    let mut parts = Vec::new();
+    for part in rel.split('/') {
+        let name = child(&at, part)?;
+        at.push(&name);
+        parts.push(name);
+    }
+    at.is_file().then(|| parts.join("/"))
+}
+
 /// Every file in `dir` whose name ends in `ext`, without regard to case,
 /// sorted.
 fn with_ext(dir: &Path, ext: &str) -> Vec<String> {
@@ -641,6 +654,18 @@ mod tests {
 
         let (_s, r) = install();
         assert!(read_map(&r, "Kola").unwrap_err().0.contains("no map Kola"));
+    }
+
+    #[test]
+    fn resolves_a_path_as_the_disk_spells_it() {
+        let (_s, r) = install();
+        assert_eq!(
+            resolve(&r, "mods/Terrains/synth/MAP/towns.lua").as_deref(),
+            Some("Mods/terrains/Synth/map/towns.lua")
+        );
+        assert_eq!(resolve(&r, "Mods/terrains/Synth/map"), None);
+        assert_eq!(resolve(&r, "Mods/terrains/Synth/../Synth/entry.lua"), None);
+        assert_eq!(resolve(&r, "/Mods/terrains/Synth/entry.lua"), None);
     }
 
     #[test]
