@@ -8,6 +8,7 @@
 use std::fmt;
 
 pub mod airfield;
+pub mod assets;
 pub mod container;
 pub mod install;
 pub mod rn4;
