@@ -8,7 +8,7 @@
 //!            (str key, str value) …      height, aircraftTypes, …, any order
 //!            u32 5, "stand", u32 4, "true"   the last pair
 //!            geometry                    f64 triples; the outline is the
-//!                                        ones at y 0, in metres
+//!                                        ones at y 0, in meters
 //! ```
 //!
 //! Only the key and value pairs are framed in a way that is understood, so
@@ -31,7 +31,7 @@ const KEYS_BEFORE: usize = 3000;
 const NAME_BEFORE: usize = 300;
 const MAX_STR: usize = 300;
 /// An outline vertex lies this far from the stand's origin. The icon
-/// geometry stays within 2 m, and no stand is a kilometre across.
+/// geometry stays within 2 m, and no stand is a kilometer across.
 const MIN_REACH_M: f64 = 2.5;
 const MAX_REACH_M: f64 = 1000.0;
 /// A coordinate this small and not zero is bytes that are not a float.
@@ -61,7 +61,7 @@ impl From<io::Error> for Error {
 /// What a stand class allows, as the game reports it for each stand.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StandParams {
-    /// The outline's extent across, x, and along, z, in metres.
+    /// The outline's extent across, x, and along, z, in meters.
     pub width: f64,
     pub length: f64,
     /// As the file writes it, or empty where it gives none.

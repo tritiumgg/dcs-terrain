@@ -22,7 +22,7 @@ use super::Decoder;
 use super::airfield::{self, Airfield, MATRIX_BYTES};
 use super::rn4::{self, Error, u32_at};
 
-/// How close a flat node lies to its `.rn4` node, in metres on each axis.
+/// How close a flat node lies to its `.rn4` node, in meters on each axis.
 const MATCH_M: f64 = 1e-3;
 /// A node matrix here may carry a scale, which its inverse undoes: on
 /// GermanyColdWar entries reach 1.09. No scale seen is near this.
