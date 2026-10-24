@@ -249,13 +249,19 @@ and it equals the live `crossroad_index`. The name is the `str` that ends exactl
 accepting `u32 at i-L-4 == L` with every byte printable. The list `count` is at `i + 128`.
 
 **Stands and runway ends:** named stands list every runway end with a distance, and runway ends list every
-stand. Treat the named nodes and their lists as an undirected graph and two-color it:
+stand. Treat the named nodes and their lists as an undirected graph and two-color each connected group of it
+on its own:
 
-- The runway ends are the side that holds a name with `#` (for example `1#27`). If both sides do, or neither
-  does, take the smaller side.
+- In each group, the runway ends are the side that holds a name with `#` (for example `1#27`). If both sides
+  do, or neither does, take the smaller side; if the sides are equal, the side of the group's first node.
+- A named node that lists nothing and is listed by nothing is a runway end when its name has `#`. An end may
+  list nothing: Batumi's `1#31` and Novorossiysk's `1#22` do, while their partners list every stand.
 - If no named node has a list, the ends are the `#`-named nodes plus every named node whose designator is
   reciprocal to one of them.
 - Every other named node is a stand.
+
+One coloring across the whole airfield, started from the first node, gets these right only by order: an
+isolated `#` end lands on the ends' side because it comes before its stands in every Caucasus file.
 
 Strip a `k#` prefix from names. A designator is `0*(\d{1,2})([LRC]?)`. Two ends are reciprocal when
 `(a + 17) % 36 + 1 == (b - 1) % 36 + 1`, with L↔R swapped and C or blank kept. Pair ends greedily: repeatedly
@@ -272,7 +278,8 @@ take the pair that maximizes (reciprocal, horizontal length). Within a pair, edg
 | airdrome reference x, z | midpoint of the two ends of a runway |
 
 **Confirmed (Caucasus):** 900/900 stands match the live name and position bit-exactly, and their index equals
-`crossroad_index`. 21/21 runways match names and ends bit-exactly, the course is exact, and the airdrome x, z is
+`crossroad_index`. Reading the live JSON needs a correctly rounded float parser: serde_json's default one
+reads some positions one unit in the last place off. 21/21 runways match names and ends bit-exactly, the course is exact, and the airdrome x, z is
 the midpoint. On Nevada and Syria, stand and runway-end y equals the sampled ground to 0.0 m.
 **Guessed:** pairing on maps with several runways (Nevada BoulderCity names the partner of runway 9 `1#27L`,
 so that pair is geometric); the stand heading; runway width, which is not in the airfield files. A lead for
@@ -286,22 +293,29 @@ container header, class name ("t5::rn5file"), u32 0          version
 names     road classes                                       (starts at 0x33)
 names     stand and marking classes: stand_end_24m, stand_52x60m_end, stand_shelter, stand_end_all,
           stand_40x40m_end[_only_airplanes], hellicopter_no_taxiway, marking_* …
-nodes     the same nodes as the .rn4, with y = 0:
-  u32 nodeIndex, u32 standClass, u32 k, k × u32,
+nodes     the same nodes as the .rn4, with y = 0, not always in the same order:
+  u32 ordinal, u32 standClass, u32 k, k × u32,
   f64[16] matrix, f64[16] its inverse
 ```
 
-Find the matrices the same way as in `.rn4`. Match a node to its `.rn4` node by `|Δx| < 1e-3`, `|Δz| < 1e-3`
-and `y == 0`. Then, with `o` the matrix offset and `idx` the `.rn4` node index, find the `k` in 0..5 for which
-`u32[o-4-4k] == k` and `u32[o-12-4k] == idx` and `u32[o-8-4k] < len(stand classes)`. The stand class is
-`classes[u32[o-8-4k]]`.
+Find the matrices as in `.rn4`, but allow entries of the upper 3 × 3 up to 100: GermanyColdWar scales them
+by about 1.09, so the unit test finds only the inverses there. A matched matrix and its inverse are one node;
+skip 256 bytes. Either class table may be empty (`u32 0`), as on GermanyColdWar's helipads.
+
+A node's first word is its **ordinal in the `.rn5`**, which is not always the `.rn4` index: GermanyColdWar's
+`Buchel.rn5` lists `.rn4` node 0 as its node 3. Count the nodes as they are found. Then, with `o` the matrix
+offset and `n` its ordinal, find the `k` in 0..5 for which `u32[o-4-4k] == k` and `u32[o-12-4k] == n` and
+`u32[o-8-4k] < len(stand classes)`. The stand class is `classes[u32[o-8-4k]]`, and it belongs to the `.rn4`
+node at the same position: `|Δx| < 1e-3`, `|Δz| < 1e-3` and `y == 0`. On Caucasus the two numberings agree.
 
 **Test `k` from 5 down to 0.** Testing upward misreads `idx 0, class 0, k 1, [0]`: the `k = 0` test also passes
 and returns class 1. That was the only one of 900 Caucasus stands that disagreed.
 
 **Confirmed:** the stand class (900/900 Caucasus stands give the live parameters through `assets.assets`).
+Every stand on all eight installed maps of 2.9.30.28738 gets a class.
 **Guessed:** the k-list (probably links), the road-class table's use, and non-stand classes listed among the
-nodes (Syria `rwy_point_*`, `taxi_point_holding_position`).
+nodes: on 2.9.30.28738, 43 Syria nodes of `taxi_point_holding_position` and 4 MarianaIslands nodes of
+`rwy_point_takeoff_landing` are named like stands, and `assets.assets` holds no stand record for either class.
 
 ## `misc/assets.assets`: stand class parameters
 
@@ -336,8 +350,10 @@ magnitude. Small icon geometry stays within ±2.0 and is excluded by this test.
 
 The values differ per map (`stand_40x40m_end` LENGTH is 43.057953 on Caucasus and 39.857483 on Nevada), so read
 each map's own file and never parse dimensions from the class name.
-**Confirmed:** Caucasus 900/900 on all six values plus flag, WIDTH and LENGTH within 1e-4.
-**Guessed:** Nevada and Syria, which have no live dump; Nevada `stand_vpp_no_takeoff` has no record; SHELTER.
+**Confirmed:** Caucasus 900/900 on all six values plus flag, WIDTH and LENGTH equal to the live strings at six
+decimals (decoded on 2.9.30.28738 against the live extract of 2.9.29.27468, same terrain files).
+**Guessed:** the other maps, which have no live dump; SHELTER. Every stand class the other seven maps use has
+a record, Nevada's included.
 
 ## `landscape5::Scene5File` (`.scn5`)
 
