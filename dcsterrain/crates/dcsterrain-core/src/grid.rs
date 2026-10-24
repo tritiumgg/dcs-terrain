@@ -187,6 +187,56 @@ impl Window {
     }
 }
 
+/// A layer's value at `(x, z)`, or `None` off the grid or where it is
+/// `nodata`.
+///
+/// `height` is bilinear between the four cell centres around the point, and
+/// `None` when any of them that carries weight is `nodata`, so a slope is
+/// never drawn down to the nodata value. Within half a cell of the grid's
+/// edge the edge cell stands for the one beyond it. Every other layer is a
+/// code or a count, which has no value between two cells, so it reads the
+/// cell holding the point.
+pub fn sample(src: &impl Tiles, layer: Layer, x: f64, z: f64) -> Result<Option<f64>, Failure> {
+    let g = *src.grid();
+    let Some((row, col)) = g.cell_at(x, z) else {
+        return Ok(None);
+    };
+    let present = |v: i32| (v != layer.nodata).then_some(f64::from(v));
+    if layer.name != "height" {
+        let w = Window::read(src, layer, row.into(), col.into(), 1, 1)?;
+        return Ok(present(w.data[0]));
+    }
+    let c = f64::from(g.cell_size);
+    // In cells from the centre of the first cell, held inside the centres.
+    let axis = |v: f64, origin: f64, n: u32| {
+        let f = ((v - origin) / c - 0.5).clamp(0.0, f64::from(n - 1));
+        let i = f.floor();
+        (i as i64, f - i)
+    };
+    let (r0, tr) = axis(x, g.origin_x, g.height);
+    let (c0, tc) = axis(z, g.origin_z, g.width);
+    let w = Window::read(src, layer, r0, c0, 2, 2)?;
+    let mut sum = 0.0;
+    for (i, weight) in [
+        (1.0 - tr) * (1.0 - tc),
+        (1.0 - tr) * tc,
+        tr * (1.0 - tc),
+        tr * tc,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if weight == 0.0 {
+            continue;
+        }
+        let Some(v) = present(w.data[i]) else {
+            return Ok(None);
+        };
+        sum += weight * v;
+    }
+    Ok(Some(sum))
+}
+
 fn layer_named(name: &str) -> Layer {
     layer(name).expect("a layer the format has")
 }
@@ -482,5 +532,111 @@ mod tests {
         let f = tile(&ExtractTiles::new(&x), l("height"), 0, 0).unwrap_err();
         assert_eq!(f.path, "tiles/height/0_0.bin");
         assert!(f.message.contains("not all sea"), "{f}");
+    }
+
+    /// A 3 by 3 grid in tiles of 2, height `10 × row + col`, all land.
+    struct Small {
+        grid: Grid,
+    }
+
+    impl Tiles for Small {
+        fn grid(&self) -> &Grid {
+            &self.grid
+        }
+
+        fn stored(&self, layer: Layer, tx: u32, tz: u32) -> Result<Option<Samples>, Failure> {
+            let at = |i: usize| (tx * 2 + i as u32 / 2, tz * 2 + i as u32 % 2);
+            let off = |(r, c): (u32, u32)| r >= 3 || c >= 3;
+            Ok(Some(Samples::from_fn(layer.dtype, 4, |i| {
+                match layer.name {
+                    _ if off(at(i)) => layer.nodata,
+                    "height" => (at(i).0 * 10 + at(i).1) as i32,
+                    "surface" => 1,
+                    _ => 0,
+                }
+            })))
+        }
+    }
+
+    fn small() -> Small {
+        Small {
+            grid: Grid {
+                cell_size: 50,
+                origin_x: -1000.0,
+                origin_z: 2000.0,
+                height: 3,
+                width: 3,
+                tile_size: 2,
+            },
+        }
+    }
+
+    #[test]
+    fn height_is_bilinear_between_cell_centres() {
+        let s = small();
+        let h = l("height");
+        let at = |n: f64, e: f64| sample(&s, h, -1000.0 + n * 50.0, 2000.0 + e * 50.0).unwrap();
+        // At a centre, the cell; between four, across the tile corner at
+        // (2, 2), the weighted mean.
+        assert_eq!(at(0.5, 0.5), Some(0.0));
+        assert_eq!(at(2.5, 1.5), Some(21.0));
+        assert_eq!(at(1.0, 1.0), Some(5.5));
+        assert_eq!(at(2.0, 2.0), Some(16.5));
+        let v = at(1.75, 2.25).unwrap();
+        assert!((v - (12.5 + 1.75)).abs() < 1e-9, "{v}");
+        // Within half a cell of the edge the edge cell stands beyond it.
+        assert_eq!(at(0.1, 1.5), Some(1.0));
+        assert_eq!(at(0.01, 0.01), Some(0.0));
+        assert_eq!(at(2.99, 2.99), Some(22.0));
+        assert_eq!(at(2.9, 1.0), Some(20.5));
+        // Off the grid, the far edges open.
+        assert_eq!(at(-0.01, 1.0), None);
+        assert_eq!(at(3.0, 1.0), None);
+        assert_eq!(at(1.0, 3.0), None);
+        assert_eq!(sample(&s, h, f64::NAN, 2000.0).unwrap(), None);
+        // Every other layer is the cell holding the point.
+        let surface = sample(&s, l("surface"), -1000.0 + 75.0, 2000.0 + 75.0).unwrap();
+        assert_eq!(surface, Some(1.0));
+    }
+
+    #[test]
+    fn samples_the_synthetic_extract() {
+        let (_s, x) = synth_extract();
+        let src = ExtractTiles::new(&x);
+        let t = theatre();
+        let g = x.manifest.grid;
+        let h = |r: u32, c: u32| f64::from(t.cell(r, c).height);
+        let at = |layer: &str, r: f64, c: f64| {
+            let (x0, z0) = (g.origin_x, g.origin_z);
+            sample(&src, l(layer), x0 + r * 50.0, z0 + c * 50.0).unwrap()
+        };
+        // Across the tile corner at (256, 256), a quarter and three quarters
+        // of the way between centres.
+        let want = 0.75 * 0.25 * h(255, 255)
+            + 0.75 * 0.75 * h(255, 256)
+            + 0.25 * 0.25 * h(256, 255)
+            + 0.25 * 0.75 * h(256, 256);
+        let got = at("height", 255.75, 256.25).unwrap();
+        assert!((got - want).abs() < 1e-9, "{got} against {want}");
+        assert_eq!(at("height", 300.5, 1300.5), Some(h(300, 1300)));
+
+        // The all-sea tile (1, 1), rebuilt.
+        assert_eq!(at("height", 300.0, 300.0), Some(0.0));
+        assert_eq!(at("surface", 300.0, 300.0), Some(3.0));
+        assert_eq!(at("water", 300.0, 300.0), Some(2.0));
+
+        // Row 39 is the last outside the mesh: nodata carries weight
+        // between it and row 40, and none at row 40's centre.
+        assert_eq!(t.cell(39, 700).height, synth::HEIGHT_NODATA);
+        assert_ne!(t.cell(40, 700).height, synth::HEIGHT_NODATA);
+        assert_eq!(at("height", 40.0, 700.5), None);
+        assert_eq!(at("height", 40.5, 700.5), Some(h(40, 700)));
+        assert_eq!(at("water", 39.5, 700.5), None);
+
+        // A count, nearest: inside the forest, and an absent tile's 0.
+        let trees = f64::from(t.cell(810, 1110).trees);
+        assert!(trees > 0.0);
+        assert_eq!(at("trees", 810.9, 1110.1), Some(trees));
+        assert_eq!(at("trees", 100.5, 100.5), Some(0.0));
     }
 }
