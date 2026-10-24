@@ -316,6 +316,7 @@ Every stand on all eight installed maps of 2.9.30.28738 gets a class.
 **Guessed:** the k-list (probably links), the road-class table's use, and non-stand classes listed among the
 nodes: on 2.9.30.28738, 43 Syria nodes of `taxi_point_holding_position` and 4 MarianaIslands nodes of
 `rwy_point_takeoff_landing` are named like stands, and `assets.assets` holds no stand record for either class.
+ADR 0046 leaves them out of `stands.json`.
 
 ## `misc/assets.assets`: stand class parameters
 

@@ -186,8 +186,8 @@ fn caucasus_stands_and_runways_equal_the_live_extract() {
     );
 }
 
-/// Every installed map's airfields decode. Reports what the decode cannot
-/// give a stand: a class, or a class with a record.
+/// Every installed map's airfields decode, and every stand has a class with
+/// a record.
 #[test]
 fn every_map_decodes_its_airfields() {
     let Some(root) = install_root() else { return };
@@ -227,5 +227,9 @@ fn every_map_decodes_its_airfields() {
         );
         assert!(!got.runways.is_empty(), "{dir}: no runways");
         assert!(unclassed.is_empty(), "{dir}: stands without a class");
+        assert!(
+            no_record.is_empty(),
+            "{dir}: stands of a class with no record"
+        );
     }
 }

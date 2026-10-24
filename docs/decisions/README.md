@@ -57,6 +57,7 @@ disagree, the later accepted one wins, and the earlier is marked
 | [0043](0043-router-points-lie-within-a-lane-of-the-centerline.md) | Accepted | 2026-10-23 | Router points lie within a lane of the decoded centerline | ADR 0034 roads row; `plan.md` E3 |
 | [0044](0044-a-road-node-id-names-a-junction-not-a-point.md) | Accepted | 2026-10-23 | A road node id names a junction, not a point, and the catch-all id is written null | ADR 0039 "roads.jsonl", "Consequences"; `plan.md` E3, C9 |
 | [0045](0045-an-instance-id-s-index-width-follows-the-largest-node.md) | Accepted | 2026-10-23 | An instance id's index width follows the largest node, not the version | ADR 0035 Context; ADR 0039 "scenery.jsonl"; `plan.md` E4 |
+| [0046](0046-a-named-node-is-a-stand-only-when-its-class-has-a-stand-record.md) | Accepted | 2026-10-24 | A named node is a stand only when its class has a stand record | ADR 0039 "stands.json"; `extract-format.md` "stands.json"; `plan.md` E5, C5c |
 
 Add a row when you add an ADR. This table is the index Claude reads, so an ADR
 missing from it will not be found. Each record's own `Affects` line, at the top

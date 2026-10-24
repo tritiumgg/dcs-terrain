@@ -39,7 +39,7 @@ pub struct RunwayRow {
 }
 
 /// A stand class's parameters under the names the game gives them. Every
-/// value is null for a stand whose class has no record.
+/// value is null for a stand the files give no class.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[allow(non_snake_case)]
 pub struct Params {
@@ -90,7 +90,8 @@ pub fn runway_rows(name_id: &str, a: &Airfield) -> Vec<RunwayRow> {
 }
 
 /// The rows of each of `a`'s stands, its class from `classes` and that
-/// class's parameters from `params`.
+/// class's parameters from `params`. A named node whose class has no
+/// record is not a stand (ADR 0046): a holding point, say.
 pub fn stand_rows(
     name_id: &str,
     a: &Airfield,
@@ -99,12 +100,15 @@ pub fn stand_rows(
 ) -> Vec<StandRow> {
     a.stands
         .iter()
-        .map(|&i| {
+        .filter_map(|&i| {
             let n = a.node(i);
             let [x, _, z] = n.position();
             let class = classes.and_then(|c| c.of(i));
             let p = class.and_then(|c| params.get(c));
-            StandRow {
+            if class.is_some() && p.is_none() {
+                return None;
+            }
+            Some(StandRow {
                 airdrome_id: None,
                 airdrome_name_id: name_id.to_string(),
                 crossroad_index: i,
@@ -128,7 +132,7 @@ pub fn stand_rows(
                     LENGTH: p.map(|p| p.length),
                     HEIGHT: p.map(|p| p.height.clone()),
                 },
-            }
+            })
         })
         .collect()
 }
@@ -269,7 +273,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stand_row_takes_its_class_parameters_and_nulls_where_none() {
+    fn a_stand_row_takes_its_class_parameters_and_a_class_with_none_is_no_stand() {
         let rows = stand_rows("Anapa", &airfield(), Some(&classes()), &params());
         let got = serde_json::to_value(&rows).unwrap();
         assert_eq!(
@@ -284,19 +288,15 @@ mod tests {
                 },
             })
         );
-        // A class with no record keeps its name and has no parameters.
-        assert_eq!(got[1]["stand_class"], "stand_vpp_no_takeoff");
-        assert_eq!(got[1]["flag"], Value::Null);
-        assert!(
-            got[1]["params"]
-                .as_object()
-                .unwrap()
-                .values()
-                .all(Value::is_null)
-        );
+        // Node 2's class has no record, so it is not a stand.
+        assert_eq!(got.as_array().unwrap().len(), 1);
 
+        // With no class at all, both are written, with no parameters.
         let rows = stand_rows("Anapa", &airfield(), None, &params());
+        assert_eq!(rows.len(), 2);
         assert_eq!((rows[0].stand_class.as_deref(), rows[0].flag), (None, None));
+        let p = serde_json::to_value(&rows[1].params).unwrap();
+        assert!(p.as_object().unwrap().values().all(Value::is_null));
     }
 
     #[test]
