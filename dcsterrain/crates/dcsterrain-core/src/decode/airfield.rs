@@ -225,10 +225,12 @@ fn has_hash(nodes: &[Node], i: u32) -> bool {
 }
 
 /// The named nodes that are runway ends. A stand lists every end with its
-/// distance and an end lists every stand, so the named nodes two-colour,
-/// and the ends are the side that holds a `#` name, or failing that the
-/// smaller. Where no named node lists another, the ends are the `#` names
-/// and every name reciprocal to one of them.
+/// distance and an end lists every stand, so the named nodes that list or
+/// are listed two-color. In each such group the ends are the side that
+/// holds a `#` name, or failing that the smaller, or failing that the side
+/// of the group's first node. A named node in no group is an end when its
+/// name has a `#`: an end may list nothing. Where no named node lists
+/// another, the ends are the `#` names and every name reciprocal to one.
 fn runway_ends(nodes: &[Node]) -> Vec<u32> {
     let named: Vec<u32> = nodes
         .iter()
@@ -256,40 +258,41 @@ fn runway_ends(nodes: &[Node]) -> Vec<u32> {
             .filter(|&i| has_hash(nodes, i) || hashed.iter().any(|&h| reciprocal(name(h), name(i))))
             .collect();
     }
-    // Breadth first from each uncoloured node in index order, which starts
-    // on side 0.
-    let mut colour: Vec<Option<u8>> = vec![None; nodes.len()];
+    let mut ends = Vec::new();
+    let mut seen = vec![false; nodes.len()];
     for &start in &named {
-        if colour[start as usize].is_some() {
+        if seen[start as usize] {
             continue;
         }
-        colour[start as usize] = Some(0);
-        let mut queue = vec![start];
-        while let Some(i) = queue.pop() {
-            let c = colour[i as usize].unwrap();
+        seen[start as usize] = true;
+        if adj[start as usize].is_empty() {
+            if has_hash(nodes, start) {
+                ends.push(start);
+            }
+            continue;
+        }
+        let mut sides: [Vec<u32>; 2] = [vec![start], Vec::new()];
+        let mut queue = vec![(start, 0)];
+        while let Some((i, c)) = queue.pop() {
             for &j in &adj[i as usize] {
-                if colour[j as usize].is_none() {
-                    colour[j as usize] = Some(1 - c);
-                    queue.push(j);
+                if !seen[j as usize] {
+                    seen[j as usize] = true;
+                    sides[1 - c].push(j);
+                    queue.push((j, 1 - c));
                 }
             }
         }
+        let hash = |s: &[u32]| s.iter().any(|&i| has_hash(nodes, i));
+        let pick = match (hash(&sides[0]), hash(&sides[1])) {
+            (true, false) => 0,
+            (false, true) => 1,
+            _ if sides[1].len() < sides[0].len() => 1,
+            _ => 0,
+        };
+        ends.append(&mut sides[pick]);
     }
-    let side = |c: u8| -> Vec<u32> {
-        named
-            .iter()
-            .copied()
-            .filter(|&i| colour[i as usize] == Some(c))
-            .collect()
-    };
-    let (zero, one) = (side(0), side(1));
-    let hash = |s: &[u32]| s.iter().any(|&i| has_hash(nodes, i));
-    match (hash(&zero), hash(&one)) {
-        (true, false) => zero,
-        (false, true) => one,
-        _ if one.len() < zero.len() => one,
-        _ => zero,
-    }
+    ends.sort_unstable();
+    ends
 }
 
 /// Pairs runway ends, taking the pair reciprocal by name before one that
@@ -564,6 +567,24 @@ mod tests {
         assert_eq!(a.runway_name(&a.runways[0]), "22-04");
         let course = (242_258.1f64 - 243_999.5).atan2(-6396.9 - -4427.9);
         assert_eq!(a.course(&a.runways[0]), course);
+    }
+
+    #[test]
+    fn an_end_listed_after_its_stands_is_still_an_end() {
+        // The stands come first in the file, and the `#` end lists nothing.
+        let b = file(
+            &["vpp"],
+            &[
+                at("40", -4829.5, 244_622.0, &[3]),
+                at("90", -5155.0, 244_536.2, &[3]),
+                at("1#22", -4427.9, 243_999.5, &[]),
+                at("04", -6396.9, 242_258.1, &[0, 1]),
+                at("91", -5255.0, 244_536.2, &[]),
+            ],
+        );
+        let a = parse(&b, "X.rn4").unwrap();
+        assert_eq!(names(&a, &a.stands), ["40", "90", "91"]);
+        assert_eq!(a.runways, [Runway { edge1: 2, edge2: 3 }]);
     }
 
     #[test]
