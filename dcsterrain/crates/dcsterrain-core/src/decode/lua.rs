@@ -12,6 +12,8 @@
 //! the game takes a beacon whose type names an undefined constant as a beacon
 //! with no type, and so does this reader.
 
+pub mod tables;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
