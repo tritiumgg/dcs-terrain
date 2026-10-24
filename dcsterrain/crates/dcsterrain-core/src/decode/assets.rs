@@ -174,8 +174,10 @@ pub fn read(path: &Path) -> Result<BTreeMap<String, StandParams>, Error> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub mod build {
+    //! `assets.assets` records as the decoder reads them, for tests.
+
+    use super::STAND_MARK;
 
     fn s(b: &mut Vec<u8>, v: &str) {
         b.extend_from_slice(&(v.len() as u32).to_le_bytes());
@@ -190,7 +192,7 @@ mod tests {
 
     /// A record as the file lays one out: name, a zero, category, a pair
     /// count, the pairs, then an icon and the outline among other floats.
-    fn record(b: &mut Vec<u8>, name: &str, pairs: &[(&str, &str)], outline: &[[f64; 2]]) {
+    pub fn record(b: &mut Vec<u8>, name: &str, pairs: &[(&str, &str)], outline: &[[f64; 2]]) {
         s(b, name);
         b.extend_from_slice(&[0; 4]);
         s(b, "crosstaxiway");
@@ -213,6 +215,12 @@ mod tests {
         }
         b.extend_from_slice(&[0; 7]);
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build::record;
+    use super::*;
 
     #[test]
     fn reads_each_stand_class_with_its_outline_and_permissions() {

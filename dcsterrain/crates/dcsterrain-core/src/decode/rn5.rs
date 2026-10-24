@@ -89,10 +89,11 @@ pub fn read(path: &Path, rn4: &Airfield) -> Result<StandClasses, Error> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::super::airfield::build::{self as afb, matrix, put_matrix};
+pub mod build {
+    //! `.rn5` files as the decoder reads them, for tests.
+
+    use super::super::airfield::build::{matrix, put_matrix};
     use super::super::container;
-    use super::*;
 
     fn names(b: &mut Vec<u8>, list: &[&str]) {
         b.extend_from_slice(&(list.len() as u32).to_le_bytes());
@@ -102,9 +103,9 @@ mod tests {
         }
     }
 
-    /// An `.rn5` of two stand classes and a node for each of `nodes`, as
-    /// `(node, class, list, x, z)`.
-    fn file(nodes: &[(u32, u32, &[u32], f64, f64)]) -> Vec<u8> {
+    /// An `.rn5` of two stand classes, `stand_shelter` and `stand_end_24m`,
+    /// and a node for each of `nodes`, as `(node, class, list, x, z)`.
+    pub fn file(nodes: &[(u32, u32, &[u32], f64, f64)]) -> Vec<u8> {
         let mut b = container::build("t5::rn5file", 0, 0);
         names(&mut b, &["vpp", "taxiway"]);
         names(&mut b, &["stand_shelter", "stand_end_24m"]);
@@ -112,14 +113,21 @@ mod tests {
             for v in [node, class, list.len() as u32].iter().chain(list) {
                 b.extend_from_slice(&v.to_le_bytes());
             }
-            let m = matrix([x, 0.0, z], 0.3);
-            put_matrix(&mut b, &m);
+            put_matrix(&mut b, &matrix([x, 0.0, z], 0.3));
             // The inverse, whose translation lies on no node.
             put_matrix(&mut b, &matrix([-x, 0.0, -z], -0.3));
         }
         b.extend_from_slice(&[0; 16]);
         b
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::airfield::build as afb;
+    use super::super::container;
+    use super::build::file;
+    use super::*;
 
     fn rn4() -> Airfield {
         let node = |name, x, z| afb::Node {
