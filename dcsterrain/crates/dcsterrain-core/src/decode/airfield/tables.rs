@@ -160,6 +160,13 @@ pub fn decode(install: &Path, files: &[FileEntry]) -> Result<Airfields, Refusal>
         Some(f) => {
             assets::read(&install.join(&f.path)).map_err(|e| Refusal(format!("{}: {e}", f.path)))?
         }
+        // Every classed stand would lack its record and be left out.
+        None if role("airfield_rn5").next().is_some() => {
+            return Err(Refusal(
+                "the map has airfield .rn5 files but no misc/assets.assets to give their stand classes"
+                    .into(),
+            ));
+        }
         None => BTreeMap::new(),
     };
     let mut out = Airfields {
@@ -376,6 +383,10 @@ mod tests {
         let got = decode(&s.0, &files[..1]).unwrap();
         assert_eq!(got.stands.len(), 2);
         assert!(got.stands.iter().all(|r| r.stand_class.is_none()));
+
+        // With its rn5 but no assets, every classed stand would be lost.
+        let e = decode(&s.0, &files[..2]).unwrap_err();
+        assert!(e.0.contains("no misc/assets.assets"), "{e}");
     }
 
     #[test]
