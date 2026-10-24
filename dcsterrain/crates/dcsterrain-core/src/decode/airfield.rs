@@ -24,7 +24,8 @@ use super::rn4::{self, Error, f64_at, u32_at};
 
 mod tables;
 pub use tables::{
-    Params, RUNWAYS_FILE, RunwayRow, STANDS_FILE, StandRow, runway_rows, stand_rows, write_rows,
+    Airfields, Params, RUNWAYS_FILE, RunwayRow, STANDS_FILE, StandRow, decode, runway_rows,
+    stand_rows, write_rows,
 };
 
 /// The bytes of a node's matrix.

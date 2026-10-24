@@ -12,8 +12,10 @@ use std::path::Path;
 use serde::Serialize;
 
 use super::Airfield;
-use crate::decode::assets::StandParams;
-use crate::decode::rn5::StandClasses;
+use crate::decode::assets::{self, StandParams};
+use crate::decode::install::Refusal;
+use crate::decode::rn5::{self, StandClasses};
+use crate::extract::FileEntry;
 
 pub const RUNWAYS_FILE: &str = "runways.json";
 pub const STANDS_FILE: &str = "stands.json";
@@ -131,6 +133,54 @@ pub fn stand_rows(
         .collect()
 }
 
+/// Every airfield of a map, as rows.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Airfields {
+    pub runways: Vec<RunwayRow>,
+    pub stands: Vec<StandRow>,
+}
+
+/// The basename of a path relative to the install, without its extension.
+fn stem(path: &str) -> &str {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    name.rsplit_once('.').map_or(name, |(s, _)| s)
+}
+
+/// Decodes every airfield among a map's `files`, relative to `install`.
+/// Each `.rn4` takes the `.rn5` of the same basename, without regard to
+/// case, and the map's `assets.assets` gives the classes' parameters. An
+/// airdrome's `name_id` is its `.rn4`'s basename.
+pub fn decode(install: &Path, files: &[FileEntry]) -> Result<Airfields, Refusal> {
+    let role = |r: &'static str| files.iter().filter(move |f| f.role == r);
+    let params = match role("assets").next() {
+        Some(f) => {
+            assets::read(&install.join(&f.path)).map_err(|e| Refusal(format!("{}: {e}", f.path)))?
+        }
+        None => BTreeMap::new(),
+    };
+    let mut out = Airfields {
+        runways: Vec::new(),
+        stands: Vec::new(),
+    };
+    for f in role("airfield_rn4") {
+        let name_id = stem(&f.path);
+        let a =
+            super::read(&install.join(&f.path)).map_err(|e| Refusal(format!("{}: {e}", f.path)))?;
+        let classes =
+            match role("airfield_rn5").find(|g| stem(&g.path).eq_ignore_ascii_case(name_id)) {
+                Some(g) => Some(
+                    rn5::read(&install.join(&g.path), &a)
+                        .map_err(|e| Refusal(format!("{}: {e}", g.path)))?,
+                ),
+                None => None,
+            };
+        out.runways.extend(runway_rows(name_id, &a));
+        out.stands
+            .extend(stand_rows(name_id, &a, classes.as_ref(), &params));
+    }
+    Ok(out)
+}
+
 /// Writes `rows` to `path` as one JSON array, by way of a `.tmp` renamed
 /// into place.
 pub fn write_rows<T: Serialize>(path: &Path, rows: &[T]) -> io::Result<()> {
@@ -154,14 +204,14 @@ mod tests {
     use super::*;
     use crate::scratch::Scratch;
 
-    fn airfield() -> Airfield {
+    fn airfield_file() -> Vec<u8> {
         let node = |name, x, z, links: &[u32]| build::Node {
             name: Some(name),
             at: [x, 20.0, z],
             heading: 0.25,
             links: links.iter().map(|&j| (j, 100.0)).collect(),
         };
-        let b = file(
+        file(
             &["vpp"],
             &[
                 node("1#22", -4427.5, 244_000.0, &[]),
@@ -169,8 +219,11 @@ mod tests {
                 node("90", -5155.0, 244_536.25, &[3]),
                 node("04", -6396.5, 242_258.0, &[1, 2]),
             ],
-        );
-        parse(&b, "Anapa.rn4").unwrap()
+        )
+    }
+
+    fn airfield() -> Airfield {
+        parse(&airfield_file(), "Anapa.rn4").unwrap()
     }
 
     fn classes() -> StandClasses {
@@ -252,6 +305,86 @@ mod tests {
         p.get_mut("stand_shelter").unwrap().for_helicopters = true;
         let rows = stand_rows("Anapa", &airfield(), Some(&classes()), &p);
         assert_eq!(rows[0].flag, Some(64));
+    }
+
+    fn entry(role: &str, path: &str) -> FileEntry {
+        FileEntry {
+            role: role.into(),
+            path: path.into(),
+            class: None,
+            version: None,
+            size: 0,
+            payload_size: None,
+        }
+    }
+
+    #[test]
+    fn decodes_each_airfield_with_the_rn5_of_its_name_in_any_case() {
+        let s = Scratch::new();
+        let dir = s.0.join("Mods/terrains/X/AirfieldsTaxiways");
+        fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(s.0.join("Mods/terrains/X/misc")).unwrap();
+        fs::write(dir.join("Anapa.rn4"), airfield_file()).unwrap();
+        fs::write(
+            dir.join("ANAPA.rn5"),
+            rn5::build::file(&[(1, 1, &[], -4829.5, 244_622.0)]),
+        )
+        .unwrap();
+        let mut a = vec![0; 8];
+        assets::build::record(
+            &mut a,
+            "stand_end_24m",
+            &[("height", "8")],
+            &[[-11.0, -13.0], [11.0, 13.0]],
+        );
+        fs::write(s.0.join("Mods/terrains/X/misc/assets.assets"), a).unwrap();
+        let files = [
+            entry(
+                "airfield_rn4",
+                "Mods/terrains/X/AirfieldsTaxiways/Anapa.rn4",
+            ),
+            entry(
+                "airfield_rn5",
+                "Mods/terrains/X/AirfieldsTaxiways/ANAPA.rn5",
+            ),
+            entry("assets", "Mods/terrains/X/misc/assets.assets"),
+        ];
+        let got = decode(&s.0, &files).unwrap();
+        assert_eq!(got.runways.len(), 1);
+        assert_eq!(got.runways[0].airdrome_name_id, "Anapa");
+        let stands: Vec<_> = got
+            .stands
+            .iter()
+            .map(|r| {
+                (
+                    r.crossroad_index,
+                    r.stand_class.as_deref(),
+                    r.params.WIDTH,
+                    r.flag,
+                )
+            })
+            .collect();
+        assert_eq!(
+            stands,
+            [
+                (1, Some("stand_end_24m"), Some(22.0), Some(64)),
+                (2, None, None, None)
+            ]
+        );
+
+        // Without its rn5 or the assets, the stands are there unclassed.
+        let got = decode(&s.0, &files[..1]).unwrap();
+        assert_eq!(got.stands.len(), 2);
+        assert!(got.stands.iter().all(|r| r.stand_class.is_none()));
+    }
+
+    #[test]
+    fn a_file_that_will_not_decode_is_refused_by_name() {
+        let s = Scratch::new();
+        fs::create_dir_all(&s.0).unwrap();
+        fs::write(s.0.join("Bad.rn4"), b"not a container").unwrap();
+        let e = decode(&s.0, &[entry("airfield_rn4", "Bad.rn4")]).unwrap_err();
+        assert!(e.0.starts_with("Bad.rn4: not a container"), "{e}");
     }
 
     #[test]
