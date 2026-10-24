@@ -12,6 +12,7 @@ use std::time::Instant;
 
 use serde_json::Value;
 
+use dcsterrain_core::decode::airfield;
 use dcsterrain_core::decode::install::{self, TERRAINS_DIR};
 use dcsterrain_core::decode::scn5::{self, Pool, Scene};
 use dcsterrain_core::decode::surface5;
@@ -346,31 +347,20 @@ fn fold(deg: f64) -> f64 {
     a.min(90.0 - a)
 }
 
-/// Nevada's runway lights face along or across their runway. The runways
-/// are the reference decode's, `<Map>/airfields.json`, paired ends read
-/// from the airfield files. A light is an object or line whose model names
-/// one or is an in-pavement light, within 60 m of a centerline and between
-/// its ends. Only runways at least 15° off the grid's axes are scored,
-/// where an axis read the wrong way round would show.
+/// Nevada's runway lights face along or across their runway, as the airfield
+/// files pair its ends. A light is an object or line whose model names one
+/// or is an in-pavement light, within 60 m of a centerline and between its
+/// ends. Only runways at least 15° off the grid's axes are scored, where an
+/// axis read the wrong way round would show.
 #[test]
 fn nevada_runway_lights_align_with_their_runways() {
-    let (Some(root), Some(refdir)) = (install_root(), reference()) else {
-        return;
-    };
-    let airfields: Value = serde_json::from_str(
-        &fs::read_to_string(refdir.join("Nevada").join("airfields.json")).unwrap(),
-    )
-    .unwrap();
+    let Some(root) = install_root() else { return };
+    let map = install::read_map(&root, "Nevada").unwrap();
+    let decoded = airfield::decode(&root, &map.files).unwrap();
     // Each runway as its first end, unit course, length and course.
     let mut runways = Vec::new();
-    for rw in airfields
-        .as_array()
-        .unwrap()
-        .iter()
-        .flat_map(|a| a["runways"].as_array().unwrap())
-    {
-        let f = |k: &str| rw[k].as_f64().unwrap();
-        let (x1, z1, x2, z2) = (f("edge1_x"), f("edge1_z"), f("edge2_x"), f("edge2_z"));
+    for rw in &decoded.runways {
+        let (x1, z1, x2, z2) = (rw.edge1_x, rw.edge1_z, rw.edge2_x, rw.edge2_z);
         let len = (x2 - x1).hypot(z2 - z1);
         let course = (z2 - z1).atan2(x2 - x1).to_degrees();
         if fold(course) >= 15.0 {
