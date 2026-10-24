@@ -1,16 +1,23 @@
-//! Transverse Mercator on WGS84, by Krüger's series to sixth order in the
-//! third flattening, which is good to well under a millimetre within a few
-//! thousand kilometres of the central meridian.
+//! The map projection: DCS `x` (north) and `z` (east) are a WGS84 transverse
+//! Mercator with `k_0 = 0.9996`, a whole-degree central meridian and a false
+//! origin.
 //!
-//! The synthetic theatre needs it in both directions: towns and beacons are
-//! given a latitude and longitude that the theatre's own projection maps back
-//! onto their x and z, so a reader that checks the projection finds them
-//! agreeing.
-
-use super::{CRS_EASTING_OFFSET_M, CRS_K_0, CRS_LON_0_DEG, CRS_NORTHING_OFFSET_M};
+//! The series is Krüger's to sixth order in the third flattening, which is
+//! good to well under a millimetre within a few thousand kilometres of the
+//! central meridian.
 
 const A: f64 = 6_378_137.0;
 const F: f64 = 1.0 / 298.257_223_563;
+pub const K_0: f64 = 0.9996;
+
+/// One map's projection. The offsets are what the projected northing and
+/// easting exceed DCS `x` and `z` by.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Tmerc {
+    pub lon_0: i32,
+    pub easting: f64,
+    pub northing: f64,
+}
 
 struct Series {
     /// The rectifying radius scaled by `k_0`.
@@ -26,7 +33,7 @@ fn series() -> Series {
     let (n2, n3, n4, n5, n6) = (n * n, n.powi(3), n.powi(4), n.powi(5), n.powi(6));
     let rect = A / (1.0 + n) * (1.0 + n2 / 4.0 + n4 / 64.0 + n6 / 256.0);
     Series {
-        k0a: CRS_K_0 * rect,
+        k0a: K_0 * rect,
         e: (F * (2.0 - F)).sqrt(),
         alpha: [
             n / 2.0 - 2.0 * n2 / 3.0 + 5.0 * n3 / 16.0 + 41.0 * n4 / 180.0 - 127.0 * n5 / 288.0
@@ -100,21 +107,38 @@ fn inverse(northing: f64, easting: f64) -> (f64, f64) {
     (phi.to_degrees(), lam.to_degrees())
 }
 
-/// DCS `x` (north) and `z` (east) of a latitude and longitude.
-pub fn to_xz(lat: f64, lon: f64) -> (f64, f64) {
-    let (n, e) = forward(lat, lon - f64::from(CRS_LON_0_DEG));
-    (n - CRS_NORTHING_OFFSET_M, e - CRS_EASTING_OFFSET_M)
-}
+impl Tmerc {
+    /// DCS `x` and `z` of a latitude and longitude.
+    pub fn to_xz(&self, lat: f64, lon: f64) -> (f64, f64) {
+        let (n, e) = forward(lat, lon - f64::from(self.lon_0));
+        (n - self.northing, e - self.easting)
+    }
 
-/// Latitude and longitude of DCS `x` and `z`.
-pub fn to_latlon(x: f64, z: f64) -> (f64, f64) {
-    let (lat, dlon) = inverse(x + CRS_NORTHING_OFFSET_M, z + CRS_EASTING_OFFSET_M);
-    (lat, dlon + f64::from(CRS_LON_0_DEG))
+    /// Latitude and longitude of DCS `x` and `z`.
+    pub fn to_latlon(&self, x: f64, z: f64) -> (f64, f64) {
+        let (lat, dlon) = inverse(x + self.northing, z + self.easting);
+        (lat, dlon + f64::from(self.lon_0))
+    }
+
+    /// The PROJ string whose forward direction gives `(z, x)`: PROJ adds its
+    /// false origin, so the offsets are negated into it.
+    pub fn proj4(&self) -> String {
+        format!(
+            "+proj=tmerc +lat_0=0 +lon_0={} +k_0={K_0} +x_0={} +y_0={} +datum=WGS84 +units=m",
+            self.lon_0, -self.easting, -self.northing
+        )
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const CAUCASUS: Tmerc = Tmerc {
+        lon_0: 33,
+        easting: 99517.0,
+        northing: 4998115.0,
+    };
 
     // Published UTM figures, which share k_0 = 0.9996: 3 degrees east of the
     // central meridian on the equator is 333 978.556 m east of it, and 45
@@ -138,12 +162,20 @@ mod tests {
             (45_000.0, 30_000.0),
             (-300_000.0, 600_000.0),
         ] {
-            let (lat, lon) = to_latlon(x, z);
-            let (x2, z2) = to_xz(lat, lon);
+            let (lat, lon) = CAUCASUS.to_latlon(x, z);
+            let (x2, z2) = CAUCASUS.to_xz(lat, lon);
             assert!(
                 (x2 - x).abs() < 1e-3 && (z2 - z).abs() < 1e-3,
                 "{x} {z} -> {x2} {z2}"
             );
         }
+    }
+
+    #[test]
+    fn the_proj_string_negates_the_offsets() {
+        assert_eq!(
+            CAUCASUS.proj4(),
+            "+proj=tmerc +lat_0=0 +lon_0=33 +k_0=0.9996 +x_0=-99517 +y_0=-4998115 +datum=WGS84 +units=m"
+        );
     }
 }

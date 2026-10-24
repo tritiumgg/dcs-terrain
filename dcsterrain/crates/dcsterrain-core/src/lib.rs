@@ -2,6 +2,7 @@
 //!
 //! The modules this crate exposes arrive with the tasks that fill them.
 
+pub mod crs;
 pub mod decode;
 pub mod extract;
 // Constants only for now; the generator lands beside them. Tests always see
