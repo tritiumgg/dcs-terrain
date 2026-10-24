@@ -12,7 +12,7 @@ use serde::Serialize;
 use super::{Chunk, Table, Value};
 use crate::crs::{self, Pair, Tmerc};
 use crate::decode::airfield::write_rows;
-use crate::decode::install::{self, Refusal};
+use crate::decode::install::Refusal;
 use crate::extract::FileEntry;
 
 pub const BEACONS_FILE: &str = "beacons.json";
@@ -208,9 +208,9 @@ const SOURCES: [(&str, &str); 4] = [
 /// than three carry both positions; a map with neither is refused.
 pub fn decode(install: &Path, theatre: &str, files: &[FileEntry]) -> Result<LuaTables, Refusal> {
     let mut included: Vec<FileEntry> = Vec::new();
-    let mut cache: BTreeMap<String, Vec<(String, f64)>> = BTreeMap::new();
     let mut unresolved = Vec::new();
     let mut chunks: BTreeMap<&str, (String, Chunk)> = BTreeMap::new();
+    let mut labels = BTreeMap::new();
     for (what, name) in SOURCES {
         let Some(f) = files.iter().find(|f| {
             f.role == "lua"
@@ -223,28 +223,23 @@ pub fn decode(install: &Path, theatre: &str, files: &[FileEntry]) -> Result<LuaT
         };
         let text = fs::read(install.join(&f.path))
             .map_err(|e| Refusal(format!("{} cannot be read: {e}", f.path)))?;
-        let mut include = |path: &str| -> Result<Vec<(String, f64)>, String> {
-            let rel = install::resolve(install, path)
-                .ok_or_else(|| format!("dofile names {path}, which the install does not hold"))?;
-            if let Some(c) = cache.get(&rel) {
-                return Ok(c.clone());
+        let chunk = super::run_text(install, &f.path, &text).map_err(|e| Refusal(e.0))?;
+        for (path, size) in &chunk.included {
+            if !included.iter().any(|g| g.path == *path) {
+                included.push(FileEntry {
+                    role: "lua".into(),
+                    path: path.clone(),
+                    class: None,
+                    version: None,
+                    size: *size,
+                    payload_size: None,
+                });
             }
-            let bytes = fs::read(install.join(&rel)).map_err(|e| format!("{rel}: {e}"))?;
-            let c = super::constants(&bytes);
-            included.push(FileEntry {
-                role: "lua".into(),
-                path: rel.clone(),
-                class: None,
-                version: None,
-                size: bytes.len() as u64,
-                payload_size: None,
-            });
-            cache.insert(rel, c.clone());
-            Ok(c)
-        };
-        let chunk =
-            super::read(&text, &mut include).map_err(|e| Refusal(format!("{}: {e}", f.path)))?;
+        }
         unresolved.extend(chunk.unresolved.iter().map(|n| format!("{}: {n}", f.path)));
+        if what == "radio" {
+            labels = radio_labels(&text);
+        }
         chunks.insert(what, (f.path.clone(), chunk));
     }
 
@@ -262,7 +257,7 @@ pub fn decode(install: &Path, theatre: &str, files: &[FileEntry]) -> Result<LuaT
         None => Vec::new(),
     };
     let (radio, airdrome_ids) = match table("radio", "radio")? {
-        Some((path, t)) => radio(t).map_err(|e| Refusal(format!("{path}: {e}")))?,
+        Some((path, t)) => radio(t, &labels).map_err(|e| Refusal(format!("{path}: {e}")))?,
         None => (Vec::new(), BTreeMap::new()),
     };
     let (crs, latlon_samples) = projection(theatre, &beacons)?;
@@ -386,7 +381,55 @@ fn beacons(t: &Table) -> Result<Vec<BeaconRow>, String> {
         .collect()
 }
 
-fn radio(t: &Table) -> Result<(Vec<RadioRow>, BTreeMap<String, i64>), String> {
+/// The label of each station `Radio.lua` labels, by its `radioId`: the
+/// comment on the line before the line that assigns it, as ED writes
+///
+/// ```text
+///     -- Anapa
+///     radioId = 'airfield12_0';
+/// ```
+///
+/// Lua discards comments, so they are read from the text.
+fn radio_labels(text: &[u8]) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    let mut previous: Option<String> = None;
+    // Lua breaks a line at `\r` as well as `\n`.
+    for line in String::from_utf8_lossy(text).split(['\n', '\r']) {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(id) = radio_id(line)
+            && let Some(label) = previous.as_deref().and_then(|p| p.strip_prefix("--"))
+        {
+            let label = label.trim();
+            // A block comment, or a station commented out, is no label.
+            if !label.is_empty() && !label.starts_with('[') && radio_id(label).is_none() {
+                out.entry(id.to_string())
+                    .or_insert_with(|| label.to_string());
+            }
+        }
+        previous = Some(line.to_string());
+    }
+    out
+}
+
+/// The id a line `radioId = 'airfield12_0';` assigns.
+fn radio_id(line: &str) -> Option<&str> {
+    let rest = line
+        .strip_prefix("radioId")?
+        .trim_start()
+        .strip_prefix('=')?
+        .trim_start();
+    let q = rest.chars().next().filter(|c| *c == '\'' || *c == '"')?;
+    let rest = &rest[1..];
+    Some(&rest[..rest.find(q)?])
+}
+
+fn radio(
+    t: &Table,
+    labels: &BTreeMap<String, String>,
+) -> Result<(Vec<RadioRow>, BTreeMap<String, i64>), String> {
     let mut rows = Vec::new();
     let mut ids = BTreeMap::new();
     for (r, i) in entries(t, "radio")?.into_iter().zip(1..) {
@@ -394,7 +437,7 @@ fn radio(t: &Table) -> Result<(Vec<RadioRow>, BTreeMap<String, i64>), String> {
         let radio_id = r.str("radioId").map(str::to_string);
         // Only an airdrome's first station, `airfield<ID>_0`, names it.
         if let (Some(label), Some(id)) = (
-            r.comment.as_deref().filter(|c| !c.is_empty()),
+            radio_id.as_deref().and_then(|s| labels.get(s)),
             radio_id
                 .as_deref()
                 .filter(|s| s.ends_with("_0"))
@@ -813,18 +856,11 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_file_that_is_not_data_naming_it() {
+    fn refuses_a_file_that_does_not_run_naming_it() {
         let (s, files) = install(4);
-        put(
-            &s.0,
-            &format!("{MAP}/Radio.lua"),
-            "radio = {}\nfor i = 1, 2 do end\n",
-        );
+        put(&s.0, &format!("{MAP}/Radio.lua"), "radio = {}\nradio = {\n");
         let e = decode(&s.0, "Caucasus", &files).unwrap_err();
-        assert_eq!(
-            e.0,
-            format!("{MAP}/Radio.lua: line 2: \"for\" is code, which is not read")
-        );
+        assert!(e.0.contains(&format!("{MAP}/Radio.lua:3:")), "{e}");
         put(&s.0, &format!("{MAP}/Radio.lua"), "radios = {}\n");
         let e = decode(&s.0, "Caucasus", &files).unwrap_err();
         assert_eq!(e.0, format!("{MAP}/Radio.lua assigns no radio table"));
@@ -835,6 +871,20 @@ mod tests {
         );
         let e = decode(&s.0, "Caucasus", &files).unwrap_err();
         assert!(e.0.contains("dofile names Scripts/Missing.lua"), "{e}");
+    }
+
+    #[test]
+    fn a_label_is_the_comment_on_the_line_before_its_station() {
+        let text = "{\r\t\t-- Anapa\r\t\tradioId = 'airfield12_0';\r}\n\
+                    {\n-- radioId = 'old';\nradioId = \"airfield13_0\";\n}\n\
+                    {\n--[[ block ]]\nradioId = 'airfield14_0';\n}\n\
+                    {\n\t-- Batumi\n\n\tradioId = 'airfield22_0';\n}\n";
+        let labels = radio_labels(text.as_bytes());
+        let got: Vec<(&str, &str)> = labels
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        assert_eq!(got, [("airfield12_0", "Anapa"), ("airfield22_0", "Batumi")]);
     }
 
     #[test]

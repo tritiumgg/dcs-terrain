@@ -1,24 +1,36 @@
-//! Reads the tables a map's Lua files declare, without running them.
+//! Runs a map's Lua files in a sandbox and reads back the tables they set
+//! (ADR 0047).
 //!
-//! The files are data written as Lua 5.1: assignments of literals and table
-//! constructors, a `dofile` of ED's shared scripts for the constants they
-//! name, and `_ = require("i_18n").translate` to mark strings for
-//! translation. That much is read. Anything that would need code to run, a
-//! function body, a loop, an operator other than unary minus, stops the read
-//! with the line it is on, so a file that grows logic is refused rather than
-//! half read.
+//! The files are data written as Lua 5.1, so Lua 5.1 itself reads them. Each
+//! runs in an environment of its own holding the pure parts of the base
+//! library and `string`, `table` and `math`, and nothing that reaches a file,
+//! the system or the rest of the state. `dofile` runs a script from the
+//! install in the same environment, which is how ED's shared scripts give the
+//! files their constants. `require("i_18n")` gives a `translate` that returns
+//! its argument, and any other module is an empty table. A run is cut off
+//! after a fixed number of instructions and a fixed amount of memory, and what
+//! would escape those, `pcall` and pattern matching, is left out.
 //!
-//! A name nobody assigned reads as nil, as it would in Lua, and is reported:
-//! the game takes a beacon whose type names an undefined constant as a beacon
-//! with no type, and so does this reader.
+//! A name nothing assigned reads as nil, as it does in the game, and is
+//! reported: a beacon whose type names an undefined constant has no type.
 
 pub mod tables;
 
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
-/// A Lua value. Strings are kept as text: bytes that are not UTF-8 are
-/// replaced, since every string these files hold is a name or an id.
+use mlua::chunk::ChunkMode;
+use mlua::{HookTriggers, Lua, LuaOptions, StdLib, VmState};
+
+use super::install;
+
+/// A Lua value, as far as data needs one. Strings are kept as text: bytes
+/// that are not UTF-8 are replaced, since every string these files hold is a
+/// name or an id. A function or other value that is not data reads as absent.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Nil,
@@ -26,60 +38,22 @@ pub enum Value {
     Num(f64),
     Str(String),
     Table(Table),
-    Func(Builtin),
 }
 
-/// The functions a data file may call.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Builtin {
-    Dofile,
-    Require,
-    /// `i_18n`'s `translate`, which returns its argument when no catalogue
-    /// is loaded.
-    Translate,
-}
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Key {
+    Bool(bool),
     Num(f64),
     Str(String),
-    Bool(bool),
 }
 
-impl Key {
-    fn of(v: Value) -> Option<Key> {
-        match v {
-            Value::Num(n) if !n.is_nan() => Some(Key::Num(n)),
-            Value::Str(s) => Some(Key::Str(s)),
-            Value::Bool(b) => Some(Key::Bool(b)),
-            _ => None,
-        }
-    }
-}
-
-/// A table, its entries in the order the constructor gave them.
+/// A table, its entries in key order: Lua keeps none of its own.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Table {
     pub entries: Vec<(Key, Value)>,
-    /// The first comment after the opening brace and before the first
-    /// field. ED labels some entries this way, and the label is data.
-    pub comment: Option<String>,
 }
 
 impl Table {
-    /// Sets `k`, in place if it is already there; nil removes it, as in Lua.
-    fn set(&mut self, k: Key, v: Value) {
-        let at = self.entries.iter().position(|(e, _)| *e == k);
-        match (at, v) {
-            (Some(i), Value::Nil) => {
-                self.entries.remove(i);
-            }
-            (Some(i), v) => self.entries[i].1 = v,
-            (None, Value::Nil) => {}
-            (None, v) => self.entries.push((k, v)),
-        }
-    }
-
     pub fn get(&self, name: &str) -> Option<&Value> {
         self.entries.iter().find_map(|(k, v)| match k {
             Key::Str(s) if s == name => Some(v),
@@ -116,45 +90,56 @@ impl Table {
     }
 
     /// The values of a list keyed by consecutive integers from 0 or from 1,
-    /// in key order, whatever order the constructor gave them in; an empty
-    /// table is an empty list. `None` when the keys are anything else.
+    /// in key order; an empty table is an empty list. `None` when the keys
+    /// are anything else.
     pub fn list(&self) -> Option<Vec<&Value>> {
-        let mut keyed: Vec<(f64, &Value)> = Vec::with_capacity(self.entries.len());
-        for (k, v) in &self.entries {
-            match k {
-                Key::Num(n) => keyed.push((*n, v)),
-                _ => return None,
-            }
-        }
-        keyed.sort_by(|a, b| a.0.total_cmp(&b.0));
-        let from = keyed.first().map_or(1.0, |e| e.0);
-        let consecutive = (from == 0.0 || from == 1.0)
-            && keyed
-                .iter()
-                .zip(0..)
-                .all(|((n, _), i)| *n == from + f64::from(i));
-        consecutive.then(|| keyed.into_iter().map(|(_, v)| v).collect())
+        let from = match self.entries.first() {
+            None => return Some(Vec::new()),
+            Some((Key::Num(n), _)) if *n == 0.0 || *n == 1.0 => *n,
+            Some(_) => return None,
+        };
+        let consecutive = self
+            .entries
+            .iter()
+            .zip(0..)
+            .all(|((k, _), i)| *k == Key::Num(from + f64::from(i)));
+        consecutive.then(|| self.entries.iter().map(|(_, v)| v).collect())
     }
 }
 
-/// Why a file cannot be read as data. The line is 1-based.
+/// Why a file cannot be read. Lua's own message, which names the file and
+/// line, or the sandbox's.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Error {
-    pub line: u32,
-    pub why: String,
-}
+pub struct Error(pub String);
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "line {}: {}", self.line, self.why)
+        f.write_str(&self.0)
     }
 }
 
-/// What a file assigned at its top level, and the names it read that
-/// nothing assigned.
+impl From<mlua::Error> for Error {
+    fn from(e: mlua::Error) -> Self {
+        // A Rust callback's error arrives wrapped with a traceback; the cause
+        // is the message.
+        let mut e = &e;
+        while let mlua::Error::CallbackError { cause, .. } = e {
+            e = cause;
+        }
+        Error(e.to_string())
+    }
+}
+
+/// What a file set in its environment, the scripts it ran, and the names it
+/// read that nothing assigned.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Chunk {
     pub globals: BTreeMap<String, Value>,
+    /// Each script a `dofile` ran, relative to the install as the disk
+    /// spells it, with its size, in the order first run.
+    pub included: Vec<(String, u64)>,
+    /// Names read that nothing assigned, and `require` of each module the
+    /// sandbox stands in for, as `require("utils")`.
     pub unresolved: BTreeSet<String>,
 }
 
@@ -167,735 +152,240 @@ impl Chunk {
     }
 }
 
-/// What `dofile` asks for: the constants the file at a path defines (see
-/// [`constants`]), or why it cannot be read.
-pub type Include<'a> = dyn FnMut(&str) -> Result<Vec<(String, f64)>, String> + 'a;
+/// How many instructions a file and the scripts it runs may take. The
+/// largest map's beacons take a few hundred thousand; a loop that never ends
+/// takes all of them.
+const INSTRUCTIONS: u64 = 200_000_000;
+const HOOK_EVERY: u32 = 10_000;
 
-/// Reads `text`, handing each path a `dofile` names to `include` and taking
-/// what it returns as globals.
-pub fn read(text: &[u8], include: &mut Include) -> Result<Chunk, Error> {
-    let lexed = lex(text)?;
-    let mut p = Parser {
-        toks: lexed.toks,
-        comments: lexed.comments,
-        at: 0,
-        locals: BTreeMap::new(),
-        chunk: Chunk::default(),
-        include,
-    };
-    p.chunk()?;
-    Ok(p.chunk)
-}
+/// How much memory one file's state may hold. Syria's towns take a few MB.
+const MEMORY: usize = 512 << 20;
 
-/// The numeric constants a shared script assigns at its top level: each line
-/// that starts in the first column as `NAME = <number>`, with an optional
-/// minus, semicolon and trailing comment. The rest of the file, which may be
-/// code, is not read.
-pub fn constants(text: &[u8]) -> Vec<(String, f64)> {
-    let mut out = Vec::new();
-    for line in text.split(|&c| c == b'\n') {
-        if !line
-            .first()
-            .is_some_and(|c| c.is_ascii_alphabetic() || *c == b'_')
-        {
-            continue;
-        }
-        let Ok(l) = lex(line) else { continue };
-        let k: Vec<&Tok> = l.toks.iter().map(|t| &t.kind).collect();
-        let value = match k.as_slice() {
-            [Tok::Name(_), Tok::Sym("="), Tok::Num(n)]
-            | [Tok::Name(_), Tok::Sym("="), Tok::Num(n), Tok::Sym(";")] => *n,
-            [Tok::Name(_), Tok::Sym("="), Tok::Sym("-"), Tok::Num(n)]
-            | [
-                Tok::Name(_),
-                Tok::Sym("="),
-                Tok::Sym("-"),
-                Tok::Num(n),
-                Tok::Sym(";"),
-            ] => -*n,
-            _ => continue,
-        };
-        if let Tok::Name(name) = k[0] {
-            out.push((name.clone(), value));
-        }
-    }
-    out
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum Tok {
-    Name(String),
-    Keyword(&'static str),
-    Str(String),
-    Num(f64),
-    Sym(&'static str),
-}
-
-#[derive(Debug, Clone)]
-struct Token {
-    kind: Tok,
-    pos: usize,
-    line: u32,
-}
-
-struct Lexed {
-    toks: Vec<Token>,
-    comments: Vec<(usize, String)>,
-}
-
-const KEYWORDS: [&str; 21] = [
-    "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in", "local",
-    "nil", "not", "or", "repeat", "return", "then", "true", "until", "while",
+/// The parts of the base library a data file may call: none reaches a file
+/// or another environment. `pcall` is left out because it would catch the
+/// instruction cap's error and carry on; no ED file calls it.
+const BASE: [&str; 14] = [
+    "assert",
+    "error",
+    "ipairs",
+    "next",
+    "pairs",
+    "rawequal",
+    "rawget",
+    "rawset",
+    "select",
+    "setmetatable",
+    "getmetatable",
+    "tonumber",
+    "tostring",
+    "type",
 ];
+const LIBRARIES: [&str; 4] = ["string", "table", "math", "unpack"];
 
-/// Longest first, so `...` is not read as `..` and `.`.
-const SYMBOLS: [&str; 26] = [
-    "...", "..", "==", "~=", "<=", ">=", "+", "-", "*", "/", "%", "^", "#", "<", ">", "=", "(",
-    ")", "{", "}", "[", "]", ";", ":", ",", ".",
-];
+/// `string` functions taken out of the state: matching a pattern runs in C,
+/// where neither cap sees it, and can take exponential time; `dump` yields
+/// bytecode. No ED file calls any of them.
+const UNSAFE_STRING: [&str; 5] = ["find", "match", "gmatch", "gsub", "dump"];
 
-fn lex(b: &[u8]) -> Result<Lexed, Error> {
-    let mut toks = Vec::new();
-    let mut comments = Vec::new();
-    let mut i = 0;
-    let mut line = 1u32;
-    let err = |line, why: String| Error { line, why };
-    while i < b.len() {
-        let c = b[i];
-        if c == b'\n' {
-            line += 1;
-            i += 1;
-            continue;
-        }
-        if c.is_ascii_whitespace() {
-            i += 1;
-            continue;
-        }
-        let start = i;
-        let at_line = line;
-        if b[i..].starts_with(b"--") {
-            let (text, end) = match long_bracket(b, i + 2) {
-                Some(level) => long_body(b, i + 2, level)
-                    .ok_or_else(|| err(line, "a long comment is never closed".into()))?,
-                None => {
-                    let end = b[i..]
-                        .iter()
-                        .position(|&c| c == b'\n')
-                        .map_or(b.len(), |n| i + n);
-                    (String::from_utf8_lossy(&b[i + 2..end]).into_owned(), end)
-                }
-            };
-            line += count_lines(&b[i..end]);
-            comments.push((start, text.trim().to_string()));
-            i = end;
-            continue;
-        }
-        let kind = if c.is_ascii_alphabetic() || c == b'_' {
-            while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
-                i += 1;
-            }
-            let word = String::from_utf8_lossy(&b[start..i]).into_owned();
-            match KEYWORDS.iter().find(|k| **k == word) {
-                Some(k) => Tok::Keyword(k),
-                None => Tok::Name(word),
-            }
-        } else if c.is_ascii_digit() || (c == b'.' && b.get(i + 1).is_some_and(u8::is_ascii_digit))
-        {
-            let (n, end) = number(b, i).ok_or_else(|| {
-                err(
-                    line,
-                    format!("{:?} is not a number", lossy(&b[i..b.len().min(i + 16)])),
-                )
-            })?;
-            i = end;
-            Tok::Num(n)
-        } else if c == b'"' || c == b'\'' {
-            let (s, end) = short_string(b, i).map_err(|why| err(line, why))?;
-            line += count_lines(&b[i..end]);
-            i = end;
-            Tok::Str(s)
-        } else if let Some(level) = (c == b'[').then(|| long_bracket(b, i)).flatten() {
-            let (s, end) = long_body(b, i, level)
-                .ok_or_else(|| err(line, "a long string is never closed".into()))?;
-            line += count_lines(&b[i..end]);
-            i = end;
-            Tok::Str(s)
-        } else if let Some(s) = SYMBOLS.iter().find(|s| b[i..].starts_with(s.as_bytes())) {
-            i += s.len();
-            Tok::Sym(s)
-        } else {
-            return Err(err(line, format!("unexpected character {:?}", c as char)));
-        };
-        toks.push(Token {
-            kind,
-            pos: start,
-            line: at_line,
-        });
-    }
-    Ok(Lexed { toks, comments })
+/// The names the sandbox puts in an environment, which are not the file's.
+fn provided(name: &str) -> bool {
+    BASE.contains(&name)
+        || LIBRARIES.contains(&name)
+        || matches!(name, "dofile" | "require" | "package" | "_G")
 }
 
-fn lossy(b: &[u8]) -> String {
-    String::from_utf8_lossy(b).into_owned()
+/// Runs the file at `rel` under `install` and reads what it set.
+pub fn run(install: &Path, rel: &str) -> Result<Chunk, Error> {
+    let text = fs::read(install.join(rel)).map_err(|e| Error(format!("{rel}: {e}")))?;
+    run_text(install, rel, &text)
 }
 
-fn count_lines(b: &[u8]) -> u32 {
-    b.iter().filter(|&&c| c == b'\n').count() as u32
-}
-
-/// The level of a long bracket `[==[` opening at `i`.
-fn long_bracket(b: &[u8], i: usize) -> Option<usize> {
-    if b.get(i) != Some(&b'[') {
-        return None;
-    }
-    let level = b[i + 1..].iter().take_while(|&&c| c == b'=').count();
-    (b.get(i + 1 + level) == Some(&b'[')).then_some(level)
-}
-
-/// Whether `c` breaks a line.
-fn is_break(c: u8) -> bool {
-    c == b'\n' || c == b'\r'
-}
-
-/// The length of the line break at the start of `b`: Lua reads `\n`, `\r`,
-/// `\r\n` and `\n\r` each as one.
-fn line_break(b: &[u8]) -> usize {
-    match b {
-        [c, d, ..] if is_break(*c) && is_break(*d) && c != d => 2,
-        [c, ..] if is_break(*c) => 1,
-        _ => 0,
-    }
-}
-
-/// The body of the long bracket opening at `i`, and the position past its
-/// close. A line break straight after the opening bracket is not part of it,
-/// and each one inside it reads as `\n`.
-fn long_body(b: &[u8], i: usize, level: usize) -> Option<(String, usize)> {
-    let from = i + level + 2;
-    let from = from + line_break(&b[from..]);
-    let close = [b"]".as_slice(), &vec![b'='; level], b"]"].concat();
-    let n = b[from..].windows(close.len()).position(|w| w == close)?;
-    let mut body = Vec::with_capacity(n);
-    let mut j = from;
-    while j < from + n {
-        match line_break(&b[j..from + n]) {
-            0 => {
-                body.push(b[j]);
-                j += 1;
-            }
-            k => {
-                body.push(b'\n');
-                j += k;
-            }
-        }
-    }
-    Some((lossy(&body), from + n + close.len()))
-}
-
-/// A Lua 5.1 numeral at `i`: decimal with optional fraction and exponent,
-/// or hexadecimal integer.
-fn number(b: &[u8], i: usize) -> Option<(f64, usize)> {
-    let mut j = i;
-    if b[i..].starts_with(b"0x") || b[i..].starts_with(b"0X") {
-        j += 2;
-        while j < b.len() && b[j].is_ascii_hexdigit() {
-            j += 1;
-        }
-        let digits = std::str::from_utf8(&b[i + 2..j]).ok()?;
-        return Some((u64::from_str_radix(digits, 16).ok()? as f64, j));
-    }
-    while j < b.len() && (b[j].is_ascii_digit() || b[j] == b'.') {
-        j += 1;
-    }
-    if j < b.len() && (b[j] == b'e' || b[j] == b'E') {
-        j += 1;
-        if j < b.len() && (b[j] == b'+' || b[j] == b'-') {
-            j += 1;
-        }
-        while j < b.len() && b[j].is_ascii_digit() {
-            j += 1;
-        }
-    }
-    // Lua reads `3x` as one malformed numeral, not a number and a name.
-    if j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'_') {
-        return None;
-    }
-    let n = std::str::from_utf8(&b[i..j]).ok()?.parse().ok()?;
-    Some((n, j))
-}
-
-fn short_string(b: &[u8], i: usize) -> Result<(String, usize), String> {
-    let q = b[i];
-    let mut out = Vec::new();
-    let mut j = i + 1;
-    loop {
-        let Some(&c) = b.get(j) else {
-            return Err("a string is never closed".into());
-        };
-        j += 1;
-        match c {
-            _ if c == q => break,
-            b'\n' => return Err("a string runs past the end of its line".into()),
-            b'\\' => {
-                let Some(&e) = b.get(j) else {
-                    return Err("a string is never closed".into());
-                };
-                j += 1;
-                match e {
-                    b'n' => out.push(b'\n'),
-                    b't' => out.push(b'\t'),
-                    b'r' => out.push(b'\r'),
-                    b'a' => out.push(7),
-                    b'b' => out.push(8),
-                    b'f' => out.push(12),
-                    b'v' => out.push(11),
-                    // A line break, in any of its forms, continues the string.
-                    b'\n' | b'\r' => {
-                        out.push(b'\n');
-                        j += line_break(&b[j - 1..]) - 1;
-                    }
-                    b'0'..=b'9' => {
-                        let mut n = u32::from(e - b'0');
-                        for _ in 0..2 {
-                            match b.get(j) {
-                                Some(d) if d.is_ascii_digit() => {
-                                    n = n * 10 + u32::from(d - b'0');
-                                    j += 1;
-                                }
-                                _ => break,
-                            }
-                        }
-                        out.push(
-                            u8::try_from(n).map_err(|_| format!("escape \\{n} is too large"))?,
-                        );
-                    }
-                    // Lua 5.1 keeps any other escaped character as itself.
-                    e => out.push(e),
-                }
-            }
-            c => out.push(c),
-        }
-    }
-    Ok((lossy(&out), j))
-}
-
-/// How many positional items Lua 5.1 holds before storing them.
-const POSITIONAL_FLUSH: usize = 50;
-
-struct Parser<'a> {
-    toks: Vec<Token>,
-    comments: Vec<(usize, String)>,
-    at: usize,
-    locals: BTreeMap<String, Value>,
-    chunk: Chunk,
-    include: &'a mut Include<'a>,
-}
-
-impl Parser<'_> {
-    fn peek(&self) -> Option<&Tok> {
-        self.toks.get(self.at).map(|t| &t.kind)
-    }
-
-    fn line(&self) -> u32 {
-        self.toks
-            .get(self.at)
-            .or(self.toks.last())
-            .map_or(1, |t| t.line)
-    }
-
-    fn fail<T>(&self, why: impl Into<String>) -> Result<T, Error> {
-        Err(Error {
-            line: self.line(),
-            why: why.into(),
-        })
-    }
-
-    /// An error on `line`, for one found after its tokens were read.
-    fn fail_on<T>(&self, line: u32, why: impl Into<String>) -> Result<T, Error> {
-        Err(Error {
-            line,
-            why: why.into(),
-        })
-    }
-
-    fn next(&mut self) -> Option<Tok> {
-        let t = self.toks.get(self.at).map(|t| t.kind.clone());
-        self.at += 1;
-        t
-    }
-
-    fn eat(&mut self, sym: &str) -> bool {
-        if matches!(self.peek(), Some(Tok::Sym(s)) if *s == sym) {
-            self.at += 1;
-            true
-        } else {
-            false
-        }
-    }
-
-    fn expect(&mut self, sym: &str) -> Result<(), Error> {
-        if self.eat(sym) {
-            Ok(())
-        } else {
-            let found = self.describe();
-            self.fail(format!("expected {sym:?}, found {found}"))
-        }
-    }
-
-    fn describe(&self) -> String {
-        match self.peek() {
-            None => "the end of the file".into(),
-            Some(Tok::Name(n)) => format!("{n:?}"),
-            Some(Tok::Keyword(k)) => format!("{k:?}"),
-            Some(Tok::Str(_)) => "a string".into(),
-            Some(Tok::Num(_)) => "a number".into(),
-            Some(Tok::Sym(s)) => format!("{s:?}"),
-        }
-    }
-
-    fn name(&mut self) -> Result<String, Error> {
-        match self.next() {
-            Some(Tok::Name(n)) => Ok(n),
-            _ => {
-                self.at -= 1;
-                let found = self.describe();
-                self.fail(format!("expected a name, found {found}"))
-            }
-        }
-    }
-
-    fn chunk(&mut self) -> Result<(), Error> {
-        while let Some(t) = self.peek().cloned() {
-            match t {
-                Tok::Sym(";") => self.at += 1,
-                Tok::Keyword("local") => self.local()?,
-                Tok::Name(_) | Tok::Sym("(") => self.assignment_or_call()?,
-                Tok::Keyword(k) => return self.fail(format!("{k:?} is code, which is not read")),
-                _ => {
-                    let found = self.describe();
-                    return self.fail(format!("expected a statement, found {found}"));
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn local(&mut self) -> Result<(), Error> {
-        self.at += 1;
-        if matches!(self.peek(), Some(Tok::Keyword("function"))) {
-            return self.fail("\"function\" is code, which is not read");
-        }
-        let mut names = vec![self.name()?];
-        while self.eat(",") {
-            names.push(self.name()?);
-        }
-        let values = if self.eat("=") {
-            self.exprs()?
-        } else {
-            Vec::new()
-        };
-        let mut values = values.into_iter();
-        for n in names {
-            let v = values.next().unwrap_or(Value::Nil);
-            self.locals.insert(n, v);
-        }
-        Ok(())
-    }
-
-    fn assignment_or_call(&mut self) -> Result<(), Error> {
-        // A plain name followed by `=` or `,` is an assignment target.
-        if let (Some(Tok::Name(n)), Some(Tok::Sym("=" | ","))) = (
-            self.peek().cloned(),
-            self.toks.get(self.at + 1).map(|t| t.kind.clone()),
-        ) {
-            self.at += 1;
-            let mut names = vec![n];
-            while self.eat(",") {
-                names.push(self.name()?);
-            }
-            self.expect("=")?;
-            let mut values = self.exprs()?.into_iter();
-            for n in names {
-                let v = values.next().unwrap_or(Value::Nil);
-                if let Some(slot) = self.locals.get_mut(&n) {
-                    *slot = v;
-                } else if v == Value::Nil {
-                    self.chunk.globals.remove(&n);
-                } else {
-                    self.chunk.globals.insert(n, v);
-                }
-            }
-            return Ok(());
-        }
-        let (_, called) = self.prefix()?;
-        if !called {
-            if matches!(self.peek(), Some(Tok::Sym("="))) {
-                return self.fail("only a plain name can be assigned");
-            }
-            return self.fail("an expression is not a statement");
-        }
-        Ok(())
-    }
-
-    fn exprs(&mut self) -> Result<Vec<Value>, Error> {
-        let mut out = vec![self.expr()?];
-        while self.eat(",") {
-            out.push(self.expr()?);
-        }
-        Ok(out)
-    }
-
-    fn expr(&mut self) -> Result<Value, Error> {
-        let v = self.unary()?;
-        if let Some(Tok::Sym(s @ ("+" | "-" | "*" | "/" | "%" | "^" | "..")))
-        | Some(Tok::Sym(s @ ("==" | "~=" | "<=" | ">=" | "<" | ">"))) = self.peek()
-        {
-            let s = *s;
-            return self.fail(format!("operator {s:?} is code, which is not read"));
-        }
-        if let Some(Tok::Keyword(k @ ("and" | "or"))) = self.peek() {
-            let k = *k;
-            return self.fail(format!("operator {k:?} is code, which is not read"));
-        }
-        Ok(v)
-    }
-
-    fn unary(&mut self) -> Result<Value, Error> {
-        let line = self.line();
-        if self.eat("-") {
-            return match self.unary()? {
-                Value::Num(n) => Ok(Value::Num(-n)),
-                _ => self.fail_on(line, "minus applies to a number only"),
-            };
-        }
-        self.simple()
-    }
-
-    fn simple(&mut self) -> Result<Value, Error> {
-        match self.peek().cloned() {
-            Some(Tok::Keyword("nil")) => {
-                self.at += 1;
-                Ok(Value::Nil)
-            }
-            Some(Tok::Keyword("true")) => {
-                self.at += 1;
-                Ok(Value::Bool(true))
-            }
-            Some(Tok::Keyword("false")) => {
-                self.at += 1;
-                Ok(Value::Bool(false))
-            }
-            Some(Tok::Num(n)) => {
-                self.at += 1;
-                Ok(Value::Num(n))
-            }
-            Some(Tok::Str(s)) => {
-                self.at += 1;
-                Ok(Value::Str(s))
-            }
-            Some(Tok::Sym("{")) => self.table().map(Value::Table),
-            Some(Tok::Name(_) | Tok::Sym("(")) => self.prefix().map(|(v, _)| v),
-            Some(Tok::Keyword(k)) => self.fail(format!("{k:?} is code, which is not read")),
-            _ => {
-                let found = self.describe();
-                self.fail(format!("expected a value, found {found}"))
-            }
-        }
-    }
-
-    /// A name or parenthesised value, then any field reads and calls. Also
-    /// says whether it ended in a call, which is all a statement may be.
-    fn prefix(&mut self) -> Result<(Value, bool), Error> {
-        let mut v = if self.eat("(") {
-            let v = self.expr()?;
-            self.expect(")")?;
-            v
-        } else {
-            let n = self.name()?;
-            self.lookup(&n)
-        };
-        let mut called = false;
-        loop {
-            let line = self.line();
-            match self.peek().cloned() {
-                Some(Tok::Sym(".")) => {
-                    self.at += 1;
-                    let field = self.name()?;
-                    v = self.field(v, Value::Str(field))?;
-                    called = false;
-                }
-                Some(Tok::Sym("[")) => {
-                    self.at += 1;
-                    let k = self.expr()?;
-                    self.expect("]")?;
-                    v = self.field(v, k)?;
-                    called = false;
-                }
-                Some(Tok::Sym(":")) => {
-                    return self.fail("a method call is code, which is not read");
-                }
-                Some(Tok::Sym("(")) => {
-                    self.at += 1;
-                    let args = if self.eat(")") {
-                        Vec::new()
-                    } else {
-                        let a = self.exprs()?;
-                        self.expect(")")?;
-                        a
-                    };
-                    v = self.call(line, v, args)?;
-                    called = true;
-                }
-                Some(Tok::Str(s)) => {
-                    self.at += 1;
-                    v = self.call(line, v, vec![Value::Str(s)])?;
-                    called = true;
-                }
-                Some(Tok::Sym("{")) => {
-                    let t = self.table()?;
-                    v = self.call(line, v, vec![Value::Table(t)])?;
-                    called = true;
-                }
-                _ => return Ok((v, called)),
-            }
-        }
-    }
-
-    fn lookup(&mut self, name: &str) -> Value {
-        if let Some(v) = self.locals.get(name) {
-            return v.clone();
-        }
-        if let Some(v) = self.chunk.globals.get(name) {
-            return v.clone();
-        }
-        match name {
-            "dofile" => Value::Func(Builtin::Dofile),
-            "require" => Value::Func(Builtin::Require),
-            _ => {
-                self.chunk.unresolved.insert(name.to_string());
-                Value::Nil
-            }
-        }
-    }
-
-    fn field(&self, of: Value, k: Value) -> Result<Value, Error> {
-        let Value::Table(t) = of else {
-            return self.fail("a field is read from something that is not a table");
-        };
-        Ok(match Key::of(k) {
-            Some(k) => t
-                .entries
-                .iter()
-                .find(|(e, _)| *e == k)
-                .map_or(Value::Nil, |(_, v)| v.clone()),
-            None => Value::Nil,
-        })
-    }
-
-    fn call(&mut self, line: u32, f: Value, args: Vec<Value>) -> Result<Value, Error> {
-        let first = args.into_iter().next().unwrap_or(Value::Nil);
-        match f {
-            Value::Func(Builtin::Translate) => Ok(first),
-            Value::Func(Builtin::Require) => match first {
-                Value::Str(m) if m == "i_18n" => Ok(Value::Table(Table {
-                    entries: vec![(
-                        Key::Str("translate".into()),
-                        Value::Func(Builtin::Translate),
-                    )],
-                    comment: None,
-                })),
-                Value::Str(m) => self.fail_on(line, format!("requires {m:?}, which is not read")),
-                _ => self.fail_on(line, "require takes a module name"),
-            },
-            Value::Func(Builtin::Dofile) => {
-                let Value::Str(path) = first else {
-                    return self.fail_on(line, "dofile takes a path");
-                };
-                let defined = (self.include)(&path).or_else(|why| self.fail_on(line, why))?;
-                for (name, n) in defined {
-                    self.chunk.globals.insert(name, Value::Num(n));
-                }
-                Ok(Value::Nil)
-            }
-            _ => self.fail_on(line, "calls something that is not a known function"),
-        }
-    }
-
-    fn table(&mut self) -> Result<Table, Error> {
-        let open = self.toks[self.at].pos;
-        self.expect("{")?;
-        let first_field = self.toks.get(self.at).map_or(usize::MAX, |t| t.pos);
-        let comment = self
-            .comments
-            .iter()
-            .find(|(p, _)| *p > open && *p < first_field)
-            .map(|(_, c)| c.clone());
-        let mut t = Table {
-            entries: Vec::new(),
-            comment,
-        };
-        // Lua 5.1 stores positional items fifty at a time and at the close, so
-        // one outlasts an explicit key it shares that was written before then.
-        let mut positional: Vec<Value> = Vec::new();
-        let mut stored = 0.0;
-        let flush = |t: &mut Table, positional: &mut Vec<Value>, stored: &mut f64| {
-            for v in positional.drain(..) {
-                *stored += 1.0;
-                t.set(Key::Num(*stored), v);
-            }
-        };
-        while !self.eat("}") {
-            let line = self.line();
-            if self.eat("[") {
-                let k = self.expr()?;
-                self.expect("]")?;
-                self.expect("=")?;
-                let v = self.expr()?;
-                match Key::of(k) {
-                    Some(k) => t.set(k, v),
-                    None => return self.fail_on(line, "a table key is nil or not a number"),
-                }
-            } else if let (Some(Tok::Name(n)), Some(Tok::Sym("="))) = (
-                self.peek().cloned(),
-                self.toks.get(self.at + 1).map(|t| t.kind.clone()),
-            ) {
-                self.at += 2;
-                let v = self.expr()?;
-                t.set(Key::Str(n), v);
+/// Runs `text`, named `rel`, with `dofile` reading from `install`.
+pub fn run_text(install: &Path, rel: &str, text: &[u8]) -> Result<Chunk, Error> {
+    let lua = Lua::new_with(
+        StdLib::TABLE | StdLib::STRING | StdLib::MATH,
+        LuaOptions::new(),
+    )?;
+    lua.set_memory_limit(MEMORY)?;
+    let spent = Rc::new(Cell::new(0u64));
+    let budget = spent.clone();
+    lua.set_global_hook(
+        HookTriggers::new().every_nth_instruction(HOOK_EVERY),
+        move |_, _| {
+            budget.set(budget.get() + u64::from(HOOK_EVERY));
+            if budget.get() > INSTRUCTIONS {
+                Err(mlua::Error::runtime(format!(
+                    "ran past {INSTRUCTIONS} instructions, which data does not need"
+                )))
             } else {
-                positional.push(self.expr()?);
-                if positional.len() == POSITIONAL_FLUSH {
-                    flush(&mut t, &mut positional, &mut stored);
+                Ok(VmState::Continue)
+            }
+        },
+    )?;
+
+    let globals = lua.globals();
+    // The state's own table, which strings reach as their methods too.
+    let string: mlua::Table = globals.raw_get("string")?;
+    for name in UNSAFE_STRING {
+        string.raw_set(name, mlua::Value::Nil)?;
+    }
+    let env = lua.create_table()?;
+    for name in BASE.iter().chain(&LIBRARIES) {
+        env.raw_set(*name, globals.raw_get::<mlua::Value>(*name)?)?;
+    }
+    env.raw_set("_G", env.clone())?;
+    let package = lua.create_table()?;
+    package.raw_set("path", "")?;
+    package.raw_set("cpath", "")?;
+    env.raw_set("package", package)?;
+
+    let unresolved = Rc::new(RefCell::new(BTreeSet::new()));
+    let missing = unresolved.clone();
+    let meta = lua.create_table()?;
+    meta.raw_set(
+        "__index",
+        lua.create_function(move |_, (_, k): (mlua::Value, mlua::Value)| {
+            if let mlua::Value::String(s) = k {
+                missing
+                    .borrow_mut()
+                    .insert(String::from_utf8_lossy(&s.as_bytes()).into_owned());
+            }
+            Ok(mlua::Value::Nil)
+        })?,
+    )?;
+    env.set_metatable(Some(meta))?;
+
+    let stood_in = unresolved.clone();
+    let translate = lua.create_function(|_, v: mlua::Value| Ok(v))?;
+    env.raw_set(
+        "require",
+        lua.create_function(move |lua, name: String| {
+            let module = lua.create_table()?;
+            if name == "i_18n" {
+                module.raw_set("translate", translate.clone())?;
+            } else {
+                stood_in.borrow_mut().insert(format!("require({name:?})"));
+            }
+            Ok(module)
+        })?,
+    )?;
+
+    let included = Rc::new(RefCell::new(Vec::<(String, u64)>::new()));
+    let ran = included.clone();
+    let root: PathBuf = install.to_path_buf();
+    let scope = env.clone();
+    env.raw_set(
+        "dofile",
+        lua.create_function(move |lua, path: String| {
+            let rel = install::resolve(&root, &path).ok_or_else(|| {
+                mlua::Error::runtime(format!(
+                    "dofile names {path}, which the install does not hold"
+                ))
+            })?;
+            let bytes = fs::read(root.join(&rel)).map_err(mlua::Error::external)?;
+            if !ran.borrow().iter().any(|(p, _)| *p == rel) {
+                ran.borrow_mut().push((rel.clone(), bytes.len() as u64));
+            }
+            lua.load(bytes.as_slice())
+                .set_mode(ChunkMode::Text)
+                .set_name(format!("@{rel}"))
+                .set_environment(scope.clone())
+                .exec()
+        })?,
+    )?;
+
+    lua.load(text)
+        .set_mode(ChunkMode::Text)
+        .set_name(format!("@{rel}"))
+        .set_environment(env.clone())
+        .exec()?;
+
+    let mut out = Chunk::default();
+    let mut left = VALUES;
+    for pair in env.pairs::<mlua::Value, mlua::Value>() {
+        let (k, v) = pair?;
+        let mlua::Value::String(k) = k else { continue };
+        let name = String::from_utf8_lossy(&k.as_bytes()).into_owned();
+        if provided(&name) {
+            continue;
+        }
+        if let Some(v) = data(v, 0, &mut left)? {
+            out.globals.insert(name, v);
+        }
+    }
+    out.included = included.take();
+    out.unresolved = unresolved.take();
+    Ok(out)
+}
+
+/// Tables nested deeper than this are not data.
+const DEPTH: usize = 64;
+
+/// How many values a file's globals may hold, counting a table each time it
+/// is reached: a table that holds itself twice at each level doubles at each.
+/// The largest table read, Syria's towns, holds about 10 000.
+const VALUES: usize = 1_000_000;
+
+/// `v` as data, or `None` for a value that is not: a function, a thread,
+/// userdata.
+fn data(v: mlua::Value, depth: usize, left: &mut usize) -> Result<Option<Value>, Error> {
+    if *left == 0 {
+        return Err(Error(format!("the globals hold more than {VALUES} values")));
+    }
+    *left -= 1;
+    Ok(Some(match v {
+        mlua::Value::Nil => Value::Nil,
+        mlua::Value::Boolean(b) => Value::Bool(b),
+        mlua::Value::Integer(n) => Value::Num(n as f64),
+        mlua::Value::Number(n) => Value::Num(n),
+        mlua::Value::String(s) => Value::Str(String::from_utf8_lossy(&s.as_bytes()).into_owned()),
+        mlua::Value::Table(t) => {
+            if depth == DEPTH {
+                return Err(Error(format!("a table nests deeper than {DEPTH}")));
+            }
+            let mut entries = Vec::new();
+            for pair in t.pairs::<mlua::Value, mlua::Value>() {
+                let (k, v) = pair?;
+                let key = match data(k, depth + 1, left)? {
+                    Some(Value::Bool(b)) => Key::Bool(b),
+                    Some(Value::Num(n)) => Key::Num(n),
+                    Some(Value::Str(s)) => Key::Str(s),
+                    _ => continue,
+                };
+                if let Some(v) = data(v, depth + 1, left)? {
+                    entries.push((key, v));
                 }
             }
-            if !self.eat(",") && !self.eat(";") {
-                self.expect("}")?;
-                break;
-            }
+            entries.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+            Value::Table(Table { entries })
         }
-        flush(&mut t, &mut positional, &mut stored);
-        Ok(t)
-    }
+        _ => return Ok(None),
+    }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
 
-    fn no_include(path: &str) -> Result<Vec<(String, f64)>, String> {
-        Err(format!("no file {path}"))
+    fn put(root: &Path, rel: &str, text: &str) {
+        let p = root.join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, text).unwrap();
     }
 
     fn parse(text: &str) -> Chunk {
-        read(text.as_bytes(), &mut no_include).unwrap()
+        let s = Scratch::new();
+        run_text(&s.0, "m.lua", text.as_bytes()).unwrap()
     }
 
-    fn fails(text: &str) -> Error {
-        read(text.as_bytes(), &mut no_include).unwrap_err()
+    fn fails(text: &str) -> String {
+        let s = Scratch::new();
+        run_text(&s.0, "m.lua", text.as_bytes()).unwrap_err().0
     }
 
     #[test]
-    fn reads_literals_tables_and_translated_strings() {
+    fn reads_tables_and_translated_strings() {
         let c = parse(
             "local gettext = require(\"i_18n\")\nlocal       _ = gettext.translate\n\
              beacons = {\n\t{\n\t\tdisplay_name = _('Anapa');\n\t\tposition = { -1321.5, 12, 0x10 };\n\
@@ -911,43 +401,21 @@ mod tests {
         );
         assert_eq!(b.get("ok"), Some(&Value::Bool(true)));
         assert_eq!(b.get("gone"), None);
-        assert!(c.unresolved.is_empty());
+        assert!(c.unresolved.is_empty(), "{:?}", c.unresolved);
         assert!(!c.globals.contains_key("gettext"), "locals are not globals");
     }
 
     #[test]
-    fn reads_bracketed_keys_and_lists_them_in_key_order() {
-        let c = parse("t = { [31] = 'c', [2] = 'b', [1] = 'a' }\nu = { [0] = 'x', [1] = 'y' }\n");
+    fn lists_keys_in_order_whatever_order_they_were_given() {
+        let c = parse("t = { [31] = 'c', [2] = 'b', [1] = 'a' }\nu = { [1] = 'y', [0] = 'x' }\n");
         let t = c.table("t").unwrap();
-        // 1, 2 and 31 are not consecutive.
-        assert_eq!(t.list(), None);
+        assert_eq!(t.list(), None, "1, 2 and 31 are not consecutive");
         assert_eq!(t.index(31.0), Some(&Value::Str("c".into())));
         let u: Vec<&Value> = c.table("u").unwrap().list().unwrap();
         assert_eq!(u, [&Value::Str("x".into()), &Value::Str("y".into())]);
         assert_eq!(Table::default().list(), Some(vec![]));
         let c = parse("t = { [\"KUTAISI\"] = { latitude = 42.27 } }");
         assert!(c.table("t").unwrap().list().is_none());
-    }
-
-    #[test]
-    fn decodes_escapes_and_long_strings() {
-        let c = parse("a = 'it\\'s \\65\\t' b = [[\nfirst\nsecond]] c = [==[x]]y]==]");
-        assert_eq!(c.globals["a"], Value::Str("it's A\t".into()));
-        assert_eq!(c.globals["b"], Value::Str("first\nsecond".into()));
-        assert_eq!(c.globals["c"], Value::Str("x]]y".into()));
-    }
-
-    #[test]
-    fn keeps_the_comment_that_opens_a_table() {
-        let c = parse(
-            "radio = {\n\t{\n\t\t-- Anapa\n\t\tradioId = 'airfield12_0';\n\t\t-- later\n\t};\n\t{ radioId = 'x' };\n}\n",
-        );
-        let r = c.table("radio").unwrap().list().unwrap();
-        let (Value::Table(a), Value::Table(b)) = (r[0], r[1]) else {
-            panic!()
-        };
-        assert_eq!(a.comment.as_deref(), Some("Anapa"));
-        assert_eq!(b.comment, None);
     }
 
     #[test]
@@ -963,102 +431,111 @@ mod tests {
     }
 
     #[test]
-    fn takes_the_constants_a_dofile_names() {
-        let mut asked = Vec::new();
-        let mut include = |p: &str| {
-            asked.push(p.to_string());
-            Ok(constants(
-                b"-- Frequency bands\nHF = 0\nUHF = 3;\nM = -1 -- discard\n\tINNER = 9\nF = f(1)\n",
-            ))
-        };
-        let c = read(
-            b"dofile('Scripts/World/Radio/FrequencyBands.lua')\nf = { [HF] = 1, [UHF] = 2, m = M, i = INNER }\n",
-            &mut include,
-        )
-        .unwrap();
-        assert_eq!(asked, ["Scripts/World/Radio/FrequencyBands.lua"]);
+    fn a_dofile_runs_the_installs_script_in_the_same_environment() {
+        let s = Scratch::new();
+        put(
+            &s.0,
+            "Scripts/World/Radio/BeaconTypes.lua",
+            "package.path = package.path..';./Scripts/?.lua;'\nlocal utils = require('utils')\n\
+             BEACON_TYPE_HOMER = 8\nlocal function homer(x) return { type = BEACON_TYPE_HOMER, x = x } end\n\
+             SAMPLE = homer(3)\n",
+        );
+        put(
+            &s.0,
+            "Scripts/World/Radio/FrequencyBands.lua",
+            "HF = 0\nUHF = 3\n",
+        );
+        let text = "dofile('scripts/world/radio/BeaconTypes.lua')\n\
+                    dofile('Scripts/World/Radio/FrequencyBands.lua')\n\
+                    dofile('Scripts/World/Radio/FrequencyBands.lua')\n\
+                    f = { [HF] = 1, [UHF] = 2, kind = BEACON_TYPE_HOMER }\n";
+        let c = run_text(&s.0, "m.lua", text.as_bytes()).unwrap();
         let f = c.table("f").unwrap();
         assert_eq!(f.index(0.0), Some(&Value::Num(1.0)));
         assert_eq!(f.index(3.0), Some(&Value::Num(2.0)));
-        assert_eq!(f.num("m"), Some(-1.0));
-        // Indented or computed, it is not a constant.
-        assert_eq!(f.get("i"), None);
-        assert!(!c.globals.contains_key("F"));
+        assert_eq!(f.num("kind"), Some(8.0));
+        assert_eq!(c.table("SAMPLE").unwrap().num("x"), Some(3.0));
+        let ran: Vec<&str> = c.included.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(
+            ran,
+            [
+                "Scripts/World/Radio/BeaconTypes.lua",
+                "Scripts/World/Radio/FrequencyBands.lua"
+            ]
+        );
+        assert_eq!(c.included[1].1, 15);
+        assert!(
+            c.unresolved.contains("require(\"utils\")"),
+            "{:?}",
+            c.unresolved
+        );
+        assert!(!c.globals.contains_key("package"));
     }
 
     #[test]
-    fn a_dofile_that_cannot_be_read_stops_the_read() {
+    fn a_dofile_outside_the_install_is_refused() {
         let e = fails("\n\ndofile('Scripts/x.lua')\n");
-        assert_eq!(e.to_string(), "line 3: no file Scripts/x.lua");
-    }
-
-    #[test]
-    fn refuses_code() {
-        assert_eq!(fails("x = 1\nif x then y = 2 end").line, 2);
-        assert!(fails("local function f() end").why.contains("\"function\""));
-        assert!(fails("t = { a = 1 + 2 }").why.contains("operator \"+\""));
         assert!(
-            fails("t = { a = 'x' .. 'y' }")
-                .why
-                .contains("operator \"..\"")
+            e.contains("dofile names Scripts/x.lua, which the install does not hold"),
+            "{e}"
         );
-        assert!(
-            fails(
-                "t = {}
-t.a = 1"
-            )
-            .why
-            .contains("plain name")
-        );
-        assert!(fails("print('x')").why.contains("not a known function"));
-        assert!(
-            fails("local u = require('utils')")
-                .why
-                .contains("\"utils\"")
-        );
-        assert!(fails("t = { 1, 2").why.contains("the end of the file"));
-        assert!(fails("a = 'open").why.contains("never closed"));
-        assert!(fails("a = 3x").why.contains("not a number"));
+        assert!(fails("dofile('../../etc/passwd')").contains("does not hold"));
     }
 
     #[test]
-    fn an_error_found_after_a_call_names_the_calls_line() {
-        assert_eq!(fails("print('x')\nfoo = 1").line, 1);
-        assert_eq!(fails("dofile('Scripts/x.lua')\nlocal a = 1").line, 1);
-        assert_eq!(fails("t = {\n [nil] = 1,\n b = 2 }").line, 2);
-        assert_eq!(fails("t = - 'x'\nu = 1").line, 1);
+    fn names_the_file_and_line_of_an_error() {
+        let e = fails("x = 1\nlocal t = nil\ny = t.field\n");
+        assert!(e.contains("m.lua:3:"), "{e}");
+        assert!(fails("t = { 1, 2").contains("m.lua:1:"));
     }
 
     #[test]
-    fn a_positional_item_outlasts_an_explicit_key_before_it_is_stored() {
-        let c = parse("a = { 'a', [1] = 'b' }\nb = { [1] = 'a', 'b' }");
-        let first = |t: &str| c.table(t).unwrap().index(1.0).cloned();
-        assert_eq!(first("a"), Some(Value::Str("a".into())));
-        assert_eq!(first("b"), Some(Value::Str("b".into())));
-        // The first fifty are stored when the fiftieth is read.
-        let fifty = vec!["0"; 50].join(", ");
-        let c = parse(&format!("t = {{ {fifty}, [1] = 9, 1 }}"));
-        let t = c.table("t").unwrap();
-        assert_eq!(t.index(1.0), Some(&Value::Num(9.0)));
-        assert_eq!(t.index(51.0), Some(&Value::Num(1.0)));
+    fn nothing_reaches_a_file_or_the_system() {
+        for code in [
+            "io.open('x')",
+            "os.exit(1)",
+            "loadfile('x')",
+            "loadstring('return 1')()",
+            "getfenv(0)",
+            "debug.getinfo(1)",
+            "print('x')",
+            "pcall(error)",
+            "string.find('a', 'a')",
+            "('a'):match('a')",
+            "string.gsub('a', 'a', 'b')",
+            "('a'):gmatch('a')",
+            "string.dump(tostring)",
+        ] {
+            let e = fails(code);
+            assert!(e.contains("attempt to"), "{code}: {e}");
+        }
     }
 
     #[test]
-    fn reads_every_form_of_line_break_inside_a_string_as_one() {
-        let c = parse("a = [[\r\nx\r\ny\n\rz\rw]]\r\nb = 'p\\\r\nq'\r\n");
-        assert_eq!(c.globals["a"], Value::Str("x\ny\nz\nw".into()));
-        assert_eq!(c.globals["b"], Value::Str("p\nq".into()));
+    fn a_loop_that_never_ends_is_cut_off() {
+        let e = fails("while true do end");
+        assert!(e.contains("instructions, which data does not need"), "{e}");
+        let e = fails("t = {} while true do t[#t + 1] = string.rep('x', 1000000) .. #t end");
+        assert!(e.contains("memory"), "{e}");
     }
 
     #[test]
-    fn counts_lines_across_comments_and_long_strings() {
-        let e = fails("--[[ one\ntwo ]]\na = [[x\ny]]\n-- c\nwhile");
-        assert_eq!(e.line, 6, "{e}");
+    fn refuses_bytecode() {
+        let s = Scratch::new();
+        let e = run_text(&s.0, "m.lua", b"\x1bLua\x51\x00").unwrap_err().0;
+        assert!(e.contains("binary"), "{e}");
+    }
+
+    #[test]
+    fn a_table_that_holds_itself_over_and_over_is_cut_off() {
+        let e = fails("a = {} for i = 1, 40 do a = { a, a } end x = a");
+        assert!(e.contains("more than 1000000 values"), "{e}");
     }
 
     #[test]
     fn replaces_bytes_that_are_not_utf8() {
-        let c = read(b"a = 'Boulder\xf1ity'", &mut no_include).unwrap();
+        let s = Scratch::new();
+        let c = run_text(&s.0, "m.lua", b"a = 'Boulder\xf1ity'").unwrap();
         assert_eq!(c.globals["a"], Value::Str("Boulder\u{fffd}ity".into()));
     }
 }

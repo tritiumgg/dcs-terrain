@@ -198,7 +198,17 @@ fn caucasus_matches_the_live_extract() {
         assert_eq!(got, want, "{name_id} beacons");
     }
     assert!(missing.is_empty(), "no id for {missing:?}");
-    assert!(t.unresolved.is_empty(), "{:?}", t.unresolved);
+    // ED's `wsTypes.lua` reads an `SA2_SR` it never defines, and its
+    // `BeaconTypes.lua` requires a module the sandbox stands in for; neither
+    // reaches a table.
+    let path = "Mods/terrains/Caucasus/Beacons.lua";
+    assert_eq!(
+        t.unresolved,
+        [
+            format!("{path}: SA2_SR"),
+            format!("{path}: require(\"utils\")")
+        ]
+    );
 }
 
 /// The fit on every installed map against the table of measured rows, which
