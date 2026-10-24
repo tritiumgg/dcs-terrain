@@ -352,18 +352,44 @@ fn long_bracket(b: &[u8], i: usize) -> Option<usize> {
     (b.get(i + 1 + level) == Some(&b'[')).then_some(level)
 }
 
-/// The body of the long bracket opening at `i`, and the position past its
-/// close. A newline straight after the opening bracket is not part of it.
-fn long_body(b: &[u8], i: usize, level: usize) -> Option<(String, usize)> {
-    let mut from = i + level + 2;
-    if b[from..].starts_with(b"\r\n") {
-        from += 2;
-    } else if b.get(from) == Some(&b'\n') {
-        from += 1;
+/// Whether `c` breaks a line.
+fn is_break(c: u8) -> bool {
+    c == b'\n' || c == b'\r'
+}
+
+/// The length of the line break at the start of `b`: Lua reads `\n`, `\r`,
+/// `\r\n` and `\n\r` each as one.
+fn line_break(b: &[u8]) -> usize {
+    match b {
+        [c, d, ..] if is_break(*c) && is_break(*d) && c != d => 2,
+        [c, ..] if is_break(*c) => 1,
+        _ => 0,
     }
+}
+
+/// The body of the long bracket opening at `i`, and the position past its
+/// close. A line break straight after the opening bracket is not part of it,
+/// and each one inside it reads as `\n`.
+fn long_body(b: &[u8], i: usize, level: usize) -> Option<(String, usize)> {
+    let from = i + level + 2;
+    let from = from + line_break(&b[from..]);
     let close = [b"]".as_slice(), &vec![b'='; level], b"]"].concat();
     let n = b[from..].windows(close.len()).position(|w| w == close)?;
-    Some((lossy(&b[from..from + n]), from + n + close.len()))
+    let mut body = Vec::with_capacity(n);
+    let mut j = from;
+    while j < from + n {
+        match line_break(&b[j..from + n]) {
+            0 => {
+                body.push(b[j]);
+                j += 1;
+            }
+            k => {
+                body.push(b'\n');
+                j += k;
+            }
+        }
+    }
+    Some((lossy(&body), from + n + close.len()))
 }
 
 /// A Lua 5.1 numeral at `i`: decimal with optional fraction and exponent,
@@ -423,7 +449,11 @@ fn short_string(b: &[u8], i: usize) -> Result<(String, usize), String> {
                     b'b' => out.push(8),
                     b'f' => out.push(12),
                     b'v' => out.push(11),
-                    b'\n' => out.push(b'\n'),
+                    // A line break, in any of its forms, continues the string.
+                    b'\n' | b'\r' => {
+                        out.push(b'\n');
+                        j += line_break(&b[j - 1..]) - 1;
+                    }
                     b'0'..=b'9' => {
                         let mut n = u32::from(e - b'0');
                         for _ in 0..2 {
@@ -449,6 +479,9 @@ fn short_string(b: &[u8], i: usize) -> Result<(String, usize), String> {
     Ok((lossy(&out), j))
 }
 
+/// How many positional items Lua 5.1 holds before storing them.
+const POSITIONAL_FLUSH: usize = 50;
+
 struct Parser<'a> {
     toks: Vec<Token>,
     comments: Vec<(usize, String)>,
@@ -473,6 +506,14 @@ impl Parser<'_> {
     fn fail<T>(&self, why: impl Into<String>) -> Result<T, Error> {
         Err(Error {
             line: self.line(),
+            why: why.into(),
+        })
+    }
+
+    /// An error on `line`, for one found after its tokens were read.
+    fn fail_on<T>(&self, line: u32, why: impl Into<String>) -> Result<T, Error> {
+        Err(Error {
+            line,
             why: why.into(),
         })
     }
@@ -620,10 +661,11 @@ impl Parser<'_> {
     }
 
     fn unary(&mut self) -> Result<Value, Error> {
+        let line = self.line();
         if self.eat("-") {
             return match self.unary()? {
                 Value::Num(n) => Ok(Value::Num(-n)),
-                _ => self.fail("minus applies to a number only"),
+                _ => self.fail_on(line, "minus applies to a number only"),
             };
         }
         self.simple()
@@ -674,6 +716,7 @@ impl Parser<'_> {
         };
         let mut called = false;
         loop {
+            let line = self.line();
             match self.peek().cloned() {
                 Some(Tok::Sym(".")) => {
                     self.at += 1;
@@ -700,17 +743,17 @@ impl Parser<'_> {
                         self.expect(")")?;
                         a
                     };
-                    v = self.call(v, args)?;
+                    v = self.call(line, v, args)?;
                     called = true;
                 }
                 Some(Tok::Str(s)) => {
                     self.at += 1;
-                    v = self.call(v, vec![Value::Str(s)])?;
+                    v = self.call(line, v, vec![Value::Str(s)])?;
                     called = true;
                 }
                 Some(Tok::Sym("{")) => {
                     let t = self.table()?;
-                    v = self.call(v, vec![Value::Table(t)])?;
+                    v = self.call(line, v, vec![Value::Table(t)])?;
                     called = true;
                 }
                 _ => return Ok((v, called)),
@@ -749,7 +792,7 @@ impl Parser<'_> {
         })
     }
 
-    fn call(&mut self, f: Value, args: Vec<Value>) -> Result<Value, Error> {
+    fn call(&mut self, line: u32, f: Value, args: Vec<Value>) -> Result<Value, Error> {
         let first = args.into_iter().next().unwrap_or(Value::Nil);
         match f {
             Value::Func(Builtin::Translate) => Ok(first),
@@ -761,20 +804,20 @@ impl Parser<'_> {
                     )],
                     comment: None,
                 })),
-                Value::Str(m) => self.fail(format!("requires {m:?}, which is not read")),
-                _ => self.fail("require takes a module name"),
+                Value::Str(m) => self.fail_on(line, format!("requires {m:?}, which is not read")),
+                _ => self.fail_on(line, "require takes a module name"),
             },
             Value::Func(Builtin::Dofile) => {
                 let Value::Str(path) = first else {
-                    return self.fail("dofile takes a path");
+                    return self.fail_on(line, "dofile takes a path");
                 };
-                let defined = (self.include)(&path).or_else(|why| self.fail(why))?;
+                let defined = (self.include)(&path).or_else(|why| self.fail_on(line, why))?;
                 for (name, n) in defined {
                     self.chunk.globals.insert(name, Value::Num(n));
                 }
                 Ok(Value::Nil)
             }
-            _ => self.fail("calls something that is not a known function"),
+            _ => self.fail_on(line, "calls something that is not a known function"),
         }
     }
 
@@ -791,8 +834,18 @@ impl Parser<'_> {
             entries: Vec::new(),
             comment,
         };
-        let mut next = 1.0;
+        // Lua 5.1 stores positional items fifty at a time and at the close, so
+        // one outlasts an explicit key it shares that was written before then.
+        let mut positional: Vec<Value> = Vec::new();
+        let mut stored = 0.0;
+        let flush = |t: &mut Table, positional: &mut Vec<Value>, stored: &mut f64| {
+            for v in positional.drain(..) {
+                *stored += 1.0;
+                t.set(Key::Num(*stored), v);
+            }
+        };
         while !self.eat("}") {
+            let line = self.line();
             if self.eat("[") {
                 let k = self.expr()?;
                 self.expect("]")?;
@@ -800,7 +853,7 @@ impl Parser<'_> {
                 let v = self.expr()?;
                 match Key::of(k) {
                     Some(k) => t.set(k, v),
-                    None => return self.fail("a table key is nil or not a number"),
+                    None => return self.fail_on(line, "a table key is nil or not a number"),
                 }
             } else if let (Some(Tok::Name(n)), Some(Tok::Sym("="))) = (
                 self.peek().cloned(),
@@ -810,15 +863,17 @@ impl Parser<'_> {
                 let v = self.expr()?;
                 t.set(Key::Str(n), v);
             } else {
-                let v = self.expr()?;
-                t.set(Key::Num(next), v);
-                next += 1.0;
+                positional.push(self.expr()?);
+                if positional.len() == POSITIONAL_FLUSH {
+                    flush(&mut t, &mut positional, &mut stored);
+                }
             }
             if !self.eat(",") && !self.eat(";") {
                 self.expect("}")?;
                 break;
             }
         }
+        flush(&mut t, &mut positional, &mut stored);
         Ok(t)
     }
 }
@@ -964,6 +1019,35 @@ t.a = 1"
         assert!(fails("t = { 1, 2").why.contains("the end of the file"));
         assert!(fails("a = 'open").why.contains("never closed"));
         assert!(fails("a = 3x").why.contains("not a number"));
+    }
+
+    #[test]
+    fn an_error_found_after_a_call_names_the_calls_line() {
+        assert_eq!(fails("print('x')\nfoo = 1").line, 1);
+        assert_eq!(fails("dofile('Scripts/x.lua')\nlocal a = 1").line, 1);
+        assert_eq!(fails("t = {\n [nil] = 1,\n b = 2 }").line, 2);
+        assert_eq!(fails("t = - 'x'\nu = 1").line, 1);
+    }
+
+    #[test]
+    fn a_positional_item_outlasts_an_explicit_key_before_it_is_stored() {
+        let c = parse("a = { 'a', [1] = 'b' }\nb = { [1] = 'a', 'b' }");
+        let first = |t: &str| c.table(t).unwrap().index(1.0).cloned();
+        assert_eq!(first("a"), Some(Value::Str("a".into())));
+        assert_eq!(first("b"), Some(Value::Str("b".into())));
+        // The first fifty are stored when the fiftieth is read.
+        let fifty = vec!["0"; 50].join(", ");
+        let c = parse(&format!("t = {{ {fifty}, [1] = 9, 1 }}"));
+        let t = c.table("t").unwrap();
+        assert_eq!(t.index(1.0), Some(&Value::Num(9.0)));
+        assert_eq!(t.index(51.0), Some(&Value::Num(1.0)));
+    }
+
+    #[test]
+    fn reads_every_form_of_line_break_inside_a_string_as_one() {
+        let c = parse("a = [[\r\nx\r\ny\n\rz\rw]]\r\nb = 'p\\\r\nq'\r\n");
+        assert_eq!(c.globals["a"], Value::Str("x\ny\nz\nw".into()));
+        assert_eq!(c.globals["b"], Value::Str("p\nq".into()));
     }
 
     #[test]
