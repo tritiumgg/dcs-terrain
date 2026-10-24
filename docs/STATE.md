@@ -4,19 +4,19 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-10-24T08:25Z
+**Last updated:** 2026-10-24T21:54Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
 1. **E6: the Lua tables.** `Beacons.lua`, `Radio.lua`, `towns.lua` and
-   `nodes.lua` read as data, never run, with the constants their `dofile`d
-   scripts assign; the projection fitted to the beacons, towns put through
-   it, and airdrome ids from `Radio.lua`'s labels. *Verified by:* an agent,
-   through `mise run check`, and the opt-in checks: Caucasus beacons, radio,
-   nodes and towns equal the live extract field for field, town `x, z`
-   within 2.2 mm; the fit within 0.01 m of the measured row on all 8 maps.
+   `nodes.lua` run in a sandboxed Lua 5.1 (ADR **0047**); the projection
+   fitted to the beacons, towns put through it, and airdrome ids from
+   `Radio.lua`'s labels. *Verified by:* an agent, through `mise run check`,
+   and the opt-in checks: Caucasus beacons, radio, nodes and towns equal the
+   live extract field for field, town `x, z` within 2.2 mm; the fit within
+   0.01 m of the measured row on all 8 maps.
 2. **E5: airfields.** Nodes found by their matrix; runway ends told from
    stands by coloring each linked group, and paired by designator, then
    length; each stand's class from the `.rn5`, numbered in its own order,
@@ -79,4 +79,4 @@ Things a later task must not lose. Max 10 — `CLAUDE.md` has the rules.
 | 3 | The hook still writes v1, so `extractor/test/constants.lua` pins `FORMAT_VERSION` to 1 rather than the shared 2; restore it, and drop the fill and road-seed constants if nothing else reads them. | X15 |
 | 4 | The synthetic road network is a tree, so the junction-to-bridge edge outranks the bridge in betweenness and the contracted arms tie: "bridge has max betweenness" fails as stated. Change the layout or the test, and record which in an ADR. | C9 |
 | 5 | `Mesh::sample` tests every triangle of each block whose box holds the point, about 10 000 a block: fine for checking thousands of points, not for putting millions of road, scenery and tree positions on the ground. Index the triangles, or read heights from the written tiles, before those checks run. | E8 |
-| 6 | `lua::tables::decode` returns `included`, the shared scripts each `dofile` names (read for their constants), and `unresolved`, each name nothing assigns: put the first in the manifest's `files` and the second in `notes`. GermanyCW's `BEACON_TYPE_AIRPORT_TACAN` is defined nowhere, so that beacon's `type` is null, as in the game. | E8 |
+| 6 | `lua::tables::decode` returns `included`, the shared scripts each `dofile` ran, and `unresolved`, each name nothing assigns and each module the sandbox stood in for: put the first in the manifest's `files` and the second in `notes`. | E8 |
