@@ -258,6 +258,20 @@ impl Samples {
         (0..self.len()).map(|i| self.get(i))
     }
 
+    /// `n` samples of `dtype`, sample `i` being `f(i)`. A value outside the
+    /// dtype's range is the caller's error, and wraps.
+    pub fn from_fn(dtype: Dtype, n: usize, f: impl Fn(usize) -> i32) -> Samples {
+        match dtype {
+            Dtype::U8 => Samples::U8((0..n).map(|i| f(i) as u8).collect()),
+            Dtype::I16 => Samples::I16((0..n).map(|i| f(i) as i16).collect()),
+            Dtype::U16 => Samples::U16((0..n).map(|i| f(i) as u16).collect()),
+        }
+    }
+
+    pub fn filled(dtype: Dtype, v: i32, n: usize) -> Samples {
+        Samples::from_fn(dtype, n, |_| v)
+    }
+
     fn decode(dtype: Dtype, bytes: &[u8]) -> Samples {
         let pairs = || bytes.as_chunks::<2>().0.iter().copied();
         match dtype {
