@@ -11,6 +11,7 @@ pub mod airfield;
 pub mod assets;
 pub mod container;
 pub mod install;
+pub mod lua;
 pub mod rn4;
 pub mod rn5;
 pub mod scn5;
