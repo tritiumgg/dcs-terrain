@@ -117,6 +117,76 @@ pub fn tile(src: &impl Tiles, layer: Layer, tx: u32, tz: u32) -> Result<Samples,
     }
 }
 
+/// A rectangle of one layer's cells, read across tiles into one buffer.
+///
+/// It may reach past the grid on any side; a cell there reads as the
+/// layer's `nodata`, as a cell outside the mesh does.
+#[derive(Debug, Clone)]
+pub struct Window {
+    pub layer: Layer,
+    /// The grid row and column of the first sample.
+    pub row0: i64,
+    pub col0: i64,
+    pub rows: u32,
+    pub cols: u32,
+    /// Row-major with columns fastest, as a tile is.
+    pub data: Vec<i32>,
+}
+
+impl Window {
+    pub fn read(
+        src: &impl Tiles,
+        layer: Layer,
+        row0: i64,
+        col0: i64,
+        rows: u32,
+        cols: u32,
+    ) -> Result<Window, Failure> {
+        let g = *src.grid();
+        let mut data = vec![layer.nodata; rows as usize * cols as usize];
+        // The part of the window on the grid, as half-open grid indices.
+        let clip = |start: i64, len: u32, n: u32| {
+            (start.max(0), (start + i64::from(len)).min(i64::from(n)))
+        };
+        let (r_lo, r_hi) = clip(row0, rows, g.height);
+        let (c_lo, c_hi) = clip(col0, cols, g.width);
+        let ts = i64::from(g.tile_size);
+        let on_grid = r_lo < r_hi && c_lo < c_hi;
+        let tiles = |lo: i64, hi: i64| lo / ts..(hi - 1) / ts + 1;
+        // Each tile the window touches is read once.
+        for tx in tiles(r_lo, r_hi).take_while(|_| on_grid) {
+            for tz in tiles(c_lo, c_hi) {
+                let t = tile(src, layer, tx as u32, tz as u32)?;
+                let (r0, r1) = (r_lo.max(tx * ts), r_hi.min((tx + 1) * ts));
+                let (c0, c1) = (c_lo.max(tz * ts), c_hi.min((tz + 1) * ts));
+                for r in r0..r1 {
+                    for c in c0..c1 {
+                        let from = (r - tx * ts) * ts + (c - tz * ts);
+                        let to = (r - row0) * i64::from(cols) + (c - col0);
+                        data[to as usize] = t.get(from as usize);
+                    }
+                }
+            }
+        }
+        Ok(Window {
+            layer,
+            row0,
+            col0,
+            rows,
+            cols,
+            data,
+        })
+    }
+
+    /// The sample at a grid row and column, or `None` outside the window.
+    pub fn get(&self, row: i64, col: i64) -> Option<i32> {
+        let (r, c) = (row - self.row0, col - self.col0);
+        let inside =
+            (0..i64::from(self.rows)).contains(&r) && (0..i64::from(self.cols)).contains(&c);
+        inside.then(|| self.data[(r * i64::from(self.cols) + c) as usize])
+    }
+}
+
 fn layer_named(name: &str) -> Layer {
     layer(name).expect("a layer the format has")
 }
@@ -264,8 +334,138 @@ mod tests {
             assert_eq!(t.len(), 256 * 256);
             assert!(t.iter().all(|v| v == layer.nodata), "{}", layer.name);
         }
-        // Its neighbour is untouched.
-        assert!(src.stored(l("height"), 2, 3).unwrap().is_some());
+        // A window over its corner reads it as nodata and its neighbours as
+        // written.
+        let th = theatre();
+        for layer in crate::extract::LAYERS {
+            let w = Window::read(&src, layer, 510, 510, 4, 4).unwrap();
+            for (r, c) in cells(&w) {
+                let inside = (512..768).contains(&r) && (512..768).contains(&c);
+                let want = if inside {
+                    layer.nodata
+                } else {
+                    truth(&th, layer, r, c)
+                };
+                assert_eq!(w.get(r, c), Some(want), "{} ({r}, {c})", layer.name);
+            }
+        }
+    }
+
+    /// What the closed form says a cell of a layer holds, off the grid
+    /// included.
+    fn truth(t: &synth::Theatre, layer: Layer, row: i64, col: i64) -> i32 {
+        if row < 0 || col < 0 {
+            return layer.nodata;
+        }
+        let c = t.cell(row as u32, col as u32);
+        match layer.name {
+            "height" => i32::from(c.height),
+            "water" => i32::from(c.water),
+            "surface" => i32::from(c.surface),
+            "trees" => i32::from(c.trees),
+            _ => i32::from(c.lines),
+        }
+    }
+
+    fn cells(w: &Window) -> impl Iterator<Item = (i64, i64)> + '_ {
+        (0..i64::from(w.rows))
+            .flat_map(move |r| (0..i64::from(w.cols)).map(move |c| (w.row0 + r, w.col0 + c)))
+    }
+
+    fn assert_window(src: &impl Tiles, t: &synth::Theatre, row0: i64, col0: i64, n: u32) {
+        for layer in crate::extract::LAYERS {
+            let w = Window::read(src, layer, row0, col0, n, n).unwrap();
+            assert_eq!(w.data.len(), (n * n) as usize);
+            for (r, c) in cells(&w) {
+                assert_eq!(
+                    w.get(r, c),
+                    Some(truth(t, layer, r, c)),
+                    "{} window at ({row0}, {col0}), cell ({r}, {c})",
+                    layer.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_window_reads_across_every_tile_edge_and_corner() {
+        let (_s, x) = synth_extract();
+        let src = ExtractTiles::new(&x);
+        let t = theatre();
+        // The grid is 1400 cells a side in 6 tiles; the inner tile
+        // boundaries are at multiples of 256 up to 1280.
+        for k in 1..=5i64 {
+            // Along one boundary, away from the other.
+            assert_window(&src, &t, k * 256 - 2, 100, 4);
+            assert_window(&src, &t, 100, k * 256 - 2, 4);
+            for m in 1..=5i64 {
+                assert_window(&src, &t, k * 256 - 2, m * 256 - 2, 4);
+            }
+        }
+    }
+
+    #[test]
+    fn a_window_reads_past_every_grid_edge_and_corner_as_nodata() {
+        let (_s, x) = synth_extract();
+        let src = ExtractTiles::new(&x);
+        let t = theatre();
+        let n = i64::from(x.manifest.grid.height);
+        assert_eq!(n, i64::from(t.cells()));
+        assert_eq!(x.manifest.grid.width, x.manifest.grid.height);
+        // Four edges, four corners: the window is half off the grid. The
+        // north and east ones hang into the cells of the last tile beyond
+        // the grid, 1400 to 1535, and the corner one past the tiles too.
+        for (r, c) in [
+            (-2, 700),
+            (n - 2, 700),
+            (700, -2),
+            (700, n - 2),
+            (-2, -2),
+            (-2, n - 2),
+            (n - 2, -2),
+            (n - 2, n - 2),
+            (1534, 1534),
+        ] {
+            assert_window(&src, &t, r, c, 4);
+        }
+        for (r, c) in [(-10, -10), (-10, 700), (2000, 2000), (700, 1400)] {
+            for layer in crate::extract::LAYERS {
+                let w = Window::read(&src, layer, r, c, 5, 5).unwrap();
+                assert!(w.data.iter().all(|&v| v == layer.nodata), "({r}, {c})");
+            }
+        }
+        let empty = Window::read(&src, l("height"), 10, 10, 0, 3).unwrap();
+        assert!(empty.data.is_empty());
+        assert_eq!(empty.get(10, 10), None);
+    }
+
+    #[test]
+    fn a_window_over_the_whole_grid_matches_the_theatre() {
+        let (_s, x) = synth_extract();
+        let src = ExtractTiles::new(&x);
+        let t = theatre();
+        let n = x.manifest.grid.height + 2;
+        let windows: Vec<Window> = crate::extract::LAYERS
+            .iter()
+            .map(|&layer| Window::read(&src, layer, -1, -1, n, n).unwrap())
+            .collect();
+        for (r, c) in cells(&windows[0]) {
+            let cell = if r < 0 || c < 0 {
+                None
+            } else {
+                Some(t.cell(r as u32, c as u32))
+            };
+            let want = [
+                cell.map_or(-32768, |c| i32::from(c.height)),
+                cell.map_or(255, |c| i32::from(c.water)),
+                cell.map_or(0, |c| i32::from(c.surface)),
+                cell.map_or(65535, |c| i32::from(c.trees)),
+                cell.map_or(65535, |c| i32::from(c.lines)),
+            ];
+            for (w, want) in windows.iter().zip(want) {
+                assert_eq!(w.get(r, c), Some(want), "{} ({r}, {c})", w.layer.name);
+            }
+        }
     }
 
     #[test]
