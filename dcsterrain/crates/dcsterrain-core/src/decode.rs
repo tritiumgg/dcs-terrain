@@ -7,6 +7,7 @@
 
 use std::fmt;
 
+pub mod airfield;
 pub mod container;
 pub mod install;
 pub mod rn4;
