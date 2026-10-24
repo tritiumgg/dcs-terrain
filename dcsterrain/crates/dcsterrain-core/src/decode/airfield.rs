@@ -31,7 +31,7 @@ pub use tables::{
 /// The bytes of a node's matrix.
 pub const MATRIX_BYTES: usize = 128;
 /// A rotation entry, scaled by at most rounding.
-const UNIT: f64 = 1.0001;
+pub const UNIT: f64 = 1.0001;
 /// Where a translation may lie. No map's origin is on a runway, and no
 /// airfield is below the sea or above the highest mountains by much.
 const MIN_ABS_X_M: f64 = 1.0;
@@ -44,9 +44,10 @@ const MAX_NAME_LEN: usize = 39;
 /// More links than an airfield has nodes is bytes that are not a list.
 const MAX_LINKS: u32 = 100_000;
 
-/// The node matrix at `i`, if one is there: a rotation whose translation
-/// lies within the map, with the affine column `0, 0, 0, 1`.
-pub fn matrix_at(b: &[u8], i: usize) -> Option<[f64; 16]> {
+/// The node matrix at `i`, if one is there: no entry of its upper 3 × 3
+/// larger than `largest`, a translation within the map, and the affine
+/// column `0, 0, 0, 1`.
+pub fn matrix_at(b: &[u8], i: usize, largest: f64) -> Option<[f64; 16]> {
     if i + MATRIX_BYTES > b.len() {
         return None;
     }
@@ -62,7 +63,7 @@ pub fn matrix_at(b: &[u8], i: usize) -> Option<[f64; 16]> {
         if k % 4 == 3 {
             *v == 0.0
         } else {
-            v.abs() <= UNIT
+            v.abs() <= largest
         }
     });
     let [x, y, z] = [m[12], m[13], m[14]];
@@ -113,7 +114,7 @@ fn nodes(b: &[u8], from: usize) -> Result<Vec<Node>, Error> {
     let mut out = Vec::new();
     let mut i = from;
     while i + MATRIX_BYTES <= b.len() {
-        let Some(matrix) = matrix_at(b, i) else {
+        let Some(matrix) = matrix_at(b, i, UNIT) else {
             i += 1;
             continue;
         };
@@ -340,10 +341,19 @@ fn pair(nodes: &[Node], ends: &[u32]) -> Vec<Runway> {
     out
 }
 
+/// A class table at `at`, and where it ends. A helipad's files may list no
+/// classes, which the map-wide file never does.
+pub(super) fn class_table(b: &[u8], at: usize) -> Result<(Vec<String>, usize), Error> {
+    match u32_at(b, at) {
+        Some(0) => Ok((Vec::new(), at + 4)),
+        _ => rn4::classes(b, at),
+    }
+}
+
 /// Decodes an airfield's `.rn4`. `name` is how an error names it.
 pub fn parse(b: &[u8], name: &str) -> Result<Airfield, Error> {
     let h = rn4::header(b, name, Decoder::RoadNetwork)?;
-    let (classes, at) = rn4::classes(b, h.body())?;
+    let (classes, at) = class_table(b, h.body())?;
     let nodes = nodes(b, at)?;
     let ends = runway_ends(&nodes);
     let runways = pair(&nodes, &ends);
@@ -484,7 +494,7 @@ mod tests {
         let at = [-4800.0, 18.5, 244_600.0];
         let mut b = vec![0u8; 3];
         build::put_matrix(&mut b, &build::matrix(at, 1.0));
-        assert!(matrix_at(&b, 3).is_some());
+        assert!(matrix_at(&b, 3, UNIT).is_some());
         for (k, v) in [
             (0, 1.5),
             (3, 0.5),
@@ -497,7 +507,7 @@ mod tests {
             m[k] = v;
             let mut b = Vec::new();
             build::put_matrix(&mut b, &m);
-            assert_eq!(matrix_at(&b, 0), None, "entry {k} = {v}");
+            assert_eq!(matrix_at(&b, 0, UNIT), None, "entry {k} = {v}");
         }
     }
 

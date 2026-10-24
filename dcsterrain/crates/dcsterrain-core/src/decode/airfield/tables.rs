@@ -327,7 +327,7 @@ mod tests {
         fs::write(dir.join("Anapa.rn4"), airfield_file()).unwrap();
         fs::write(
             dir.join("ANAPA.rn5"),
-            rn5::build::file(&[(1, 1, &[], -4829.5, 244_622.0)]),
+            rn5::build::file(&[(0, 1, &[], -4829.5, 244_622.0)]),
         )
         .unwrap();
         let mut a = vec![0; 8];
