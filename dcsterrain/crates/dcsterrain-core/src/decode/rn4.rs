@@ -156,16 +156,16 @@ impl Network {
     }
 }
 
-fn u32_at(b: &[u8], at: usize) -> Option<u32> {
+pub(super) fn u32_at(b: &[u8], at: usize) -> Option<u32> {
     Some(u32::from_le_bytes(b.get(at..at + 4)?.try_into().ok()?))
 }
 
-fn f64_at(b: &[u8], at: usize) -> f64 {
+pub(super) fn f64_at(b: &[u8], at: usize) -> f64 {
     f64::from_le_bytes(b[at..at + 8].try_into().unwrap())
 }
 
 /// Reads the class table at `at`, returning it and where it ends.
-fn classes(b: &[u8], mut at: usize) -> Result<(Vec<String>, usize), Error> {
+pub(super) fn classes(b: &[u8], mut at: usize) -> Result<(Vec<String>, usize), Error> {
     let short = || malformed("the class table runs past the end of the file".into());
     let count = u32_at(b, at).ok_or_else(short)?;
     if count == 0 || count > MAX_CLASSES {
@@ -212,20 +212,24 @@ fn run(b: &[u8], q: usize, reach: &Reach) -> Option<Vec<[f64; 3]>> {
     Some((0..n as usize).map(point).collect())
 }
 
-/// Decodes a whole road network file. `name` is how an error names it.
-pub fn parse(b: &[u8], name: &str, reach: &Reach) -> Result<Network, Error> {
+/// The header of `b`, refused unless it names `want`. `name` is how an error
+/// names the file.
+pub(super) fn header(b: &[u8], name: &str, want: Decoder) -> Result<container::Header, Error> {
     let head = &b[..b.len().min(MAX_HEAD)];
     let h = container::parse(head).map_err(|e| malformed(format!("not a container: {e}")))?;
     match dispatch(name, &h) {
-        Ok(Decoder::RoadNetwork) => {}
-        Ok(d) => {
-            return Err(malformed(format!(
-                "{} version {} is read by the {d:?} decoder, not this one",
-                h.class, h.version
-            )));
-        }
-        Err(e) => return Err(malformed(e.to_string())),
+        Ok(d) if d == want => Ok(h),
+        Ok(d) => Err(malformed(format!(
+            "{} version {} is read by the {d:?} decoder, not this one",
+            h.class, h.version
+        ))),
+        Err(e) => Err(malformed(e.to_string())),
     }
+}
+
+/// Decodes a whole road network file. `name` is how an error names it.
+pub fn parse(b: &[u8], name: &str, reach: &Reach) -> Result<Network, Error> {
+    let h = header(b, name, Decoder::RoadNetwork)?;
     let (classes, mut i) = classes(b, h.body())?;
     let mut edges = Vec::new();
     // Greedy from the left: a candidate that starts inside an accepted run
