@@ -14,9 +14,9 @@ publishing one is your own call against the ED EULA.
 
 > **Not usable yet.** The specification is complete and the extractor is being
 > rebuilt to read the terrain files directly, so of the commands below only
-> `dcsterrain synth` and `dcsterrain check-extract` run today. The rest are
-> the planned interface, kept here so the shape is visible. Progress is in
-> [docs/STATE.md](docs/STATE.md).
+> `dcsterrain synth` and `dcsterrain check-extract` run today, and `pack` and
+> `check` in part. The rest are the planned interface, kept here so the shape
+> is visible. Progress is in [docs/STATE.md](docs/STATE.md).
 
 ## Requirements
 
@@ -70,7 +70,9 @@ problem with its file and exits 1 when there is one:
 dcsterrain check-extract ./extract-caucasus
 ```
 
-**Pack** the extract into a single file, then verify it:
+**Pack** the extract into a single file, then verify it. Today `pack` writes
+only the file's metadata, with no grids or tables yet, and `check` reports
+that metadata and checks nothing else (not usable yet):
 
 ```bash
 dcsterrain pack ./extract-caucasus caucasus.sqlite
