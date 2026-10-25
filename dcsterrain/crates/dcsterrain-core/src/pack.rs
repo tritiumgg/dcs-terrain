@@ -142,6 +142,10 @@ pub fn pack(dir: &Path, out: Option<&Path>, opts: &Options) -> Result<Packed, Er
         Some(p) => p.to_path_buf(),
         None => PathBuf::from(default_name(&m.theatre, &m.dcs_build, opts.cell_size)),
     };
+    if path.is_dir() {
+        let why = format!("{} is a directory, not a file to write", path.display());
+        return Err(Error::Io(io::Error::other(why)));
+    }
     if path.exists() && !opts.force {
         let differs = differs_from(&path, &rows);
         if !differs.is_empty() {
@@ -154,12 +158,11 @@ pub fn pack(dir: &Path, out: Option<&Path>, opts: &Options) -> Result<Packed, Er
     let partial = PathBuf::from(partial);
     // A crashed pack may have left one.
     let _ = fs::remove_file(&partial);
-    let written = write(&partial, &rows);
+    let written = write(&partial, &rows).and_then(|()| Ok(fs::rename(&partial, &path)?));
     if let Err(e) = written {
         let _ = fs::remove_file(&partial);
         return Err(e);
     }
-    fs::rename(&partial, &path)?;
     Ok(Packed {
         path,
         theatre: m.theatre.clone(),
@@ -450,6 +453,21 @@ mod tests {
             Error::Exists { .. }
         ));
         assert_eq!(fs::read_to_string(&foreign).unwrap(), "not a database");
+    }
+
+    #[test]
+    fn refuses_a_directory_as_the_output_and_leaves_nothing() {
+        let s = Scratch::new();
+        let dir = synth_extract(&s);
+        let out = s.0.join("taken");
+        fs::create_dir(&out).unwrap();
+        let forced = Options {
+            force: true,
+            ..Options::default()
+        };
+        let e = pack(&dir, Some(&out), &forced).unwrap_err();
+        assert!(e.to_string().contains("is a directory"), "{e}");
+        assert!(!s.0.join("taken.partial").exists());
     }
 
     #[test]
