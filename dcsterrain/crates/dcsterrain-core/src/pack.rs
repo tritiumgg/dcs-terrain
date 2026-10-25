@@ -16,7 +16,10 @@ use serde_json::Value;
 
 use crate::extract::{self, Extract, Failure};
 
+mod check;
 pub mod meta;
+
+pub use check::{Report, check};
 
 /// The packed file's own format, independent of the extract's.
 pub const FORMAT_VERSION: u32 = 1;
