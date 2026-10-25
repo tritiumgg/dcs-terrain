@@ -225,8 +225,9 @@ pub struct Tile {
     pub max: Option<f64>,
 }
 
-/// Writes a grid's row and every tile in one transaction, so a grid is in the
-/// file whole or not at all.
+/// Writes a grid's row and every tile in one transaction. With no journal a
+/// failed transaction cannot be relied on to roll back, so a failure here
+/// abandons the whole pack, whose partial file is then removed.
 pub fn write_grid(
     conn: &mut Connection,
     row: &GridRow,
@@ -279,7 +280,7 @@ fn read_config(x: &Extract) -> Result<Value, Failure> {
 }
 
 /// The `meta` keys in which the file at `path` differs from `rows`; every key
-/// when it is not a packed file at all. When it was packed and its version
+/// when it is not a packed file at all. `packed_at` and `dcsterrain_version`
 /// are not compared, so repacking the same extract replaces it, while a file
 /// stamped with validation figures is kept unless forced.
 fn differs_from(path: &Path, rows: &[(&'static str, Option<String>)]) -> Vec<String> {
@@ -471,7 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_a_grid_whole_in_one_transaction() {
+    fn writes_a_grid_row_and_its_tiles() {
         let s = Scratch::new();
         let dir = synth_extract(&s);
         let out = s.0.join("x.sqlite");
@@ -500,19 +501,20 @@ mod tests {
         };
         assert_eq!(write_grid(&mut conn, &row, [tile(0), tile(1)]).unwrap(), 2);
 
-        // A duplicate tile fails the insert, and the row before it goes too.
+        let n: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM grid_tile WHERE name = 'height'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 2);
+
+        // A duplicate tile is an error, which abandons the pack.
         let again = GridRow {
             name: "water".into(),
             ..row
         };
         assert!(write_grid(&mut conn, &again, [tile(0), tile(0)]).is_err());
-        let names: Vec<String> = conn
-            .prepare("SELECT DISTINCT name FROM grid_tile UNION SELECT name FROM grid")
-            .unwrap()
-            .query_map([], |r| r.get(0))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-        assert_eq!(names, ["height"]);
     }
 }
