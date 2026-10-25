@@ -6,6 +6,7 @@ pub mod crs;
 pub mod decode;
 pub mod extract;
 pub mod grid;
+pub mod pack;
 // Constants only for now; the generator lands beside them. Tests always see
 // the module, and a consumer that wants `dcsterrain synth` in a release build
 // asks for the feature.
