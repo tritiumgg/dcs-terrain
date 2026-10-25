@@ -146,7 +146,10 @@ impl Window {
         let mut data = vec![layer.nodata; rows as usize * cols as usize];
         // The part of the window on the grid, as half-open grid indices.
         let clip = |start: i64, len: u32, n: u32| {
-            (start.max(0), (start + i64::from(len)).min(i64::from(n)))
+            (
+                start.max(0),
+                start.saturating_add(i64::from(len)).min(i64::from(n)),
+            )
         };
         let (r_lo, r_hi) = clip(row0, rows, g.height);
         let (c_lo, c_hi) = clip(col0, cols, g.width);
@@ -463,8 +466,9 @@ mod tests {
         assert_eq!(n, i64::from(t.cells()));
         assert_eq!(x.manifest.grid.width, x.manifest.grid.height);
         // Four edges, four corners: the window is half off the grid. The
-        // north and east ones hang into the cells of the last tile beyond
-        // the grid, 1400 to 1535, and the corner one past the tiles too.
+        // north and east ones reach rows and columns 1400 to 1535, which the
+        // last tile pads past the grid and the window never reads, and the
+        // last one past the tiles too.
         for (r, c) in [
             (-2, 700),
             (n - 2, 700),
@@ -534,7 +538,7 @@ mod tests {
         assert!(f.message.contains("not all sea"), "{f}");
     }
 
-    /// A 3 by 3 grid in tiles of 2, height `10 × row + col`, all land.
+    /// A grid in tiles of 2, height `10 × row + col`, all land.
     struct Small {
         grid: Grid,
     }
@@ -546,7 +550,7 @@ mod tests {
 
         fn stored(&self, layer: Layer, tx: u32, tz: u32) -> Result<Option<Samples>, Failure> {
             let at = |i: usize| (tx * 2 + i as u32 / 2, tz * 2 + i as u32 % 2);
-            let off = |(r, c): (u32, u32)| r >= 3 || c >= 3;
+            let off = |(r, c): (u32, u32)| r >= self.grid.height || c >= self.grid.width;
             Ok(Some(Samples::from_fn(layer.dtype, 4, |i| {
                 match layer.name {
                     _ if off(at(i)) => layer.nodata,
@@ -558,14 +562,16 @@ mod tests {
         }
     }
 
-    fn small() -> Small {
+    /// Rows run with x and columns with z, so a grid that is not square
+    /// catches the two swapped.
+    fn small(height: u32, width: u32) -> Small {
         Small {
             grid: Grid {
                 cell_size: 50,
                 origin_x: -1000.0,
                 origin_z: 2000.0,
-                height: 3,
-                width: 3,
+                height,
+                width,
                 tile_size: 2,
             },
         }
@@ -573,13 +579,14 @@ mod tests {
 
     #[test]
     fn height_is_bilinear_between_cell_centres() {
-        let s = small();
+        let s = small(3, 5);
         let h = l("height");
         let at = |n: f64, e: f64| sample(&s, h, -1000.0 + n * 50.0, 2000.0 + e * 50.0).unwrap();
         // At a centre, the cell; between four, across the tile corner at
         // (2, 2), the weighted mean.
         assert_eq!(at(0.5, 0.5), Some(0.0));
         assert_eq!(at(2.5, 1.5), Some(21.0));
+        assert_eq!(at(1.5, 4.5), Some(14.0));
         assert_eq!(at(1.0, 1.0), Some(5.5));
         assert_eq!(at(2.0, 2.0), Some(16.5));
         let v = at(1.75, 2.25).unwrap();
@@ -587,16 +594,41 @@ mod tests {
         // Within half a cell of the edge the edge cell stands beyond it.
         assert_eq!(at(0.1, 1.5), Some(1.0));
         assert_eq!(at(0.01, 0.01), Some(0.0));
-        assert_eq!(at(2.99, 2.99), Some(22.0));
+        assert_eq!(at(2.99, 4.99), Some(24.0));
         assert_eq!(at(2.9, 1.0), Some(20.5));
+        assert_eq!(at(1.0, 4.9), Some(9.0));
         // Off the grid, the far edges open.
         assert_eq!(at(-0.01, 1.0), None);
+        assert_eq!(at(1.0, -0.01), None);
         assert_eq!(at(3.0, 1.0), None);
-        assert_eq!(at(1.0, 3.0), None);
+        assert_eq!(at(1.0, 5.0), None);
         assert_eq!(sample(&s, h, f64::NAN, 2000.0).unwrap(), None);
+        assert_eq!(sample(&s, h, f64::INFINITY, 2000.0).unwrap(), None);
         // Every other layer is the cell holding the point.
         let surface = sample(&s, l("surface"), -1000.0 + 75.0, 2000.0 + 75.0).unwrap();
         assert_eq!(surface, Some(1.0));
+        // One cell has no neighbour to weigh, and stands for the whole cell.
+        let one = small(1, 1);
+        for (n, e) in [(0.0, 0.0), (0.5, 0.5), (0.99, 0.2)] {
+            let v = sample(&one, h, -1000.0 + n * 50.0, 2000.0 + e * 50.0).unwrap();
+            assert_eq!(v, Some(0.0), "({n}, {e})");
+        }
+    }
+
+    #[test]
+    fn a_window_on_a_grid_that_is_not_square() {
+        let s = small(3, 5);
+        let w = Window::read(&s, l("height"), -1, -1, 5, 7).unwrap();
+        for r in -1..4i64 {
+            for c in -1..6i64 {
+                let on = (0..3).contains(&r) && (0..5).contains(&c);
+                let want = if on { (r * 10 + c) as i32 } else { -32768 };
+                assert_eq!(w.get(r, c), Some(want), "({r}, {c})");
+            }
+        }
+        // A window so far out its end would overflow reads nothing.
+        let far = Window::read(&s, l("height"), i64::MAX - 1, 0, 4, 4).unwrap();
+        assert!(far.data.iter().all(|&v| v == -32768));
     }
 
     #[test]
@@ -638,5 +670,49 @@ mod tests {
         assert!(trees > 0.0);
         assert_eq!(at("trees", 810.9, 1110.1), Some(trees));
         assert_eq!(at("trees", 100.5, 100.5), Some(0.0));
+    }
+
+    /// One 2 by 2 tile at (0, 0) of whichever layers are given.
+    struct Sparse(Vec<(&'static str, Samples)>, Grid);
+
+    impl Tiles for Sparse {
+        fn grid(&self) -> &Grid {
+            &self.1
+        }
+
+        fn stored(&self, layer: Layer, tx: u32, tz: u32) -> Result<Option<Samples>, Failure> {
+            let here = (tx, tz) == (0, 0);
+            let found = self.0.iter().find(|(n, _)| here && *n == layer.name);
+            Ok(found.map(|(_, s)| s.clone()))
+        }
+    }
+
+    #[test]
+    fn each_absent_rule_stands_on_the_water_tile_alone() {
+        let grid = small(2, 2).grid;
+        let water = |v: [u8; 4]| ("water", Samples::U8(v.to_vec()));
+        // A water tile with no covered cell is never written, but read one
+        // stands for no sea and no count.
+        let none = Sparse(vec![water([255; 4])], grid);
+        assert!(tile(&none, l("height"), 0, 0).is_err());
+        assert!(tile(&none, l("surface"), 0, 0).is_err());
+        let trees = tile(&none, l("trees"), 0, 0).unwrap();
+        assert_eq!(trees, Samples::U16(vec![65535; 4]));
+        // Sea beside a cell off the mesh is not all sea.
+        let edge = Sparse(vec![water([2, 2, 2, 255])], grid);
+        assert!(tile(&edge, l("height"), 0, 0).is_err());
+        let lines = tile(&edge, l("lines"), 0, 0).unwrap();
+        assert_eq!(lines, Samples::U16(vec![0, 0, 0, 65535]));
+        // A written tile is read as written, whatever the water tile says.
+        let height = ("height", Samples::I16(vec![7; 4]));
+        let alone = Sparse(vec![height], grid);
+        assert_eq!(
+            tile(&alone, l("height"), 0, 0).unwrap(),
+            Samples::I16(vec![7; 4])
+        );
+        assert_eq!(
+            tile(&alone, l("water"), 0, 0).unwrap(),
+            Samples::U8(vec![255; 4])
+        );
     }
 }
