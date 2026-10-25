@@ -189,6 +189,78 @@ fn write(path: &Path, rows: &[(&'static str, Option<String>)]) -> Result<(), Err
     Ok(())
 }
 
+/// One `grid` row.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GridRow {
+    pub name: String,
+    pub cell_size: f64,
+    pub origin_x: f64,
+    pub origin_z: f64,
+    pub width: u32,
+    pub height: u32,
+    pub dtype: String,
+    pub tile_size: u32,
+    pub nodata: String,
+    pub unit: String,
+    /// The grid this one is computed from at query time, with no tiles.
+    pub derived_from: Option<String>,
+    /// The parameters that produced the grid, as a JSON object.
+    pub params: Value,
+}
+
+/// One stored tile: raw little-endian samples, row-major.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Tile {
+    pub tx: u32,
+    pub tz: u32,
+    pub data: Vec<u8>,
+    /// Over the samples that are not nodata; `None` when every one is.
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+}
+
+/// Writes a grid's row and every tile in one transaction, so a grid is in the
+/// file whole or not at all.
+pub fn write_grid(
+    conn: &mut Connection,
+    row: &GridRow,
+    tiles: impl IntoIterator<Item = Tile>,
+) -> rusqlite::Result<usize> {
+    let tx = conn.transaction()?;
+    tx.execute(
+        "INSERT INTO grid(name, cell_size, origin_x, origin_z, width, height, dtype,
+           tile_size, nodata, unit, derived_from, params)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        params![
+            row.name,
+            row.cell_size,
+            row.origin_x,
+            row.origin_z,
+            row.width,
+            row.height,
+            row.dtype,
+            row.tile_size,
+            row.nodata,
+            row.unit,
+            row.derived_from,
+            row.params.to_string(),
+        ],
+    )?;
+    let mut n = 0;
+    {
+        let mut insert = tx.prepare(
+            "INSERT INTO grid_tile(name, tx, tz, data, min_val, max_val)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )?;
+        for t in tiles {
+            insert.execute(params![row.name, t.tx, t.tz, t.data, t.min, t.max])?;
+            n += 1;
+        }
+    }
+    tx.commit()?;
+    Ok(n)
+}
+
 fn read_config(x: &Extract) -> Result<Value, Failure> {
     let name = x
         .manifest
@@ -375,5 +447,51 @@ mod tests {
             Error::Exists { .. }
         ));
         assert_eq!(fs::read_to_string(&foreign).unwrap(), "not a database");
+    }
+
+    #[test]
+    fn writes_a_grid_whole_in_one_transaction() {
+        let s = Scratch::new();
+        let dir = synth_extract(&s);
+        let out = s.0.join("x.sqlite");
+        pack(&dir, Some(&out), &Options::default()).unwrap();
+        let mut conn = Connection::open(&out).unwrap();
+        let row = GridRow {
+            name: "height".into(),
+            cell_size: 50.0,
+            origin_x: 0.0,
+            origin_z: 0.0,
+            width: 128,
+            height: 64,
+            dtype: "i16".into(),
+            tile_size: TILE_SIZE,
+            nodata: "-32768".into(),
+            unit: "m".into(),
+            derived_from: None,
+            params: serde_json::json!({}),
+        };
+        let tile = |tz| Tile {
+            tx: 0,
+            tz,
+            data: vec![0; 64 * 64 * 2],
+            min: Some(0.0),
+            max: Some(0.0),
+        };
+        assert_eq!(write_grid(&mut conn, &row, [tile(0), tile(1)]).unwrap(), 2);
+
+        // A duplicate tile fails the insert, and the row before it goes too.
+        let again = GridRow {
+            name: "water".into(),
+            ..row
+        };
+        assert!(write_grid(&mut conn, &again, [tile(0), tile(0)]).is_err());
+        let names: Vec<String> = conn
+            .prepare("SELECT DISTINCT name FROM grid_tile UNION SELECT name FROM grid")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(names, ["height"]);
     }
 }
