@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use dcsterrain_core::synth;
+use dcsterrain_core::{pack, synth};
 use tracing::Level;
 
 #[derive(Parser)]
@@ -57,8 +57,8 @@ enum Command {
         /// Grids to leave out, comma-separated.
         #[arg(long, value_delimiter = ',')]
         drop: Vec<String>,
-        /// The packed base cell size in metres.
-        #[arg(long, default_value_t = 50)]
+        /// The packed base cell size in metres, 50 or 100.
+        #[arg(long, default_value_t = pack::DEFAULT_CELL_SIZE)]
         cell_size: u32,
         #[arg(long)]
         allow_partial: bool,
@@ -162,8 +162,37 @@ fn main() -> ExitCode {
         },
         Command::Extract { .. } => not_yet("extract"),
         Command::CheckExtract { dir } => run_check_extract(&dir),
-        Command::Pack { .. } => not_yet("pack"),
-        Command::Check { .. } => not_yet("check"),
+        Command::Pack {
+            dir,
+            out,
+            config,
+            drop,
+            cell_size,
+            allow_partial,
+            allow_crs_residual,
+            betweenness_samples,
+            threads,
+            force,
+            json,
+        } => {
+            let unbuilt = [
+                ("--config", config.is_some()),
+                ("--drop", !drop.is_empty()),
+                ("--allow-partial", allow_partial),
+                ("--allow-crs-residual", allow_crs_residual),
+                ("--betweenness-samples", betweenness_samples.is_some()),
+                ("--threads", threads.is_some()),
+                ("--json", json),
+            ];
+            match unbuilt.iter().find(|u| u.1) {
+                Some((flag, _)) => not_yet(&format!("pack {flag}")),
+                None => run_pack(&dir, out.as_deref(), cell_size, force),
+            }
+        }
+        Command::Check { file, install } => match install {
+            Some(_) => not_yet("check --install"),
+            None => run_check(&file),
+        },
         Command::Stamp { .. } => not_yet("stamp"),
         Command::Query { .. } => not_yet("query"),
         Command::Serve { .. } => not_yet("serve"),
@@ -226,6 +255,64 @@ fn run_check_extract(dir: &Path) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn run_pack(dir: &Path, out: Option<&Path>, cell_size: u32, force: bool) -> ExitCode {
+    let opts = pack::Options { cell_size, force };
+    match pack::pack(dir, out, &opts) {
+        Ok(p) => {
+            println!(
+                "{}: packed {} on DCS {} at {} m, {} grids",
+                p.path.display(),
+                p.theatre,
+                p.dcs_build,
+                p.cell_size,
+                p.grids
+            );
+            ExitCode::SUCCESS
+        }
+        Err(pack::Error::Extract(failures)) => {
+            for f in &failures {
+                println!("{f}");
+            }
+            tracing::error!(
+                "{} cannot be packed: {} problems, each listed with its path",
+                dir.display(),
+                failures.len()
+            );
+            ExitCode::FAILURE
+        }
+        Err(e) => {
+            tracing::error!("{e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_check(file: &Path) -> ExitCode {
+    let report = match pack::check(file) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    for (k, v) in &report.meta {
+        println!("{k} = {}", v.as_deref().unwrap_or("NULL"));
+    }
+    if report.passes() {
+        tracing::info!("{} passes", file.display());
+        return ExitCode::SUCCESS;
+    }
+    for f in &report.failures {
+        println!("{f}");
+    }
+    tracing::error!(
+        "{} fails: {} problems",
+        file.display(),
+        report.failures.len()
+    );
+    ExitCode::FAILURE
 }
 
 fn not_yet(name: &str) -> ExitCode {
