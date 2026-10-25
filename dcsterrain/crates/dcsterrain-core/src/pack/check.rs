@@ -85,9 +85,9 @@ pub fn check(path: &Path) -> Result<Report, String> {
     }
     for k in NUMERIC {
         if let Some(Some(v)) = get(k)
-            && v.parse::<f64>().is_err()
+            && !v.parse::<f64>().is_ok_and(f64::is_finite)
         {
-            failures.push(format!("meta {k} is {v:?}, not a number"));
+            failures.push(format!("meta {k} is {v:?}, not a finite number"));
         }
     }
     if let Some(Some(v)) = get("format_version")
@@ -179,6 +179,10 @@ mod tests {
             (
                 "UPDATE meta SET value = 'wide' WHERE key = 'grid_width'",
                 "grid_width is \"wide\"",
+            ),
+            (
+                "UPDATE meta SET value = 'NaN' WHERE key = 'grid_origin_x'",
+                "grid_origin_x is \"NaN\"",
             ),
             (
                 "UPDATE meta SET value = '2' WHERE key = 'format_version'",
