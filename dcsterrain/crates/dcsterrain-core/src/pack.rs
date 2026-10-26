@@ -20,6 +20,7 @@ mod check;
 mod describe;
 pub mod grids;
 pub mod meta;
+pub mod tables;
 
 pub use check::{Report, check};
 pub use describe::describe;
@@ -201,6 +202,7 @@ fn write(
     }
     tx.commit()?;
     let grids = grids::write_base(&mut conn, x, cell_size)?;
+    tables::write(&mut conn, x)?;
     // Lays every tile's overflow pages out contiguously, so a window read is
     // a short sequential run.
     conn.execute_batch("VACUUM")?;
@@ -379,7 +381,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_the_pragmas_schema_meta_and_base_grids() {
+    fn writes_the_pragmas_schema_meta_grids_and_tables() {
         let s = Scratch::new();
         let dir = synth_extract(&s);
         let out = s.0.join("synth.sqlite");
@@ -400,7 +402,16 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        assert_eq!(tables, ["grid", "grid_tile", "meta"]);
+        let mut want = vec!["grid", "grid_tile", "meta"];
+        want.extend(tables::VECTOR);
+        want.sort_unstable();
+        let ours: Vec<&str> = tables
+            .iter()
+            .map(String::as_str)
+            // The R-tree keeps its nodes in shadow tables of its own.
+            .filter(|t| !t.starts_with("poi_idx"))
+            .collect();
+        assert_eq!(ours, want);
         let n: i64 = conn
             .query_row("SELECT count(*) FROM grid", [], |r| r.get(0))
             .unwrap();
