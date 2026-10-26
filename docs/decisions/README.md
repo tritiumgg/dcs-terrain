@@ -59,6 +59,7 @@ disagree, the later accepted one wins, and the earlier is marked
 | [0045](0045-an-instance-id-s-index-width-follows-the-largest-node.md) | Accepted | 2026-10-23 | An instance id's index width follows the largest node, not the version | ADR 0035 Context; ADR 0039 "scenery.jsonl"; `plan.md` E4 |
 | [0046](0046-a-named-node-is-a-stand-only-when-its-class-has-a-stand-record.md) | Accepted | 2026-10-24 | A named node is a stand only when its class has a stand record | ADR 0039 "stands.json"; `extract-format.md` "stands.json"; `plan.md` E5, C5c |
 | [0047](0047-the-map-s-lua-files-run-in-a-sandboxed-lua-5-1.md) | Accepted | 2026-10-24 | The map's Lua files run in a sandboxed Lua 5.1 | ADR 0039 "beacons.json", "towns.json"; `extract-format.md` "towns.json", "nodes.json"; `extractor-hook.md` "Hook-pass sweeps"; `plan.md` E6 |
+| [0048](0048-a-coarse-cell-takes-the-largest-code-and-the-mean-of-its-covered-cells.md) | Accepted | 2026-10-25 | A coarse cell takes the largest code and the mean of its covered cells | `core.md` "Grids"; ADRs 0011, 0036; `plan.md` C5b |
 
 Add a row when you add an ADR. This table is the index Claude reads, so an ADR
 missing from it will not be found. Each record's own `Affects` line, at the top
