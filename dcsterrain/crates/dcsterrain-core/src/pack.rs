@@ -225,14 +225,15 @@ pub struct Tile {
     pub max: Option<f64>,
 }
 
-/// Writes a grid's row and every tile in one transaction. With no journal a
-/// failed transaction cannot be relied on to roll back, so a failure here
+/// Writes a grid's row and every tile in one transaction, the tiles made as
+/// they are written. With no journal a failed transaction cannot be relied
+/// on to roll back, so a failure here, in SQLite or in making a tile,
 /// abandons the whole pack, whose partial file is then removed.
-pub fn write_grid(
+pub fn write_grid<E: From<rusqlite::Error>>(
     conn: &mut Connection,
     row: &GridRow,
-    tiles: impl IntoIterator<Item = Tile>,
-) -> rusqlite::Result<usize> {
+    tiles: impl IntoIterator<Item = Result<Tile, E>>,
+) -> Result<usize, E> {
     let tx = conn.transaction()?;
     tx.execute(
         "INSERT INTO grid(name, cell_size, origin_x, origin_z, width, height, dtype,
@@ -260,6 +261,7 @@ pub fn write_grid(
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )?;
         for t in tiles {
+            let t = t?;
             insert.execute(params![row.name, t.tx, t.tz, t.data, t.min, t.max])?;
             n += 1;
         }
@@ -492,12 +494,14 @@ mod tests {
             derived_from: None,
             params: serde_json::json!({}),
         };
-        let tile = |tz| Tile {
-            tx: 0,
-            tz,
-            data: vec![0; 64 * 64 * 2],
-            min: Some(0.0),
-            max: Some(0.0),
+        let tile = |tz| {
+            Ok::<_, rusqlite::Error>(Tile {
+                tx: 0,
+                tz,
+                data: vec![0; 64 * 64 * 2],
+                min: Some(0.0),
+                max: Some(0.0),
+            })
         };
         assert_eq!(write_grid(&mut conn, &row, [tile(0), tile(1)]).unwrap(), 2);
 
