@@ -86,17 +86,7 @@ pub fn write_base(conn: &mut Connection, x: &Extract, cell_size: u32) -> Result<
                         if layer.name == "water" {
                             *k = kind(s);
                         }
-                        match *k {
-                            Kind::Off => false,
-                            // Only where the reader rebuilds it exactly: a
-                            // coarse cell is sea with land in it.
-                            Kind::Sea => {
-                                layer.name == "water"
-                                    || !omit_sea
-                                    || s.iter().any(|&v| v != sea(layer))
-                            }
-                            Kind::Mixed => true,
-                        }
+                        is_stored(*k, layer, omit_sea, s)
                     })
                     .map(|(tx, tz, s)| Ok(encode(layer, tx, tz, &s)))
                     .collect(),
@@ -174,6 +164,17 @@ fn reduce(layer: Layer, vals: impl Iterator<Item = i32>) -> i32 {
     }
     // floor(sum / n + 0.5), exactly.
     (2 * sum + n).div_euclid(2 * n) as i32
+}
+
+/// Whether a layer's tile is stored, given what its `water` tile is.
+fn is_stored(k: Kind, layer: Layer, omit_sea: bool, s: &[i32]) -> bool {
+    match k {
+        Kind::Off => false,
+        // Only where the reader rebuilds it exactly: a coarse cell is sea
+        // with land in it.
+        Kind::Sea => layer.name == "water" || !omit_sea || s.iter().any(|&v| v != sea(layer)),
+        Kind::Mixed => true,
+    }
 }
 
 /// What a reader puts in a sea tile's place.
@@ -471,6 +472,28 @@ mod tests {
                 assert!(t.iter().all(|v| v == l(name).nodata), "{name}");
             }
         }
+    }
+
+    #[test]
+    fn a_sea_tile_is_left_out_only_where_the_reader_rebuilds_it() {
+        let (h, w, s) = (l("height"), l("water"), l("surface"));
+        assert_eq!(kind(&[2, 2, 2, 2]), Kind::Sea);
+        assert_eq!(kind(&[255, 255, 255, 255]), Kind::Off);
+        assert_eq!(kind(&[2, 2, 2, 255]), Kind::Mixed);
+        assert_eq!(kind(&[2, 0, 2, 2]), Kind::Mixed);
+        for omit in [true, false] {
+            assert!(is_stored(Kind::Sea, w, omit, &[2; 4]));
+            assert!(!is_stored(Kind::Off, w, omit, &[255; 4]));
+            assert!(is_stored(Kind::Mixed, h, omit, &[0; 4]));
+            // A coarse cell that is sea with land among its four keeps its
+            // mean height.
+            assert!(is_stored(Kind::Sea, h, omit, &[0, 0, 3, 0]));
+            assert!(is_stored(Kind::Sea, s, omit, &[3, 3, 1, 3]));
+        }
+        assert!(!is_stored(Kind::Sea, h, true, &[0; 4]));
+        assert!(!is_stored(Kind::Sea, s, true, &[3; 4]));
+        assert!(is_stored(Kind::Sea, h, false, &[0; 4]));
+        assert!(is_stored(Kind::Sea, s, false, &[3; 4]));
     }
 
     #[test]
