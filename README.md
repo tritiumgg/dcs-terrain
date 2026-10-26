@@ -71,8 +71,9 @@ dcsterrain check-extract ./extract-caucasus
 ```
 
 **Pack** the extract into a single file, then verify it. Today `pack` writes
-only the file's metadata, with no grids or tables yet, and `check` reports
-that metadata and checks nothing else (not usable yet):
+the metadata and the height, water and surface grids, with no derived grids
+or tables yet, and `check` reports the metadata and checks nothing else
+(not usable yet):
 
 ```bash
 dcsterrain pack ./extract-caucasus caucasus.sqlite
