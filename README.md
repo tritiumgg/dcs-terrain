@@ -71,8 +71,9 @@ dcsterrain check-extract ./extract-caucasus
 ```
 
 **Pack** the extract into a single file, then verify it. Today `pack` writes
-the metadata and the height, water and surface grids, with no derived grids
-or tables yet, and `check` reports the metadata and checks nothing else
+the metadata, the height, water and surface grids, and the airfield, beacon,
+radio, town and node tables, with no derived grids, scenery or roads yet, and
+`check` reports the metadata and checks nothing else
 (not usable yet):
 
 ```bash
