@@ -56,17 +56,21 @@ pub fn nearest(path: &Path, req: &NearestRequest) -> Result<NearestResponse, Str
             .iter()
             .map(|b| b as &dyn rusqlite::ToSql)
             .chain(kinds.iter().map(|k| k as &dyn rusqlite::ToSql));
-        let mut found: Vec<Nearby> = boxed
+        let mut found: Vec<(i64, Nearby)> = boxed
             .query_map(params_from_iter(args), |r| {
                 let (x, z): (f64, f64) = (r.get(3)?, r.get(4)?);
-                Ok(Nearby {
-                    id: r.get::<_, i64>(0)?.to_string(),
-                    kind: r.get(1)?,
-                    name: r.get(2)?,
-                    x,
-                    z,
-                    distance: (x - req.x).hypot(z - req.z),
-                })
+                let id: i64 = r.get(0)?;
+                Ok((
+                    id,
+                    Nearby {
+                        id: id.to_string(),
+                        kind: r.get(1)?,
+                        name: r.get(2)?,
+                        x,
+                        z,
+                        distance: (x - req.x).hypot(z - req.z),
+                    },
+                ))
             })
             .and_then(Iterator::collect)
             .map_err(fail)?;
@@ -74,12 +78,12 @@ pub fn nearest(path: &Path, req: &NearestRequest) -> Result<NearestResponse, Str
         // A row in the box's corner may be farther than one just outside its
         // side, so only those within the inscribed circle are certain.
         if !all {
-            found.retain(|n| n.distance <= reach);
+            found.retain(|(_, n)| n.distance <= reach);
         }
         if all || found.len() >= want {
-            found.sort_by(|a, b| a.distance.total_cmp(&b.distance).then(a.id.cmp(&b.id)));
+            found.sort_by(|(ia, a), (ib, b)| a.distance.total_cmp(&b.distance).then(ia.cmp(ib)));
             found.truncate(want);
-            break found;
+            break found.into_iter().map(|(_, n)| n).collect();
         }
         reach *= 2.0;
     };
@@ -218,6 +222,32 @@ mod tests {
                 assert_eq!(got, all[..2], "from {x}, {z}");
             }
         }
+    }
+
+    /// A town in the first box's corner is farther than one just past its
+    /// side, so the search must not stop at the box.
+    #[test]
+    fn a_row_past_the_box_side_beats_one_in_its_corner() {
+        let s = Scratch::new();
+        let dir = s.0.join("extract");
+        let t = synth::Theatre::new(synth::DEFAULT_SEED, synth::DEFAULT_SIZE_KM, 50).unwrap();
+        synth::write(&t, &dir).unwrap();
+        let (x, z) = (1000.0, 2000.0);
+        let town = |name: &str, dx: f64, dz: f64| {
+            serde_json::json!({"name": name, "display_name": name, "lat": 0, "lon": 0,
+                "x": x + dx, "z": z + dz})
+        };
+        let near = FIRST_REACH_M * 0.95;
+        let towns = serde_json::json!([
+            town("CORNER", near, near),
+            town("SIDE", FIRST_REACH_M * 1.05, 0.0),
+            town("FAR", 30_000.0, 30_000.0),
+        ]);
+        fs::write(dir.join("towns.json"), towns.to_string()).unwrap();
+        let out = s.0.join("x.sqlite");
+        pack(&dir, Some(&out), &Options::default()).unwrap();
+        let r = nearest(&out, &req(NearestKind::Town, x, z, 1)).unwrap();
+        assert_eq!(r.results[0].name.as_deref(), Some("SIDE"));
     }
 
     #[test]
