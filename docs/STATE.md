@@ -4,55 +4,55 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-10-25T05:08Z
+**Last updated:** 2026-10-26T03:30Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **C5a: the `pack` skeleton.** `pack` writes `meta`, `grid` and
+1. **C5b: the base grids.** `water`, `height` and `surface` re-tiled to 64
+   with per-tile min and max; a tile off the mesh stored in no grid, an
+   all-sea one only as `water`. At 100 m ADR **0048** makes a cell from its
+   four: the mean height and the largest code of the covered ones. A minimal
+   `pack::describe` reads `meta` and `grid`. *Verified by:* an agent, through
+   `mise run check`: every packed cell against the closed form at 50 and
+   100 m, and `describe` against the manifest at both.
+2. **C5a: the `pack` skeleton.** `pack` writes `meta`, `grid` and
    `grid_tile` at 8 KiB pages with no journal, each grid in one
    transaction, then `VACUUM`, under a `.partial` name renamed into place;
    `meta` carries ADR 0008's keys and ADR 0039's fill. `check` reports
    every `meta` key, NULLs included. *Verified by:* an agent, through
    `mise run check`: the synthetic extract packs at 50 and 100 m and passes.
-2. **C4: the `grid` module.** Cell and tile addressing; `Window` reads a
+3. **C4: the `grid` module.** Cell and tile addressing; `Window` reads a
    rectangle across tiles and past the grid, off-grid cells `nodata`;
    `sample` bilinear on `height`, `None` where a weighted corner is
    `nodata`, nearest elsewhere; unwritten tiles rebuilt by ADR 0039's
    three rules. *Verified by:* an agent, through `mise run check`: windows
    at every tile and grid edge and corner, the whole grid against the
    closed form, and an off-mesh tile from a hand-edited manifest.
-3. **E6: the Lua tables.** `Beacons.lua`, `Radio.lua`, `towns.lua` and
+4. **E6: the Lua tables.** `Beacons.lua`, `Radio.lua`, `towns.lua` and
    `nodes.lua` run in a sandboxed Lua 5.1 (ADR **0047**); the projection
    fitted to the beacons, towns put through it, and airdrome ids from
    `Radio.lua`'s labels. *Verified by:* an agent, through `mise run check`,
    and the opt-in checks: Caucasus beacons, radio, nodes and towns equal the
    live extract field for field, town `x, z` within 2.2 mm; the fit within
    0.01 m of the measured row on all 8 maps.
-4. **E5: airfields.** Nodes found by their matrix; runway ends told from
+5. **E5: airfields.** Nodes found by their matrix; runway ends told from
    stands by coloring each linked group, and paired by designator, then
    length; each stand's class from the `.rn5`, numbered in its own order,
    and its parameters from `assets.assets`. ADR **0046** writes a named
    node as a stand only when its class has a stand record. *Verified by:*
    an agent, through `mise run check`, and the opt-in checks: Caucasus
    900/900 stands on every parameter and 21/21 runways, bit-exact.
-5. **E4: the `scn5` scene decoder.** Model table, nodes, group and pools
-   found; every pooled instance walked in id order; `scenery.jsonl`,
-   `scenery_models.json` and the `trees` and `lines` tiles written: Caucasus
-   in 5 s. ADR **0045** sets the id shift by the largest node, not the
-   version. *Verified by:* an agent, through `mise run check`, and the
-   opt-in checks: Caucasus and Nevada objects equal the reference decode row
-   for row; 87.9 % of Nevada's runway lights within 2°; all eight maps walk.
 
 ## Next
 
 One task. The thing to pick up immediately.
 
-**C5b / C5c** — the packed file's base grids and tables. C5b re-tiles
-through `grid` and writes each grid with `pack::write_grid`; C5c creates
-its own tables, which the skeleton leaves out. *Verified by:* an agent,
-through `mise run check`, on the synthetic extract; no DCS needed.
+**C5c** — the packed file's vector tables from the extract's JSON, and
+their R-trees, each table created by C5c itself since the skeleton leaves
+them out; `pack::describe` then fills `row_counts`. *Verified by:* an
+agent, through `mise run check`, on the synthetic extract; no DCS needed.
 
 ## Then
 
