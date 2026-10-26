@@ -4,65 +4,63 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `decisions/` holds what has diverged from the frozen documents.
 
-**Last updated:** 2026-10-26T03:30Z
+**Last updated:** 2026-10-26T05:00Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **C5b: the base grids.** `water`, `height` and `surface` re-tiled to 64
+1. **C5c: the vector tables.** `airdrome`, `runway`, `stand`, `beacon`,
+   `radio` and `poi` from the extract's JSON, with the `poi_idx` R-tree; ADR
+   **0049** keys an airdrome by `name_id`. `describe` fills `row_counts`;
+   `pack::nearest` answers `town` and `node` only. *Verified by:* an agent,
+   through `mise run check`: row and R-tree counts against the extract,
+   `nearest` against a brute-force scan.
+2. **C5b: the base grids.** `water`, `height` and `surface` re-tiled to 64
    with per-tile min and max; a tile off the mesh stored in no grid, an
    all-sea one only as `water`. At 100 m ADR **0048** makes a cell from its
    four: the mean height and the largest code of the covered ones. A minimal
    `pack::describe` reads `meta` and `grid`. *Verified by:* an agent, through
    `mise run check`: every packed cell against the closed form at 50 and
    100 m, and `describe` against the manifest at both.
-2. **C5a: the `pack` skeleton.** `pack` writes `meta`, `grid` and
+3. **C5a: the `pack` skeleton.** `pack` writes `meta`, `grid` and
    `grid_tile` at 8 KiB pages with no journal, each grid in one
    transaction, then `VACUUM`, under a `.partial` name renamed into place;
    `meta` carries ADR 0008's keys and ADR 0039's fill. `check` reports
    every `meta` key, NULLs included. *Verified by:* an agent, through
    `mise run check`: the synthetic extract packs at 50 and 100 m and passes.
-3. **C4: the `grid` module.** Cell and tile addressing; `Window` reads a
+4. **C4: the `grid` module.** Cell and tile addressing; `Window` reads a
    rectangle across tiles and past the grid, off-grid cells `nodata`;
    `sample` bilinear on `height`, `None` where a weighted corner is
    `nodata`, nearest elsewhere; unwritten tiles rebuilt by ADR 0039's
    three rules. *Verified by:* an agent, through `mise run check`: windows
    at every tile and grid edge and corner, the whole grid against the
    closed form, and an off-mesh tile from a hand-edited manifest.
-4. **E6: the Lua tables.** `Beacons.lua`, `Radio.lua`, `towns.lua` and
+5. **E6: the Lua tables.** `Beacons.lua`, `Radio.lua`, `towns.lua` and
    `nodes.lua` run in a sandboxed Lua 5.1 (ADR **0047**); the projection
    fitted to the beacons, towns put through it, and airdrome ids from
    `Radio.lua`'s labels. *Verified by:* an agent, through `mise run check`,
    and the opt-in checks: Caucasus beacons, radio, nodes and towns equal the
    live extract field for field, town `x, z` within 2.2 mm; the fit within
    0.01 m of the measured row on all 8 maps.
-5. **E5: airfields.** Nodes found by their matrix; runway ends told from
-   stands by coloring each linked group, and paired by designator, then
-   length; each stand's class from the `.rn5`, numbered in its own order,
-   and its parameters from `assets.assets`. ADR **0046** writes a named
-   node as a stand only when its class has a stand record. *Verified by:*
-   an agent, through `mise run check`, and the opt-in checks: Caucasus
-   900/900 stands on every parameter and 21/21 runways, bit-exact.
 
 ## Next
 
 One task. The thing to pick up immediately.
 
-**C5c** — the packed file's vector tables from the extract's JSON, and
-their R-trees, each table created by C5c itself since the skeleton leaves
-them out; `pack::describe` then fills `row_counts`. *Verified by:* an
-agent, through `mise run check`, on the synthetic extract; no DCS needed.
+**C8** — scenery classification: rules over `scenery_models.json`, the
+`scenery` table and the catalogue report. *Verified by:* an agent, through
+`mise run check`, on the synthetic extract; no DCS needed.
 
 ## Then
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **C8** — scenery classification from the model boxes.
-2. **E7** — forest and built-up polygons from the mesh's materials.
-3. **E8** — `dcsterrain extract` runs the decoders and writes the extract.
-4. **C10** — `pack` checks `latlon_samples` against the extract's `crs`.
-5. **C6** — `derive` `valid`, `tpi_2000` and the query-time window layers.
+1. **E7** — forest and built-up polygons from the mesh's materials.
+2. **E8** — `dcsterrain extract` runs the decoders and writes the extract.
+3. **C10** — `pack` checks `latlon_samples` against the extract's `crs`.
+4. **C6** — `derive` `valid`, `tpi_2000` and the query-time window layers.
+5. **C9** — the road graph from the network's own edges and nodes, contracted.
 
 Milestone in view: **MS1 Packed file**. Proof is `pack` and `check` passing
 on the synthetic extract, and every decoder passing its opt-in checks on
