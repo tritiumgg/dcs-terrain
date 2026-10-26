@@ -57,19 +57,21 @@ fn airdromes(tx: &Transaction, x: &Extract) -> Result<(), Error> {
     )?;
     for r in rows(x, "airdromes")?.iter() {
         let name_id = r.text("name_id")?.ok_or_else(|| r.bad("name_id", "null"))?;
-        insert.execute(params![
-            r.int("id")?,
-            name_id,
-            r.text("code")?,
-            r.text("display_name")?,
-            r.num("x")?,
-            r.num("z")?,
-            r.num("lat")?,
-            r.num("lon")?,
-            r.flag("civilian")?,
-            r.flag("abandoned")?,
-            r.text("class")?,
-        ])?;
+        insert
+            .execute(params![
+                r.int("id")?,
+                name_id,
+                r.text("code")?,
+                r.text("display_name")?,
+                r.num("x")?,
+                r.num("z")?,
+                r.num("lat")?,
+                r.num("lon")?,
+                r.flag("civilian")?,
+                r.flag("abandoned")?,
+                r.text("class")?,
+            ])
+            .map_err(|e| r.sql(e))?;
     }
     Ok(())
 }
@@ -90,17 +92,19 @@ fn runways(tx: &Transaction, x: &Extract) -> Result<(), Error> {
             (Some(x1), Some(z1), Some(x2), Some(z2)) => Some((x2 - x1).hypot(z2 - z1)),
             _ => None,
         };
-        insert.execute(params![
-            r.int("airdrome_id")?,
-            r.text("airdrome_name_id")?,
-            r.text("name")?,
-            ends.0,
-            ends.1,
-            ends.2,
-            ends.3,
-            r.num("course")?,
-            length,
-        ])?;
+        insert
+            .execute(params![
+                r.int("airdrome_id")?,
+                r.text("airdrome_name_id")?,
+                r.text("name")?,
+                ends.0,
+                ends.1,
+                ends.2,
+                ends.3,
+                r.num("course")?,
+                length,
+            ])
+            .map_err(|e| r.sql(e))?;
     }
     Ok(())
 }
@@ -113,29 +117,31 @@ fn stands(tx: &Transaction, x: &Extract) -> Result<(), Error> {
     )?;
     for r in rows(x, "stands")?.iter() {
         let p = r.object("params")?;
-        insert.execute(params![
-            r.int("airdrome_id")?,
-            r.text("airdrome_name_id")?,
-            r.text("name")?,
-            r.num("x")?,
-            r.num("z")?,
-            r.int("crossroad_index")?,
-            p.as_ref()
-                .map(|p| p.flag("FOR_HELICOPTERS"))
-                .transpose()?
-                .flatten(),
-            p.as_ref()
-                .map(|p| p.flag("FOR_AIRPLANES"))
-                .transpose()?
-                .flatten(),
-            p.as_ref().map(|p| p.flag("SHELTER")).transpose()?.flatten(),
-            p.as_ref().map(|p| p.num("WIDTH")).transpose()?.flatten(),
-            p.as_ref().map(|p| p.num("LENGTH")).transpose()?.flatten(),
-            p.as_ref()
-                .map(|p| p.num_text("HEIGHT"))
-                .transpose()?
-                .flatten(),
-        ])?;
+        insert
+            .execute(params![
+                r.int("airdrome_id")?,
+                r.text("airdrome_name_id")?,
+                r.text("name")?,
+                r.num("x")?,
+                r.num("z")?,
+                r.int("crossroad_index")?,
+                p.as_ref()
+                    .map(|p| p.flag("FOR_HELICOPTERS"))
+                    .transpose()?
+                    .flatten(),
+                p.as_ref()
+                    .map(|p| p.flag("FOR_AIRPLANES"))
+                    .transpose()?
+                    .flatten(),
+                p.as_ref().map(|p| p.flag("SHELTER")).transpose()?.flatten(),
+                p.as_ref().map(|p| p.num("WIDTH")).transpose()?.flatten(),
+                p.as_ref().map(|p| p.num("LENGTH")).transpose()?.flatten(),
+                p.as_ref()
+                    .map(|p| p.num_text("HEIGHT"))
+                    .transpose()?
+                    .flatten(),
+            ])
+            .map_err(|e| r.sql(e))?;
     }
     Ok(())
 }
@@ -146,19 +152,21 @@ fn beacons(tx: &Transaction, x: &Extract) -> Result<(), Error> {
            lat, lon) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
     )?;
     for r in rows(x, "beacons")?.iter() {
-        insert.execute(params![
-            r.text("beacon_id")?,
-            r.int("type")?,
-            r.text("callsign")?,
-            r.text("display_name")?,
-            r.int("frequency_hz")?,
-            r.int("channel")?,
-            r.num("x")?,
-            r.num("z")?,
-            r.num("alt")?,
-            r.num("lat")?,
-            r.num("lon")?,
-        ])?;
+        insert
+            .execute(params![
+                r.text("beacon_id")?,
+                r.int("type")?,
+                r.text("callsign")?,
+                r.text("display_name")?,
+                r.int("frequency_hz")?,
+                r.int("channel")?,
+                r.num("x")?,
+                r.num("z")?,
+                r.num("alt")?,
+                r.num("lat")?,
+                r.num("lon")?,
+            ])
+            .map_err(|e| r.sql(e))?;
     }
     Ok(())
 }
@@ -186,15 +194,17 @@ fn radio(tx: &Transaction, x: &Extract) -> Result<(), Error> {
                 .transpose()
                 .map(Option::flatten)
         };
-        insert.execute(params![
-            r.text("radio_id")?,
-            callsign,
-            roles,
-            band("hf")?,
-            band("fm")?,
-            band("vhf")?,
-            band("uhf")?,
-        ])?;
+        insert
+            .execute(params![
+                r.text("radio_id")?,
+                callsign,
+                roles,
+                band("hf")?,
+                band("fm")?,
+                band("vhf")?,
+                band("uhf")?,
+            ])
+            .map_err(|e| r.sql(e))?;
     }
     Ok(())
 }
@@ -205,14 +215,18 @@ fn poi(tx: &Transaction, x: &Extract) -> Result<(), Error> {
     let mut insert = tx.prepare("INSERT INTO poi(kind, name, x, z) VALUES (?1, ?2, ?3, ?4)")?;
     for r in rows(x, "towns")?.iter() {
         let (px, pz) = r.position()?;
-        insert.execute(params!["town", r.text("name")?, px, pz])?;
+        insert
+            .execute(params!["town", r.text("name")?, px, pz])
+            .map_err(|e| r.sql(e))?;
     }
     for r in rows(x, "nodes")?.iter() {
         let name = r.text("name")?;
         for (side, kind) in [("red", "node_red"), ("blue", "node_blue")] {
             let p = r.object(side)?.ok_or_else(|| r.bad(side, "null"))?;
             let (px, pz) = p.position()?;
-            insert.execute(params![kind, name, px, pz])?;
+            insert
+                .execute(params![kind, name, px, pz])
+                .map_err(|e| r.sql(e))?;
         }
     }
     tx.execute(
@@ -275,6 +289,17 @@ impl<'a> Row<'a> {
         Error::Extract(vec![Failure::new(self.file, why)])
     }
 
+    /// A repeated key is the extract's fault, so it is reported against the
+    /// row that repeats it; any other SQLite error is the pack's.
+    fn sql(&self, e: rusqlite::Error) -> Error {
+        match e.sqlite_error_code() {
+            Some(rusqlite::ErrorCode::ConstraintViolation) => {
+                Error::Extract(vec![Failure::new(self.file, format!("{}: {e}", self.at))])
+            }
+            _ => Error::Sqlite(e),
+        }
+    }
+
     fn num(&self, k: &str) -> Result<Option<f64>, Error> {
         match self.get(k) {
             Value::Null => Ok(None),
@@ -285,7 +310,9 @@ impl<'a> Row<'a> {
         }
     }
 
-    /// A whole number, which a writer may have spelled with a fraction of 0.
+    /// A whole number. A map's Lua may compute one, `38.4 * 1000000`, and the
+    /// decoder writes the double it got, so a value within a thousandth of a
+    /// whole number is that number.
     fn int(&self, k: &str) -> Result<Option<i64>, Error> {
         match self.get(k) {
             Value::Null => Ok(None),
@@ -293,8 +320,8 @@ impl<'a> Row<'a> {
                 .as_i64()
                 .or_else(|| {
                     v.as_f64()
-                        .filter(|f| f.fract() == 0.0 && f.abs() < 2f64.powi(53))
-                        .map(|f| f as i64)
+                        .filter(|f| (f - f.round()).abs() < 1e-3 && f.abs() < 2f64.powi(53))
+                        .map(|f| f.round() as i64)
                 })
                 .map(Some)
                 .ok_or_else(|| self.bad(k, "not a whole number")),
@@ -602,6 +629,43 @@ mod tests {
             e => panic!("{e}"),
         }
         assert!(!out.exists());
+    }
+
+    #[test]
+    fn a_computed_frequency_is_its_whole_number() {
+        let s = Scratch::new();
+        let dir = synth_extract(&s);
+        edit(&dir, "radio.json", |v| {
+            v[0]["frequencies_hz"]["fm"] = (38.4 * 1_000_000.0).into()
+        });
+        let conn = packed(&s, &dir);
+        let fm: i64 = conn
+            .query_row("SELECT fm FROM radio", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(fm, 38_400_000);
+
+        edit(&dir, "radio.json", |v| {
+            v[0]["frequencies_hz"]["fm"] = 38_400_000.5.into()
+        });
+        let e = pack(&dir, Some(&s.0.join("y.sqlite")), &Options::default()).unwrap_err();
+        assert!(e.to_string().contains("the extract fails"), "{e}");
+    }
+
+    #[test]
+    fn a_repeated_key_names_its_row() {
+        let s = Scratch::new();
+        let dir = synth_extract(&s);
+        edit(&dir, "beacons.json", |v| {
+            let first = v[0]["beacon_id"].clone();
+            v[1]["beacon_id"] = first;
+        });
+        match pack(&dir, Some(&s.0.join("x.sqlite")), &Options::default()).unwrap_err() {
+            Error::Extract(f) => {
+                assert_eq!(f[0].path, "beacons.json");
+                assert!(f[0].message.starts_with("row 2: UNIQUE"), "{f:?}");
+            }
+            e => panic!("{e}"),
+        }
     }
 
     #[test]
