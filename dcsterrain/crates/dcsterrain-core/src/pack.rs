@@ -17,6 +17,7 @@ use serde_json::Value;
 use crate::extract::{self, Extract, Failure};
 
 mod check;
+pub mod grids;
 pub mod meta;
 
 pub use check::{Report, check};
@@ -158,21 +159,30 @@ pub fn pack(dir: &Path, out: Option<&Path>, opts: &Options) -> Result<Packed, Er
     let partial = PathBuf::from(partial);
     // A crashed pack may have left one.
     let _ = fs::remove_file(&partial);
-    let written = write(&partial, &rows).and_then(|()| Ok(fs::rename(&partial, &path)?));
-    if let Err(e) = written {
-        let _ = fs::remove_file(&partial);
-        return Err(e);
-    }
+    let written = write(&partial, &rows, &x, opts.cell_size)
+        .and_then(|grids| Ok(fs::rename(&partial, &path).map(|()| grids)?));
+    let grids = match written {
+        Ok(n) => n,
+        Err(e) => {
+            let _ = fs::remove_file(&partial);
+            return Err(e);
+        }
+    };
     Ok(Packed {
         path,
         theatre: m.theatre.clone(),
         dcs_build: m.dcs_build.clone(),
         cell_size: opts.cell_size,
-        grids: 0,
+        grids,
     })
 }
 
-fn write(path: &Path, rows: &[(&'static str, Option<String>)]) -> Result<(), Error> {
+fn write(
+    path: &Path,
+    rows: &[(&'static str, Option<String>)],
+    x: &Extract,
+    cell_size: u32,
+) -> Result<usize, Error> {
     let mut conn = Connection::open(path)?;
     // Nothing reads the file until the rename, so a crash costs only the
     // partial file, and a journal would protect nothing.
@@ -188,11 +198,12 @@ fn write(path: &Path, rows: &[(&'static str, Option<String>)]) -> Result<(), Err
         }
     }
     tx.commit()?;
+    let grids = grids::write_base(&mut conn, x, cell_size)?;
     // Lays every tile's overflow pages out contiguously, so a window read is
     // a short sequential run.
     conn.execute_batch("VACUUM")?;
     conn.close().map_err(|(_, e)| e)?;
-    Ok(())
+    Ok(grids)
 }
 
 /// One `grid` row.
@@ -366,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_an_empty_file_with_the_pragmas_and_schema() {
+    fn writes_the_pragmas_schema_meta_and_base_grids() {
         let s = Scratch::new();
         let dir = synth_extract(&s);
         let out = s.0.join("synth.sqlite");
@@ -388,12 +399,11 @@ mod tests {
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(tables, ["grid", "grid_tile", "meta"]);
-        for t in ["grid", "grid_tile"] {
-            let n: i64 = conn
-                .query_row(&format!("SELECT count(*) FROM {t}"), [], |r| r.get(0))
-                .unwrap();
-            assert_eq!(n, 0, "{t}");
-        }
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM grid", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n as usize, grids::BASE.len());
+        assert_eq!(p.grids, grids::BASE.len());
         let n: i64 = conn
             .query_row("SELECT count(*) FROM meta", [], |r| r.get(0))
             .unwrap();
@@ -481,7 +491,7 @@ mod tests {
         pack(&dir, Some(&out), &Options::default()).unwrap();
         let mut conn = Connection::open(&out).unwrap();
         let row = GridRow {
-            name: "height".into(),
+            name: "scratch".into(),
             cell_size: 50.0,
             origin_x: 0.0,
             origin_z: 0.0,
@@ -507,7 +517,7 @@ mod tests {
 
         let n: i64 = conn
             .query_row(
-                "SELECT count(*) FROM grid_tile WHERE name = 'height'",
+                "SELECT count(*) FROM grid_tile WHERE name = 'scratch'",
                 [],
                 |r| r.get(0),
             )
@@ -516,7 +526,7 @@ mod tests {
 
         // A duplicate tile is an error, which abandons the pack.
         let again = GridRow {
-            name: "water".into(),
+            name: "scratch2".into(),
             ..row
         };
         assert!(write_grid(&mut conn, &again, [tile(0), tile(0)]).is_err());

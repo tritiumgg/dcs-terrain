@@ -272,7 +272,7 @@ impl Samples {
         Samples::from_fn(dtype, n, |_| v)
     }
 
-    fn decode(dtype: Dtype, bytes: &[u8]) -> Samples {
+    pub(crate) fn decode(dtype: Dtype, bytes: &[u8]) -> Samples {
         let pairs = || bytes.as_chunks::<2>().0.iter().copied();
         match dtype {
             Dtype::U8 => Samples::U8(bytes.to_vec()),

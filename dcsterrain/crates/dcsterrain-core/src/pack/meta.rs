@@ -6,8 +6,9 @@
 
 use serde_json::Value;
 
+use super::grids::cells;
 use super::{FORMAT_VERSION, TILE_SIZE};
-use crate::extract::{CELL_SIZE_M, Extract};
+use crate::extract::Extract;
 
 /// Every key a packed file's `meta` carries, in the order `check` reports
 /// them. ADR 0023 removed `terrain_digest`; ADR 0039 removed the fill triple
@@ -109,9 +110,6 @@ pub fn from_extract(
     let bullseye = &config["default_bullseye"];
     let [blue_x, blue_z] = point(bullseye, "blue")?;
     let [red_x, red_z] = point(bullseye, "red")?;
-    // The extract is always 50 m; a coarser base keeps the origin and covers
-    // the same ground, its last cell overhanging where the count is odd.
-    let cells = |n: u32| (n * CELL_SIZE_M).div_ceil(cell_size);
     let a = &m.authored_bounds_m;
 
     let some = |s: String| Some(s);
@@ -131,8 +129,14 @@ pub fn from_extract(
         ("bounds_ne_z", ne_z),
         ("grid_origin_x", some(m.grid.origin_x.to_string())),
         ("grid_origin_z", some(m.grid.origin_z.to_string())),
-        ("grid_width", some(cells(m.grid.width).to_string())),
-        ("grid_height", some(cells(m.grid.height).to_string())),
+        (
+            "grid_width",
+            some(cells(m.grid.width, cell_size).to_string()),
+        ),
+        (
+            "grid_height",
+            some(cells(m.grid.height, cell_size).to_string()),
+        ),
         ("cell_size", some(cell_size.to_string())),
         ("tile_size", some(TILE_SIZE.to_string())),
         ("sea_enabled", sea),
