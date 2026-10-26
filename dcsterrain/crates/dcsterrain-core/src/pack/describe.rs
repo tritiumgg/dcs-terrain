@@ -1,7 +1,7 @@
-//! What a packed file says about itself: its `meta` and its `grid` table.
+//! What a packed file says about itself: its `meta`, its `grid` table and how
+//! many rows each vector table holds.
 //!
-//! Read straight from the file, with no reader behind it yet; there are no
-//! vector tables to count until `pack` writes them.
+//! Read straight from the file, with no reader behind it yet.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use rusqlite::{Connection, OpenFlags};
 
+use super::tables::VECTOR;
 use crate::types::{DescribeResponse, GridInfo, Provenance};
 
 pub fn describe(path: &Path) -> Result<DescribeResponse, String> {
@@ -47,6 +48,24 @@ pub fn describe(path: &Path) -> Result<DescribeResponse, String> {
             .collect()
         })
         .map_err(fail)?;
+    // A table a later pack adds is counted once it is in the list; one the
+    // file lacks is left out rather than counted as empty.
+    let mut row_counts = BTreeMap::new();
+    for table in VECTOR {
+        let present: bool = conn
+            .query_row(
+                "SELECT count(*) > 0 FROM sqlite_schema WHERE type = 'table' AND name = ?1",
+                [table],
+                |r| r.get(0),
+            )
+            .map_err(fail)?;
+        if present {
+            let n: i64 = conn
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+                .map_err(fail)?;
+            row_counts.insert(table.to_string(), n as u64);
+        }
+    }
 
     let key = |k: &str| {
         meta.get(k)
@@ -72,7 +91,7 @@ pub fn describe(path: &Path) -> Result<DescribeResponse, String> {
         },
         meta,
         grids,
-        row_counts: BTreeMap::new(),
+        row_counts,
         layers_dropped,
         validation: (!validation.is_empty()).then_some(validation),
     })
@@ -125,6 +144,16 @@ mod tests {
             assert_eq!(meta("validation_at"), None);
             assert_eq!(d.validation, None);
             assert!(d.layers_dropped.is_empty());
+            let rows = |t: &str| d.row_counts.get(t).copied();
+            assert_eq!(d.row_counts.len(), VECTOR.len());
+            assert_eq!(rows("airdrome"), Some(1));
+            assert_eq!(rows("stand"), Some(u64::from(synth::STAND_COUNT)));
+            assert_eq!(rows("beacon"), Some(u64::from(synth::BEACON_COUNT)));
+            assert_eq!(rows("radio"), Some(u64::from(synth::RADIO_COUNT)));
+            assert_eq!(
+                rows("poi"),
+                Some(u64::from(synth::TOWNS_COUNT + 2 * synth::NODES_COUNT))
+            );
 
             let mut names: Vec<&str> = d.grids.iter().map(|g| g.name.as_str()).collect();
             names.sort_unstable();
