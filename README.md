@@ -46,6 +46,12 @@ The binary lands at `dcsterrain/target/release/dcsterrain`.
 
 ## Use it
 
+List the terrains your install holds, with the id each one takes (planned):
+
+```bash
+dcsterrain list-terrains
+```
+
 Ask a question about a terrain by its id (planned, not usable yet):
 
 ```bash

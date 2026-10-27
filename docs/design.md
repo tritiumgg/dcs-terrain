@@ -351,6 +351,11 @@ largest component, sampled from 2 000 sources on large graphs, normalized
   operation returns a full result or an error.
 - `--terrain synth` answers from the synthetic terrain with no install, with
   `--seed`, `--size-km` and `--cell`.
+- `dcsterrain list-terrains [--install <dir>] [--json]` lists every installed
+  terrain: its id, its folder, whether a decoder reads each of its terrain
+  files, and whether it has a cache for the installed build. It reads only
+  each `entry.lua` and the file headers, needs no cache, and is how a user
+  finds the id `--terrain` takes.
 - `dcsterrain schema` prints every operation's request and response schema.
 - `dcsterrain index`, `dcsterrain cache`, as §4.
 - `dcsterrain check [--install <dir>] --terrain <Terrain>` reports each terrain file's
