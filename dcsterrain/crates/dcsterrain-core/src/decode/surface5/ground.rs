@@ -217,6 +217,16 @@ impl Bins {
         let i = (r * self.cols + c) as usize;
         &self.items[self.start[i] as usize..self.start[i + 1] as usize]
     }
+
+    /// The triangles listed in the bin `p`, in grid units, falls in.
+    fn at(&self, p: [f64; 2]) -> &[u32] {
+        let b = f64::from(BIN_CELLS);
+        self.get((p[0] / b).floor() as i64, (p[1] / b).floor() as i64)
+    }
+
+    fn bytes(&self) -> usize {
+        (self.start.len() + self.items.len()) * 4
+    }
 }
 
 /// One block's ground on one grid. Cell `(row, col)` has its center at
@@ -229,7 +239,10 @@ pub struct Prepared {
     tri: Vec<[u32; 3]>,
     tritype: Vec<u32>,
     bins: Bins,
+    /// The triangles of the block's runway subsets, binned as `tri` is: an
+    /// airfield block holds tens of thousands.
     runway: Vec<[u32; 3]>,
+    runway_bins: Bins,
 }
 
 /// A point in grid units.
@@ -244,7 +257,7 @@ impl Prepared {
         let n = b.p.len() as u32;
         let world: Vec<[f64; 3]> = (0..n).map(|i| b.world(i)).collect();
         let rc: Vec<[f64; 2]> = world.iter().map(|v| grid_units(g, v[0], v[2])).collect();
-        let runway = b
+        let runway: Vec<[u32; 3]> = b
             .subsets
             .iter()
             .filter(|s| s.material == RUNWAY_MATERIAL)
@@ -253,6 +266,7 @@ impl Prepared {
         Prepared {
             index: b.index,
             bins: Bins::new(&rc, &b.tri),
+            runway_bins: Bins::new(&rc, &runway),
             h: world.iter().map(|v| v[1]).collect(),
             rc,
             tri: b.tri,
@@ -266,7 +280,8 @@ impl Prepared {
         self.rc.len() * 24
             + (self.tri.len() + self.runway.len()) * 12
             + self.tritype.len() * 4
-            + (self.bins.start.len() + self.bins.items.len()) * 4
+            + self.bins.bytes()
+            + self.runway_bins.bytes()
     }
 
     fn corners(&self, t: [u32; 3]) -> [[f64; 2]; 3] {
@@ -280,8 +295,8 @@ impl Prepared {
 
     /// Whether a runway subset of this block covers `p`, in grid units.
     pub fn on_runway(&self, p: [f64; 2]) -> bool {
-        self.runway.iter().any(|&t| {
-            let [a, b, c] = self.corners(t);
+        self.runway_bins.at(p).iter().any(|&t| {
+            let [a, b, c] = self.corners(self.runway[t as usize]);
             cover(a, b, c, p).is_some()
         })
     }
@@ -290,12 +305,8 @@ impl Prepared {
     /// `runway` is false: a runway subset of any block marks the point, as
     /// it marks a tile's cell, so the caller asks every block `on_runway`.
     pub fn point(&self, p: [f64; 2]) -> Option<Ground> {
-        let b = f64::from(BIN_CELLS);
-        let bin = self
-            .bins
-            .get((p[0] / b).floor() as i64, (p[1] / b).floor() as i64);
         let mut best: Option<Ground> = None;
-        for &t in bin {
+        for &t in self.bins.at(p) {
             let tri = self.tri[t as usize];
             let [a, b, c] = self.corners(tri);
             let Some((u, v)) = cover(a, b, c, p) else {
@@ -419,17 +430,17 @@ pub fn tile(blocks: &[&Prepared], g: &Grid, tx: u32, tz: u32) -> Tile {
                         }
                     }
                 }
-            }
-        }
-        for &tri in &b.runway {
-            let p = b.corners(tri);
-            let Some((rr, cc)) = cells(p, rows, cols) else {
-                continue;
-            };
-            for r in rr {
-                for c in cc.clone() {
-                    if cover(p[0], p[1], p[2], [r as f64, c as f64]).is_some() {
-                        runway[at(r, c)] = true;
+                for &t in b.runway_bins.get(br, bc) {
+                    let p = b.corners(b.runway[t as usize]);
+                    let Some((rr, cc)) = cells(p, bin_rows, bin_cols) else {
+                        continue;
+                    };
+                    for r in rr {
+                        for c in cc.clone() {
+                            if cover(p[0], p[1], p[2], [r as f64, c as f64]).is_some() {
+                                runway[at(r, c)] = true;
+                            }
+                        }
                     }
                 }
             }
@@ -627,6 +638,61 @@ mod tests {
         let refs: Vec<&Prepared> = b.iter().collect();
         let t = tile(&refs, &g, 0, 0);
         assert_eq!(t.surface[18 * 64 + 18], SURFACE_RUNWAY);
+    }
+
+    #[test]
+    fn the_runway_index_finds_what_a_search_of_every_runway_triangle_finds() {
+        // A 20 km block whose runway subset spans many bins, two of its
+        // triangles sharing an edge and one a sliver.
+        let s = 20000.0;
+        let block = build::Block {
+            t: [0.0; 3],
+            bbox: [0.0, 0.0, 0.0, s, 1000.0, s],
+            arrays: vec![
+                u32s("TRITYPE", &[0, 0]),
+                tri(&[[0, 1, 2], [1, 3, 2]], Some(("Surface5.0", "Land"))),
+                u32s("baseIndex", &[4, 5, 6, 7, 8]),
+                tri(
+                    &[[0, 1, 2], [1, 3, 2], [0, 4, 1]],
+                    Some(("Runway5.0", "Runway")),
+                ),
+                vec3(
+                    "Pbase",
+                    &[
+                        [0.0, 0.0, 0.0],
+                        [s, 1000.0, 0.0],
+                        [0.0, 500.0, s],
+                        [s, 200.0, s],
+                        [3000.0, 0.0, 2000.0],
+                        [9000.0, 0.0, 2400.0],
+                        [3100.0, 0.0, 6000.0],
+                        [9200.0, 0.0, 6100.0],
+                        [6000.0, 0.0, 2150.0],
+                    ],
+                ),
+            ],
+        };
+        let g = grid(400);
+        let b = &prepared(&[block], &g)[0];
+        assert_eq!(b.runway.len(), 3);
+        let scan = |p: [f64; 2]| {
+            b.runway.iter().any(|&t| {
+                let [x, y, z] = b.corners(t);
+                cover(x, y, z, p).is_some()
+            })
+        };
+        let mut on = 0;
+        for k in 0..20000 {
+            let p = [f64::from(k % 200) * 1.03 + 0.37, f64::from(k / 200) * 1.31];
+            let want = scan(p);
+            assert_eq!(b.on_runway(p), want, "{p:?}");
+            on += usize::from(want);
+        }
+        assert!(on > 1000, "{on} points on the runway");
+        // Corners and edges, where the tolerance reaches past a bin.
+        for v in &b.rc {
+            assert_eq!(b.on_runway(*v), scan(*v), "{v:?}");
+        }
     }
 
     #[test]
