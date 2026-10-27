@@ -228,11 +228,13 @@ the install, never in the repository.
   loose quadtree, and nothing else is tabular enough to need a database.
 - `dcsterrain index` builds a terrain's entries ahead of time; it is optional.
   `dcsterrain cache list`, `prune` and `clear` manage the directory. `prune`
-  removes builds other than the installed one; `clear` asks before deleting
-  `validation.json`, and `--yes` deletes it without asking. Nothing is deleted
-  without a command, and neither deletes under a directory with no
-  `CACHEDIR.TAG`, which the cache writes at its root, so a mistyped `--cache`
-  cannot empty somebody's folder. `list-terrains`, `index` and `cache` take
+  removes builds other than the installed one, with their `validation.json`,
+  whose figures are for files no longer installed; `clear` asks before
+  deleting `validation.json`, and `--yes` deletes it without asking. Nothing
+  is deleted without a command, neither deletes under a directory with no
+  `CACHEDIR.TAG`, and neither follows a link. The cache tags its root only
+  when the root is new or empty, and never makes one inside the install, so a
+  mistyped `--cache` cannot empty somebody's folder. `list-terrains`, `index` and `cache` take
   `--cache`; `query` will once an operation reads an entry.
 
 ### 4.3 The hook's tables
