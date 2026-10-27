@@ -1,6 +1,6 @@
 [package]
 name = "dcsterrain-core"
-description = "Extract reader, packer, packed-file reader and terrain operations."
+description = "File decoders and terrain operations over a DCS install."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,7 +13,6 @@ synth = []
 
 [dependencies]
 mlua = { version = "0.12.2", features = ["lua51", "vendored"] }
-rusqlite = { version = "0.40.2", features = ["bundled"] }
 schemars = "1.2.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

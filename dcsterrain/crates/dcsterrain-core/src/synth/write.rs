@@ -1,7 +1,7 @@
 //! Writes the synthetic theatre as a complete extract directory.
 //!
-//! The directory is what the file decoders write from a real map, so `pack`
-//! and `check-extract` read the two the same way. As a real run does, the
+//! The directory is what the file decoders write from a real terrain, so the
+//! extract reader and its check read the two the same way. As a real run does, the
 //! writer refuses a directory that is not empty, writes every file under a
 //! `.tmp` name and renames it into place, and writes `manifest.json` last: a
 //! directory without a manifest is an interrupted run.

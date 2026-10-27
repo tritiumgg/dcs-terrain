@@ -2,7 +2,7 @@
 //!
 //! The manifest is written last, so a directory without one is an
 //! interrupted run and is refused rather than read in part. `check` validates
-//! the rest without packing.
+//! the rest.
 
 use std::collections::BTreeMap;
 use std::fmt;

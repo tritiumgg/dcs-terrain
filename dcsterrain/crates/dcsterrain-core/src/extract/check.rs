@@ -1,4 +1,4 @@
-//! Validates an extract without packing it.
+//! Validates an extract directory.
 //!
 //! Every failure is collected rather than the first returned, so a user fixing
 //! an extract sees the whole list at once. A manifest that cannot be read is
