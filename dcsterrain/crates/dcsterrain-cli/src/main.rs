@@ -558,7 +558,18 @@ fn cache_prune(install: Option<PathBuf>, cache: CacheDir) -> ExitCode {
             println!("nothing to prune");
         }
         for s in gone {
-            println!("deleted {} {} ({})", s.terrain, s.build, bytes(s.size()));
+            let figures = s.entries.iter().any(|(n, _)| n == cache::VALIDATION_FILE);
+            let with = if figures {
+                ", with its validation figures"
+            } else {
+                ""
+            };
+            println!(
+                "deleted {} {} ({}{with})",
+                s.terrain,
+                s.build,
+                bytes(s.size())
+            );
         }
         Ok(())
     })())
@@ -567,6 +578,8 @@ fn cache_prune(install: Option<PathBuf>, cache: CacheDir) -> ExitCode {
 fn cache_clear(terrain: Option<&str>, yes: bool, cache: CacheDir) -> ExitCode {
     report((|| {
         let cache = cache.open()?;
+        // Asking about a directory that will be refused anyway would mislead.
+        cache.check_tag().map_err(|e| e.0)?;
         let figures = cache.validation_files(terrain).map_err(|e| e.0)?;
         let validation = figures.is_empty() || yes || confirm(&figures);
         let cleared = cache.clear(terrain, validation).map_err(|e| e.0)?;

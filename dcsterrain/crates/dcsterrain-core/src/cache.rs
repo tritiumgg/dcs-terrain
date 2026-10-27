@@ -32,6 +32,7 @@ const TAG: &str = "Signature: 8a477f597d28d172789f06886806bc55\n\
                    # This directory is the dcs-terrain cache; it can be rebuilt.\n";
 
 const MAGIC: &[u8; 8] = b"DCSTRCH\0";
+const MAX_KEY: u64 = 1 << 20;
 
 /// One kind of entry: what it is called, which install files it reads, and
 /// how it is built from them.
@@ -136,7 +137,7 @@ impl Cache {
     /// The entries of one opened terrain.
     pub fn terrain(&self, install: &Path, map: &Map) -> TerrainCache {
         TerrainCache {
-            root: self.root.clone(),
+            cache: self.clone(),
             dir: self.dir(&map.theatre, &map.build.version),
             install: install.to_path_buf(),
             map: map.clone(),
@@ -146,7 +147,7 @@ impl Cache {
     /// What is stored for `terrain` at `build`, `None` when nothing is.
     pub fn stored(&self, terrain: &str, build: &str) -> Option<Stored> {
         let path = self.dir(terrain, build);
-        path.is_dir().then(|| Stored {
+        is_real_dir(&path).then(|| Stored {
             terrain: dir_name(terrain),
             build: dir_name(build),
             entries: entries_in(&path),
@@ -173,7 +174,8 @@ impl Cache {
     }
 
     /// Deletes every build but `keep`, of every terrain, and returns what it
-    /// deleted.
+    /// deleted. An old build's `validation.json` goes with it: its figures
+    /// are for terrain files no longer installed.
     pub fn prune(&self, keep: &str) -> Result<Vec<Stored>, Refusal> {
         self.check_tag()?;
         let keep = dir_name(keep);
@@ -212,7 +214,8 @@ impl Cache {
                 if !validation && e.file_name() == VALIDATION_FILE {
                     continue;
                 }
-                let done = if path.is_dir() {
+                // A link is deleted as a link, never followed.
+                let done = if e.file_type().is_ok_and(|t| t.is_dir()) {
                     fs::remove_dir_all(&path)
                 } else {
                     fs::remove_file(&path)
@@ -247,7 +250,7 @@ impl Cache {
 
     /// Refuses to delete under a directory this tool did not make. A root
     /// that does not exist holds nothing to delete.
-    fn check_tag(&self) -> Result<(), Refusal> {
+    pub fn check_tag(&self) -> Result<(), Refusal> {
         if !self.root.exists() || self.root.join(TAG_FILE).is_file() {
             return Ok(());
         }
@@ -256,9 +259,49 @@ impl Cache {
             self.root.display()
         )))
     }
+
+    /// Makes the root a cache: tags it, if it is new or empty. A directory
+    /// that already holds something else is refused, since `clear` would
+    /// then delete under it.
+    fn claim(&self) -> Result<(), Refusal> {
+        let tag = self.root.join(TAG_FILE);
+        let empty = match fs::read_dir(&self.root) {
+            Ok(mut r) => r.next().is_none(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => true,
+            Err(e) => return Err(cannot("read", &self.root, e)),
+        };
+        // The tag is looked for after the listing: a concurrent builder tags
+        // the root before it puts anything else in it, so a root found full
+        // is either tagged by now or not a cache.
+        if tag.is_file() {
+            return Ok(());
+        }
+        if !empty {
+            return Err(Refusal(format!(
+                "{} holds other files and no {TAG_FILE}, so it is not a dcs-terrain cache; \
+                 name a new or empty directory",
+                self.root.display()
+            )));
+        }
+        fs::create_dir_all(&self.root).map_err(|e| cannot("create", &self.root, e))?;
+        match File::create_new(&tag) {
+            Ok(mut f) => f
+                .write_all(TAG.as_bytes())
+                .map_err(|e| cannot("write", &tag, e)),
+            // Another builder tagged it first.
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+            Err(e) => Err(cannot("create", &tag, e)),
+        }
+    }
+}
+
+/// A directory itself, not a link to one.
+fn is_real_dir(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|m| m.is_dir())
 }
 
 /// Each directory directly under `dir`, sorted; none when `dir` is missing.
+/// A link to a directory is not one, so nothing is deleted through it.
 fn subdirs(dir: &Path) -> Result<Vec<String>, Refusal> {
     let read = match fs::read_dir(dir) {
         Ok(r) => r,
@@ -267,7 +310,7 @@ fn subdirs(dir: &Path) -> Result<Vec<String>, Refusal> {
     };
     let mut out: Vec<String> = read
         .flatten()
-        .filter(|e| e.path().is_dir())
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     out.sort();
@@ -290,7 +333,7 @@ fn entries_in(dir: &Path) -> Vec<(String, u64)> {
 }
 
 fn size_of(path: &Path) -> u64 {
-    match fs::metadata(path) {
+    match fs::symlink_metadata(path) {
         Ok(m) if m.is_dir() => fs::read_dir(path)
             .into_iter()
             .flatten()
@@ -313,7 +356,7 @@ fn cannot(what: &str, path: &Path, e: io::Error) -> Refusal {
 /// The entries of one terrain at its installed build.
 #[derive(Debug, Clone)]
 pub struct TerrainCache {
-    root: PathBuf,
+    cache: Cache,
     dir: PathBuf,
     install: PathBuf,
     map: Map,
@@ -328,10 +371,13 @@ pub enum State {
     Stale(String),
 }
 
-/// An entry ready to read: its file, and where its payload starts in it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// An entry ready to read: its file, held open since its header was
+/// checked so a builder replacing it cannot change what is read, and where
+/// its payload starts in it.
+#[derive(Debug)]
 pub struct Opened {
     pub path: PathBuf,
+    pub file: File,
     pub offset: u64,
     pub len: u64,
     /// Whether this call built it.
@@ -340,9 +386,9 @@ pub struct Opened {
 
 impl Opened {
     pub fn payload(&self) -> io::Result<Vec<u8>> {
-        let mut f = File::open(&self.path)?;
+        let mut f = &self.file;
         f.seek(SeekFrom::Start(self.offset))?;
-        let mut out = Vec::with_capacity(self.len as usize);
+        let mut out = Vec::new();
         f.take(self.len).read_to_end(&mut out)?;
         Ok(out)
     }
@@ -432,16 +478,31 @@ impl TerrainCache {
             .collect()
     }
 
+    /// Creates the directory, refusing one inside the install, which is
+    /// never written to, and sweeps temporary files a crashed builder left.
     fn make_dir(&self) -> Result<(), Refusal> {
-        fs::create_dir_all(&self.dir).map_err(|e| cannot("create", &self.dir, e))?;
-        let tag = self.root.join(TAG_FILE);
-        match File::create_new(&tag) {
-            Ok(mut f) => f
-                .write_all(TAG.as_bytes())
-                .map_err(|e| cannot("write", &tag, e)),
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(()),
-            Err(e) => Err(cannot("create", &tag, e)),
+        if self.dir.starts_with(&self.install) {
+            return Err(Refusal(format!(
+                "the cache {} is inside the install {}, which is never written to",
+                self.cache.root().display(),
+                self.install.display()
+            )));
         }
+        self.cache.claim()?;
+        fs::create_dir_all(&self.dir).map_err(|e| cannot("create", &self.dir, e))?;
+        // An hour is far longer than any build takes, so a live builder's
+        // file is never swept.
+        let old = |e: &fs::DirEntry| {
+            e.metadata()
+                .and_then(|m| m.modified())
+                .is_ok_and(|t| t.elapsed().is_ok_and(|age| age.as_secs() > 3600))
+        };
+        for e in fs::read_dir(&self.dir).into_iter().flatten().flatten() {
+            if is_temporary(&e.file_name().to_string_lossy()) && old(&e) {
+                let _ = fs::remove_file(e.path());
+            }
+        }
+        Ok(())
     }
 
     /// Writes `name` under a temporary name and renames it into place. When
@@ -484,8 +545,9 @@ impl TerrainCache {
     }
 }
 
-/// An entry's header as read from the disk.
+/// An entry's header as read from the disk, and the file it was read from.
 struct Head {
+    file: File,
     version: u32,
     key: String,
     offset: u64,
@@ -497,6 +559,7 @@ impl Head {
     fn opened(self, path: PathBuf, built: bool) -> Opened {
         Opened {
             path,
+            file: self.file,
             offset: self.offset,
             len: self.len,
             built,
@@ -528,6 +591,11 @@ fn read_head(path: &Path) -> io::Result<Head> {
     let key_len = u64::from(u32::from_le_bytes(
         fixed[12..16].try_into().expect("4 bytes"),
     ));
+    // A key is a few lines per install file; a longer one is not ours, and
+    // must not size an allocation.
+    if key_len > MAX_KEY {
+        return Err(bad("its key is too long"));
+    }
     if 24 + key_len > file_len {
         return Err(bad("its key runs past the end"));
     }
@@ -536,6 +604,7 @@ fn read_head(path: &Path) -> io::Result<Head> {
     let mut len = [0u8; 8];
     f.read_exact(&mut len)?;
     Ok(Head {
+        file: f,
         version,
         key: String::from_utf8(key).map_err(|_| bad("its key is not UTF-8"))?,
         offset: 24 + key_len,
@@ -547,7 +616,7 @@ fn read_head(path: &Path) -> io::Result<Head> {
 fn judge(head: &Head, version: u32, key: &str) -> State {
     if head.version != version {
         State::Stale(format!("its version is {}, not {version}", head.version))
-    } else if head.offset + head.len != head.file_len {
+    } else if head.offset.checked_add(head.len) != Some(head.file_len) {
         State::Stale("its length does not match its header".into())
     } else if head.key != key {
         State::Stale("an install file or the build changed".into())
@@ -820,6 +889,78 @@ mod tests {
         cache.clear(None, true).unwrap();
         assert!(cache.list().unwrap().is_empty());
         assert!(f.cache.0.join(TAG_FILE).is_file(), "the root stays a cache");
+    }
+
+    #[test]
+    fn refuses_to_make_a_cache_of_a_full_directory_or_inside_the_install() {
+        let f = Fixture::new();
+        put(&f.cache.0, "photos/2024/cat.jpg", b"meow");
+        let mesh = Counted::new("mesh.toc", &["surface"]);
+        let err = f.terrain().index(&[&mesh]).unwrap_err().0;
+        assert!(err.contains("holds other files"), "{err}");
+        assert!(!f.cache.0.join(TAG_FILE).exists());
+
+        let map = install::open(&f.install.0, "Caucasus").unwrap();
+        let inside = Cache::new(f.install.0.join("cache")).terrain(&f.install.0, &map);
+        let err = inside.index(&[&mesh]).unwrap_err().0;
+        assert!(err.contains("inside the install"), "{err}");
+        assert!(!f.install.0.join("cache").exists());
+    }
+
+    #[test]
+    fn a_hostile_header_is_stale_and_sizes_nothing() {
+        let f = Fixture::new();
+        let mesh = Counted::new("mesh.toc", &["surface"]);
+        let t = f.terrain();
+        let path = t.get(&mesh).unwrap().path;
+        let mut long_key = MAGIC.to_vec();
+        long_key.extend_from_slice(&1u32.to_le_bytes());
+        long_key.extend_from_slice(&u32::MAX.to_le_bytes());
+        fs::write(&path, &long_key).unwrap();
+        assert!(matches!(t.state(&mesh).unwrap(), State::Stale(_)));
+
+        let mut huge = encode(1, &t.key(&mesh).unwrap(), b"");
+        let at = huge.len() - 8;
+        huge[at..].copy_from_slice(&u64::MAX.to_le_bytes());
+        fs::write(&path, &huge).unwrap();
+        assert!(matches!(t.state(&mesh).unwrap(), State::Stale(_)));
+        assert_eq!(
+            t.get(&mesh).unwrap().payload().unwrap(),
+            b"mesh.toc of Caucasus"
+        );
+    }
+
+    #[test]
+    fn an_opened_entry_reads_the_file_its_header_came_from() {
+        let f = Fixture::new();
+        let mesh = Counted::new("mesh.toc", &["surface"]);
+        let t = f.terrain();
+        let held = t.get(&mesh).unwrap();
+        // Another builder replaces it, with a longer key and so a later
+        // payload.
+        let other = encode(1, &format!("{}x\n", t.key(&mesh).unwrap()), b"other");
+        let tmp = t.dir().join(".mesh.toc.test.tmp");
+        fs::write(&tmp, other).unwrap();
+        fs::rename(&tmp, &held.path).unwrap();
+        assert_eq!(held.payload().unwrap(), b"mesh.toc of Caucasus");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn clear_and_prune_never_follow_a_link_out_of_the_cache() {
+        let f = Fixture::new();
+        let mesh = Counted::new("mesh.toc", &["surface"]);
+        f.terrain().index(&[&mesh]).unwrap();
+        let outside = Scratch::new();
+        put(&outside.0, "2.8.0.1/keep", b"mine");
+        put(&outside.0, "keep", b"mine");
+        std::os::unix::fs::symlink(&outside.0, f.cache.0.join("Linked")).unwrap();
+        std::os::unix::fs::symlink(&outside.0, f.cache.0.join("Caucasus/2.9.0.1/horizon")).unwrap();
+        let cache = Cache::new(&f.cache.0);
+        cache.prune("2.9.0.1").unwrap();
+        cache.clear(None, true).unwrap();
+        assert!(outside.0.join("2.8.0.1/keep").is_file());
+        assert!(outside.0.join("keep").is_file());
     }
 
     #[test]
