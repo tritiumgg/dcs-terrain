@@ -15,7 +15,7 @@ place and never writes to it. It keeps a small, rebuildable cache beside it in
 your user cache directory.
 
 > **Not usable yet.** The project was redesigned to read the install directly,
-> and the query engine is being built. `list-terrains`, `schema` and
+> and the query engine is being built. `list-terrains`, `cache`, `schema` and
 > `query ... describe` work today; every other operation is planned, kept
 > here so the shape is visible. Progress is in [docs/STATE.md](docs/STATE.md).
 
@@ -60,6 +60,12 @@ Describe a terrain by its id: its build, its files and their versions
 ```bash
 dcsterrain query --terrain Caucasus describe
 ```
+
+`dcsterrain cache list` shows the cache (`--cache <dir>` names another),
+`cache prune` deletes builds other than the installed one, and `cache clear`
+deletes all of it, asking before the live validation figures.
+`dcsterrain index --terrain Caucasus` builds a cache ahead of time; no entry
+exists to build yet (not usable yet).
 
 Ask a siting question the same way, `find_sites` with its JSON (planned, not
 usable yet). The first question on a terrain will build its cache in seconds,
