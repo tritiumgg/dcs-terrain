@@ -201,15 +201,15 @@ fn run_query(
 }
 
 fn list_terrains(install: Option<PathBuf>, as_json: bool) -> ExitCode {
-    let root = match install_root(install) {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!("{e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let listed = match install::terrains(&root) {
+    let listed = install_root(install).and_then(|root| {
+        let listed = install::terrains(&root).map_err(|e| e.0)?;
+        Ok((root, listed))
+    });
+    let (root, listed) = match listed {
         Ok(l) => l,
+        // A table reader gets the reason on stderr; a JSON reader also gets
+        // it as the one document on stdout.
+        Err(e) if as_json => return refuse(vec![Issue::new("no_install", &e, "")]),
         Err(e) => {
             tracing::error!("{e}");
             return ExitCode::FAILURE;

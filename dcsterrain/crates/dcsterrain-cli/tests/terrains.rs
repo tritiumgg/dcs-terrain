@@ -252,4 +252,12 @@ fn refuses_a_directory_that_is_no_install() {
     let out = run(&["list-terrains", "--install", missing.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     assert!(out.stdout.is_empty());
+    let out = run(&[
+        "list-terrains",
+        "--install",
+        missing.to_str().unwrap(),
+        "--json",
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(stdout_json(&out)["issues"][0]["code"], "no_install");
 }
