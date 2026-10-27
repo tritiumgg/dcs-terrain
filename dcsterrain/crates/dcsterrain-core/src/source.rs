@@ -8,6 +8,8 @@ use std::fmt;
 
 use crate::grid::Grid;
 
+pub mod install;
+
 /// Why a terrain cannot answer. The message names the file or the setting.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusal(pub String);
