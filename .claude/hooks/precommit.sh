@@ -4,9 +4,8 @@
 # The document tools all run in CI. Running them here moves the failure from a
 # CI round trip to the moment of the commit, where the fix is a single edit.
 #
-# Each is run only when something it reads has changed, because the ledger lint
-# reads nine documents and 3315 rows and is not worth paying for on a commit
-# that touches Lua. nospecrefs is cheap and scans everything, so it always runs.
+# statecheck runs only when STATE.md changed. nospecrefs is cheap and scans
+# everything, so it always runs.
 #
 # The files checked are the ones that differ from HEAD on disk, staged or not,
 # plus untracked ones. What is on disk is what a commit records, whether the
@@ -37,13 +36,6 @@ changed=$( { git diff --name-only HEAD; git ls-files --others --exclude-standard
 
 if printf '%s\n' "$changed" | grep -qx 'docs/STATE.md'; then
     out=$(sh tools/statecheck.sh 2>&1) || report "$out"
-fi
-
-# A frozen document should never reach a commit at all -- guard-frozen-writes
-# refuses the edit -- but a shell redirect or a hand edit outside the session
-# can still land one, and then the stamps are the only thing that notices.
-if printf '%s\n' "$changed" | grep -q '^docs/spec/'; then
-    out=$(sh tools/ledger.sh lint 2>&1) || report "$out"
 fi
 
 # The shell guard and the hook tests name the commands they refuse, so the

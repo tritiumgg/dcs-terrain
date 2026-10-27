@@ -51,9 +51,6 @@ expect_ask() {
 bash_payload() {
     printf '{"tool_name":"Bash","tool_input":{"command":"%s"}}' "$1"
 }
-write_payload() {
-    printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$1"
-}
 
 refuse_bash() { expect 2 guard-bash.sh "$(bash_payload "$1")"; }
 allow_bash()  { expect 0 guard-bash.sh "$(bash_payload "$1")"; }
@@ -62,36 +59,8 @@ ask_bash()    { expect_ask guard-bash.sh "$(bash_payload "$1")"; }
 # --- every hook ignores a tool that is not its own -------------------------
 
 expect 0 guard-bash.sh '{"tool_name":"Read","tool_input":{"file_path":"x"}}'
-expect 0 guard-frozen-writes.sh '{"tool_name":"Bash","tool_input":{"command":"ls"}}'
 expect 0 precommit.sh '{"tool_name":"Read","tool_input":{"file_path":"x"}}'
 expect 0 postcommit.sh '{"tool_name":"Read","tool_input":{"file_path":"x"}}'
-
-# --- guard-frozen-writes ---------------------------------------------------
-
-expect 2 guard-frozen-writes.sh "$(write_payload 'docs/spec/core.md')"
-expect 2 guard-frozen-writes.sh "$(write_payload 'docs/spec/extract-format.md')"
-expect 2 guard-frozen-writes.sh "$(write_payload 'docs/spec/ledger/core-ledger.tsv')"
-expect 2 guard-frozen-writes.sh "$(write_payload 'docs/spec//core.md')"
-expect 2 guard-frozen-writes.sh "$(write_payload '/home/x/dcs-terrain/docs/spec/core.md')"
-expect 2 guard-frozen-writes.sh "$(write_payload '.gitattributes')"
-
-# A Windows path arrives with its separators escaped for JSON. Built here
-# rather than written inline, because a doubled backslash in a shell literal
-# is one backslash by the time the payload is assembled, and the case then
-# silently stops being a Windows path.
-BS=$(printf '\\')
-WINSPEC="C:${BS}${BS}Users${BS}${BS}x${BS}${BS}docs${BS}${BS}spec${BS}${BS}core.md"
-WINOK="C:${BS}${BS}Users${BS}${BS}x${BS}${BS}docs${BS}${BS}plan.md"
-expect 2 guard-frozen-writes.sh "$(write_payload "$WINSPEC")"
-expect 0 guard-frozen-writes.sh "$(write_payload "$WINOK")"
-
-# Living documents are edited directly.
-expect 0 guard-frozen-writes.sh "$(write_payload 'docs/STATE.md')"
-expect 0 guard-frozen-writes.sh "$(write_payload 'docs/plan.md')"
-expect 0 guard-frozen-writes.sh "$(write_payload 'docs/decisions/0010-a-new-record.md')"
-expect 0 guard-frozen-writes.sh "$(write_payload 'docs/README.md')"
-expect 0 guard-frozen-writes.sh "$(write_payload 'extractor/DcsTerrainExtract.lua')"
-expect 0 guard-frozen-writes.sh '{"tool_name":"Write","tool_input":{}}'
 
 # --- guard-bash: the DCS install is read-only ------------------------------
 #
@@ -112,16 +81,6 @@ allow_bash 'cat \"C:/Program Files/Eagle Dynamics/DCS World/autoupdate.cfg\"'
 allow_bash 'grep -rn Terrain \"C:/Program Files/Eagle Dynamics/DCS World/Scripts\"'
 # Saved Games is not the install: the hook is copied there by hand.
 allow_bash 'cp extractor/DcsTerrainExtract.lua \"C:/Users/x/Saved Games/DCS/Scripts/Hooks/\"'
-
-# --- guard-bash: the frozen documents --------------------------------------
-
-refuse_bash 'echo x >> docs/spec/core.md'
-refuse_bash 'cp /tmp/a docs/spec/core.md'
-refuse_bash 'rm .gitattributes'
-refuse_bash 'echo x > \"docs/spec/core.md\"'
-allow_bash 'cat docs/spec/core.md'
-allow_bash 'grep -rn nodata docs/spec/'
-allow_bash 'sh tools/ledger.sh lint'
 
 # --- guard-bash: the toolchain ---------------------------------------------
 

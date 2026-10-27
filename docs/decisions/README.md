@@ -1,147 +1,33 @@
 # Decision records
 
-Everything under `docs/spec/` is frozen ([ADR 0001](0001-what-is-frozen.md));
-everything else in `docs/` is living and edited directly. Everything that
-diverges from a frozen document is recorded here.
+[`design.md`](../design.md) and [`queries.md`](../queries.md) state the design
+and are edited directly. An ADR is written when a decision changes that design
+and its reasoning is worth keeping beside it: a measurement that contradicts
+the design, an approach that does not work, a platform fact that turns out
+wrong, or a new DCS build or map measured differently. The design document is
+updated in the same pull request to match.
 
-**Where an ADR and a frozen document disagree, the ADR wins.** Where two ADRs
-disagree, the later accepted one wins, and the earlier is marked
-`Superseded by [ADR MMMM](MMMM-title.md)`.
+No ADR is needed for work that does what the design already says, or for a
+change to the plan.
+
+## Rules
+
+- Copy [`TEMPLATE.md`](TEMPLATE.md) to `NNNN-title-in-kebab-case.md` with the
+  next free number, and add a row to the index below.
+- Four headings: Status, Context, Decision, Consequences. Alternatives sit
+  under Decision. Consequences include the ones that hurt.
+- One decision per record. Cite one as `ADR NNNN`. Code may cite an ADR; it
+  cites no other document.
+- A committed ADR is not rewritten. A changed decision gets a new record, and
+  the old one's Status becomes `Superseded by [ADR NNNN](...)`. Before its
+  first commit a record may still be rewritten or dropped.
+- Propose an ADR to the user before writing it, unless they have already
+  agreed to the decision.
+
+Numbering restarted at 0001 with the reset of 2026-10-27; the records before it
+are in git at commit `4b85bd0`.
 
 ## Index
 
-| ADR | Status | Date | Title | Affects |
-|---|---|---|---|---|
-| [0001](0001-what-is-frozen.md) | Accepted | 2026-09-03 | `docs/spec/` is frozen; everything else is living | all documents; `plan.md` "Working rules" |
-| [0002](0002-document-names-and-layout.md) | Accepted | 2026-09-03 | Frozen documents live in `docs/spec/` under plain names | `plan.md` task P1 |
-| [0003](0003-user-guide-is-a-separate-document.md) | Accepted | 2026-09-03 | The user guide is a separate document, written after the tools work | `using-the-data.md`; task D1 at MS5 |
-| [0004](0004-projection-samples-not-kept.md) | Accepted | 2026-09-03 | The projection samples are not kept; `fit.py` moves to `tools/probe-theatre/` | `validation.md`, probe log — both name `projection-samples/` |
-| [0005](0005-extractor-verified-live.md) | Accepted | 2026-09-03 | The extractor is verified live; offline Lua tests are minimal | `extractor-hook.md` "Testing"; `plan.md` P1, P2, X1, X3–X9, MS0 |
-| [0006](0006-mise-provisions-the-toolchain.md) | Accepted | 2026-09-03 | `mise` provisions the toolchain, and Windows builds its own Lua 5.1 | `core.md` "Workspace"; `kotlin-consumer.md`; `extractor-hook.md`; `plan.md` P1, P2, P3 |
-| [0007](0007-extract-format-v1.md) | Accepted | 2026-09-04 | Extract format v1 is frozen, with measured field sources and a separate code for an unrecognised surface string | `extract-format.md` "Tile binary layout", "Tables", "manifest.json"; `design-and-facts.md` `Airdromes`; `plan.md` F1, X1, X5, C5c |
-| [0008](0008-packed-meta-carries-the-authored-rectangle.md) | Accepted | 2026-09-04 | The packed file's `meta` carries the authored rectangle, and its bounds keys are metres | `core.md` "Packed file"; `plan.md` C5a, C6 |
-| [0009](0009-a-run-may-have-no-authored-rectangle.md) | Accepted | 2026-09-04 | A run may have no authored rectangle, and both manifest keys are then null | `extract-format.md` "manifest.json"; `core.md` `valid`; ADR 0008's `check` clause; `plan.md` X3, X10, C3, C4, C5a |
-| [0010](0010-server-state-calls-need-terrain-not-a-mission.md) | Accepted | 2026-09-04 | `server`-state `land` and `world` calls need loaded terrain, not a running mission | `design-and-facts.md` phase-`sim` rule; `extractor-hook.md` "Lifecycle" step 4, "Mission-pass sweeps"; probe log "Crash record"; `CLAUDE.md`; `plan.md` X4, X8a, X8b, X10 |
-| [0011](0011-config-holds-only-what-a-user-can-answer.md) | Accepted | 2026-09-04 | The config table holds only what a user can answer; the rest is derived or constant | `extractor-hook.md` "Config table", "Hook-pass sweeps", "Mission-pass sweeps"; `extract-format.md` "Tables"; ADR 0010's `allow_helipads` clause; `plan.md` X2a, X2b, X5, X8b, X10, X12, X13 |
-| [0012](0012-a-bad-config-value-falls-back-to-its-default.md) | Accepted | 2026-09-04 | A bad config value is logged and falls back to its default | `extractor-hook.md` "Config table" validation sentence, "Files" `dcs.log` clause; `plan.md` X2a |
-| [0013](0013-the-progress-log-is-append-only.md) | Accepted | 2026-09-04 | The progress log is append-only, and `dcs.log` gets a warning as well as a phase line | `extractor-hook.md` "Files"; `plan.md` X2a, X12, X13 |
-| [0014](0014-a-run-waits-in-a-stopped-state.md) | Accepted | 2026-09-05 | A run waits in a stopped state, and Start always re-enters idle | `extractor-hook.md` "Lifecycle"; `plan.md` X4, X13 |
-| [0015](0015-a-failing-window-is-switched-off-not-retried.md) | Accepted | 2026-09-05 | A failing window is switched off, and never reaches the run | `extractor-hook.md` "Failure handling"; `plan.md` X12, X13 |
-| [0016](0016-a-write-is-checked-by-what-landed.md) | Accepted | 2026-09-06 | A write is checked by what landed, because DCS's file handles report nothing | `design-and-facts.md` "Sources you have" hook-state facts; `plan.md` X3, X5–X9, X10, X13 |
-| [0017](0017-start-re-points-a-run-at-the-window-s-directory.md) | Accepted | 2026-09-08 | Start re-points a run at the directory the window names | `extractor-hook.md` "Lifecycle"; ADR 0014's "Start resets nothing"; `plan.md` X10, X13 |
-| [0018](0018-the-window-is-raised-above-dcs-chrome.md) | Accepted | 2026-09-08 | The window is raised above DCS's own chrome | `plan.md` X13, X14 |
-| [0019](0019-a-crop-is-refused-under-a-kilometer-and-outside-the-map.md) | Accepted | 2026-09-08 | A crop is refused under a kilometer of radius and outside the map | `extractor-hook.md` "Config table"; ADR 0011's crop; `plan.md` X10, X13, X14 |
-| [0020](0020-the-output-directory-is-an-absolute-path-on-a-drive-that-exists.md) | Accepted | 2026-09-08 | The output directory is an absolute path on a drive that exists | `extractor-hook.md` "Config table"; ADR 0012; `plan.md` X10, X13, X14 |
-| [0021](0021-the-terrain-fingerprint-is-sizes-and-times-not-a-hash.md) | Superseded by [ADR 0023](0023-the-dcs-build-is-the-terrain-version.md) | 2026-09-09 | The terrain fingerprint records sizes and modification times, not a hash | `extract-format.md` "manifest.json"; `extractor-hook.md` "Hook-pass sweeps"; `design-and-facts.md` "Design decisions"; ADR 0007's digest clause; `plan.md` X2b, C3, C12c |
-| [0022](0022-fingerprint-files-are-found-by-extension.md) | Accepted | 2026-09-09 | Fingerprint files are found by extension, and a directory without `entry.lua` is not a theatre | `extract-format.md` "manifest.json"; ADR 0011's provisional paragraph; `plan.md` X2b |
-| [0023](0023-the-dcs-build-is-the-terrain-version.md) | Accepted | 2026-09-09 | The DCS build is the terrain version, and the fingerprint is a record of the files | `core.md` "Packed file", "Versioning"; `query-operations.md` "Common types"; `mcp-server.md` "Response discipline"; `extract-format.md` "manifest.json"; `design-and-facts.md` "Two version stamps"; ADR 0021; `plan.md` X2b, C3, C12c |
-| [0024](0024-the-progress-log-carries-a-heartbeat-and-totals.md) | Accepted | 2026-09-11 | The progress log carries a heartbeat and a totals line | `extractor-hook.md` "Files", "Lifecycle" step 5; ADR 0013's consequence; `plan.md` X12 |
-| [0025](0025-the-bar-is-the-running-sweep-s-own-count.md) | Accepted | 2026-09-11 | The bar is the running sweep's own count, and the run reports no fraction of the whole | `extractor-hook.md` "Lifecycle", "Performance targets"; `plan.md` X12, X5–X8c |
-| [0026](0026-the-authored-rectangle-is-measured-never-read.md) | Superseded by [ADR 0034](0034-the-extract-is-decoded-from-the-terrain-files.md) | 2026-09-11 | The authored rectangle is measured, never read from a theatre file | `extract-format.md` "manifest.json"; `extractor-hook.md` "Lifecycle"; `design-and-facts.md` `nodesMapBorders`, "Geometry facts"; ADR 0009, ADR 0011; `plan.md` X5, X6, X10, X11, V |
-| [0027](0027-breakpoints-count-only-near-a-road.md) | Superseded by [ADR 0034](0034-the-extract-is-decoded-from-the-terrain-files.md) | 2026-09-12 | The pre-sweep's breakpoints count only near a road | `extract-format.md` "manifest.json"; `design-and-facts.md` "Geometry facts", "Design decisions"; `extractor-hook.md` "Lifecycle"; ADR 0026's X11 check; `plan.md` X6, X11 |
-| [0028](0028-water-and-height-are-one-sweep.md) | Superseded by [ADR 0034](0034-the-extract-is-decoded-from-the-terrain-files.md) | 2026-09-12 | Water and height are one sweep | `extractor-hook.md` "Hook-pass sweeps", "Performance targets"; `extract-format.md` "manifest.json" `timing_ms`; ADR 0025; `plan.md` X6, X11 |
-| [0029](0029-a-disc-settles-a-cell-only-within-the-theatres-reach.md) | Superseded by [ADR 0034](0034-the-extract-is-decoded-from-the-terrain-files.md) | 2026-09-12 | A disc settles a cell only within the theatre's reach | ADR 0027's disc paragraph; `extractor-hook.md` "Lifecycle", roads seeds; `plan.md` X6, X7 |
-| [0030](0030-road-seeds-follow-a-fixed-plan.md) | Superseded by [ADR 0034](0034-the-extract-is-decoded-from-the-terrain-files.md) | 2026-09-12 | Road seeds follow a fixed plan, and the file is its own journal | `extractor-hook.md` "Hook-pass sweeps", "Lifecycle"; `extract-format.md` "Tables", "manifest.json" `timing_ms`; `plan.md` X7 |
-| [0031](0031-a-far-seed-is-neither-asked-nor-written.md) | Superseded by [ADR 0034](0034-the-extract-is-decoded-from-the-terrain-files.md) | 2026-09-12 | A far seed is neither asked nor written | ADR 0029's roads paragraph; `extractor-hook.md` "Hook-pass sweeps"; `extract-format.md` "Tables"; `plan.md` X7 |
-| [0032](0032-the-scenery-sweep-searches-a-2-km-box-lattice.md) | Superseded by [ADR 0034](0034-the-extract-is-decoded-from-the-terrain-files.md) | 2026-10-01 | The scenery sweep searches a 2 km box lattice | `extractor-hook.md` "Mission-pass sweeps", "Performance targets"; `design-and-facts.md` "Design decisions"; `extract-format.md` "Tables"; `plan.md` X8b |
-| [0033](0033-the-scenery-file-is-its-own-journal.md) | Superseded by [ADR 0034](0034-the-extract-is-decoded-from-the-terrain-files.md) | 2026-10-01 | The scenery file is its own journal, and its last box is asked again | `extractor-hook.md` "Mission-pass sweeps", "Lifecycle"; `plan.md` X8b, X8c |
-| [0034](0034-the-extract-is-decoded-from-the-terrain-files.md) | Accepted | 2026-10-22 | The extract is decoded from the terrain files | `extractor-hook.md` throughout; `design-and-facts.md` "Design decisions", "Sources you have"; `extract-format.md` "manifest.json"; `validation.md`; `plan.md` components X and V; ADRs 0026–0033 |
-| [0035](0035-a-decoder-is-chosen-by-class-and-version.md) | Accepted | 2026-10-22 | A decoder is chosen by the file's class and version, and an unknown one is refused | `design-and-facts.md` "Two version stamps, not one"; ADR 0034 |
-| [0036](0036-the-packed-base-is-50-m-on-every-map.md) | Accepted | 2026-10-22 | The packed base is 50 m on every map | `core.md` "Grids"; `design-and-facts.md` "Design decisions"; `plan.md` C5b |
-| [0037](0037-the-hook-keeps-only-an-optional-tables-pass.md) | Accepted | 2026-10-22 | The hook keeps only an optional tables pass | `extractor-hook.md` throughout; `extract-format.md` "airdromes.json", "config.json"; `core.md` the `airdrome` table; `validation.md`; `plan.md` component X |
-| [0038](0038-the-projection-is-fitted-from-the-beacons.md) | Superseded by [ADR 0040](0040-the-extractor-fits-the-projection.md) | 2026-10-22 | The projection is fitted from the map's beacons | `extract-format.md` "config.json"; `core.md` "Projection"; `design-and-facts.md` the projection table; `validation.md`; `plan.md` C10, V2 |
-| [0039](0039-extract-format-v2.md) | Accepted | 2026-10-22 | Extract format v2 is written by the file decoders | `extract-format.md` throughout; `core.md` "Packed file", "Scenery classification", "Road graph", "Synthetic theatre"; ADRs 0007, 0009, 0011, 0023; `plan.md` F3, C2–C5c, C8, C8a, C9, C15, E1–E8, X15 |
-| [0040](0040-the-extractor-fits-the-projection.md) | Accepted | 2026-10-22 | The extractor fits the projection, and `pack` checks it | `extract-format.md` "config.json", "towns.json"; `core.md` "Projection"; ADR 0038; `plan.md` E6, C5c, C10 |
-| [0041](0041-water-wins-over-land-and-river-over-lake-and-sea.md) | Accepted | 2026-10-23 | Water wins over land, and river over lake and sea, at a cell | ADR 0039 "Tile layers"; `plan.md` E2 |
-| [0042](0042-the-mesh-edge-is-coverage-and-flat-5-m-ground-is-land.md) | Accepted | 2026-10-23 | The mesh edge is coverage, and flat 5 m ground is land | ADR 0039 "Coverage"; ADR 0007; `plan.md` E2 |
-| [0043](0043-router-points-lie-within-a-lane-of-the-centerline.md) | Accepted | 2026-10-23 | Router points lie within a lane of the decoded centerline | ADR 0034 roads row; `plan.md` E3 |
-| [0044](0044-a-road-node-id-names-a-junction-not-a-point.md) | Accepted | 2026-10-23 | A road node id names a junction, not a point, and the catch-all id is written null | ADR 0039 "roads.jsonl", "Consequences"; `plan.md` E3, C9 |
-| [0045](0045-an-instance-id-s-index-width-follows-the-largest-node.md) | Accepted | 2026-10-23 | An instance id's index width follows the largest node, not the version | ADR 0035 Context; ADR 0039 "scenery.jsonl"; `plan.md` E4 |
-| [0046](0046-a-named-node-is-a-stand-only-when-its-class-has-a-stand-record.md) | Accepted | 2026-10-24 | A named node is a stand only when its class has a stand record | ADR 0039 "stands.json"; `extract-format.md` "stands.json"; `plan.md` E5, C5c |
-| [0047](0047-the-map-s-lua-files-run-in-a-sandboxed-lua-5-1.md) | Accepted | 2026-10-24 | The map's Lua files run in a sandboxed Lua 5.1 | ADR 0039 "beacons.json", "towns.json"; `extract-format.md` "towns.json", "nodes.json"; `extractor-hook.md` "Hook-pass sweeps"; `plan.md` E6 |
-| [0048](0048-a-coarse-cell-takes-the-largest-code-and-the-mean-of-its-covered-cells.md) | Accepted | 2026-10-25 | A coarse cell takes the largest code and the mean of its covered cells | `core.md` "Grids"; ADRs 0011, 0036; `plan.md` C5b |
-| [0049](0049-an-airdrome-is-keyed-by-its-name-id.md) | Accepted | 2026-10-26 | An airdrome is keyed by its `name_id`, and runways and stands carry it | `core.md` "Packed file"; ADRs 0037, 0039; `plan.md` C5c |
-
-Add a row when you add an ADR. This table is the index Claude reads, so an ADR
-missing from it will not be found. Each record's own `Affects` line, at the top
-of its `Context`, carries the same ground in full.
-
-## Format
-
-Michael Nygard's four headings, and no others:
-
-```
-# ADR 0007: Extract format v1 is frozen
-
-## Status
-## Context
-## Decision
-## Consequences
-```
-
-Records are numbered `NNNN-title-in-kebab-case.md`, cited as `ADR NNNN`, and
-their numbers are four digits, sequential, and never reused or renumbered.
-`TEMPLATE.md` is the starting point.
-
-`Status` is exactly `Accepted` or `Superseded by [ADR MMMM](MMMM-title.md)`.
-There is no draft status: a record is written once the decision is made, which
-is why `CLAUDE.md` says to propose an ADR in conversation rather than to commit
-one and revise it.
-
-`Context` opens with `**Affects:**` naming the frozen documents and sections
-the decision touches, then quotes the frozen text it answers so a reader sees
-the divergence without opening the spec.
-
-`Alternatives considered` is a `###` heading under `Decision`. The argument for
-a rejected option runs to paragraphs here, and it belongs with the choice it
-lost to.
-
-The record carries no date. `git log` has the date it was added, and the table
-above repeats it.
-
-## Writing one
-
-Copy `TEMPLATE.md` to `NNNN-title-in-kebab-case.md`, taking the next free
-number. Fill in Status, Context, Decision and Consequences. Then add the row
-above.
-
-Keep one decision per record. Two decisions in one ADR cannot be superseded
-independently, and one of them always turns out to need it.
-
-An ADR is a point-in-time record. Once accepted **and committed**, its Context,
-Decision and Consequences are not rewritten — a decision that changes gets a
-new ADR, and the old one's Status becomes `Superseded by ADR MMMM`. The Status
-line is the only part of such an ADR that changes.
-
-Before the first commit that carries it, an ADR may still be rewritten or
-dropped. A decision reversed the same afternoon it was written never governed
-any work, and a supersession chain recording that is noise. Consolidate into
-what would have been written had it been right the first time, then commit.
-Once it is in history, supersede instead.
-
-Superseding is two edits in one commit: the new record's `Context` names the
-old one and says what changed to justify revisiting it, and the old record's
-`Status` becomes the supersession line. Nothing enforces the pair. Check it
-with:
-
-```bash
-grep -H '^Superseded' docs/decisions/*.md
-```
-
-## When an ADR is needed
-
-- A measurement contradicts what a frozen document says.
-- Implementation shows a specified approach does not work, or a done test in
-  `plan.md` cannot be met as written.
-- A dependency, version or platform fact named in a spec turns out to be wrong
-  or unavailable.
-- A field, name, default or threshold ends up different from the spec's.
-- A task change carries reasoning that binds later work. The task itself is an
-  edit to `plan.md`, not an ADR.
-- Something the specs leave open gets settled — the `UNVERIFIED` ledger rows
-  are the known list of these.
-- A new DCS build or theatre is measured: the ADR says which probe log now
-  applies.
-
-An ADR is **not** needed for work that does what the specs already say, or for
-detail the specs explicitly leave to implementation.
+| ADR | Status | Date | Title |
+|---|---|---|---|

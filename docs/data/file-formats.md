@@ -128,7 +128,7 @@ material. Pairs seen include `Surface5.0/Land` (the full mesh), `Road5.1/Beach`,
   `u, v` with tolerance `u ≥ -1e-7, v ≥ -1e-7, u + v ≤ 1 + 1e-7`, and skip triangles whose determinant is 0.
   Interpolate `h` linearly.
 - **Precedence where triangles overlap:** a triangle with `TRITYPE & 8` (road strip) wins, then a water
-  triangle (`TRITYPE & 7`), then the higher block index, then the higher triangle index (ADR 0041). Without the
+  triangle (`TRITYPE & 7`), then the higher block index, then the higher triangle index. Without the
   road rule the Roki tunnel area is off by 729 m, because a road strip runs under a mountain triangle and the
   live terrain reports the road. Without the water rule, lake triangles laid over a land triangle of the same
   block read as land on 43 Caucasus cells.
@@ -214,7 +214,7 @@ the points. `y` is a height for kinds 1 and 2 only. For kind 0 it is not: the me
 The node ids name junctions, and an edge stops short of its junction: the ends naming one id lie p50 27 m,
 p99 176 m from their mean on Caucasus roads, and at most 2.2 km on any of the eight installed maps. Each
 map also has one catch-all id, named by dozens to hundreds of ends spread across the whole map (Caucasus 1697),
-which is no junction; the extract writes it, and 0xFFFFFFFF, as null (ADR 0044).
+which is no junction; the extract writes it, and 0xFFFFFFFF, as null.
 
 **Confirmed:** the class table, the point and tangent arrays, and that `y` is a height for roads and rail
 (Caucasus road vertices: 99.5 % within 0.5 m of the sampled ground; rail 98.8 %). The kind byte is confirmed
@@ -316,7 +316,7 @@ Every stand on all eight installed maps of 2.9.30.28738 gets a class.
 **Guessed:** the k-list (probably links), the road-class table's use, and non-stand classes listed among the
 nodes: on 2.9.30.28738, 43 Syria nodes of `taxi_point_holding_position` and 4 MarianaIslands nodes of
 `rwy_point_takeoff_landing` are named like stands, and `assets.assets` holds no stand record for either class.
-ADR 0046 leaves them out of `stands.json`.
+They are not stands (`design.md` §3.2).
 
 ## `misc/assets.assets`: stand class parameters
 
@@ -408,7 +408,7 @@ sum of `n` over the nodes before it.
 
 ### Instance id and collision pools
 
-`id = node << S | index`, where **S = 13 when every node holds at most 8 192 instances, else 15** (ADR 0045).
+`id = node << S | index`, where **S = 13 when every node holds at most 8 192 instances, else 15** (`design.md` §3.2).
 The version does not decide it: Nevada (version 8, largest node 8 808) and PersianGulf (version 9, 14 872) use
 15, and bits 13-14 of their ids are never set; the six other installed maps use 13. A decoder checks S by the
 pool's own AABBs: an id split at the right S puts its instance inside its box (±0.5 m in x and z).
@@ -534,12 +534,12 @@ according to the live table.
 
 ## Key validation figures
 
-- Caucasus heights, by the rules above (ADR 0041): 99.9485 % of 141.19 M cells exact, 99.99859 % within 1 m,
+- Caucasus heights, by the rules above: 99.9485 % of 141.19 M cells exact, 99.99859 % within 1 m,
   and 1 707 cells off by more than 2 m (lake clusters), worst 29 m. Land only: 99.9195 % exact.
 - Caucasus water class: all but 4 of 141 190 035 cells agree. The 4 are land 0.5 m over a lake, where the game
   reports land.
 - Caucasus coverage: no cell the live extract wrote lies outside the mesh. The 6.39 M cells it wrote as fill are
-  flat mesh land at exactly 5 m, which the sim reports with its off-map value (ADR 0042).
+  flat mesh land at exactly 5 m, which the sim reports with its off-map value.
 - Caucasus road polylines against the live road router: p50 1.42 m, p99 4.3 m. Rail: p50 2.18 m. Both look like
   a lane or track offset from the stored centerline.
 - Road vertices within 0.5 m of the sampled ground: Caucasus 99.5 %, Nevada 99.0 %, Syria 92.5 %. On Syria the

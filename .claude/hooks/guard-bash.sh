@@ -10,8 +10,6 @@
 #
 # Refused:
 #   a write into the DCS install       it is read-only, always
-#   a redirect, tee, cp, mv or rm      docs/spec/ is frozen
-#     aimed at docs/spec/ or .gitattributes
 #   cargo, lua, rustc, rustfmt bare    run through mise exec -- or mise run
 #   rustup, mise use rust              the toolchain lives in rust-toolchain.toml
 #   git merge without --ff-only        history is linear
@@ -87,15 +85,6 @@ that does can leave a theatre unloadable.
 
 Read from it freely. What the hook needs goes in the Saved Games write
 directory, which lfs.writedir() reports and which is not the install."
-fi
-
-FROZEN='(docs/spec/|\.gitattributes)'
-if writes_to "$FROZEN"; then
-    refuse "a shell write to a frozen document or to .gitattributes." \
-"docs/spec/ is frozen: not edited, not renamed, not moved. Anything you would
-have changed there goes in docs/decisions/ as an ADR instead, from
-docs/decisions/TEMPLATE.md. .gitattributes keeps the ledger stamps valid
-on a Windows checkout."
 fi
 
 if has "${START}(cargo|lua5\\.1|lua|luac|rustc|rustfmt)([[:space:]]|$)"; then

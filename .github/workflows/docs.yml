@@ -2,8 +2,8 @@ name: docs
 
 # Runs on everything, with no path filter, unlike rust.yml and lua.yml. The
 # checks here are about the repository rather than about one language: a
-# frozen document edited from anywhere, a citation added to any file, a state
-# file over budget, a hook that stopped guarding. Filtering by path would let
+# citation added to any file, a state file over budget, a hook that stopped
+# guarding. Filtering by path would let
 # exactly the change that breaks one of those skip the job that catches it.
 #
 # Cheap enough to run every time: no toolchain, no build, seconds on the
@@ -28,12 +28,6 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-
-      # The ledger stamps are the SHA-256 of each document's bytes, so the
-      # checkout has to carry the bytes that were committed. .gitattributes
-      # settles that; this step is what would notice if it ever stopped.
-      - name: The frozen documents are unchanged
-        run: sh tools/ledger.sh lint
 
       - name: The code cites no document
         run: sh tools/nospecrefs.sh
