@@ -442,8 +442,9 @@ Accuracy:
 Each names what settles it.
 
 1. **DCS's share mode on its terrain files.** If DCS opens them denying
-   readers, the tool cannot run beside a live server. Not measured. *Settles
-   it:* task N0, minutes with DCS on a terrain.
+   readers, the tool cannot run beside a live server. *Settled:* it does not;
+   with Caucasus loaded on 2.9.30.28738 every terrain file opens for read,
+   even sharing read only (`data/live-gate.md`).
 2. **OS file-cache sharing with DCS.** Decides a benefit, not viability.
    *Settles it:* N0's Process Monitor and RAMMap capture.
 3. **A new ED format version** stops that terrain's queries until a decoder

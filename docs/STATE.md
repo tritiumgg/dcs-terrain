@@ -4,7 +4,7 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `design.md` and `queries.md` hold the design.
 
-**Last updated:** 2026-10-27T20:05Z
+**Last updated:** 2026-10-27T20:28Z
 
 ## Done
 
@@ -44,14 +44,14 @@ One task. The thing to pick up immediately.
 
 **N3** — the mesh in place: `mesh.toc` as the first cache entry, tiles on
 demand, point mode. *Verified by:* an agent, opt-in against the install.
-**N0** is still open and live: it needs DCS on a terrain, so only somebody
-at the install can do it, and no agent task waits on it.
+**N0**'s open test passed: DCS lets readers in. Its Process Monitor and
+RAMMap captures remain, for somebody at the install; no agent task waits.
 
 ## Then
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **N0** — live gate: read a terrain's files while DCS has it loaded.
+1. **N0** — the rest: DCS's open flags and its pages in the OS cache.
 2. **N4** — scenery in place: the pool-tree reader.
 3. **N5** — `tables.json`, the projection check and `index --hook`.
 4. **N6** — the road graph: junctions, contraction, betweenness.
