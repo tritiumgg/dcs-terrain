@@ -56,9 +56,9 @@ fn an_unknown_operation_is_refused() {
 }
 
 #[test]
-fn a_stub_says_so_on_stderr() {
-    let out = run(&["stamp", "anywhere", "k=v"]);
+fn a_removed_subcommand_is_refused() {
+    let out = run(&["pack", "anywhere"]);
     assert_eq!(out.status.code(), Some(2));
     assert!(out.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("not built yet"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("unrecognized subcommand"));
 }
