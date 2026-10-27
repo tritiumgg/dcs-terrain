@@ -27,15 +27,45 @@ struct Footprint { width: f64, depth: f64, orientations_deg: Vec<f64> }   // def
   `cell_size` and `elapsed_ms` (`design.md` §5).
 - Errors are a list of `{code, message, path}` issues. An operation returns a
   full result or an error, never a partial one.
-- **GeoJSON.** An operation that returns areas — `viewshed`, `radar_floor`,
-  `coverage`, `exposure` — takes `geojson: true` and then also returns a
-  `geojson` field: an RFC 7946 `FeatureCollection` that any map program opens.
-  Coordinates are longitude and latitude (WGS84) through the map's fitted
-  projection, with the polygons simplified to half a cell. Each operation says
-  what its features are and the properties they carry.
+- **GeoJSON.** Every operation that returns geometry takes `geojson: true` and
+  then also returns a `geojson` field: an RFC 7946 `FeatureCollection` that any
+  map program opens. Coordinates are longitude and latitude (WGS84) through the
+  map's fitted projection, with area outlines simplified to half a cell. §1.1
+  lists what each operation's features are.
 - Point answers (`sample` at points, observer and target heights, `alt_agl`
   conversions) use point mode, the mesh triangle's own height. Regional answers
   read the 50 m raster.
+
+### 1.1 GeoJSON features
+
+Every feature carries the properties named here and nothing the JSON
+response does not already hold. An operation with an observer, site or
+endpoints also returns them as `Point` features.
+
+| Operation | Features |
+|---|---|
+| `sample` | a `Point` per row, its layer values as properties |
+| `viewshed` | one `MultiPolygon` of the visible area, holes included, with the observer, radius and target height |
+| `radar_floor` | one `MultiPolygon` per band, lowest first, with `alt_agl` |
+| `coverage` | one `MultiPolygon` per band's dead zones with `alt_agl`; the asset's outline when given |
+| `approach_spectrum` | a `Polygon` wedge per blind arc, out to `radius`, with the band and the arc's bearings |
+| `unmask_profile` | the route as a `LineString`; a `LineString` per masked segment; the first-seen point |
+| `exposure` | the unseen polygons with `alt_agl` |
+| `score_site`, `find_sites` | a `Point` per candidate with its rank, score and orientation, and its footprint as a `Polygon` |
+| `route` | the route as a `LineString`, and each leg as one with its length, climb, grade, exposure and class |
+| `route_alternatives` | each route as a `LineString` with its stretch and overlap; the edges every alternative shares, as `LineString`s marked `shared` |
+| `low_level_route` | the path as a `LineString` with altitude MSL as the third coordinate, and each leg with its height above ground and the sites that see it |
+| `nearest` | a `Point` per result with its kind, name and distance; for roads and rail, the matched edge as a `LineString` |
+| `scenery_in` | each object's box as a `Polygon` with its model, class and height; the region or footprint queried |
+| `chokepoints` | each edge as a `LineString` with its rank, betweenness, class and `crosses_water` |
+| `trafficability` | the line to the nearest road as a `LineString`, and the blocking point when there is one |
+| `point_info` | a `Point` per request point with its fields |
+| `airfield_info` | each runway as a `LineString` between its thresholds with designator, course, length and width; each stand as a `Point` with its size, and whether it fits when `fits` is given |
+| `validate_placements` | a `Point` per unit with its issues, its footprint as a `Polygon`, and each offending object's box |
+| `towns` | each place's outline as a `Polygon` when outlines are asked for, and a `Point` at its center with its name, size class and form |
+
+`describe` and `geo` return no geometry to draw; `geo` is the conversion
+itself.
 
 ## 2. Layers
 
@@ -105,9 +135,7 @@ Request: `observer`, `radius`, `target_alt_agl`, `resolution` (default the
 cell size). Response: `{origin_x, origin_z, cell, width, height, bits:
 base64}`, `visible_fraction`, and `rings: Vec<Polygon>` when `as_polygons` is
 true (marching squares, simplified to half a cell). Radials are spaced to give
-one per cell on the outer ring. With `geojson`, one `MultiPolygon` feature of
-the visible area, holes included, with `visible: true`, the observer, radius
-and target height as properties, and a `Point` feature for the observer.
+one per cell on the outer ring.
 
 ### `coverage`
 
@@ -116,9 +144,7 @@ Request: `site: Observer`, `envelope {radius, alt_bands_agl}`, `asset: Region
 covered_fraction, dead_zones: Vec<Polygon>, asset_covered_fraction,
 blind_approach_exists}`, the last true when some radial stays masked from
 `radius` in to `min_masked_range`. Computed from the radar floor: a cell is
-covered at a band when its floor is at or below it. With `geojson`, one feature
-per band's dead zones with `alt_agl`, a `Point` for the site, and the asset's
-outline when given.
+covered at a band when its floor is at or below it.
 
 ### `approach_spectrum`
 
@@ -224,10 +250,9 @@ true; there is no magnetic model. The caller supplies the airframe's size.
 Request: `site: Observer`, `radius`, `resolution` (default the cell size),
 optionally `points`, and `bands_agl` (default 30, 100, 300, 1 000 m) for the
 GeoJSON. Response: a raster of the lowest altitude, AGL and MSL, at which a
-target is visible from the site, or that value at each point. With `geojson`,
-one `MultiPolygon` feature per band — the area where a target at that height
-above ground is seen — with `alt_agl` as a property, ordered lowest first so a
-map can color them as nested contours.
+target is visible from the site, or that value at each point. Each GeoJSON
+band is the area where a target at that height above ground is seen; they nest,
+so a map can color them as contours.
 The viewshed sweep keeps the running maximum elevation angle along each
 radial; the floor at a cell is that angle times range, plus the site height,
 minus the ground. One sweep, the cost of a viewshed. Flat world.
@@ -237,8 +262,7 @@ minus the ground. One sweep, the cost of a viewshed. Flat world.
 Request: `sites: Vec<{observer, radius, weight}>`, `region`, and a
 `target_alt_agl` or a band. Response per cell: the lowest floor over all sites
 and how many sites see the target altitude; optionally polygons of "unseen at
-or below h". With `geojson`, those polygons as features with `alt_agl`, and a
-`Point` feature per site. Geometry only: no clutter, Doppler notch or minimum elevation.
+or below h". Geometry only: no clutter, Doppler notch or minimum elevation.
 
 ### `validate_placements`
 
