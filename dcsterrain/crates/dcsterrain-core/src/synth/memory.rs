@@ -158,13 +158,13 @@ mod tests {
     }
 
     #[test]
-    fn a_point_is_the_closed_form_there_and_a_cell_its_centre() {
+    fn a_point_is_the_closed_form_there_and_a_cell_its_center() {
         let s = synth();
         let (x, z) = s.form().abs(LAKE_NORTH_M + 10.0, LAKE_EAST_M);
         let p = s.point(x, z).unwrap().unwrap();
         assert_eq!(p.height, LAKE_LEVEL_M);
         assert_eq!((p.water, p.cover), (WATER_LAKE, Cover::Water));
-        // Off a cell centre the height is the hill's own, not the cell's.
+        // Off a cell center the height is the hill's own, not the cell's.
         let (n, e) = (HILL_A_NORTH_M + 333.0, HILL_A_EAST_M + 17.0);
         let (x, z) = s.form().abs(n, e);
         assert_eq!(

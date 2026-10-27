@@ -44,7 +44,7 @@ pub trait Source {
     /// is the layer's `nodata`.
     fn tile(&self, layer: Layer, tx: u32, tz: u32) -> Result<Vec<i32>, Refusal>;
 
-    /// The ground at DCS `(x, z)` itself, not at a cell centre: the winning
+    /// The ground at DCS `(x, z)` itself, not at a cell center: the winning
     /// surface's own height, which is what the game reports. `None` where
     /// nothing covers the point.
     fn point(&self, x: f64, z: f64) -> Result<Option<Ground>, Refusal>;
@@ -53,7 +53,7 @@ pub trait Source {
 /// The ground at one point.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Ground {
-    /// Metres: the water surface over water, the ground elsewhere.
+    /// Meters: the water surface over water, the ground elsewhere.
     pub height: f64,
     /// As the `water` layer codes it.
     pub water: u8,
@@ -64,7 +64,7 @@ pub struct Ground {
 
 /// Cells along each side of a tile.
 pub const TILE_SIZE: u32 = 64;
-/// Metres along each side of a cell.
+/// Meters along each side of a cell.
 pub const CELL_SIZE: u32 = 50;
 
 /// A layer of the cell grid, each cell sampled at its centre.

@@ -282,14 +282,15 @@ fn base_index_for(fields: &[Field], i: usize) -> Option<&Field> {
     None
 }
 
-fn intern(names: &mut Vec<String>, s: String) -> u16 {
-    match names.iter().position(|n| *n == s) {
-        Some(k) => k as u16,
+fn intern(names: &mut Vec<String>, s: String) -> Result<u16, Error> {
+    let k = match names.iter().position(|n| *n == s) {
+        Some(k) => k,
         None => {
             names.push(s);
-            (names.len() - 1) as u16
+            names.len() - 1
         }
-    }
+    };
+    u16::try_from(k).map_err(|_| malformed("the file names more than 65 536 materials".into()))
 }
 
 fn block_info(
@@ -323,8 +324,8 @@ fn block_info(
             continue;
         };
         subsets.push(SubsetToc {
-            shader: intern(names, shader),
-            material: intern(names, material),
+            shader: intern(names, shader)?,
+            material: intern(names, material)?,
             base: base.into(),
             tri: f.into(),
         });
@@ -490,12 +491,32 @@ impl Surface5 {
                 bytes.len() - r.at
             )));
         }
+        // What opening the file would have refused.
+        if blocks.is_empty() {
+            return Err(Malformed("the table of contents holds no blocks".into()));
+        }
+        let finite = |b: &BlockInfo| b.t.iter().chain(&b.bbox).all(|v| v.is_finite());
+        if let Some(i) = blocks.iter().position(|b| !finite(b)) {
+            return Err(Malformed(format!(
+                "block {i}'s place or box is not a finite number"
+            )));
+        }
+        if data_base > len {
+            return Err(Malformed(format!(
+                "the data base {data_base} lies past the end of the file, {len} bytes"
+            )));
+        }
         Ok(Surface5 {
             blocks,
             names,
             data_base,
             len,
         })
+    }
+
+    /// The length of the file the table of contents was read from.
+    pub fn file_len(&self) -> u64 {
+        self.len
     }
 
     /// The union of the finest blocks' boxes: the map's extent.
@@ -526,8 +547,12 @@ impl Surface5 {
                 a.size
             )));
         }
-        let start = self.data_base + a.offset;
-        if start.checked_add(a.size).is_none_or(|end| end > self.len) {
+        let end = self
+            .data_base
+            .checked_add(a.offset)
+            .and_then(|s| s.checked_add(a.size));
+        let start = self.data_base.wrapping_add(a.offset);
+        if end.is_none_or(|end| end > self.len) {
             return Err(malformed(format!(
                 "{} runs past the end of the file",
                 what()
@@ -595,6 +620,14 @@ impl Surface5 {
             )));
         }
         check_indices(&format!("block {index}'s triangle list"), &tri, p.len())?;
+        // A NaN passes every comparison with the box below, so it is
+        // refused here.
+        let bad = p.iter().flatten().chain(&depth).any(|v| !v.is_finite());
+        if bad {
+            return Err(malformed(format!(
+                "block {index} holds a vertex or depth that is not a finite number"
+            )));
+        }
         // A reader skips a block by its box, so a vertex outside it would be
         // ground nothing reads.
         let b = info.bbox;
@@ -782,6 +815,40 @@ mod tests {
         assert_eq!(
             back.read_all(&f[..], &m).unwrap(),
             s.read_all(&f[..], &m).unwrap()
+        );
+    }
+
+    #[test]
+    fn refuses_a_table_of_contents_no_file_would_give() {
+        let f = file(&[two_triangles()], 1);
+        let s = Surface5::open(&f[..], "t").unwrap();
+        let mut none = s.clone();
+        none.blocks.clear();
+        let e = Surface5::decode(&none.encode()).unwrap_err();
+        assert_eq!(e.0, "the table of contents holds no blocks");
+        let mut nan = s.clone();
+        nan.blocks[0].bbox[3] = f32::NAN;
+        let e = Surface5::decode(&nan.encode()).unwrap_err();
+        assert_eq!(e.0, "block 0's place or box is not a finite number");
+        // An array whose offset overflows is refused, not wrapped.
+        let mut far = s.clone();
+        far.blocks[0].pbase.offset = u64::MAX - 2;
+        let far = Surface5::decode(&far.encode()).unwrap();
+        let e = far.read_block(&f[..], 0, &[]).unwrap_err().to_string();
+        assert_eq!(e, "block 0's Pbase field runs past the end of the file");
+    }
+
+    #[test]
+    fn refuses_a_vertex_that_is_not_a_number() {
+        let mut b = two_triangles();
+        b.arrays[7] = vec3(
+            "Pbase",
+            &[[0.0, 10.0, 0.0], [f32::NAN; 3], [0.0; 3], [0.0; 3]],
+        );
+        let e = read_built(&[b], 1, &[]).unwrap_err().to_string();
+        assert_eq!(
+            e,
+            "block 0 holds a vertex or depth that is not a finite number"
         );
     }
 

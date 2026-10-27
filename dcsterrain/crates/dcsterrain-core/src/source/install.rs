@@ -25,7 +25,7 @@ pub const BLOCK_BUDGET: usize = 32 << 20;
 pub const TILE_COUNT: usize = 256;
 
 /// How far past its stated box a block is read for a point or tile. Its
-/// vertices lie inside the box to within a centimetre.
+/// vertices lie inside the box to within a centimeter.
 const BOX_PAD_M: f64 = 1.0;
 
 /// The `.surface5` table of contents.
@@ -160,6 +160,16 @@ impl Install {
         let f = surface_file(&map)?;
         let path = f.path.clone();
         let file = File::open(root.join(&path)).map_err(|e| refusal(&path, e))?;
+        // The file can change between the key's check and this open; the
+        // offsets are then another file's.
+        let size = file.metadata().map_err(|e| refusal(&path, e))?.len();
+        if size != toc.file_len() {
+            return Err(Refusal(format!(
+                "{path} changed while it was being opened ({size} bytes, where its table of \
+                 contents was read from {}); open it again",
+                toc.file_len()
+            )));
+        }
         let boxes: Vec<[f64; 4]> = toc.blocks.iter().map(|b| b.world_box()).collect();
         let grid = grid_for(&toc.bounds(), CELL_SIZE, TILE_SIZE);
         Ok(Install {
@@ -263,10 +273,12 @@ impl Source for Install {
             return Ok(None);
         }
         let p = grid_units(&self.grid, x, z);
-        let mut best = None;
-        for i in self.under(x, x, z, z) {
-            best = ground::merge(best, self.block(i)?.point(p));
-        }
+        let blocks = self
+            .under(x, x, z, z)
+            .into_iter()
+            .map(|i| self.block(i))
+            .collect::<Result<Vec<_>, _>>()?;
+        let best = ground::point(blocks.iter().map(|b| b.as_ref()), p);
         Ok(best.map(|g| Ground {
             height: g.h,
             water: water_class(g.tritype),
@@ -294,7 +306,7 @@ mod tests {
         fs::write(p, bytes).unwrap();
     }
 
-    /// A kilometre square at (1000, 2000) in two triangles: the south-west
+    /// A kilometer square at (1000, 2000) in two triangles: the south-west
     /// half forest rising from 100 m to 200 m northward, the north-east half
     /// a lake 50 m deep over a 50 m bed at its far corner. A runway subset
     /// covers a triangle near the south-west corner.
@@ -374,7 +386,7 @@ mod tests {
         assert_eq!(t.point(999.0, 2500.0).unwrap(), None);
         assert_eq!(t.point(f64::NAN, 2500.0).unwrap(), None);
 
-        // Every cell is the point at its centre.
+        // Every cell is the point at its center.
         for layer in Layer::ALL {
             let w = Window::read(&t, layer, 0, 0, 20, 20).unwrap();
             for r in 0..20 {
@@ -392,10 +404,10 @@ mod tests {
             }
         }
 
-        // A second open reads the entry rather than scanning the file.
-        let before = fs::metadata(&toc).unwrap().modified().unwrap();
-        Install::open(&root.0, "Test", &cache).unwrap();
-        assert_eq!(fs::metadata(&toc).unwrap().modified().unwrap(), before);
+        // A second open reads the entry rather than building it again.
+        let map = install::open(&root.0, "Test").unwrap();
+        let again = cache.terrain(&root.0, &map).get(&MESH_TOC).unwrap();
+        assert!(!again.built);
     }
 
     #[test]

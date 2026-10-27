@@ -37,9 +37,12 @@ pub fn grid_for(b: &Bounds, cell_size: u32, tile_size: u32) -> Grid {
     }
 }
 
-/// How far past its box a triangle is listed, in cells: a point on its edge
-/// is covered within the edge tolerance, and must find it in its bin.
-const BIN_SLACK: f64 = 1e-6;
+/// How far past its box a triangle is listed and rasterized, in cells: a
+/// point on its edge is covered within the edge tolerance, which grows with
+/// the triangle's size, and must find it. Five centimeters is far more than
+/// that tolerance reaches on any triangle a block holds, and costs nothing:
+/// the cover test decides.
+const BIN_SLACK: f64 = 1e-3;
 
 /// `surface` codes. 2, shallow water, is never written: nothing in the file
 /// is known to mark it.
@@ -216,7 +219,7 @@ impl Bins {
     }
 }
 
-/// One block's ground on one grid. Cell `(row, col)` has its centre at
+/// One block's ground on one grid. Cell `(row, col)` has its center at
 /// `(row, col)` in grid units.
 #[derive(Debug, Clone)]
 pub struct Prepared {
@@ -275,7 +278,17 @@ impl Prepared {
         z[0] + u * (z[1] - z[0]) + v * (z[2] - z[0])
     }
 
-    /// The winning triangle of this block at `p`, in grid units.
+    /// Whether a runway subset of this block covers `p`, in grid units.
+    pub fn on_runway(&self, p: [f64; 2]) -> bool {
+        self.runway.iter().any(|&t| {
+            let [a, b, c] = self.corners(t);
+            cover(a, b, c, p).is_some()
+        })
+    }
+
+    /// The winning triangle of this block at `p`, in grid units. Its
+    /// `runway` is false: a runway subset of any block marks the point, as
+    /// it marks a tile's cell, so the caller asks every block `on_runway`.
     pub fn point(&self, p: [f64; 2]) -> Option<Ground> {
         let b = f64::from(BIN_CELLS);
         let bin = self
@@ -299,16 +312,22 @@ impl Prepared {
                 best = Some(g);
             }
         }
-        // A runway subset lies on the block's own triangles, so where they
-        // cover nothing it covers nothing either.
-        best.map(|mut g| {
-            g.runway = self.runway.iter().any(|&t| {
-                let [a, b, c] = self.corners(t);
-                cover(a, b, c, p).is_some()
-            });
-            g
-        })
+        best
     }
+}
+
+/// The ground at `p`, in grid units, from every block that may cover it.
+pub fn point<'a>(blocks: impl IntoIterator<Item = &'a Prepared>, p: [f64; 2]) -> Option<Ground> {
+    let mut best: Option<Ground> = None;
+    let mut runway = false;
+    for b in blocks {
+        best = merge(best, b.point(p));
+        runway |= b.on_runway(p);
+    }
+    best.map(|mut g| {
+        g.runway = runway;
+        g
+    })
 }
 
 /// One tile of every layer, row-major with columns fastest.
@@ -339,17 +358,20 @@ fn cells(
     (r0, r1): (i64, i64),
     (c0, c1): (i64, i64),
 ) -> Option<(std::ops::RangeInclusive<i64>, std::ops::RangeInclusive<i64>)> {
+    // A center a hair outside the corners' box is still covered within the
+    // edge tolerance, as a point there is, so the box is widened by the
+    // bins' slack.
     let clip = |k: usize, start: i64, end: i64| {
         let (lo, hi) = span(&p, k);
-        let lo = (lo.ceil() as i64).max(start);
-        let hi = (hi.floor() as i64).min(end - 1);
+        let lo = ((lo - BIN_SLACK).ceil() as i64).max(start);
+        let hi = ((hi + BIN_SLACK).floor() as i64).min(end - 1);
         (lo <= hi).then_some(lo..=hi)
     };
     Some((clip(0, r0, r1)?, clip(1, c0, c1)?))
 }
 
 /// Rasterizes tile `(tx, tz)` of `g` from the blocks under it, each cell
-/// the winning triangle at its centre. `g.tile_size` must be a whole number
+/// the winning triangle at its center. `g.tile_size` must be a whole number
 /// of bins.
 pub fn tile(blocks: &[&Prepared], g: &Grid, tx: u32, tz: u32) -> Tile {
     assert!(
@@ -439,7 +461,7 @@ mod tests {
     use super::super::sample::{LAKE, SEA};
     use super::*;
 
-    /// A kilometre square at the origin in two triangles: the south-west
+    /// A kilometer square at the origin in two triangles: the south-west
     /// half rising from 100 m in the south to 200 m in the north, the
     /// north-east half a lake. A runway subset covers a triangle near the
     /// south-west corner, over three vertices the full list does not use.
@@ -489,9 +511,9 @@ mod tests {
             .collect()
     }
 
-    fn point(blocks: &[Prepared], g: &Grid, x: f64, z: f64) -> Option<Ground> {
+    fn at(blocks: &[Prepared], g: &Grid, x: f64, z: f64) -> Option<Ground> {
         let p = grid_units(g, x, z);
-        blocks.iter().map(|b| b.point(p)).fold(None, merge)
+        point(blocks, p)
     }
 
     fn cell(t: &Tile, r: usize, c: usize) -> [i32; 4] {
@@ -505,7 +527,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tile_cell_is_the_point_at_its_centre() {
+    fn a_tile_cell_is_the_point_at_its_center() {
         let g = grid(20);
         let b = prepared(&[square([0, LAKE])], &g);
         let refs: Vec<&Prepared> = b.iter().collect();
@@ -522,7 +544,7 @@ mod tests {
         for r in 0..20 {
             for c in 0..20 {
                 let (x, z) = g.centre(r, c);
-                let p = point(&b, &g, x, z).unwrap();
+                let p = at(&b, &g, x, z).unwrap();
                 let want = Layer::ALL.map(|l| p.value(l));
                 assert_eq!(cell(&t, r as usize, c as usize), want, "({r}, {c})");
             }
@@ -550,12 +572,12 @@ mod tests {
     fn a_point_interpolates_within_its_triangle() {
         let g = grid(20);
         let b = prepared(&[square([0, LAKE])], &g);
-        let p = point(&b, &g, 500.0, 250.0).unwrap();
+        let p = at(&b, &g, 500.0, 250.0).unwrap();
         assert!((p.h - 150.0).abs() < 1e-9, "{}", p.h);
         assert_eq!((p.tri, p.runway), (0, false));
-        assert!(point(&b, &g, 200.0, 200.0).unwrap().runway);
-        assert!(point(&b, &g, -1.0, 500.0).is_none());
-        assert!(point(&b, &g, 500.0, 1000.5).is_none());
+        assert!(at(&b, &g, 200.0, 200.0).unwrap().runway);
+        assert!(at(&b, &g, -1.0, 500.0).is_none());
+        assert!(at(&b, &g, 500.0, 1000.5).is_none());
     }
 
     #[test]
@@ -564,13 +586,47 @@ mod tests {
         let mut low = square([0, 0]);
         low.t[1] = -50.0;
         let b = prepared(&[square([ROAD_STRIP, ROAD_STRIP]), low], &g);
-        let p = point(&b, &g, 25.0, 25.0).unwrap();
+        let p = at(&b, &g, 25.0, 25.0).unwrap();
         assert_eq!((p.block, p.value(Layer::Surface)), (0, SURFACE_ROAD.into()));
 
         let mut land = square([0, 0]);
         land.t[1] = 50.0;
         let b = prepared(&[square([LAKE, LAKE]), land], &g);
-        assert_eq!(point(&b, &g, 25.0, 25.0).unwrap().block, 0);
+        assert_eq!(at(&b, &g, 25.0, 25.0).unwrap().block, 0);
+    }
+
+    #[test]
+    fn a_runway_subset_marks_a_point_another_block_wins() {
+        // The first block's own triangle covers only its south-west half,
+        // and its runway subset lies in the north-east half, where only the
+        // second block's ground is.
+        let mut a = square([0, 0]);
+        a.arrays[0] = u32s("TRITYPE", &[0]);
+        a.arrays[1] = tri(&[[0, 1, 2]], Some(("Surface5.0", "Land")));
+        a.arrays[2] = u32s("baseIndex", &[3, 5, 6]);
+        a.arrays[4] = vec3(
+            "Pbase",
+            &[
+                [0.0, 100.0, 0.0],
+                [1000.0, 200.0, 0.0],
+                [0.0, 100.0, 1000.0],
+                [1000.0, 100.0, 1000.0],
+                [0.0; 3],
+                [600.0, 100.0, 1000.0],
+                [1000.0, 100.0, 600.0],
+            ],
+        );
+        a.arrays[5] = f32s("depth", &[0.0; 7]);
+        let g = grid(20);
+        let b = prepared(&[a, square([0, 0])], &g);
+        let p = at(&b, &g, 900.0, 900.0).unwrap();
+        assert_eq!(
+            (p.block, p.value(Layer::Surface)),
+            (1, SURFACE_RUNWAY.into())
+        );
+        let refs: Vec<&Prepared> = b.iter().collect();
+        let t = tile(&refs, &g, 0, 0);
+        assert_eq!(t.surface[18 * 64 + 18], SURFACE_RUNWAY);
     }
 
     #[test]
@@ -624,7 +680,7 @@ mod tests {
             .unwrap();
         for k in 0..2000 {
             let (x, z) = (f64::from(k) * 15.1 - 100.0, f64::from(k * 7 % 2000) * 15.3);
-            let got = point(&b, &g, x, z);
+            let got = at(&b, &g, x, z);
             let want = mesh.sample(x, z);
             let key = |h: f64, tt, b, t| ((h * 1e6).round(), tt, b, t);
             assert_eq!(
@@ -646,7 +702,7 @@ mod tests {
                         Layer::ALL.map(Layer::nodata)
                     } else {
                         let (x, z) = g.centre(r, c);
-                        point(&b, &g, x, z).map_or(Layer::ALL.map(Layer::nodata), |p| {
+                        at(&b, &g, x, z).map_or(Layer::ALL.map(Layer::nodata), |p| {
                             Layer::ALL.map(|l| p.value(l))
                         })
                     };
