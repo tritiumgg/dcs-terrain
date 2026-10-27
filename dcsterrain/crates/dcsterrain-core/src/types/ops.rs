@@ -1,10 +1,11 @@
 //! One request and one response per operation.
 //!
 //! Every response flattens a `Provenance` into its top level, so each one
-//! carries `theatre`, `dcs_build`, `cell_size` and `elapsed_ms` beside its
-//! own fields. A field with a stated default is optional in the request and
-//! takes that default when omitted. A default that depends on the file, such
-//! as a step of twice the cell size, is an `Option` resolved by the operation.
+//! carries `terrain`, `dcs_build`, `terrain_fingerprint`, `cell_size` and
+//! `elapsed_ms` beside its own fields. A field with a stated default is
+//! optional in the request and takes that default when omitted. A default
+//! that depends on the terrain, such as a step of twice the cell size, is an
+//! `Option` resolved by the operation.
 
 use std::collections::BTreeMap;
 
@@ -12,7 +13,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    Criterion, Footprint, LatLon, Network, Observer, Point, Point3, Polygon, Provenance, Region,
+    BoundingBox, Criterion, Footprint, LatLon, Network, Observer, Point, Point3, Polygon,
+    Provenance, Region,
 };
 
 // describe
@@ -20,37 +22,57 @@ use super::{
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DescribeRequest {}
 
-/// Everything the packed file says about itself.
+/// What a terrain is, which files answer for it, and how much of it is known.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DescribeResponse {
     #[serde(flatten)]
     pub provenance: Provenance,
-    /// Every `meta` key and its stored text.
-    pub meta: BTreeMap<String, String>,
-    pub grids: Vec<GridInfo>,
-    /// Rows in each vector table, by table name.
-    pub row_counts: BTreeMap<String, u64>,
-    pub layers_dropped: Vec<String>,
-    /// The `validation_*` keys, when the file has been stamped.
-    pub validation: Option<BTreeMap<String, String>>,
+    /// The `timestamp` beside the build in `autoupdate.cfg`.
+    pub dcs_build_timestamp: String,
+    /// The box the terrain's cells cover; null until its mesh has been read.
+    pub extent: Option<BoundingBox>,
+    /// Each terrain file a decoder reads, as its header states it.
+    pub files: Vec<TerrainFile>,
+    pub counts: Counts,
+    /// The last live validation's figures; null when none has run.
+    pub validation: Option<Validation>,
 }
 
-/// One row of the packed file's `grid` table.
+/// One terrain file, its path relative to the install.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct GridInfo {
-    pub name: String,
-    pub cell_size: f64,
-    pub origin_x: f64,
-    pub origin_z: f64,
-    pub width: u32,
-    pub height: u32,
-    pub dtype: String,
-    pub tile_size: u32,
-    pub nodata: Option<String>,
-    pub unit: Option<String>,
-    pub derived_from: Option<String>,
-    /// The parameters that produced the grid, as the JSON text stored.
-    pub params: Option<String>,
+pub struct TerrainFile {
+    pub role: String,
+    pub path: String,
+    /// The class and format version the container header names; null for
+    /// Lua source and `assets.assets`, which have no header.
+    pub class: Option<String>,
+    pub version: Option<u32>,
+    pub size: u64,
+}
+
+/// How many of each thing the terrain holds. A count is null until what it
+/// is counted from has been read.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Counts {
+    pub airdromes: Option<u64>,
+    pub runways: Option<u64>,
+    pub stands: Option<u64>,
+    pub beacons: Option<u64>,
+    pub towns: Option<u64>,
+    pub nodes: Option<u64>,
+    pub road_edges: Option<u64>,
+    pub scenery_objects: Option<u64>,
+}
+
+/// The figures a live validation sortie measured against the running sim.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Validation {
+    pub height_rmse_m: f64,
+    /// The share of sightlines on which `visible` agreed with the sim.
+    pub los_agreement: f64,
+    /// Route length over the sim's own route length.
+    pub route_ratio: f64,
+    pub validated_at: String,
 }
 
 // sample
@@ -667,8 +689,9 @@ mod tests {
 
     fn provenance() -> Provenance {
         Provenance {
-            theatre: "Synth".into(),
+            terrain: "synth".into(),
             dcs_build: "0.0.0.0".into(),
+            terrain_fingerprint: "synth-1-70-50".into(),
             cell_size: 50.0,
             elapsed_ms: 3,
         }
@@ -686,7 +709,8 @@ mod tests {
         assert_eq!(
             v,
             json!({
-                "theatre": "Synth", "dcs_build": "0.0.0.0", "cell_size": 50.0,
+                "terrain": "synth", "dcs_build": "0.0.0.0",
+                "terrain_fingerprint": "synth-1-70-50", "cell_size": 50.0,
                 "elapsed_ms": 3, "visible": true, "blocking": null, "clearance_m": 12.5
             })
         );

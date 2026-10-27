@@ -123,16 +123,18 @@ pub struct LatLon {
 }
 
 // What answered: carried by every response, so a consumer can always tell
-// which theatre, build and resolution a result came from. A plain comment
+// which terrain, build and resolution a result came from. A plain comment
 // rather than a doc comment, because the schema of a struct that flattens
 // this one and has no doc of its own would take this one's as its own.
 //
-// There is no terrain digest, because the build is the terrain version,
-// since ED ships terrain only inside updates.
+// The build is the terrain version, since ED ships terrain only inside
+// updates; the fingerprint, the terrain files' sizes, records what answered
+// and needs no hash.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Provenance {
-    pub theatre: String,
+    pub terrain: String,
     pub dcs_build: String,
+    pub terrain_fingerprint: String,
     pub cell_size: f64,
     pub elapsed_ms: u64,
 }

@@ -159,13 +159,17 @@
           "minimum": 0,
           "type": "integer"
         },
-        "theatre": {
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
           "type": "string"
         }
       },
       "required": [
-        "theatre",
+        "terrain",
         "dcs_build",
+        "terrain_fingerprint",
         "cell_size",
         "elapsed_ms",
         "bands"
@@ -307,17 +311,91 @@
           "minimum": 0,
           "type": "integer"
         },
-        "theatre": {
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
           "type": "string"
         }
       },
       "required": [
-        "theatre",
+        "terrain",
         "dcs_build",
+        "terrain_fingerprint",
         "cell_size",
         "elapsed_ms",
         "edges"
       ],
+      "type": "object"
+    },
+    "Counts": {
+      "description": "How many of each thing the terrain holds. A count is null until what it\nis counted from has been read.",
+      "properties": {
+        "airdromes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "beacons": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "nodes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "road_edges": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "runways": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "scenery_objects": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "stands": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "towns": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "CoverageBand": {
@@ -409,13 +487,17 @@
           "minimum": 0,
           "type": "integer"
         },
-        "theatre": {
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
           "type": "string"
         }
       },
       "required": [
-        "theatre",
+        "terrain",
         "dcs_build",
+        "terrain_fingerprint",
         "cell_size",
         "elapsed_ms",
         "bands"
@@ -942,13 +1024,20 @@
       "type": "object"
     },
     "DescribeResponse": {
-      "description": "Everything the packed file says about itself.",
+      "description": "What a terrain is, which files answer for it, and how much of it is known.",
       "properties": {
         "cell_size": {
           "format": "double",
           "type": "number"
         },
+        "counts": {
+          "$ref": "#/$defs/Counts"
+        },
         "dcs_build": {
+          "type": "string"
+        },
+        "dcs_build_timestamp": {
+          "description": "The `timestamp` beside the build in `autoupdate.cfg`.",
           "type": "string"
         },
         "elapsed_ms": {
@@ -956,57 +1045,51 @@
           "minimum": 0,
           "type": "integer"
         },
-        "grids": {
+        "extent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Box"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The box the terrain's cells cover; null until its mesh has been read."
+        },
+        "files": {
+          "description": "Each terrain file a decoder reads, as its header states it.",
           "items": {
-            "$ref": "#/$defs/GridInfo"
+            "$ref": "#/$defs/TerrainFile"
           },
           "type": "array"
         },
-        "layers_dropped": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+        "terrain": {
+          "type": "string"
         },
-        "meta": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "Every `meta` key and its stored text.",
-          "type": "object"
-        },
-        "row_counts": {
-          "additionalProperties": {
-            "format": "uint64",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "description": "Rows in each vector table, by table name.",
-          "type": "object"
-        },
-        "theatre": {
+        "terrain_fingerprint": {
           "type": "string"
         },
         "validation": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "The `validation_*` keys, when the file has been stamped.",
-          "type": [
-            "object",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Validation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The last live validation's figures; null when none has run."
         }
       },
       "required": [
-        "theatre",
+        "terrain",
         "dcs_build",
+        "terrain_fingerprint",
         "cell_size",
         "elapsed_ms",
-        "meta",
-        "grids",
-        "row_counts",
-        "layers_dropped"
+        "dcs_build_timestamp",
+        "files",
+        "counts"
       ],
       "type": "object"
     },
@@ -1106,13 +1189,17 @@
         "stats": {
           "$ref": "#/$defs/FindSitesStats"
         },
-        "theatre": {
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
           "type": "string"
         }
       },
       "required": [
-        "theatre",
+        "terrain",
         "dcs_build",
+        "terrain_fingerprint",
         "cell_size",
         "elapsed_ms",
         "candidates",
@@ -1234,7 +1321,10 @@
           "minimum": 0,
           "type": "integer"
         },
-        "theatre": {
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
           "type": "string"
         },
         "to_latlon": {
@@ -1251,86 +1341,13 @@
         }
       },
       "required": [
-        "theatre",
+        "terrain",
         "dcs_build",
+        "terrain_fingerprint",
         "cell_size",
         "elapsed_ms",
         "to_latlon",
         "to_xz"
-      ],
-      "type": "object"
-    },
-    "GridInfo": {
-      "description": "One row of the packed file's `grid` table.",
-      "properties": {
-        "cell_size": {
-          "format": "double",
-          "type": "number"
-        },
-        "derived_from": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "dtype": {
-          "type": "string"
-        },
-        "height": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "name": {
-          "type": "string"
-        },
-        "nodata": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "origin_x": {
-          "format": "double",
-          "type": "number"
-        },
-        "origin_z": {
-          "format": "double",
-          "type": "number"
-        },
-        "params": {
-          "description": "The parameters that produced the grid, as the JSON text stored.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "tile_size": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "unit": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "width": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "name",
-        "cell_size",
-        "origin_x",
-        "origin_z",
-        "width",
-        "height",
-        "dtype",
-        "tile_size"
       ],
       "type": "object"
     },
@@ -1520,13 +1537,17 @@
           },
           "type": "array"
         },
-        "theatre": {
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
           "type": "string"
         }
       },
       "required": [
-        "theatre",
+        "terrain",
         "dcs_build",
+        "terrain_fingerprint",
         "cell_size",
         "elapsed_ms",
         "results"
@@ -1847,13 +1868,17 @@
           },
           "type": "array"
         },
-        "theatre": {
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
           "type": "string"
         }
       },
       "required": [
-        "theatre",
+        "terrain",
         "dcs_build",
+        "terrain_fingerprint",
         "cell_size",
         "elapsed_ms",
         "routes"
@@ -1955,7 +1980,10 @@
           "format": "double",
           "type": "number"
         },
-        "theatre": {
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
           "type": "string"
         },
         "waypoints": {
@@ -1967,8 +1995,9 @@
         }
       },
       "required": [
-        "theatre",
+        "terrain",
         "dcs_build",
+        "terrain_fingerprint",
         "cell_size",
         "elapsed_ms",
         "waypoints",
@@ -2070,13 +2099,17 @@
           },
           "type": "array"
         },
-        "theatre": {
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
           "type": "string"
         }
       },
       "required": [
-        "theatre",
+        "terrain",
         "dcs_build",
+        "terrain_fingerprint",
         "cell_size",
         "elapsed_ms",
         "rows"
@@ -2167,13 +2200,17 @@
           },
           "type": "array"
         },
-        "theatre": {
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
           "type": "string"
         }
       },
       "required": [
-        "theatre",
+        "terrain",
         "dcs_build",
+        "terrain_fingerprint",
         "cell_size",
         "elapsed_ms",
         "objects",
@@ -2287,13 +2324,17 @@
           },
           "type": "array"
         },
-        "theatre": {
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
           "type": "string"
         }
       },
       "required": [
-        "theatre",
+        "terrain",
         "dcs_build",
+        "terrain_fingerprint",
         "cell_size",
         "elapsed_ms",
         "orientation_deg",
@@ -2459,6 +2500,43 @@
       ],
       "type": "object"
     },
+    "TerrainFile": {
+      "description": "One terrain file, its path relative to the install.",
+      "properties": {
+        "class": {
+          "description": "The class and format version the container header names; null for\nLua source and `assets.assets`, which have no header.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "size": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "version": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "role",
+        "path",
+        "size"
+      ],
+      "type": "object"
+    },
     "TpiClass": {
       "description": "A landform class from local relief, then regional relief, then slope:\nthe first that holds of `ridge`, `valley`, `upper`, `lower`, `mid`, and\n`flat` otherwise.",
       "enum": [
@@ -2537,13 +2615,17 @@
           "description": "Why the line is or is not passable, for a reader.",
           "type": "string"
         },
-        "theatre": {
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
           "type": "string"
         }
       },
       "required": [
-        "theatre",
+        "terrain",
         "dcs_build",
+        "terrain_fingerprint",
         "cell_size",
         "elapsed_ms",
         "reachable",
@@ -2621,7 +2703,10 @@
           },
           "type": "array"
         },
-        "theatre": {
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
           "type": "string"
         },
         "visible_fraction": {
@@ -2630,12 +2715,42 @@
         }
       },
       "required": [
-        "theatre",
+        "terrain",
         "dcs_build",
+        "terrain_fingerprint",
         "cell_size",
         "elapsed_ms",
         "masked_segments",
         "visible_fraction"
+      ],
+      "type": "object"
+    },
+    "Validation": {
+      "description": "The figures a live validation sortie measured against the running sim.",
+      "properties": {
+        "height_rmse_m": {
+          "format": "double",
+          "type": "number"
+        },
+        "los_agreement": {
+          "description": "The share of sightlines on which `visible` agreed with the sim.",
+          "format": "double",
+          "type": "number"
+        },
+        "route_ratio": {
+          "description": "Route length over the sim's own route length.",
+          "format": "double",
+          "type": "number"
+        },
+        "validated_at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "height_rmse_m",
+        "los_agreement",
+        "route_ratio",
+        "validated_at"
       ],
       "type": "object"
     },
@@ -2717,7 +2832,10 @@
             "null"
           ]
         },
-        "theatre": {
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
           "type": "string"
         },
         "visible_fraction": {
@@ -2731,8 +2849,9 @@
         }
       },
       "required": [
-        "theatre",
+        "terrain",
         "dcs_build",
+        "terrain_fingerprint",
         "cell_size",
         "elapsed_ms",
         "origin_x",
@@ -2790,7 +2909,10 @@
           "minimum": 0,
           "type": "integer"
         },
-        "theatre": {
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
           "type": "string"
         },
         "visible": {
@@ -2798,8 +2920,9 @@
         }
       },
       "required": [
-        "theatre",
+        "terrain",
         "dcs_build",
+        "terrain_fingerprint",
         "cell_size",
         "elapsed_ms",
         "visible",
