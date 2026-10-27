@@ -1,502 +1,299 @@
 # dcs-terrain
 
-Tools that turn a DCS World theatre into one portable SQLite file, and answer
-terrain siting and routing questions from it, with DCS doing no terrain work at
-campaign runtime. The consumers are an MCP server and a command line, both
-going through one query engine.
+A command-line tool that answers terrain siting and routing questions about a
+DCS World map by reading the map's own files from the DCS install, read-only,
+in place, with a small rebuildable cache beside it. DCS does no terrain work at
+campaign runtime and need not be running. There is one interface,
+`dcsterrain query`, JSON in and out; an assistant learns it from a skill.
 
-The repository ships **tools only**. Users extract their own theatres.
+The repository ships **tools only**. Users run them against their own install.
 
 ## Layout
 
 ```
 docs/STATE.md          where the work is: done, next, then, and the carries
-docs/plan.md           the task graph. Tasks have ids. Changes. Not frozen
-docs/spec/             frozen: nine documents, with ledger/ beside them
-docs/decisions/        ADRs, and the only place divergence is recorded
+docs/design.md         the design: sources, decoders, cache, engine, CLI, targets
+docs/queries.md        every operation, layer and criterion
+docs/plan.md           the task graph. Tasks have ids
+docs/decisions/        ADRs: decisions that change the design
 docs/data/             measured reference data and a model census
-dcsterrain/            Cargo workspace: core, cli, mcp                (partial)
-extractor/             the Lua GameGUI hook (tables pass) and its offline tests
-tools/                 ledger.sh, statecheck.sh, nospecrefs.sh,
-                       readmeopen.sh, hooktest.sh, luatest.sh
+dcsterrain/            Cargo workspace: core, cli                    (partial)
+extractor/             the optional Lua GameGUI hook (tables pass) and its tests
+skill/                 the skill an assistant loads                  (planned)
+tools/                 statecheck.sh, nospecrefs.sh, readmeopen.sh,
+                       hooktest.sh, luatest.sh
 tools/lua51/           builds Lua 5.1.5 for Windows with MSVC
-tools/probe-theatre/   the per-map measurement, packaged             (partial)
-tools/validate/        the validation sortie                         (empty)
-.claude/hooks/         the frozen-write guard, the shell guard, the commit
-                       checks, the session start, the stop check
+tools/validate/        the live validation sortie                    (empty)
+.claude/hooks/         the shell guard, the commit checks, the session start,
+                       the stop check
 .github/workflows/     rust, lua, docs
 ```
 
-Marked entries do not exist yet, or exist only in part. `docs/README.md` is the
-index to `docs/`.
+`docs/README.md` is the index to `docs/`. The project was reset on 2026-10-27;
+the documents before it are in git at commit `4b85bd0`.
 
 ## Platforms
 
 Developed on Windows, macOS and Linux from one checkout. Windows is
 distinguished by one thing only: **DCS runs there**.
 
-- **Windows, with DCS installed.** Component X (the Lua hook, now only its
-  optional tables pass, ADR 0037), the V validation sortie through the bridge,
-  and the live steps of E9, Q9 and V1. Anything that talks to a running DCS
-  happens only here. The install's terrain files are here too, so the
-  decoders' opt-in checks run here unless the files are copied elsewhere.
-- **macOS and Linux.** Everything else — the Rust workspace including the file
-  decoders (ADR 0034), the query operations, the MCP server, and every
-  document tool. No DCS, no GPU.
+- **Windows, with DCS installed.** The optional hook, the live validation
+  sortie through the bridge, and the live steps of tasks marked *live* in
+  `docs/plan.md`. The install's terrain files are here too, so the opt-in
+  checks against a real install run here unless the files are copied.
+- **macOS and Linux.** Everything else — the Rust workspace, the decoders, the
+  query engine on the synthetic map, and every document tool. No DCS, no GPU.
 
-The longest dependency chain needs no DCS at all. So do not assume a shell, a
-path separator or a tool is present because another platform has it: check
-before relying on one, and keep scripts portable where a task does not pin
-them.
+Do not assume a shell, a path separator or a tool is present because another
+platform has it: check before relying on one, and keep scripts portable.
 
 ## `docs/STATE.md` is the handoff between sessions
 
-Read it before anything else. It names what was just done, what to pick up,
-what follows, and what carries forward. A `SessionStart` hook prints it into
-context, so it arrives without being asked for.
+Read it before anything else. A `SessionStart` hook prints it into context.
 
 **Update it at the end of every working session, before handing back.** A
-session that changed something and left it alone has lost that work. A `Stop`
-hook refuses once when the tree is dirty and the stamp is not today's.
+`Stop` hook refuses once when the tree is dirty and the stamp is not today's.
 
 - Add what you did to **Done**, newest first, and drop the oldest to keep 5.
 - Move the task you finished out of **Next**, promote from **Then**, and refill
   **Then** from `plan.md` in dependency order. Keep 1 and 5.
-- **Delete** every carry the session discharged. Do not mark it done, do not
-  keep it for the record — git has the record.
-- Stamp **Last updated** with a bare UTC datetime, `YYYY-MM-DDTHH:MMZ`. It
-  carries a datetime and nothing else: a status clause there repeats what
-  **Done** says three lines below and goes stale on the next change, so
-  `tools/statecheck.sh` refuses one.
+- **Delete** every carry the session discharged. Git has the record.
+- Stamp **Last updated** with a bare UTC datetime, `YYYY-MM-DDTHH:MMZ`, and
+  nothing else; `tools/statecheck.sh` refuses a status clause.
 
 Add a carry only for something **learned while working** that no document
-already records, and only with the task id that will discharge it. If
-`plan.md`, a spec or an ADR already says it, it is not a carry — nor is a
-task's own done test, a rule from this file, or anything in `git log`. Most
-sessions add none. A carry with no discharging task, or one that has survived
-three turns of the Next slot, means promote it to an ADR and delete the row.
+already records, with the task id that will discharge it. Most sessions add
+none. A carry that has survived three turns of the Next slot goes into
+`design.md`, or an ADR, and the row is deleted.
 
-**Keep it small.** It is loaded cold every session, so its size is a tax on
-every session. Each section has a line budget, `tools/statecheck.sh` enforces
-them, and CI fails when the file is over. Over budget, nothing is deleted — it
-moves. A completion older than the last five goes to `git log`. A choice with
-reasoning behind it becomes an ADR. A durable fact about the project belongs in
-this file, not that one. A discharged carry is deleted.
+**Keep it small.** Each section has a line budget, `tools/statecheck.sh`
+enforces it, and CI fails when the file is over. Never copy a fact into
+`STATE.md` that lives in this file or in `docs/`.
 
-Never write a paragraph where a line will do, and never copy a fact into
-`docs/STATE.md` that already lives here. Do not restate the task graph, a spec
-or an ADR — point at them.
+## The design documents are living
+
+`docs/design.md`, `docs/queries.md` and `docs/plan.md` are edited directly, in
+the pull request whose change moves them: a `plan.md` row and the code that
+reshapes it are one reviewable thought. Nothing in `docs/` is frozen.
+
+**An ADR records a decision that changes the design**, when its reasoning is
+worth keeping: a measurement that contradicts the design, an approach that does
+not work, a platform fact that turns out wrong, a new DCS build or map measured
+differently. Update `design.md` or `queries.md` to match in the same pull
+request. `docs/decisions/README.md` has the rules and the index. **Propose an
+ADR to the user before writing it**, unless they have already agreed to the
+decision. A committed ADR is not rewritten; a changed decision gets a new
+record and supersedes the old.
 
 ## `README.md` is for users, and the change that moves it updates it
 
-The root README is for a human who has never seen the project. It answers what
-this is, how to get it, how to build it, how to use it, and the license —
-nothing else. Keep it under about 80 lines; detail belongs in `docs/` behind a
-link.
+The root README answers what this is, how to get it, how to build it, how to
+use it, and the license — under about 80 lines, detail behind a link into
+`docs/`.
 
-Update it in the same session that changes **the surface a user touches**: a
-subcommand or flag they type, install or build steps, requirements, the
-extract → pack → query pipeline, or the license. If you change that surface and
-cannot update the README in the same session, add a carry naming the task that
-will.
-
-**Never document something that does not work yet without saying so.** Where
-the build has not reached a thing the README describes, the sentence says so,
-on one line, with "not usable yet", "not final" or "planned".
-`tools/readmeopen.sh` lists those lines, and the task that settles one takes
-the note out. The README currently carries a "not usable yet" banner; remove it
-when the binary can actually do what the page claims, not before.
-
-Do not put progress, task ids, milestones or a changelog in the README —
-`docs/STATE.md` holds progress and git holds history. The one exception is the
-status banner, which is for the reader's benefit, not for tracking.
-
-Milestones MS2, MS4 and MS5 change what a user can do, so each gets a
-deliberate README pass. The usage examples must be real commands with real flag
-names from the core spec. Check them before writing them. Every pull request
-body answers the `README` heading of `.github/PULL_REQUEST_TEMPLATE.md`.
-
-## `docs/spec/` is frozen. Nothing else is.
-
-**Everything under `docs/spec/` is frozen: do not edit, rename or move any of
-it.** That is the whole rule. Anything you would have changed there goes in
-`docs/decisions/` as an ADR instead, and the ADR wins over the spec text.
-
-What lives there: the nine documents, `design-and-facts.md` (the shared
-background every spec cites), the probe log, `using-the-data.md` (the source
-task M1 generates `terrain_metrics_help` from), and `ledger/` — the claims
-ledgers and glossaries that index them.
-
-The reason it is a hard rule rather than a judgment call: those documents were
-reviewed as one set, they cite each other by bare file name, and every
-`ledger/` row quotes a verbatim line from them. One edit silently breaks joins
-that nothing in this repository can rebuild. A `PreToolUse` hook refuses the
-edit, and `tools/ledger.sh lint` in CI catches one made another way.
-
-Everything else — `docs/plan.md`, `docs/STATE.md`, both READMEs,
-`docs/decisions/`, `docs/data/` — is yours to edit directly. The plan states
-build order; edit it when the order changes.
-
-**Check `docs/decisions/README.md` before acting on any frozen text.** Where an
-ADR and a document disagree, the ADR wins; where two ADRs disagree, the later
-accepted one wins. The index table is how an ADR is found, so it is not
-optional.
-
-A record has Michael Nygard's four headings and no others, is numbered
-`NNNN-title-in-kebab-case.md`, and is cited as `ADR NNNN`. Copy `TEMPLATE.md`
-and take the next free number. One decision per record; consequences must
-include the ones that hurt. `docs/decisions/README.md` holds the rest.
-
-Write an ADR when a measurement contradicts a document, when a specified
-approach does not work or a done test cannot be met as written, when a
-dependency or platform fact named in a spec turns out to be wrong, when a
-field, name, default or threshold ends up different from the spec's, when
-something the specs leave open gets settled, or when a new DCS build or theatre
-is measured. No ADR is needed for work that does what the specs already say, or
-for a plain task change — that is an edit to the plan.
-
-A committed ADR is not rewritten. A decision that changes gets a new record,
-and the old one's Status becomes `Superseded by ADR NNNN`. Before that first
-commit it may still be rewritten or dropped, so a decision reversed the same
-day is consolidated rather than superseded.
-
-**Propose an ADR before writing it**, unless the user has already agreed to the
-decision. An ADR records a choice that binds later work; it is not a
-note-to-self. Do not put its content in a code comment or a commit message
-instead — `docs/decisions/` is the only place divergence is recorded.
-
-Reworking a frozen document is possible but is a deliberate project, agreed
-with the user first: fold the accumulated ADRs into a revised document,
-regenerate its ledger and glossary, re-stamp, and freeze that. Never a side
-effect of another change.
-
-## The ledger locates a claim
-
-Read the specs freely — that is what they are for. But start from the ledger
-beside each one, which holds a row per claim with an anchor that locates the
-prose, so retrieval happens in `grep` and `awk` rather than by reading 680
-lines to find a sentence.
-
-```
-tools/ledger.sh codes                     document codes and paths
-tools/ledger.sh subjects CODE             every subject in a ledger
-tools/ledger.sh find CODE <text>          rows matching subject, claim or section
-tools/ledger.sh show CODE "<anchor>"      the prose around one anchor
-tools/ledger.sh sections CODE             the heading tree with line counts
-tools/ledger.sh read CODE "<section>"     one whole section
-tools/ledger.sh lint                      every stamp, anchor and glossary join
-```
-
-Start from `subjects` or `find`, not from `sections`. The ledger is the index.
-
-**The anchor beats the claim.** The anchor is verbatim specification text. The
-claim beside it is a summary and can misread what it summarizes.
-
-For a frozen document, `lint` is tamper detection rather than maintenance: a
-`MISMATCH` means one was edited.
+Update it in the same pull request that changes **the surface a user
+touches**: a subcommand or flag, install or build steps, requirements, or the
+license. **Never document something that does not work yet without saying
+so**, on its line, with "not usable yet", "not final" or "planned";
+`tools/readmeopen.sh` lists those lines. Remove the "not usable yet" banner
+when the binary does what the page claims, not before. No progress, task ids or
+changelog in the README. Each milestone gets a deliberate README pass, with
+real commands and real flag names.
 
 ## Never cite `docs/` from code
 
-**Code never points back at the documents**, with ADRs the single exception.
-
-No file path, section title or document name from `docs/` appears in source
-code, comments, docstrings, test names, error messages or commit messages. Not
-`// per extract-format.md "Tile binary layout"`, not `# see design-and-facts.md`,
-not a doc comment quoting a spec paragraph. Neither does a task id or the
-plan's word "done test": tasks are ephemeral, the plan retires when the tools
-ship, and a comment reading "task X3" then points at nothing.
-
-The reason is that the specs are frozen, so they will drift from the code as
-ADRs accumulate. A citation is a claim that the named section still describes
-what the code does, and nothing checks that claim — it rots silently and points
-the next reader at text that has been superseded.
-
-Write the reason instead of the reference. `// fill cells are nodata, so an
-absent tile reads as sea rather than a hole` survives; a pointer to the
-paragraph that says so does not. If the reason is too long for a comment, it is
-a decision, and it belongs in an ADR.
-
-**ADRs may be cited**, by id: `// ADR 0007: 100 m cells above 500 000 km²`. An
-ADR is a stable, numbered record of one decision, it is superseded rather than
-edited, and it is the thing that stays true as the specs age.
+**Code never points at a document**, with ADRs the single exception. No path,
+section title or document name from `docs/` in source, comments, test names,
+error messages or commit messages, and no task id or the phrase "done test":
+documents move and tasks retire, and a citation then points at nothing. Write
+the reason instead: `// a road strip wins, because the game reports the road
+where one runs under a mountain` survives; a pointer to the paragraph does not.
+Cite an ADR by id where the reason is too long for a comment.
 
 `tools/nospecrefs.sh` enforces this, and CI runs it. Everything under `docs/`,
-plus this file and any `README.md`, is exempt, because documents cite
-documents. Prose documentation may link into `docs/`; prefer the index over a
-deep link to a spec section.
+this file and any `README.md` are exempt.
 
 ## The DCS boundary
 
-These are not optional; the phase-`sim` rule exists because that call crashed
+These are not optional; the server-state rule exists because a call crashed
 DCS.
 
 - **Never write into the DCS install.** It is read-only. `guard-bash.sh`
-  refuses a shell write into it, in the quoted form a real install path takes.
-- **Know which build you are on before trusting any measurement.** The core
-  build is `version` in `autoupdate.cfg` at the install root, with `timestamp`
-  beside it. Never state a build from memory — read the file. The install is
-  normally ahead of the build `docs/spec/` names, and that gap is the usual
-  state of the project, not a decision and not an ADR. What it means is that
-  the probe log's figures are unverified on the build in front of you: carry
-  the build string with any measurement you take, and confirm a figure through
-  the bridge at the point of use rather than trusting the log for it. Only a
-  measurement that actually differs is an ADR.
+  refuses a shell write into it.
+- **Never open a `.crypt` file.**
+- **Know which build you are on before trusting a measurement.** The core build
+  is `version` in `autoupdate.cfg` at the install root, with `timestamp`
+  beside it. Never state a build from memory — read the file, and carry the
+  build string with any measurement you take.
 - **Verify every DCS symbol against ED's own code before calling it**, anchored
-  on the full dotted path, and read ED's call site when the spec cites one. Do
-  not write a call from memory.
+  on the full dotted path, and read ED's call site. Do not write a call from
+  memory.
 - **Never call** `terrain.Init`, `terrain.Create`, `terrain.Release`,
   `terrain.InitLight` or `terrain.getCrossParam` from a probe.
 - **Mission-state (`server`) `land` and `world` calls only while terrain is
-  loaded, which is `terrain.GetTerrainConfig("id")` returning non-nil**
-  (ADR 0010). A `land.getHeight` reaching the `server` state at the main menu,
-  with no terrain, crashes DCS with an access violation. A mission is not
-  required: with the Mission Editor open on a map those calls answer
-  correctly. Do not use the bridge's `phase` field for this — it reports
-  `menu` with the editor open on a map, so it cannot tell loaded terrain from
-  none. Hook-side `terrain.*` calls are safe at the menu; they return nil.
+  loaded**, which is `terrain.GetTerrainConfig("id")` returning non-nil. A
+  `land.getHeight` reaching the `server` state at the main menu crashes DCS
+  with an access violation. A mission is not required: with the Mission Editor
+  open on a map those calls answer correctly. The bridge's `phase` field
+  reports `menu` with the editor open on a map, so it cannot tell. Hook-side
+  `terrain.*` calls are safe at the menu; they return nil.
 - **Never load or use the `dcs-scripting` skill.** Symbol authority is the
-  `dcs-api-lookup` skill for signatures and existence checks, the
-  `dcs-api-bridge` MCP tools for anything a running DCS can answer, and the
-  read-only install for ED's own call sites. Prefer the bridge over the index
-  where both can answer, and the index over memory always.
-- **`docs/spec/` still names `dcs-scripting`, and cannot be edited.** It
-  appears in `design-and-facts.md` "Sources you have" and in
-  `extractor-hook.md` at the header, the mission-pass sweeps and the encoders.
-  Ignore those four citations. Nothing is lost by ignoring them: the
-  cross-state rules and the `json()` output format are both stated inline
-  beside their citation, and the stub harness the testing section names is not
-  vendored.
-- Before writing DCS Lua, read the design and facts document's "Facts that
-  shape the design", and everything in "Sources you have" except the
-  `dcs-scripting` entry: environment choice, the `net.dostring_in` bridge,
-  coordinates and the airdrome table are all settled there against
-  measurement.
+  `dcs-api-lookup` skill for signatures and existence checks, the bridge for
+  anything a running DCS can answer, and the read-only install for ED's own
+  call sites. Prefer the bridge over the index, and the index over memory.
 
-**Say who verifies.** Most done tests in the plan need a running DCS install or
-a person watching. Before starting a task, decide whether an agent can observe
-the result itself, whether it needs a maintainer reading a CI result, or
-whether only somebody at a live install can see it. Write it in
-`docs/STATE.md` under the task. An agent that skips this declares victory on
-something it never observed.
+**Say who verifies.** Before starting a task, decide whether an agent can
+observe the result itself, whether it needs CI, or whether only somebody at a
+live install can see it; `plan.md` marks each task, and `STATE.md` repeats it
+under Next. An agent that skips this declares victory on something it never
+observed.
 
 ## Toolchain
 
 Tool versions come from `mise.toml`. Do not install toolchains globally, and do
-not use a language's own version manager directly.
-
-Run every project command through mise, because a non-interactive shell does
-not pick up mise's PATH activation:
+not use a language's own version manager directly. Run every project command
+through mise, because a non-interactive shell does not pick up its PATH:
 
 ```sh
 mise exec -- cargo test
 mise run check      # fmt, clippy, test
-mise run lua-test   # the offline extractor tests under Lua 5.1
-mise run docs       # the ledger, the state file, the citations, the hooks
+mise run lua-test   # the hook's offline tests under Lua 5.1
+mise run docs       # the state file, the citations, the hooks
 ```
 
 `guard-bash.sh` refuses a bare `cargo`, `lua`, `rustc` or `rustfmt`. Anything
-with a loop or a conditional lives in `tools/` and is invoked as `sh
-tools/<name>.sh`: mise runs an inline script through `cmd` on Windows, which
-does not speak sh.
+with a loop or a conditional lives in `tools/` and is invoked as
+`sh tools/<name>.sh`: mise runs an inline script through `cmd` on Windows.
 
-**Rust is the exception, and `mise use rust@<version>` breaks it.** The
-version, profile and components live in `rust-toolchain.toml`, which rustup
-reads whether or not mise is installed. mise is told to read the same file, so
-Rust has one pin rather than two that can disagree; `mise use` writes a second
-version into `[tools]` and mise stops reading it. Edit `channel`, then
+**Rust's pin is `rust-toolchain.toml`, and `mise use rust@<version>` breaks
+it** by writing a second version into `mise.toml`. Edit `channel`, then
 `mise install`.
 
-On a fresh checkout, run `mise trust` and then `mise install` before anything
-else. mise refuses an untrusted `mise.toml` and does nothing until it is
-trusted, so a checkout that skips it fails at the first command.
+On a fresh checkout, run `mise trust` and then `mise install` first.
 
-**On Windows, run mise tasks from Git Bash.** A task body is `sh
-tools/<name>.sh`, mise runs it through `cmd`, and `cmd` finds `sh` only on a
-PATH that Git Bash has already put it on: from a plain PowerShell every task
-fails with `'sh' is not recognized`. `mise run lua51`, which builds the Lua
-5.1.5 interpreter into `.tools/bin` and needs Visual Studio Build Tools with
-the C++ workload, runs the same from either shell.
+**On Windows, run mise tasks from Git Bash**: a task body is `sh tools/...`,
+and `cmd` finds `sh` only on a PATH Git Bash has set. `mise run lua51` builds
+the Lua 5.1.5 interpreter into `.tools/bin` and needs Visual Studio Build
+Tools with the C++ workload.
 
 ## Portability
 
 Every script in `tools/` and `.claude/hooks/` is POSIX `sh` and `awk`, running
 on all three platforms — on Windows through Git-for-Windows `sh`, which is why
-`.claude/settings.json` invokes `sh` with the script as an argument rather than
-executing it.
+`.claude/settings.json` invokes `sh` with the script as an argument.
 
 No bash arrays, no `[[`, no `local`. No `sed -i`, no `grep -P`, no
-`readlink -f`. Avoid `sed` for tabs, because BSD and GNU disagree on `\t`.
-Assume nothing beyond a stock machine: no `jq`, no `python`, no `gawk`. Detect
-`sha256sum` versus `shasum`. `tools/lua51/Build-Lua51.ps1` is the one
-PowerShell exception, because it drives MSVC.
+`readlink -f`. Avoid `sed` for tabs. Assume nothing beyond a stock machine: no
+`jq`, no `python`, no `gawk`. Detect `sha256sum` versus `shasum`.
+`tools/lua51/Build-Lua51.ps1` is the one PowerShell exception, because it
+drives MSVC. `guard-bash.sh` and `precommit.sh` check this.
 
-`guard-bash.sh` refuses the non-portable commands and `precommit.sh` scans
-every changed script, so this is checked rather than remembered.
-
-Leave `.gitattributes` alone. It disables line-ending conversion, without which
-every ledger stamp breaks on a Windows checkout.
+Leave `.gitattributes` alone: it disables line-ending conversion, without
+which a script checked out on Windows gains carriage returns and `sh` fails on
+it.
 
 ## Data
 
-- **Never commit extracted or packed data.** No `*.sqlite`, no extract
-  directories, no tile blobs. `docs/data/` holds measurements and a model
-  census only.
-- Extracts and packed files are derived from ED terrain data and stay on the
-  user's machine; publishing them is the user's call against the ED EULA
-  (task P4).
+- **Never commit terrain data.** No cache entries, no extract directories, no
+  tile blobs, no fixture cut from an ED file. `docs/data/` holds measurements
+  and a model census only.
+- The cache lives in the user's cache directory, never in the repository.
 
 ## Testing
 
-- **Test against the synthetic theatre first.** `dcsterrain synth` writes a
-  closed-form extract; almost every done test in the plan is stated against it.
-- Real data is touched only in the opt-in local test group (gated on
-  `DCSTERRAIN_EXTRACT`, skipped in CI) and the live acceptance steps
-  (E9, Q9, V1).
-- **The decoders are checked against real files and a live extract.** Their
-  offline tests run on byte buffers the test builds. The opt-in group, gated
-  on `DCSTERRAIN_INSTALL`, reads an install's files, and compares against the
-  live Caucasus extract when `DCSTERRAIN_EXTRACT` names it. Never commit a
-  fixture cut from an ED file: it is terrain data.
-- **The hook is verified live, not against a vendored harness.** Its offline
-  Lua tests cover encoders, the frame-budget driver and injected failures; its
-  tables pass is checked through the bridge. Nothing named `StubHarness.lua` is
-  vendored into this repository.
+- **Test against the synthetic map first.** `--map synth` answers from a
+  closed-form theatre in memory; almost every done test is stated against it.
+- **The decoders** have offline tests on byte buffers the test builds, and an
+  opt-in group gated on `DCSTERRAIN_INSTALL` that reads a real install,
+  comparing against the live Caucasus extract when `DCSTERRAIN_EXTRACT` names
+  it. Both are skipped in CI.
+- **The hook is verified live**, with offline Lua tests for its encoders and
+  driver. Nothing named `StubHarness.lua` is vendored.
 
 ## Version control
 
-Conventional Commits: `type(scope): summary`, imperative, under 72 characters.
-Add a body when the change needs explaining. `postcommit.sh` checks the subject
-after the commit; the fix is `git commit --amend`.
+Conventional Commits: `type(scope): summary`, imperative, under 72 characters,
+with a body when the change needs explaining. `postcommit.sh` checks the
+subject; the fix is `git commit --amend`.
 
-**A branch per plan task**, named `task/<id>-<summary>`, such as
-`task/X4-frame-budget`. Work that belongs to no task takes the `type` it would
-commit under: `fix/`, `docs/`, `build/`, `ci/`.
+**A branch per plan task**, `task/<id>-<summary>`, such as `task/N3-mesh`. Work
+that belongs to no task takes its commit `type`: `fix/`, `docs/`, `build/`,
+`ci/`.
 
-**Every change is a pull request, and there is one pull request per task,
-reviewed commit by commit.** A large task is a long series of small commits on
-one branch rather than a stack of branches. Commit each slice as soon as its
-test passes, so there is always a working state to return to. Each commit does
-one thing and leaves the tree passing `mise run check`, because the reviewer
-reads them in order and each one is a recovery point.
-
-The size that matters is the commit's, not the branch's. About 100 changed
-lines is easy to review and revert, about 300 is fine for one logical change,
-and 1 000 is split before committing, with tests counted as code. Formatting
-and behaviour, a refactor and a feature, and an unrelated fix found along the
-way each take a commit of their own. A preparatory refactor claims no change in
-behaviour: sharing a diff with the feature hides which lines moved among the
-lines that changed.
+**One pull request per task, reviewed commit by commit.** A large task is a
+series of small commits on one branch. Commit each slice as soon as its test
+passes; each commit does one thing and leaves the tree passing
+`mise run check`. About 100 changed lines is easy to review, about 300 is fine
+for one logical change, 1 000 is split. Formatting and behavior, a refactor and
+a feature, and an unrelated fix each take their own commit.
 
 **Stage paths by name, never `git add -A`, `-u` or `.` and never
-`git commit -a`, and read the staged diff before writing the message.** A
-blanket stage commits whatever the tree happens to hold — a scratch file, a
-debug line, half of the next commit — and the message then describes something
-other than what landed. `git add -p` stages part of a file and `git add -n`
-previews; `guard-bash.sh` refuses the four blanket forms and allows those.
+`git commit -a`, and read the staged diff before writing the message.**
+`guard-bash.sh` refuses the blanket forms.
 
-- **History is linear. Rebase, never merge-commit.** Bring a branch up to date
-  with `git rebase main`; land it with `git merge --ff-only`. If the
-  fast-forward is refused, fix the branch. Git enforces this once
-  `merge.ff = only` and `pull.ff = only` are set, which is a machine setting
-  rather than a repository one:
+- **History is linear. Rebase, never merge-commit.** Update with
+  `git rebase main`; land with `git merge --ff-only`. Set
+  `git config --global merge.ff only` and `pull.ff only`.
+- **Deleting a remote branch is a prompt, not a reflex.**
 
-  ```sh
-  git config --global merge.ff only
-  git config --global pull.ff only
-  ```
-
-- **Deleting a remote branch is a prompt, not a reflex.** A local branch is
-  cheap to restore from the reflog; a remote one is shared, and deleting the
-  base of an open pull request closes it.
-- Put a document edit in the pull request whose code changes it, not in a
-  documentation pull request of its own. A `plan.md` row and the code that
-  reshapes it are one reviewable thought.
-
-**Review the branch locally, then push.** A fix found after the push costs a CI
-round trip, so a branch is finished on the machine first: one adversarial
-reviewer, on Sonnet, read-only, told the claim the branch makes and asked to
-break it; every finding fixed in a commit of its own, or squashed into the
-commit that introduced it while nothing is pushed; then the checks CI gates on
-— `mise run check`, `mise run lua-test` and `mise run docs`. Only then is the
-branch pushed and the pull request opened. `mise run check` alone is what a
-mid-task commit needs; it is not what a push needs.
+**Review the branch locally, then push.** One adversarial reviewer, on Sonnet,
+read-only, told the claim the branch makes and asked to break it; every
+finding fixed; then `mise run check`, `mise run lua-test` and `mise run docs`.
+Only then push and open the pull request.
 
 `docs/STATE.md` is updated in the task's own pull request, in whichever session
-ends. A session that stops mid-task still updates it, and that commit rides the
-branch like any other.
+ends, including a session that stops mid-task.
 
-**Every pull request body follows `.github/PULL_REQUEST_TEMPLATE.md`.** `gh pr
-create --body` does not read the template, so write the body to its headings;
-`guard-bash.sh` refuses one that is missing them. Summary ends with what the
-change is reviewed against: the plan task or the ADR. Testing says how a reader
-runs the tests, not that they were run, and covers the task as it lands, not
-one slice of it. Its steps are numbered, start from a clean checkout, and
-are grouped by phase (without DCS, then with DCS) and by platform (PowerShell
-on Windows, bash on macOS and Linux). Each step is an imperative sentence: an
-action, or a `Verify ...` naming what the tester sees when the steps before it
-worked. Each heading reads `none` where nothing applies.
+**Every pull request body follows `.github/PULL_REQUEST_TEMPLATE.md`**;
+`gh pr create --body` does not read it, and `guard-bash.sh` refuses a body
+missing its headings. Summary ends with what the change is reviewed against:
+the plan task or the ADR. Testing says how a reader runs the tests, in
+numbered imperative steps from a clean checkout, grouped by phase (without
+DCS, then with DCS) and platform (PowerShell on Windows, bash on macOS and
+Linux), each command in its own code block. A heading with nothing to say
+reads `none`.
 
 Do these without asking: branch, commit, rebase onto `main`, push a topic
-branch, force-with-lease a topic branch that is yours, delete a branch that is
-already merged, and open a pull request with `gh`.
+branch, force-with-lease a topic branch that is yours, delete a merged branch,
+and open a pull request with `gh`.
 
-**Ask first before merging a pull request, before pushing `main`, before
-rewriting history that has been pushed, and before tagging.** A small diff and
-a green CI run are not permission, and permission given for one pull request
-does not carry to the next. `guard-bash.sh` turns each of those into a prompt
-rather than refusing it.
+**Ask first before merging a pull request, pushing `main`, rewriting pushed
+history, or tagging.** Permission for one pull request does not carry to the
+next. `guard-bash.sh` turns each into a prompt.
 
 ## Subagents
 
-Spawning a subagent is allowed, and worth it for work that fans out: sweeping
-the specs for every place a claim appears, pressure-testing a plan before it is
-executed, or reviewing a change against the frozen documents. Work you can
-finish by reading three files you can already name is faster done directly.
+Worth it for work that fans out: sweeping the code for every place a rule
+applies, pressure-testing a plan, or reviewing a change. Work you can finish by
+reading three files you can name is faster done directly.
 
-- **A subagent never calls the DCS bridge.** The rules in "The DCS boundary"
-  exist because one of those calls crashed DCS, and a running sim is the
-  scarce resource on the Windows machine. Bridge calls stay in the session
-  that is talking to the user.
-- **A subagent never writes `docs/`.** Not an ADR, not `STATE.md`, not the
-  plan. Those record decisions, and a decision is agreed with the user before
-  it is written down. Reading all of it and reporting back is fine.
-- **A subagent's report is a claim, not a source.** Check a number, a symbol
-  or a quoted spec line before acting on it, the same as any other second-hand
-  figure.
+- **A subagent never calls the DCS bridge.** A running sim is the scarce
+  resource, and one call crashed it.
+- **A subagent never writes `docs/`.** Decisions are agreed with the user
+  before they are written down. Reading and reporting is fine.
+- **A subagent's report is a claim, not a source.** Check a number, a symbol or
+  a quote before acting on it.
 
 ## Facts worth having in hand
 
-Cited so they can be checked, not so they replace reading the spec.
-
-- **Paths are discovered, never recorded.** `lfs.currentdir()` in the hook
-  state returns the DCS install root and `lfs.writedir()` returns the Saved
-  Games directory, both readable through the bridge at the menu. No install
-  path belongs in this repository: the shipped tool takes one from the user
-  as `dcsterrain check --install <dir>`, and a session that needs one asks
-  the running sim.
-- **Coordinates.** DCS x is north, z is east, metres. The terrain module takes
+- **Paths are discovered, never recorded.** On Windows the install root is the
+  registry value `HKCU\Software\Eagle Dynamics\DCS World\Path`. Through the
+  bridge, `lfs.currentdir()` in the hook state is the install root and
+  `lfs.writedir()` the Saved Games directory. The shipped tool takes an
+  install as `--install <dir>` where there is no registry.
+- **A map is named by its `entry.lua` id**, not its folder: Germany's folder
+  is `GermanyColdWar`, its id `GermanyCW`.
+- **Coordinates.** DCS x is north, z is east, meters. The terrain module takes
   `(x, z)` scalars; `land.*` takes `{x, y}` where `y` is DCS z, or `{x, y, z}`
-  where `y` is altitude. Convert once at the bridge boundary and never pass a
-  table to a terrain-module call.
-- **Region bound.** The canonical form is an axis-aligned box in DCS metres
-  `{minX, minZ, maxX, maxZ}`. Circles, polygons and airfield distance bands are
-  convenience inputs converted to a box plus a post-filter.
-- **Two version stamps.** The DCS core build (`autoupdate.cfg`) and a
-  fingerprint of the terrain data files (`.surface5`, `.rn4`, `.scn5`) are
-  versioned separately by ED. Every extract, packed file, query response and
-  file name carries both.
-- **Cell size.** The extract is always 50 m. The packed base is a pack
-  parameter: 50 m by default on every map, 100 m only when asked (ADR 0036).
-- **Fill is `nodata`.** The extractor tests each cell against the exact fill
-  triple before rounding. An absent tile is sea (`height` 0, `surface` 3), not
-  a hole — reading absent tiles as `nodata` made every sightline across a bay
-  fail.
+  where `y` is altitude. Convert once at the bridge boundary.
+- **Region bound.** The canonical form is an axis-aligned box in DCS meters
+  `{minX, minZ, maxX, maxZ}`; circles, polygons and airfield bands become a box
+  plus a post-filter.
+- **Two version stamps.** The DCS core build (`autoupdate.cfg`) and the terrain
+  files are versioned separately by ED. Every response carries both.
+- **Every map file states its format**: a container header, a class name and a
+  format version. A decoder declares the pairs it reads, and an unknown one
+  refuses the map.
 - **Hook-state Lua is 5.1** with no `string.pack`, no `bit`, no LuaJIT, and file
-  handles with no `seek` (sizes come from `lfs.attributes`).
-- **Vegetation is in the files, not the API.** DCS exposes no tree layer to
-  query, but the scene file carries every tree and the ground mesh marks forest
-  (ADR 0034); F3 decides how they enter the schema. Concealment layers are
-  stored separately and never fused.
-- **Every map file states its format.** A container header, a class name and a
-  format version; a decoder declares the pairs it reads and an unknown one
-  stops the run (ADR 0035). Never open a `.crypt` file.
+  handles with no `seek`.
+- **DCS's own sightline ignores buildings and trees.** So does `visible`.
