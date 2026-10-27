@@ -63,10 +63,10 @@ Kept from before the reset, tested, and not tasks here:
 | Id | Deliverable | Done | Depends on | Verified by |
 |---|---|---|---|---|
 | Q1 | `describe`, `sample`, `geo`, `nearest` (all kinds but `place`), `scenery_in` | Synthetic tests; `sample` over its cap errors rather than truncates | N3, N4, N5 | agent |
-| Q2 | `visible`, `viewshed` | Hill tests; viewshed fraction against brute force | N1 | agent |
+| Q2 | `visible`, `viewshed`; the shared GeoJSON writer for area results | Hill tests; viewshed fraction against brute force; the GeoJSON is a valid RFC 7946 `FeatureCollection` whose area, projected back, matches the visible cells within one cell along the edge | N1 | agent |
 | Q3 | Criteria, the closed set including `cover_in`, `cover_fraction_min`, `dist_cover_band`; tile skipping; LOS criteria last | Each criterion has a positive and negative synthetic test | N8, N9, Q2 | agent |
 | Q4 | `score_site`, `find_sites` | Plane accepted, lake and hill rejected; suppression spacing respected | Q3 | agent |
-| Q5 | `radar_floor`; `coverage`, `approach_spectrum`, `unmask_profile` computed from it | The floor behind a hill matches its geometry; coverage's dead zone and the spectrum's blind arc lie behind the big hill with the width its geometry predicts | Q2 | agent |
+| Q5 | `radar_floor`; `coverage`, `approach_spectrum`, `unmask_profile` computed from it | The floor behind a hill matches its geometry; coverage's dead zone and the spectrum's blind arc lie behind the big hill with the width its geometry predicts; `radar_floor`'s GeoJSON bands nest, each lower band inside the next | Q2 | agent |
 | Q6 | `route`, `route_alternatives`, `chokepoints`, `trafficability` | Bridge chosen, avoid box respected, A* equals Dijkstra; the two synthetic roads are the alternatives with the bridge in `shared_edges_with_all`; bridge ranked first | N6, Q2 | agent |
 | Q7 | `dcsterrain query` over every operation: one request or JSON-lines batches, `schema` | Every operation callable from the shell; a batch of 100 requests opens the map once | Q1, Q2, Q4, Q5, Q6 | agent |
 | Q8 | Benchmarks: CI upper bounds on `Synth` at 3× the targets; an opt-in benchmark on the install against the targets, including one call end to end | Targets met or a decision recorded | Q7 | agent, opt-in |
