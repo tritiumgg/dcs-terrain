@@ -70,9 +70,8 @@ fn terrain(root: &Path, folder: &str, id: &str, scene_version: u32) {
     }
 }
 
-/// An install holding Caucasus, and Germany under a folder that is not its
-/// id, whose scene file states a version no decoder reads when `bad`.
-fn install(bad_scene: bool) -> Tree {
+/// A fresh, empty directory under the system temp.
+fn scratch() -> Tree {
     static N: AtomicU32 = AtomicU32::new(0);
     let dir = std::env::temp_dir().join(format!(
         "dcsterrain-cli-{}-{}",
@@ -80,6 +79,14 @@ fn install(bad_scene: bool) -> Tree {
         N.fetch_add(1, Ordering::Relaxed)
     ));
     let _ = fs::remove_dir_all(&dir);
+    Tree(dir)
+}
+
+/// An install holding Caucasus, and Germany under a folder that is not its
+/// id, whose scene file states a version no decoder reads when `bad`.
+fn install(bad_scene: bool) -> Tree {
+    let tree = scratch();
+    let dir = tree.0.clone();
     put(
         &dir,
         "autoupdate.cfg",
@@ -92,7 +99,7 @@ fn install(bad_scene: bool) -> Tree {
         "GermanyCW",
         if bad_scene { 10 } else { 9 },
     );
-    Tree(dir)
+    tree
 }
 
 #[test]
@@ -192,8 +199,10 @@ fn opens_a_terrain_by_the_id_its_entry_declares() {
 fn lists_both_terrains_with_their_folders_and_an_unreadable_file() {
     let t = install(true);
     let root = t.0.to_str().unwrap();
+    let c = scratch();
+    let cache = c.0.to_str().unwrap();
 
-    let out = run(&["list-terrains", "--install", root]);
+    let out = run(&["list-terrains", "--install", root, "--cache", cache]);
     assert!(
         out.status.success(),
         "{}",
@@ -202,11 +211,11 @@ fn lists_both_terrains_with_their_folders_and_an_unreadable_file() {
     let text = String::from_utf8(out.stdout).unwrap();
     let rows: Vec<Vec<&str>> = text
         .lines()
-        .skip(3)
+        .skip(4)
         .map(|l| l.split_whitespace().collect())
         .collect();
     assert_eq!(rows[0][..2], ["Caucasus", "Caucasus"], "{text}");
-    assert_eq!(rows[0][2..], ["3", "of", "3", "readable"], "{text}");
+    assert_eq!(rows[0][2..], ["none", "3", "of", "3", "readable"], "{text}");
     assert_eq!(rows[1][..2], ["GermanyCW", "GermanyColdWar"], "{text}");
     assert!(text.contains("2 of 3 readable, cannot open"), "{text}");
     assert!(
@@ -217,7 +226,14 @@ fn lists_both_terrains_with_their_folders_and_an_unreadable_file() {
         "{text}"
     );
 
-    let out = run(&["list-terrains", "--install", root, "--json"]);
+    let out = run(&[
+        "list-terrains",
+        "--install",
+        root,
+        "--json",
+        "--cache",
+        cache,
+    ]);
     assert!(out.status.success());
     let v = stdout_json(&out);
     assert_eq!(v["dcs_build"], "0.0.0.1");
@@ -260,4 +276,174 @@ fn refuses_a_directory_that_is_no_install() {
     ]);
     assert_eq!(out.status.code(), Some(1));
     assert_eq!(stdout_json(&out)["issues"][0]["code"], "no_install");
+}
+
+/// Runs the binary with `input` on its stdin.
+fn run_with(args: &[&str], input: &str) -> Output {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_dcsterrain"))
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary runs");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn list_terrains_shows_a_cache_after_index_and_none_after_clear() {
+    let t = install(false);
+    let root = t.0.to_str().unwrap();
+    let c = scratch();
+    let cache = c.0.to_str().unwrap();
+    let listed = || {
+        let out = run(&[
+            "list-terrains",
+            "--install",
+            root,
+            "--json",
+            "--cache",
+            cache,
+        ]);
+        assert!(out.status.success());
+        stdout_json(&out)
+    };
+    let v = listed();
+    assert_eq!(v["cache"], cache);
+    assert_eq!(v["terrains"][0]["cache"], Value::Null);
+
+    let out = run(&[
+        "index",
+        "--install",
+        root,
+        "--terrain",
+        "GermanyCW",
+        "--cache",
+        cache,
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let dir = c.0.join("GermanyCW").join("0.0.0.1");
+    assert!(dir.is_dir());
+    let v = listed();
+    assert_eq!(v["terrains"][0]["cache"], Value::Null, "Caucasus has none");
+    let germany = &v["terrains"][1]["cache"];
+    assert_eq!(germany["path"], dir.to_str().unwrap());
+    assert_eq!(germany["entries"], serde_json::json!([]));
+
+    let out = run(&["list-terrains", "--install", root, "--cache", cache]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("0 entries, 0 B"), "{text}");
+
+    let out = run(&[
+        "cache",
+        "list",
+        "--install",
+        root,
+        "--json",
+        "--cache",
+        cache,
+    ]);
+    let v = stdout_json(&out);
+    assert_eq!(v["stored"][0]["terrain"], "GermanyCW");
+    assert_eq!(v["stored"][0]["installed"], true);
+
+    let out = run(&["cache", "clear", "--cache", cache]);
+    assert!(out.status.success());
+    assert_eq!(listed()["terrains"][1]["cache"], Value::Null);
+}
+
+#[test]
+fn clear_asks_before_deleting_the_validation_figures() {
+    let t = install(false);
+    let root = t.0.to_str().unwrap();
+    let c = scratch();
+    let cache = c.0.to_str().unwrap();
+    let index = || {
+        let out = run(&[
+            "index",
+            "--install",
+            root,
+            "--terrain",
+            "Caucasus",
+            "--cache",
+            cache,
+        ]);
+        assert!(out.status.success());
+    };
+    index();
+    let dir = c.0.join("Caucasus").join("0.0.0.1");
+    put(&dir, "validation.json", b"{}");
+    put(&dir, "mesh.toc", b"rebuildable");
+
+    let out = run_with(&["cache", "clear", "--cache", cache], "n\n");
+    assert!(out.status.success());
+    let asked = String::from_utf8_lossy(&out.stderr);
+    assert!(asked.contains("Delete them too? [y/N]"), "{asked}");
+    assert!(dir.join("validation.json").is_file());
+    assert!(!dir.join("mesh.toc").exists());
+
+    // No answer is no.
+    let out = run_with(&["cache", "clear", "--cache", cache], "");
+    assert!(out.status.success());
+    assert!(dir.join("validation.json").is_file());
+
+    let out = run_with(&["cache", "clear", "--cache", cache], "y\n");
+    assert!(out.status.success());
+    assert!(!c.0.join("Caucasus").exists());
+
+    index();
+    put(&dir, "validation.json", b"{}");
+    let out = run_with(&["cache", "clear", "--yes", "--cache", cache], "");
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("[y/N]"));
+    assert!(!c.0.join("Caucasus").exists());
+}
+
+#[test]
+fn prune_keeps_only_the_installed_build() {
+    let t = install(false);
+    let root = t.0.to_str().unwrap();
+    let c = scratch();
+    let cache = c.0.to_str().unwrap();
+    let out = run(&[
+        "index",
+        "--install",
+        root,
+        "--terrain",
+        "Caucasus",
+        "--cache",
+        cache,
+    ]);
+    assert!(out.status.success());
+    put(&c.0, "Caucasus/0.0.0.0/mesh.toc", b"old");
+    let out = run(&["cache", "prune", "--install", root, "--cache", cache]);
+    assert!(out.status.success());
+    let said = String::from_utf8(out.stdout).unwrap();
+    assert!(said.contains("deleted Caucasus 0.0.0.0"), "{said}");
+    assert!(c.0.join("Caucasus/0.0.0.1").is_dir());
+    assert!(!c.0.join("Caucasus/0.0.0.0").exists());
+
+    // A directory this tool did not make is never deleted from.
+    let other = scratch();
+    put(&other.0, "Caucasus/0.0.0.0/keep", b"mine");
+    let out = run(&[
+        "cache",
+        "clear",
+        "--yes",
+        "--cache",
+        other.0.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(other.0.join("Caucasus/0.0.0.0/keep").is_file());
 }
