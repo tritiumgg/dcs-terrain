@@ -81,8 +81,10 @@ fn every_map_reads_its_finest_mesh() {
     }
 }
 
-/// Opens every terrain through a fresh cache twice, and reports how long
-/// the build of `mesh.toc` and an open from it take.
+/// Opens every terrain through a fresh cache, then from it five times, and
+/// reports how long the build of `mesh.toc` and the median open take. An
+/// open reads one header and checks its entry from a stat, so the large
+/// terrains, with 450 airfield files, open within 20 ms.
 #[test]
 fn every_terrain_opens_from_its_cache() {
     let Some(root) = install_root() else { return };
@@ -93,10 +95,21 @@ fn every_terrain_opens_from_its_cache() {
         let started = Instant::now();
         Install::open(&root, &id, &Cache::new(&cache.0)).unwrap_or_else(|e| panic!("{id}: {e}"));
         let built = ms(started);
-        let started = Instant::now();
-        let t = Install::open(&root, &id, &Cache::new(&cache.0)).unwrap();
-        let opened = ms(started);
-        let g = t.grid();
+        let mut times: Vec<f64> = (0..5)
+            .map(|_| {
+                let started = Instant::now();
+                Install::open(&root, &id, &Cache::new(&cache.0)).unwrap();
+                ms(started)
+            })
+            .collect();
+        times.sort_by(f64::total_cmp);
+        let median = times[2];
+        if id == "GermanyCW" || id == "Syria" {
+            assert!(median < 20.0, "{id} opens in {median:.1} ms");
+        }
+        let g = Install::open(&root, &id, &Cache::new(&cache.0))
+            .unwrap()
+            .grid();
         let started = Instant::now();
         let map = install::open(&root, &id).unwrap();
         let find = ms(started);
@@ -105,15 +118,21 @@ fn every_terrain_opens_from_its_cache() {
         let o = tc.get(&dcsterrain_core::source::install::MESH_TOC).unwrap();
         let key = ms(started);
         let started = Instant::now();
+        let fields = map.stat(&root, &["airfield_rn4", "airfield_rn5"]).unwrap();
+        let stat = ms(started);
+        let started = Instant::now();
         let bytes = o.payload().unwrap();
         let read = ms(started);
         let started = Instant::now();
         surface5::Surface5::decode(&bytes).unwrap();
         let decode = ms(started);
         eprintln!(
-            "{id}: built in {built:.0} ms, opened in {opened:.1} ms, {} x {} cells; \
-             find {find:.1}, key {key:.1}, read {read:.1}, decode {decode:.1} ms",
-            g.height, g.width
+            "{id}: built in {built:.0} ms, opened in {median:.1} ms, {} x {} cells; \
+             find {find:.1}, key {key:.1}, {} airfield files stated in {stat:.2}, \
+             read {read:.1}, decode {decode:.1} ms",
+            g.height,
+            g.width,
+            fields.len()
         );
     }
 }
