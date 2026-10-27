@@ -90,10 +90,17 @@ where a tile came from.
 ### 3.2 Decoders
 
 Every ED terrain file starts with a container header naming a class and a format
-version. Each decoder declares the (class, version) pairs it reads; the engine
-reads every file's header when it opens a terrain and picks the decoder from the
-pair. **A pair no decoder declares refuses that terrain's queries**, naming file,
-class and version. Other terrains keep answering.
+version. Each decoder declares the (class, version) pairs it reads, and the
+engine picks the decoder from the pair. Opening a terrain reads the surface
+file's header only; every other role is classified the first time an entry or
+operation needs it: the airfield, assets and Lua files when `tables.json` is
+keyed or built, the scene file for scenery, the road file for the graph
+([ADR 0001](decisions/0001-read-file-headers-per-role-when-first-needed.md)).
+**A pair no decoder declares refuses everything that reads its role**, naming
+file, class and version, and nothing else: an unknown taxiway file refuses
+`tables.json` and the operations behind it, not heights or sightlines, and
+`list-terrains` and `check` report it. An unknown surface pair refuses the
+terrain. Other terrains keep answering.
 
 After decoding, each decoder checks its own output against the ground and the
 terrain's extent — road vertices, scenery, stands and runway ends lie on the ground
@@ -187,7 +194,9 @@ is built. A fitted residual over 2 m refuses the terrain unless
 `<cache>/<terrain>/<dcs_build>/`, where `<cache>` is `%LOCALAPPDATA%\dcs-terrain\cache`
 on Windows, `$XDG_CACHE_HOME/dcs-terrain` (else `~/.cache/dcs-terrain`) on
 Linux, `~/Library/Caches/dcs-terrain` on macOS, or `--cache <dir>`. Never in
-the install, never in the repository.
+the install, never in the repository. Whether an entry there is current is
+decided from metadata (§4.2), never by opening the install files it was
+derived from.
 
 | Entry | Why it cannot be per query | Size | Build |
 |---|---|---|---|
@@ -207,10 +216,21 @@ the install, never in the repository.
   covers only the install files of the roles the entry reads (§5), so a
   changed road file leaves `mesh.toc` alone. It is memory-mapped read-only;
   mapping a 200 MiB entry costs about 0.4 MiB of commit.
+- A key is checked from metadata alone: a stat of each file of a single-file
+  role, one directory listing with size and mtime for a directory role, so a
+  file added to `AirfieldsTaxiways` is seen, and the build. The class, version
+  and payload size are read from the headers when the entry is built and
+  recorded in its key. Checking an entry over GermanyCW's 454 airfield files
+  costs 0.5 ms; reading their headers cost 40 ms. A header that changes while
+  its file's size and mtime stay the same goes unseen until the build changes;
+  no ED patch is known to do that.
 - An entry is written under a temporary name and renamed into place, so two
-  processes building it at once leave one valid copy. A rename that fails, as
-  Windows fails one over a file another process holds, still succeeds when the
-  file already there carries the same key.
+  processes building it at once leave one valid copy. On NTFS with current
+  Rust the tool's own handles, open or mapped, do not block a rename over an
+  entry; another process's handle opened without delete sharing, such as an
+  antivirus or backup tool's, and a FAT, exFAT or network volume still can. A
+  rename that fails still succeeds when the file already there carries the
+  same key.
 - A missing entry, or one whose key or format version does not match, is
   rebuilt before the operation that needs it, and only that entry: `describe`
   needs `mesh.toc` and `tables.json` and reports the other entries' counts as
@@ -257,9 +277,10 @@ the import was dropped.
   memory. ED ships terrain only inside DCS updates, so the build is the
   version; the terrain files are fingerprinted as a record of what answered.
 - **The cache key** for an entry is the build, plus for each source file its
-  path, size, payload size (the u64 at bytes 8–15 of the header) and
-  modification time, plus the decoder's class and version. A repair that
-  rewrites identical files costs a rebuild of seconds.
+  path, size and modification time, which a check compares (§4.2), and the
+  class, version and payload size (the u64 at bytes 8–15 of the header) read
+  when the entry was built. A repair that rewrites identical files costs a
+  rebuild of seconds.
 - **A batch re-checks** the build and the keys before each request (a few
   `stat`s) and reopens a terrain whose files changed. Terrain files are opened with
   delete sharing so a patch can replace them under a long batch.
@@ -390,9 +411,9 @@ correctness rule: a miss is a decision about the target.
 
 | Operation | Measured | Target |
 |---|---|---|
-| open / `describe` | 9 / 57 / 14 ms (Caucasus / GermanyCW / Afghanistan), OS cache warm; on GermanyCW and Syria 42 ms of it is classifying the terrain's files, the airfield files' headers among them, and reading `mesh.toc` takes 12 ms | 20 ms |
+| open / `describe` | open 3.5 / 14.8 / 8.9 ms (Caucasus / GermanyCW / Afghanistan) and 9.8 ms on Syria from the cache, OS cache warm, on 2.9.30.28738; on GermanyCW finding the files and reading the surface header take 2 ms, and reading and decoding `mesh.toc` 11 ms | 20 ms |
 | `sample` 10 k lattice | 10–12 ms | 100 ms |
-| `sample` 10 k scattered over a whole terrain | 1.8–8.7 s | none; points are sorted by block first |
+| `sample` 10 k scattered over a whole terrain | 8.5 / 25.9 / 2.7 s at the 32 MiB block budget, 0.7 / 13.5 / 1.2 s sorted by tile Z-order, 0.7 / 2.9 / 1.3 s with each block prepared once (Caucasus / GermanyCW / Afghanistan) | 3 s on GermanyCW, answered block by block: each block prepared once and the results merged by rank |
 | `visible` 10–40 km | 5.4–12 ms cold, 0.01–0.05 ms warm | 1 ms within a batch, 20 ms cold |
 | one `query` call end to end, OS cache warm | not measured | 50 ms for `describe`, `sample`, `visible` |
 | `viewshed`, `radar_floor` 20 km | 89–111 ms | 300 ms |

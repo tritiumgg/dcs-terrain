@@ -84,9 +84,10 @@ itself.
 ### `describe`
 
 Request: none. Response: the terrain id, build, fingerprint, extent, each terrain
-file's class, version and decoder, the cache state of every entry, counts of
-airdromes, runways, stands, beacons, towns, nodes, road edges and scenery
-objects, and the validation figures if any.
+file with its size, the surface file's class and version and each other file's
+as the cache entry that read it recorded them, null until one has, the cache
+state of every entry, counts of airdromes, runways, stands, beacons, towns,
+nodes, road edges and scenery objects, and the validation figures if any.
 
 ### `sample`
 
@@ -96,7 +97,8 @@ number|null}}` at lattice points inside the region, or one row per given point
 in order, capped by the `max_rows` request field (default 10 000; over the
 cap is an error). Regional `height` is bilinear, null where a weighted corner
 is `nodata`; other layers are nearest. Points take point mode. Points are read
-sorted by mesh block and returned in request order.
+block by block, each mesh block prepared once and each point's results merged
+by rank, and returned in request order.
 
 ### `geo`
 
