@@ -12,7 +12,7 @@ use serde_json::Value;
 
 use dcsterrain_core::decode::install::{self, TERRAINS_DIR};
 use dcsterrain_core::decode::surface5;
-use dcsterrain_core::extract::Grid;
+use dcsterrain_core::grid::Grid;
 
 fn install_root() -> Option<PathBuf> {
     match std::env::var_os("DCSTERRAIN_INSTALL") {

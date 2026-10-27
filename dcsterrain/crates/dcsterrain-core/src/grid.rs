@@ -7,13 +7,35 @@
 
 use std::collections::HashMap;
 
-use crate::extract::{Extract, Failure, Grid, Layer, Samples, TileEntry, layer};
+use serde::Deserialize;
+
+use crate::extract::{Extract, Failure, Layer, Samples, TileEntry, layer};
 
 const WATER_SEA: i32 = 2;
 const HEIGHT_SEA: i32 = 0;
 const SURFACE_WATER: i32 = 3;
 
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+pub struct Grid {
+    pub cell_size: u32,
+    pub origin_x: f64,
+    pub origin_z: f64,
+    /// Rows, running north.
+    pub height: u32,
+    /// Columns, running east.
+    pub width: u32,
+    pub tile_size: u32,
+}
+
 impl Grid {
+    /// Tiles along x and along z; the last in each direction is a full tile.
+    pub fn tiles(&self) -> (u32, u32) {
+        (
+            self.height.div_ceil(self.tile_size),
+            self.width.div_ceil(self.tile_size),
+        )
+    }
+
     /// The cell holding `(x, z)`, or `None` off the grid.
     pub fn cell_at(&self, x: f64, z: f64) -> Option<(u32, u32)> {
         let c = f64::from(self.cell_size);

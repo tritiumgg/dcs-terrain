@@ -17,7 +17,8 @@ use serde::Serialize;
 
 use super::{Error, Pool, Scene, malformed};
 use crate::decode::surface5::{put_tile, tile_entry};
-use crate::extract::{Grid, TileEntry, layer};
+use crate::extract::{TileEntry, layer};
+use crate::grid::Grid;
 
 pub const SCENERY_FILE: &str = "scenery.jsonl";
 pub const MODELS_FILE: &str = "scenery_models.json";

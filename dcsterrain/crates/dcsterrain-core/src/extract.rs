@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::grid::Grid;
+
 mod check;
 mod tables;
 
@@ -152,28 +154,6 @@ pub struct Bounds {
     pub min_z: f64,
     pub max_x: f64,
     pub max_z: f64,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize)]
-pub struct Grid {
-    pub cell_size: u32,
-    pub origin_x: f64,
-    pub origin_z: f64,
-    /// Rows, running north.
-    pub height: u32,
-    /// Columns, running east.
-    pub width: u32,
-    pub tile_size: u32,
-}
-
-impl Grid {
-    /// Tiles along x and along z; the last in each direction is a full tile.
-    pub fn tiles(&self) -> (u32, u32) {
-        (
-            self.height.div_ceil(self.tile_size),
-            self.width.div_ceil(self.tile_size),
-        )
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

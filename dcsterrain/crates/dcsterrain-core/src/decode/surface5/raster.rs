@@ -16,7 +16,8 @@ use std::thread;
 
 use super::mesh::{Block, Error, Surface5};
 use super::sample::{ROAD_STRIP, cover, rank, round_height, water_class};
-use crate::extract::{Bounds, CELL_SIZE_M, Grid, TILE_SIZE, TileEntry, layer};
+use crate::extract::{Bounds, CELL_SIZE_M, TILE_SIZE, TileEntry, layer};
+use crate::grid::Grid;
 
 /// The material whose subset marks a runway.
 pub const RUNWAY_MATERIAL: &str = "Runway";
