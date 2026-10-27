@@ -78,7 +78,7 @@ response.
 | Q10 | `point_info` | Each field tested on `Synth`; nearest town bearing and distance against brute force | Q1, N8 | agent |
 | Q11 | `airfield_info` | Opt-in: every Caucasus airdrome answers; runway courses and lengths equal the tables | Q1 | agent, opt-in |
 | Q12 | `exposure` | The minimum over sites equals per-site floors; the count of sites seeing a cell against brute force | Q5 | agent |
-| Q13 | `validate_placements` | One synthetic case per issue kind; opt-in: units placed in a Caucasus building, lake and runway are each reported with the object | Q1, N7, N8 | agent, opt-in |
+| Q13 | `validate_placements` with point, rectangle, circle and polygon shapes and a default shape per kind | One synthetic case per issue kind and per shape, including a shape that touches an object only at its edge; a unit with no shape is checked with its kind's default and the response names it; opt-in: units placed in a Caucasus building, lake and runway are each reported with the object | Q1, N7, N8 | agent, opt-in |
 | Q14 | `low_level_route` | On `Synth`, a route behind a hill from a site stays masked where the hill allows and within the AGL band; cost recorded on Caucasus | Q12 | agent, opt-in |
 | Q15 | `towns` and the `places` entry: 200 m grouping, size class and form, naming, outlines on request; `nearest` kind `place` and `point_info`'s place field | Synthetic places against brute-force linkage; opt-in: each map at hand records its class counts; on Caucasus the 47 towns with census figures rank with correlation at least 0.7 | N7, Q1 | agent, opt-in |
 

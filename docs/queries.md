@@ -61,7 +61,7 @@ endpoints also returns them as `Point` features.
 | `trafficability` | the line to the nearest road as a `LineString`, and the blocking point when there is one |
 | `point_info` | a `Point` per request point with its fields |
 | `airfield_info` | each runway as a `LineString` between its thresholds with designator, course, length and width; each stand as a `Point` with its size, and whether it fits when `fits` is given |
-| `validate_placements` | a `Point` per unit with its issues, its footprint as a `Polygon`, and each offending object's box |
+| `validate_placements` | a `Point` per unit with its issues; its shape as a `Polygon` (a circle as a 32-sided one) unless it is a point; each offending object's box |
 | `towns` | each place's outline as a `Polygon` when outlines are asked for, and a `Point` at its center with its name, size class and form |
 
 `describe` and `geo` return no geometry to draw; `geo` is the conversion
@@ -267,12 +267,44 @@ or below h". Geometry only: no clutter, Doppler notch or minimum elevation.
 ### `validate_placements`
 
 Request: `units: Vec<{id, kind: ground | ship | static | helicopter | plane |
-farp, x, z, heading, footprint?, draft?}>`. Response per unit: a list of
-issues, each naming the offending object — in water; a ship on land or in
-water shallower than its draft; slope over the kind's limit; footprint
-overlapping a building, tree, wire or wall, or a runway or taxiway; inside a
-removed-object area. Procedural forest is not a collision; a unit in forest is
-reported from `cover`.
+farp, x, z, heading, shape?, draft?}>`, where `shape` is one of:
+
+```rust
+enum Shape { Point,                                // the position alone
+             Rect { width: f64, depth: f64 },      // centered, turned to `heading`
+             Circle { radius: f64 },               // centered
+             Polygon { points: Vec<[f64; 2]> } }   // absolute DCS x, z; `x, z` is its label point
+```
+
+A unit with no `shape` takes its kind's default:
+
+| Kind | Default shape |
+|---|---|
+| `ground` | `Rect` 8 × 4 m |
+| `static` | `Rect` 10 × 10 m |
+| `helicopter` | `Circle` 10 m, the rotor disc |
+| `plane` | `Rect` 20 × 20 m |
+| `ship` | `Rect` 100 × 15 m |
+| `farp` | `Rect` 40 × 40 m |
+
+The defaults are starting values, not measured; the caller's shape always
+wins, and the response says which shape each unit was checked with.
+
+Response per unit: the shape used, and a list of issues, each naming the
+offending object. The checks run over every cell and object the shape touches:
+
+- **Water:** a non-ship unit with any water under its shape; a ship with any
+  land under it, or water shallower than `draft` anywhere under it.
+- **Slope:** the steepest slope under the shape over the kind's limit. A point
+  is judged at its own cell.
+- **Overlap:** the shape against each building, wall and wire box, each
+  instance tree's radius, and each runway and taxiway, by exact intersection;
+  `effect` objects never count.
+- **Removed objects:** the shape inside an area where the map removes
+  scenery.
+
+Procedural forest is not a collision; a unit in forest is reported from
+`cover`.
 
 ### `low_level_route`
 
