@@ -16,10 +16,10 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    frozen specs, their ledgers and the 49 ADRs, which are deleted (git keeps
    them, last at `4b85bd0`). ADRs restart at 0001. *Verified by:* an agent,
    through `mise run docs`.
-2. **C4: the `grid` module.** Cell and tile addressing; `Window` reads a
+2. **The `grid` module** (pre-reset task C4). Cell and tile addressing; `Window` reads a
    rectangle across tiles and past the grid; `sample` bilinear on height.
    *Verified by:* an agent, through `mise run check`.
-3. **E6: the Lua tables.** `Beacons.lua`, `Radio.lua`, `towns.lua` and
+3. **The Lua tables** (pre-reset task E6). `Beacons.lua`, `Radio.lua`, `towns.lua` and
    `nodes.lua` run in a sandboxed Lua 5.1; the projection is fitted from the
    beacons. *Verified by:* an agent, opt-in against the live extract.
 

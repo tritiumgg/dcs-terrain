@@ -7,8 +7,8 @@ without DCS running and without DCS doing any terrain work while a campaign
 runs.
 
 Answers come back as JSON, with ranked candidates and the reasoning kept as
-separate fields, from one command line. An AI assistant with a shell learns to
-use it from a skill shipped here.
+separate fields, from one command line. An AI assistant with a shell will
+learn to use it from a skill shipped here (planned).
 
 **Tools only. No terrain data is shipped.** The tool reads your install in
 place and never writes to it. It keeps a small, rebuildable cache beside it in
@@ -22,8 +22,8 @@ your user cache directory.
 ## Requirements
 
 A DCS World install on the same machine, which does not have to be running.
-On Windows the tool finds it from the registry. On macOS or Linux it needs a
-copy of the map's files and `--install <dir>`. No GPU.
+On Windows the tool will find it from the registry (planned). On macOS or
+Linux it needs a copy of the map's files and `--install <dir>`. No GPU.
 
 Building needs [mise](https://mise.jdx.dev), which installs the Rust pinned in
 `rust-toolchain.toml`. The optional hook's tests also need Lua 5.1; on Windows,

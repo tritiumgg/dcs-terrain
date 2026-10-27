@@ -144,8 +144,15 @@ material. Pairs seen include `Surface5.0/Land` (the full mesh), `Road5.1/Beach`,
 | 4 | river | confirmed |
 | 8 | road strip | confirmed: 99 % of road vertices sit on it |
 | 16 | rail strip | confirmed by cross-check: 98 % of rail vertices sit on it, on all three maps |
-| 32 | rare; unknown | guessed |
-| 64, 128, 256, 1024 | probably land materials (field, forest, town) | guessed |
+| 32 | runway (160 = 128 + 32 on 96 % of the `Runway` subset's triangles) | measured, Caucasus only |
+| 64 | town (94 % of the `Town` subset; 192 on 4 %) | measured, Caucasus only |
+| 128 | field (98 % of the `Field` subset) | measured, Caucasus only |
+| 256 | beach (256 or 257 on 94 % of the `Beach` subset) | measured, Caucasus only |
+| 1024 | forest (99 % of the `Forest` subset) | measured, Caucasus only |
+
+The land bits were measured on 2.9.30.28738 by matching each material subset's triangles to the block's full
+triangle list (new-queries research, branch `claude/research-new-queries-2f4ba7`). Forest and field areas agree
+within 2 % between subset and bit; the town subsets cover 46 468 km² against bit 64's 27 110 km², unexplained.
 
 **Confirmed:** block and descriptor layout, the finest mesh, heights, water surface and water class, the
 precedence rule, and bits 1/2/4/8/16. The method behaves the same on three maps.

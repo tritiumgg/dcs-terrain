@@ -289,8 +289,9 @@ reading three files you can name is faster done directly.
 - **Region bound.** The canonical form is an axis-aligned box in DCS meters
   `{minX, minZ, maxX, maxZ}`; circles, polygons and airfield bands become a box
   plus a post-filter.
-- **Two version stamps.** The DCS core build (`autoupdate.cfg`) and the terrain
-  files are versioned separately by ED. Every response carries both.
+- **Two stamps.** The DCS core build (`autoupdate.cfg`) is the version, since
+  ED ships terrain only inside updates; the terrain files' sizes are a
+  fingerprint of what answered. Every response carries both.
 - **Every map file states its format**: a container header, a class name and a
   format version. A decoder declares the pairs it reads, and an unknown one
   refuses the map.

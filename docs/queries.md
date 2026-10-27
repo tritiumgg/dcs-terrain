@@ -34,7 +34,8 @@ struct Footprint { width: f64, depth: f64, orientations_deg: Vec<f64> }   // def
 ## 2. Layers
 
 `sample`, `chokepoints` and the criteria address layers by name: `height`,
-`water` (0 land, 1 lake, 2 sea, 3 river), `surface`, `cover` (`forest`,
+`water` (0 land, 1 lake, 2 sea, 3 river), `surface` (1 land, 3 water, 4 road,
+5 runway), `cover` (`forest`,
 `field`, `town`, `beach`, `runway`, `plain`, or water), `valid`, `slope`,
 `aspect`, `roughness`, `tpi_300`, `tpi_2000`, `dist_road`, `dist_rail`,
 `dist_water`, `dist_builtup`, `count_building`, `count_industrial`,
@@ -55,8 +56,10 @@ objects, and the validation figures if any.
 Request: either `region` with `step` (meters, at least the cell size), or
 `points: Vec<Point>`; and `layers`. Response: rows `{x, z, values: {layer:
 number|null}}` at lattice points inside the region, or one row per given point
-in order, capped at `max_rows` (default 10 000; over the cap is an error).
-Points are read sorted by mesh block and returned in request order.
+in order, capped by the `max_rows` request field (default 10 000; over the
+cap is an error). Regional `height` is bilinear, null where a weighted corner
+is `nodata`; other layers are nearest. Points take point mode. Points are read
+sorted by mesh block and returned in request order.
 
 ### `geo`
 
@@ -115,15 +118,18 @@ null`. Response per band: `radials: Vec<{bearing_deg, unmask_dist,
 masked_fraction, blind}>` — the range at which a target at that altitude
 coming in from `radius` is first visible (null if never), the masked share of
 the radial, and whether it stays masked in to `min_masked_range` — plus
-`blind_arc_fraction`, `widest_blind_arc_deg`, `blind_arcs`, and the minimum,
-median and maximum unmask distance; with `sector`, the same summaries
-restricted to it. Computed from the radar floor along each radial.
+`blind_arc_fraction`, `widest_blind_arc_deg`, `blind_arcs: Vec<{from_deg,
+to_deg}>`, `unmask_dist_min`, `unmask_dist_median` and `unmask_dist_max`;
+with `sector`, the same summaries restricted to it as `sector_summary`.
+Computed from the radar floor along each radial, where the original design
+marched each radial at half-cell steps; the answer is the same geometry.
 
 ### `unmask_profile`
 
 Request: `site: Observer`, `route: Vec<Point3>`, `step` (default 100 m).
 Response: `{first_seen: Point3 | null, first_seen_dist_from_site,
-first_seen_dist_along_route, masked_segments, visible_fraction}`.
+first_seen_dist_along_route, masked_segments: Vec<{from, to}>,
+visible_fraction}`.
 
 ### `route`
 
@@ -170,7 +176,7 @@ closest point on the nearest edge, its edge id and class.
 Request: `region`, or `footprint_at {x, z, footprint, orientation_deg}`.
 Response: `{objects: [{id, model, class, x, z, alt, rotation_deg, obb_w,
 obb_d, height}], counts_by_class}`, exact OBB overlap for the footprint form,
-capped by `--max-rows` (default 5 000; over is an error). `effect` objects are
+capped by `max_rows` (default 5 000; over is an error). `effect` objects are
 returned only when asked for by class.
 
 ### `chokepoints`
@@ -262,7 +268,7 @@ a soft score. `valid` is always applied.
 | `cover_fraction_min` | `class, radius, min` | share of `class` within radius ≥ min | the share |
 | `dist_cover_band` | `class, min, max` | distance to `class` in band | 1 at min, 0 at max |
 | `dist_road_band`, `dist_rail_band` | `min, max` | distance in band | 1 at min, 0 at max |
-| `dist_water_min` | `m` | `dist_water` ≥ m | min(1, dist / 2m) |
+| `dist_water_min` | `m` | `dist_water` ≥ m | min(1, dist_water / (2 × m)) |
 | `dist_airdrome_band` | `min, max, airdrome_id?` | to the nearest airdrome, or the one given | 1 at min, 0 at max |
 | `scenery_max` | `class, radius, max` | count within radius ≤ max | 1 − count/max |
 | `scenery_in_footprint_max` | `max` | OBB overlap count ≤ max | 1 − count/max |

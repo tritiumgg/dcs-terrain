@@ -73,9 +73,12 @@ where a tile came from.
 - The install root on Windows comes from the registry value
   `HKCU\Software\Eagle Dynamics\DCS World\Path`; elsewhere it is given with
   `--install`. No path is recorded in this repository.
-- A map is a directory under `Mods/terrains` with an `entry.lua`. Its name is
-  the **id** that `entry.lua` declares, not the folder name: Germany's folder
-  is `GermanyColdWar` and its id `GermanyCW`. Every per-map key — `--map`, the
+- A map is a directory under `Mods/terrains` with an `entry.lua`; a directory
+  without one is passed over. Its name is the **id** that `entry.lua`
+  declares, not the folder name: Germany's folder is `GermanyColdWar` and its
+  id `GermanyCW`. `entry.lua` is read as text and never run: of every
+  assignment to an `id` key the shallowest wins, and `update_id` is not an
+  id. Every per-map key — `--map`, the
   cache directory, per-map class overrides, the projection table — uses the
   id. An unknown name is refused with the list of ids the install holds.
 - Each terrain file is the one file in its directory whose name ends in its
@@ -116,14 +119,18 @@ A failed check refuses the map the same way.
   road. Without the water rule, lake triangles over land read as land.
 - **Water class:** `TRITYPE & 4` river (3), else `& 1` sea (2), else `& 2`
   lake (1), else land (0).
+- **Surface:** 1 land, 3 water, 4 road (a road-strip triangle), 5 runway
+  (inside the `Runway` material subset, the one subset the decoder reads); 2 is
+  never written.
 - **Ground cover** comes from the higher `TRITYPE` bits, first match wins:
   water; `runway` (32); `town` (64); `forest` (1024); `field` (128); `beach`
-  (256); else `plain`. Road strips keep the bit of the ground under them.
-  Measured on Caucasus: each bit matches its material subset on 94–99 % of the
-  subset's triangles. The order settles the few mixed triangles by the subset
-  they fall in. Forest concealment reads bit 1024, never the trees pool: only
-  9.8 % of instance trees stand on forest ground, because DCS draws its forests
-  at runtime from the ground type. The material subsets are never read.
+  (256); else `plain`. Road and rail strips keep the bit of the ground under
+  them. Measured on Caucasus, 2.9.30.28738 (new-queries research): each bit
+  matches its material subset on 94–99 % of the subset's triangles. The order
+  settles the few mixed triangles by the subset they fall in. Forest
+  concealment reads bit 1024, never the trees pool: only 9.8 % of instance
+  trees stand on forest ground, because DCS draws its forests at runtime from
+  the ground type. Cover reads no material subset.
 - **Coverage.** A point is `nodata` only where no finest-mesh triangle covers
   it. Flat land at 5 m is land at 5 m; no fill value is tested. The sea is
   covered by sea triangles, so a sightline across a bay finds no holes.
@@ -136,10 +143,12 @@ A failed check refuses the map the same way.
   small LRU, and never memory-maps a whole terrain file: on Windows that costs
   about 2 MiB of commit per GiB mapped (123 MiB for Germany's `.surface5`).
 
-Measured: the rasterizer matches the live Caucasus extract on 99.922 % of
-22.9 M cells, on 99.9998 % within 1 m, and on 100 % of water. Raster height
-differs from the mesh at p50 0.17 m, p99 2–3 m, p99 4–8 m on steep ground, max
-159 m where surfaces overlap; that is why points use point mode.
+Measured against the live Caucasus extract (2.9.29.27468), whole map: heights
+exact on 99.9485 % of 141.19 M cells and within 1 m on 99.99859 %, worst 29 m
+in lake clusters; water class on all but 4 cells. Raster height against the
+mesh at 100 000 random points per map (no-pack research): p50 0.17 m, p99
+2–3 m overall and 4–8 m on steep ground, worst 159 m where surfaces overlap.
+That gap is why points use point mode.
 
 ### 3.4 The Lua files
 
@@ -159,12 +168,16 @@ An airdrome is keyed by its `name_id` across every source that names it.
 
 ### 3.5 The projection
 
-Fitted per map from every beacon that has both `position` and `positionGeo`:
-a transverse Mercator (`k_0 = 0.9996`, WGS84) by least squares over `lon_0`
-and the two offsets. A residual over 2 m refuses the map unless
-`--allow-crs-residual` is given. A map with fewer than three such beacons
-takes its parameters from the built-in table (`crs.rs`), and a map in neither
-is refused. Fitted when `tables.json` is built.
+A transverse Mercator (`k_0 = 0.9996`, WGS84), fitted per map from every
+beacon that has both `position` and `positionGeo`. Each whole-degree central
+meridian within 12° of the beacons is scored by the RMS of the residuals about
+the median offsets; for the best, pairs 5 m or more off are dropped and the
+offsets are the means of the rest, rounded to the millimeter. There is no fit
+with fewer than 3 distinct pairs before or after that cut, or with longitudes
+spanning more than 30°; the map then takes its parameters from the built-in
+table (`crs.rs`), and a map in neither is refused. Fitted when `tables.json`
+is built. A fitted residual over 2 m refuses the map unless
+`--allow-crs-residual` is given; that check is new in N5.
 
 ## 4. The cache
 
@@ -195,7 +208,10 @@ the install, never in the repository.
   processes building it at once leave one valid copy.
 - A missing entry, or one whose key or format version does not match, is
   rebuilt before the operation that needs it, and only that entry: `describe`
-  and `sample` need only `mesh.toc`; `route` waits for the graph.
+  needs `mesh.toc` and `tables.json` and reports the other entries' counts as
+  null until they exist; `sample` needs `mesh.toc`, plus the entry behind any
+  layer it asks for (`roads.graph` for `dist_road`, `scene.nodes` for counts);
+  `route` waits for the graph.
 - Betweenness and `places` are built at low priority in the background. Until
   they exist, `chokepoints` and `towns` return an error saying they are still
   being built.
@@ -227,8 +243,8 @@ the import was dropped.
 
 - **The core build is the version**: `version` and `timestamp` from
   `autoupdate.cfg` at the install root, read when a map is opened, never from
-  memory. ED versions the terrain files separately, so they are fingerprinted
-  too.
+  memory. ED ships terrain only inside DCS updates, so the build is the
+  version; the terrain files are fingerprinted as a record of what answered.
 - **The cache key** for an entry is the build, plus for each source file its
   path, size, payload size (the u64 at bytes 8–15 of the header) and
   modification time, plus the decoder's class and version. A repair that
@@ -312,7 +328,7 @@ source. In order: a per-map override (`classes/<map id>.toml`, or
 `min(w, d) < 1 m` and `max(w, d) ≥ 4 m`; `misc` under 4 m²; `industrial` by a
 name pattern list; else `building`. The settlement families of §6.3 refine
 `building`. No height, clearing, placement, count or place answer includes an
-`effect` object. `dcsterrain check` prints the catalogue sorted by count, with
+`effect` object. `dcsterrain check` prints the catalog sorted by count, with
 the tallest models, so a new map's top models can be reviewed in minutes.
 
 ### 6.5 Road graph
@@ -330,15 +346,15 @@ largest component, sampled from 2 000 sources on large graphs, normalized
 - With no `<json>`, `query` reads JSON lines from stdin, one request per line,
   each naming its `op`, and writes one response line per request. A batch
   opens the map once and keeps its block and tile caches across requests.
-- `--max-rows` caps `sample` and `scenery_in`; over the cap is an error, never
-  a truncation. Errors are a list of `{code, message, path}` issues; an
+- `sample` and `scenery_in` take a `max_rows` request field (defaults 10 000
+  and 5 000); over the cap is an error, never a truncation. Errors are a list of `{code, message, path}` issues; an
   operation returns a full result or an error.
 - `--map synth` answers from the synthetic theatre with no install, with
   `--seed`, `--size-km` and `--cell`.
 - `dcsterrain schema` prints every operation's request and response schema.
 - `dcsterrain index`, `dcsterrain cache`, as §4.
 - `dcsterrain check [--install <dir>] --map <Map>` reports each terrain file's
-  class, version and decoder, the cache state, the class catalogue and the last
+  class, version and decoder, the cache state, the class catalog and the last
   validation figures, and exits 1 naming any file no decoder reads.
 
 A skill in this repository teaches an assistant with a shell which operation
@@ -436,7 +452,7 @@ Each names what settles it.
     a forest edge follows coarse triangles (13 per km² p50). The size classes
     were fitted on 47 Caucasus towns; some building families (`korpus_*`,
     `airfields_building_*`) are uncertain. *Settles it:* the opt-in checks per
-    map in N8 and Q17, and the per-map class review in N7.
+    map in N8 and Q15, and the per-map class review in N7.
 12. **Low-level routes ignore obstacles.** Wires, pylons and masts are not
     modeled, so `low_level_route` clears terrain only and says so. *Settles
     it:* a user asking for obstacles.
