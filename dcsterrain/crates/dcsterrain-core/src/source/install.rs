@@ -116,6 +116,66 @@ impl<K: Eq + Hash + Copy, V: Clone> Lru<K, V> {
     }
 }
 
+/// The tiles of `g` a world rectangle `[x0, z0, x1, z1]` reaches into, as
+/// row and column ranges clipped to the grid; `None` when it lies off it.
+fn tile_span(
+    g: &Grid,
+    [x0, z0, x1, z1]: [f64; 4],
+) -> Option<(
+    std::ops::RangeInclusive<usize>,
+    std::ops::RangeInclusive<usize>,
+)> {
+    let tm = f64::from(g.tile_size) * f64::from(g.cell_size);
+    let (ntx, ntz) = g.tiles();
+    let span = |lo: f64, hi: f64, origin: f64, n: u32| {
+        let lo = ((lo - origin) / tm).floor().max(0.0);
+        let hi = ((hi - origin) / tm).floor().min(f64::from(n) - 1.0);
+        // A NaN fails the comparison and lands here too.
+        (lo <= hi).then_some(lo as usize..=hi as usize)
+    };
+    Some((
+        span(x0, x1, g.origin_x, ntx)?,
+        span(z0, z1, g.origin_z, ntz)?,
+    ))
+}
+
+/// For each tile of `g`, row-major, the blocks whose box, padded, reaches
+/// into it: a tile or point then looks at a handful of blocks rather than
+/// every block of the terrain, thirteen thousand on the largest.
+fn tile_index(g: &Grid, boxes: &[[f64; 4]]) -> (Vec<u32>, Vec<u32>) {
+    let (ntx, ntz) = g.tiles();
+    let n = ntx as usize * ntz as usize;
+    let p = BOX_PAD_M;
+    let spans: Vec<_> = boxes
+        .iter()
+        .map(|b| tile_span(g, [b[0] - p, b[1] - p, b[2] + p, b[3] + p]))
+        .collect();
+    let mut start = vec![0u32; n + 1];
+    for (rows, cols) in spans.iter().flatten() {
+        for r in rows.clone() {
+            for c in cols.clone() {
+                start[r * ntz as usize + c + 1] += 1;
+            }
+        }
+    }
+    for k in 1..start.len() {
+        start[k] += start[k - 1];
+    }
+    let mut fill = start.clone();
+    let mut ids = vec![0u32; start[n] as usize];
+    for (i, s) in spans.iter().enumerate() {
+        let Some((rows, cols)) = s else { continue };
+        for r in rows.clone() {
+            for c in cols.clone() {
+                let f = &mut fill[r * ntz as usize + c];
+                ids[*f as usize] = i as u32;
+                *f += 1;
+            }
+        }
+    }
+    (start, ids)
+}
+
 /// An install terrain: its files, its table of contents, and the blocks and
 /// tiles read so far.
 pub struct Install {
@@ -127,6 +187,10 @@ pub struct Install {
     toc: Surface5,
     boxes: Vec<[f64; 4]>,
     grid: Grid,
+    /// The blocks whose padded box reaches into each tile, row-major over
+    /// the tiles: tile k's are `tile_blocks[tile_start[k]..tile_start[k + 1]]`.
+    tile_start: Vec<u32>,
+    tile_blocks: Vec<u32>,
     blocks: Mutex<Lru<usize, Arc<Prepared>>>,
     tiles: Mutex<Lru<(u32, u32), Arc<Tile>>>,
 }
@@ -172,6 +236,7 @@ impl Install {
         }
         let boxes: Vec<[f64; 4]> = toc.blocks.iter().map(|b| b.world_box()).collect();
         let grid = grid_for(&toc.bounds(), CELL_SIZE, TILE_SIZE);
+        let (tile_start, tile_blocks) = tile_index(&grid, &boxes);
         Ok(Install {
             identity: Identity {
                 terrain: map.theatre.clone(),
@@ -185,6 +250,8 @@ impl Install {
             toc,
             boxes,
             grid,
+            tile_start,
+            tile_blocks,
             blocks: Mutex::new(Lru::new(BLOCK_BUDGET)),
             tiles: Mutex::new(Lru::new(TILE_COUNT)),
         })
@@ -204,15 +271,29 @@ impl Install {
         &self.map
     }
 
-    /// The blocks whose box, padded, overlaps `[x0, x1] × [z0, z1]`.
+    /// The blocks whose box, padded, overlaps `[x0, x1] × [z0, z1]`, in
+    /// block order, found through the tiles the rectangle touches.
     fn under(&self, x0: f64, x1: f64, z0: f64, z1: f64) -> Vec<usize> {
+        let Some((rows, cols)) = tile_span(&self.grid, [x0, z0, x1, z1]) else {
+            return Vec::new();
+        };
+        let ntz = self.grid.tiles().1 as usize;
+        let mut ids: Vec<usize> = Vec::new();
+        for r in rows {
+            for c in cols.clone() {
+                let k = r * ntz + c;
+                let (a, b) = (self.tile_start[k] as usize, self.tile_start[k + 1] as usize);
+                ids.extend(self.tile_blocks[a..b].iter().map(|&i| i as usize));
+            }
+        }
+        ids.sort_unstable();
+        ids.dedup();
         let p = BOX_PAD_M;
-        (0..self.boxes.len())
-            .filter(|&i| {
-                let [bx0, bz0, bx1, bz1] = self.boxes[i];
-                bx0 - p <= x1 && bx1 + p >= x0 && bz0 - p <= z1 && bz1 + p >= z0
-            })
-            .collect()
+        ids.retain(|&i| {
+            let [bx0, bz0, bx1, bz1] = self.boxes[i];
+            bx0 - p <= x1 && bx1 + p >= x0 && bz0 - p <= z1 && bz1 + p >= z0
+        });
+        ids
     }
 
     /// Block `i`, prepared, read on first use.
@@ -426,6 +507,75 @@ mod tests {
         let p = t.point(1025.0, 2600.0).unwrap().unwrap();
         assert_eq!(p.surface, 4);
         assert!((p.height - 52.5).abs() < 1e-9, "{}", p.height);
+    }
+
+    #[test]
+    fn the_tile_index_lists_every_block_a_brute_search_finds() {
+        let g = Grid {
+            cell_size: 50,
+            origin_x: -1000.0,
+            origin_z: 500.0,
+            height: 300,
+            width: 200,
+            tile_size: 64,
+        };
+        // A block within one tile, one across many, one on a tile edge, and
+        // one past the grid.
+        let boxes = [
+            [0.0, 1000.0, 100.0, 1100.0],
+            [-1000.0, 500.0, 9000.0, 9000.0],
+            [2200.0, 3700.0, 2300.0, 3800.0],
+            [20000.0, 20000.0, 21000.0, 21000.0],
+        ];
+        let (start, ids) = tile_index(&g, &boxes);
+        let brute = |x0: f64, x1: f64, z0: f64, z1: f64| -> Vec<usize> {
+            let p = BOX_PAD_M;
+            (0..boxes.len())
+                .filter(|&i| {
+                    let [bx0, bz0, bx1, bz1] = boxes[i];
+                    bx0 - p <= x1 && bx1 + p >= x0 && bz0 - p <= z1 && bz1 + p >= z0
+                })
+                .collect()
+        };
+        let (_ntx, ntz) = g.tiles();
+        let indexed = |x0: f64, x1: f64, z0: f64, z1: f64| -> Vec<usize> {
+            let Some((rows, cols)) = tile_span(&g, [x0, z0, x1, z1]) else {
+                return Vec::new();
+            };
+            let mut v: Vec<usize> = Vec::new();
+            for r in rows {
+                for c in cols.clone() {
+                    let k = r * ntz as usize + c;
+                    v.extend(
+                        ids[start[k] as usize..start[k + 1] as usize]
+                            .iter()
+                            .map(|&i| i as usize),
+                    );
+                }
+            }
+            v.sort_unstable();
+            v.dedup();
+            v.retain(|&i| brute(x0, x1, z0, z1).contains(&i));
+            v
+        };
+        for k in 0..400 {
+            let x = -1100.0 + f64::from(k) * 41.3;
+            let z = 400.0 + f64::from(k * 13 % 400) * 26.1;
+            assert_eq!(indexed(x, x, z, z), brute(x, x, z, z), "({x}, {z})");
+            assert_eq!(
+                indexed(x, x + 3000.0, z, z + 500.0),
+                brute(x, x + 3000.0, z, z + 500.0)
+                    .into_iter()
+                    .filter(|&i| i != 3)
+                    .collect::<Vec<_>>(),
+                "({x}, {z}) box"
+            );
+        }
+        // Past the grid nothing is listed, the far block included.
+        assert_eq!(
+            indexed(20500.0, 20500.0, 20500.0, 20500.0),
+            Vec::<usize>::new()
+        );
     }
 
     #[test]
