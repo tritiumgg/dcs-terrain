@@ -31,3 +31,4 @@ are in git at commit `4b85bd0`.
 
 | ADR | Status | Date | Title |
 |---|---|---|---|
+| [0001](0001-read-file-headers-per-role-when-first-needed.md) | Accepted | 2026-10-27 | Read a terrain's file headers per role, when the role is first needed |
