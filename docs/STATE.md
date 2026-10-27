@@ -4,43 +4,49 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `design.md` and `queries.md` hold the design.
 
-**Last updated:** 2026-10-27T18:19Z
+**Last updated:** 2026-10-27T18:49Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **The reset (documents).** The tool reads the install in place with a
+1. **A1: the reset's code.** The CLI keeps only `schema`; `pack/`,
+   `rusqlite`, the MCP crate and the theatre probe are gone; no code cites a
+   pre-reset ADR. The extract writers stay until N1, N3 and N4 replace the
+   tests that build fixtures with them. *Verified by:* an agent, through
+   `mise run check` and `mise run lua-test`.
+2. **The reset (documents).** The tool reads the install in place with a
    rebuildable cache; the packed file, SQLite and the MCP server are gone from
    the design. `design.md`, `queries.md` and a new `plan.md` replace the nine
    frozen specs, their ledgers and the 49 ADRs, which are deleted (git keeps
    them, last at `4b85bd0`). ADRs restart at 0001. *Verified by:* an agent,
    through `mise run docs`.
-2. **The `grid` module** (pre-reset task C4). Cell and tile addressing; `Window` reads a
-   rectangle across tiles and past the grid; `sample` bilinear on height.
-   *Verified by:* an agent, through `mise run check`.
-3. **The Lua tables** (pre-reset task E6). `Beacons.lua`, `Radio.lua`, `towns.lua` and
-   `nodes.lua` run in a sandboxed Lua 5.1; the projection is fitted from the
-   beacons. *Verified by:* an agent, opt-in against the live extract.
+3. **The `grid` module** (pre-reset task C4). Cell and tile addressing;
+   `Window` reads a rectangle across tiles and past the grid; `sample`
+   bilinear on height. *Verified by:* an agent, through `mise run check`.
+4. **The Lua tables** (pre-reset task E6). `Beacons.lua`, `Radio.lua`,
+   `towns.lua` and `nodes.lua` run in a sandboxed Lua 5.1; the projection is
+   fitted from the beacons. *Verified by:* an agent, opt-in against the live
+   extract.
 
 ## Next
 
 One task. The thing to pick up immediately.
 
-**A1** — remove the pack pipeline and its subcommands, replace pre-reset ADR
-citations in code and Lua with their reasons, and update the README.
-*Verified by:* an agent, through `mise run check` and `mise run lua-test`.
+**N1** — the `Source` trait and `Synth` in memory; `--terrain synth`; opening
+a terrain by its `entry.lua` id; `list-terrains`. *Verified by:* an agent,
+through `mise run check`. **N0** runs beside it at the install: it needs DCS
+on a terrain, so only somebody there can do it.
 
 ## Then
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **N0** — live gate: read a terrain's files while DCS has it loaded. Needs DCS;
-   only somebody at the install can run it, beside N1 onward.
-2. **N1** — the `Source` trait and `Synth` in memory; `--terrain synth`.
-3. **N2** — the cache directory, keys and atomic entries.
-4. **N3** — the mesh in place: tiles on demand and point mode.
-5. **N4** — scenery in place: the pool-tree reader.
+1. **N0** — live gate: read a terrain's files while DCS has it loaded.
+2. **N2** — the cache directory, keys and atomic entries.
+3. **N3** — the mesh in place: tiles on demand and point mode.
+4. **N4** — scenery in place: the pool-tree reader.
+5. **N5** — `tables.json`, the projection check and `index --hook`.
 
 Milestone in view: **MS1 Engine on the install**.
 
