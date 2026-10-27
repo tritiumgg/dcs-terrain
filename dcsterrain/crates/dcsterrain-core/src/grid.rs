@@ -22,7 +22,8 @@ pub struct Grid {
 }
 
 impl Grid {
-    /// Tiles along x and along z; the last in each direction is a full tile.
+    /// Tiles along x and along z. The last in each direction may reach past
+    /// the grid, its cells there `nodata`.
     pub fn tiles(&self) -> (u32, u32) {
         (
             self.height.div_ceil(self.tile_size),

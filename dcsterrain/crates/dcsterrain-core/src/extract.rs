@@ -450,6 +450,22 @@ mod tests {
     }
 
     #[test]
+    fn the_format_matches_the_synthetic_constants() {
+        use crate::synth;
+        assert_eq!(FORMAT_VERSION, synth::FORMAT_VERSION);
+        assert_eq!(TILE_SIZE, synth::TILE_SIZE);
+        assert_eq!(CELL_SIZE_M, synth::CELL_SIZE_M);
+        let nodata = [
+            i32::from(synth::HEIGHT_NODATA),
+            i32::from(synth::WATER_NODATA),
+            i32::from(synth::SURFACE_NODATA),
+            i32::from(synth::COUNT_NODATA),
+            i32::from(synth::COUNT_NODATA),
+        ];
+        assert_eq!(LAYERS.map(|l| l.nodata), nodata);
+    }
+
+    #[test]
     fn opens_the_fixture_and_reads_a_tile() {
         let s = fixture_extract();
         let x = Extract::open(&s.0).unwrap();
