@@ -527,6 +527,8 @@ impl TerrainCache {
         {
             return Ok(head.opened(path, false));
         }
+        // Refused before the build, which can take minutes, not after it.
+        self.make_dir()?;
         let payload = entry.build(&self.install, &self.map)?;
         let bytes = encode(entry.version(), &key, &payload);
         self.write(entry.name(), &bytes, |dest| {
@@ -593,7 +595,8 @@ impl TerrainCache {
     /// Writes `name` under a temporary name and renames it into place. When
     /// the rename fails, which Windows does while another process has the
     /// old file open, the write still succeeds if `current` says the file
-    /// already there is one another builder just put in place.
+    /// already there is one another builder just put in place. The caller
+    /// has made the directory, and so has refused one inside the install.
     fn write(
         &self,
         name: &str,
@@ -601,7 +604,6 @@ impl TerrainCache {
         current: impl Fn(&Path) -> bool,
     ) -> Result<(), Refusal> {
         static N: AtomicU32 = AtomicU32::new(0);
-        self.make_dir()?;
         let dest = self.dir.join(name);
         let tmp = self.dir.join(format!(
             ".{name}.{}.{}.tmp",
@@ -1005,6 +1007,18 @@ mod tests {
             .0;
         assert!(err.contains("inside the install"), "{err}");
         assert_eq!(entries_in(&f.install.0), before, "the install is untouched");
+    }
+
+    #[test]
+    fn refuses_a_cache_inside_the_install_before_building() {
+        let f = Fixture::new();
+        let map = install::open(&f.install.0, "Caucasus").unwrap();
+        let mesh = Counted::new("mesh.toc", &["surface"]);
+        let inside = Cache::new(f.install.0.join("cache")).terrain(&f.install.0, &map);
+        let err = inside.get(&mesh).unwrap_err().0;
+        assert!(err.contains("inside the install"), "{err}");
+        assert_eq!(mesh.builds(), 0, "nothing was built only to be refused");
+        assert!(!f.install.0.join("cache").exists());
     }
 
     #[test]
