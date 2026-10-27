@@ -383,7 +383,7 @@ correctness rule: a miss is a decision about the target.
 | `find_sites` with a horizon criterion, first touch | 0.9–4 s plus a cold window | 5 s, then 500 ms |
 | `route` 50 km | 2.5 / 13 ms | 500 ms |
 | `low_level_route` 100 km, 10 sites | not prototyped, 1–3 s estimated | 5 s |
-| `validate_placements`, 1 000 units | ~2 s cold on Germany estimated | 3 s |
+| `validate_placements`, 1 000 placements | ~2 s cold on Germany estimated | 3 s |
 | `point_info`, `airfield_info` | µs to a few ms | 20 ms cold |
 | cache build, all but betweenness and places | < 2 s; roads ≈ 5 s on Germany | 10 s |
 | private memory per query process | 15–45 MiB | 64 MiB |
