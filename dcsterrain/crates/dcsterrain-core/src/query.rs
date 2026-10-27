@@ -139,12 +139,18 @@ pub fn describe(terrain: &Terrain) -> DescribeResponse {
                 .map()
                 .files
                 .iter()
-                .map(|f| TerrainFile {
-                    role: f.role.clone(),
-                    path: f.path.clone(),
-                    class: f.class.clone(),
-                    version: f.version,
-                    size: f.size,
+                .map(|f| {
+                    // Only the surface file's header is read to open a
+                    // terrain; the others are read by what needs them.
+                    let s = &i.map().surface;
+                    let read = s.path == f.path;
+                    TerrainFile {
+                        role: f.role.clone(),
+                        path: f.path.clone(),
+                        class: s.class.clone().filter(|_| read),
+                        version: s.version.filter(|_| read),
+                        size: f.size,
+                    }
                 })
                 .collect(),
             counts: Counts::default(),

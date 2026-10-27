@@ -106,11 +106,20 @@ pub fn parse(head: &[u8]) -> Result<Header, NotContainer> {
 /// Reads the head of the file at `path` and parses it. The outer error is
 /// the file system's; the inner says the file is not a container.
 pub fn read(path: &Path) -> io::Result<Result<Header, NotContainer>> {
+    #[cfg(test)]
+    READS.with(|n| n.set(n.get() + 1));
     let mut head = Vec::with_capacity(MAX_HEAD);
     File::open(path)?
         .take(MAX_HEAD as u64)
         .read_to_end(&mut head)?;
     Ok(parse(&head))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many headers this thread has read, so a test can tell what
+    /// opening a terrain or checking an entry reads.
+    pub(crate) static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// A header as the files write it, for tests that build one.

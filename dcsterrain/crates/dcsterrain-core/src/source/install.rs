@@ -17,6 +17,7 @@ use crate::cache::{Cache, Entry};
 use crate::decode::install::{self, Map};
 use crate::decode::surface5::ground::{self, Prepared, Tile, cover_of, grid_units, surface_of};
 use crate::decode::surface5::{RUNWAY_MATERIAL, Surface5, grid_for, water_class};
+use crate::extract::FileEntry;
 use crate::grid::Grid;
 
 /// The bytes of prepared blocks kept between requests.
@@ -32,13 +33,6 @@ const BOX_PAD_M: f64 = 1.0;
 pub struct MeshToc;
 
 pub static MESH_TOC: MeshToc = MeshToc;
-
-fn surface_file(map: &Map) -> Result<&crate::extract::FileEntry, Refusal> {
-    map.files
-        .iter()
-        .find(|f| f.role == "surface")
-        .ok_or_else(|| Refusal(format!("{} has no surface file", map.theatre)))
-}
 
 /// A decoder's error, naming the file unless the error already does.
 fn refusal(path: &str, e: impl std::fmt::Display) -> Refusal {
@@ -63,8 +57,11 @@ impl Entry for MeshToc {
         &["surface"]
     }
 
-    fn build(&self, root: &Path, map: &Map) -> Result<Vec<u8>, Refusal> {
-        let f = surface_file(map)?;
+    fn build(&self, root: &Path, map: &Map, files: &[FileEntry]) -> Result<Vec<u8>, Refusal> {
+        let f = files
+            .iter()
+            .find(|f| f.role == "surface")
+            .ok_or_else(|| Refusal(format!("{} has no surface file", map.theatre)))?;
         let file = File::open(root.join(&f.path)).map_err(|e| refusal(&f.path, e))?;
         let toc = Surface5::open(&file, &f.path).map_err(|e| refusal(&f.path, e))?;
         if toc.blocks.is_empty() {
@@ -221,7 +218,7 @@ impl Install {
         };
         let bytes = opened.payload().map_err(|e| unreadable(&e))?;
         let toc = Surface5::decode(&bytes).map_err(|e| unreadable(&e))?;
-        let f = surface_file(&map)?;
+        let f = &map.surface;
         let path = f.path.clone();
         let file = File::open(root.join(&path)).map_err(|e| refusal(&path, e))?;
         // The file can change between the key's check and this open; the
@@ -586,6 +583,16 @@ mod tests {
             panic!("opened");
         };
         assert!(e.0.contains("version 6"), "{e}");
+    }
+
+    #[test]
+    fn answers_heights_over_a_taxiway_file_no_decoder_reads() {
+        let root = install(&file(&[square([0, 0])], 1));
+        let bad = container::build("t5::rn5file", 99, 0);
+        put(&root.0, "Mods/terrains/Test/AirfieldsTaxiways/X.rn5", &bad);
+        let c = Scratch::new();
+        let t = Install::open(&root.0, "Test", &Cache::new(&c.0)).unwrap();
+        assert_eq!(t.point(1100.0, 2100.0).unwrap().unwrap().surface, 5);
     }
 
     #[test]

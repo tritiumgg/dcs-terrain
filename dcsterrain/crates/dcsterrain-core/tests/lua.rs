@@ -46,7 +46,12 @@ fn maps(root: &Path) -> Vec<String> {
 
 fn decode(root: &Path, dir: &str) -> (install::Map, LuaTables) {
     let map = install::read_map(root, dir).unwrap_or_else(|e| panic!("{dir}: {e}"));
-    let t = tables::decode(root, &map.theatre, &map.files).unwrap_or_else(|e| panic!("{dir}: {e}"));
+    let t = tables::decode(
+        root,
+        &map.theatre,
+        &install::classify(root, &map.files).unwrap(),
+    )
+    .unwrap_or_else(|e| panic!("{dir}: {e}"));
     (map, t)
 }
 

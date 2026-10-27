@@ -393,7 +393,7 @@ fn fold(deg: f64) -> f64 {
 fn nevada_runway_lights_align_with_their_runways() {
     let Some(root) = install_root() else { return };
     let map = install::read_map(&root, "Nevada").unwrap();
-    let decoded = airfield::decode(&root, &map.files).unwrap();
+    let decoded = airfield::decode(&root, &install::classify(&root, &map.files).unwrap()).unwrap();
     // Each runway as its first end, unit course, length and course.
     let mut runways = Vec::new();
     for rw in &decoded.runways {

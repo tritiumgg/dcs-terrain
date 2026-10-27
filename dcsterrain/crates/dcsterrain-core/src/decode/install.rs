@@ -2,8 +2,9 @@
 //! and the id each declares, and a terrain's files with the class and version
 //! each one states.
 
+use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
@@ -160,14 +161,75 @@ fn bare(b: &[u8], i: usize) -> Option<(usize, u8, String)> {
 pub const TERRAINS_DIR: &str = "Mods/terrains";
 
 /// A map as the install holds it: what it is, which build, and every file
-/// the decoders will read, each classified from its own header.
+/// the decoders will read. Only the surface file is classified from its
+/// header when the map is read, since nothing answers without it; the
+/// others are classified when something first reads their role, so a
+/// height never waits on 450 taxiway headers (ADR 0001).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Map {
     /// The directory under `Mods/terrains`, spelled as the disk spells it.
     pub dir: String,
     pub theatre: String,
     pub build: Build,
-    pub files: Vec<FileEntry>,
+    /// Every file of every role, found by listing, none of them read.
+    pub files: Vec<Located>,
+    pub surface: FileEntry,
+}
+
+/// One of a map's files as a listing or a stat gives it, without opening
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Located {
+    pub role: String,
+    pub path: String,
+    pub size: u64,
+    /// Nanoseconds since the Unix epoch.
+    pub modified: u128,
+}
+
+impl Map {
+    /// The files of `roles` as the disk holds them now, read from metadata
+    /// alone: a stat of each file of a role that takes one file or a named
+    /// one, and one listing of the directory of a role that takes every
+    /// file in it, so a file added there is seen.
+    pub fn stat(&self, install: &Path, roles: &[&str]) -> Result<Vec<Located>, Refusal> {
+        let root = install.join(TERRAINS_DIR).join(&self.dir);
+        let rel_root = format!("{TERRAINS_DIR}/{}", self.dir);
+        let mut ls = Listings::default();
+        let mut out = Vec::new();
+        for (i, (role, find, _)) in ROLES.iter().enumerate() {
+            if !roles.contains(role) {
+                continue;
+            }
+            if let Find::All(..) = find {
+                out.extend(locate(&mut ls, &root, &rel_root, role, find)?);
+                continue;
+            }
+            // A role named by several rows is stated once, at its first.
+            if ROLES[..i].iter().any(|(r, ..)| r == role) {
+                continue;
+            }
+            for f in self.files.iter().filter(|f| f.role == *role) {
+                let meta = fs::metadata(install.join(&f.path))
+                    .map_err(|e| Refusal(format!("{} cannot be read: {e}", f.path)))?;
+                out.push(Located {
+                    size: meta.len(),
+                    modified: since_epoch(&meta).ok_or_else(|| no_time(&f.path))?,
+                    ..f.clone()
+                });
+            }
+        }
+        Ok(out)
+    }
+}
+
+fn since_epoch(meta: &fs::Metadata) -> Option<u128> {
+    let t = meta.modified().ok()?;
+    Some(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos())
+}
+
+fn no_time(rel: &str) -> Refusal {
+    Refusal(format!("{rel} has no modification time"))
 }
 
 /// Where a role's files live under the map directory, and how many.
@@ -236,22 +298,66 @@ pub fn resolve(root: &Path, rel: &str) -> Option<String> {
     at.is_file().then(|| parts.join("/"))
 }
 
-/// Every file in `dir` whose name ends in `ext`, without regard to case,
-/// sorted.
-fn with_ext(dir: &Path, ext: &str) -> Vec<String> {
+/// One entry of a directory as its listing gives it.
+#[derive(Debug, Clone)]
+struct Seen {
+    name: String,
+    file: bool,
+    size: u64,
+    modified: Option<u128>,
+}
+
+/// Directory listings, each read once: the map's directory is looked in
+/// for every role, and `AirfieldsTaxiways` holds two.
+#[derive(Default)]
+struct Listings(HashMap<PathBuf, Vec<Seen>>);
+
+impl Listings {
+    fn of(&mut self, dir: &Path) -> &[Seen] {
+        self.0.entry(dir.to_path_buf()).or_insert_with(|| list(dir))
+    }
+
+    /// The entry of `dir` named `name` without regard to case.
+    fn child(&mut self, dir: &Path, name: &str) -> Option<Seen> {
+        self.of(dir)
+            .iter()
+            .find(|s| s.name.eq_ignore_ascii_case(name))
+            .cloned()
+    }
+}
+
+/// Every entry of `dir`, none when it cannot be read. A listing carries
+/// each entry's type, size and time without opening it, on Windows from
+/// the directory itself; only a link is followed, so a linked map file is
+/// still the map's file.
+fn list(dir: &Path) -> Vec<Seen> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
-    let mut names: Vec<String> = entries
+    entries
         .flatten()
-        // The target's type, as a named file is found: a linked map file is
-        // still the map's file.
-        .filter(|e| e.path().is_file())
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n.len() > ext.len() && n.to_ascii_lowercase().ends_with(ext))
-        .collect();
-    names.sort();
-    names
+        .map(|e| {
+            let meta = match e.file_type() {
+                Ok(t) if t.is_symlink() => fs::metadata(e.path()),
+                _ => e.metadata(),
+            };
+            let name = e.file_name().to_string_lossy().into_owned();
+            match meta {
+                Ok(m) => Seen {
+                    name,
+                    file: m.is_file(),
+                    size: m.len(),
+                    modified: since_epoch(&m),
+                },
+                Err(_) => Seen {
+                    name,
+                    file: false,
+                    size: 0,
+                    modified: None,
+                },
+            }
+        })
+        .collect()
 }
 
 /// Reads `map`, the directory name under `Mods/terrains`, from the install
@@ -275,17 +381,22 @@ pub fn read_map(install: &Path, map: &str) -> Result<Map, Refusal> {
     let theatre =
         entry_id(&text).ok_or_else(|| Refusal(format!("{rel_root}/{entry} declares no id")))?;
 
+    let mut ls = Listings::default();
     let mut files = Vec::new();
-    for (role, find, decoder) in ROLES {
-        for rel in locate(&root, &rel_root, &find)? {
-            files.push(classify(install, role, &rel, decoder)?);
-        }
+    for (role, find, _) in &ROLES {
+        files.extend(locate(&mut ls, &root, &rel_root, role, find)?);
     }
+    let surface = files
+        .iter()
+        .find(|f| f.role == "surface")
+        .expect("the surface role finds its one file or refuses");
+    let surface = classify_one(install, surface)?;
     Ok(Map {
         dir,
         theatre,
         build,
         files,
+        surface,
     })
 }
 
@@ -384,34 +495,51 @@ pub struct Survey {
     pub refusal: Option<String>,
 }
 
-/// Surveys one listed terrain. Reads only headers, and never refuses: what
-/// would refuse the terrain is its `refusal`.
+/// Surveys one listed terrain in one pass: each file located once and each
+/// header read once. Never refuses: what would refuse opening the terrain
+/// is its `refusal`, and a file no decoder reads that opening does not
+/// read is only marked unreadable.
 pub fn survey(install: &Path, listed: &Listed) -> Survey {
     let root = install.join(TERRAINS_DIR).join(&listed.dir);
     let rel_root = format!("{TERRAINS_DIR}/{}", listed.dir);
+    // In the order opening the terrain meets them.
+    let mut refusal = match &listed.id {
+        None => Some(format!("{rel_root}/{ENTRY_FILE} declares no id")),
+        Some(_) => read_build(install).err().map(|r| r.0),
+    };
+    let mut surface = None;
+    let mut ls = Listings::default();
     let mut files = Vec::new();
-    for (role, find, decoder) in ROLES {
-        // A missing or doubled file is the refusal's to report.
-        for rel in locate(&root, &rel_root, &find).unwrap_or_default() {
+    for (role, find, decoder) in &ROLES {
+        let found = locate(&mut ls, &root, &rel_root, role, find).unwrap_or_else(|e| {
+            refusal.get_or_insert(e.0);
+            Vec::new()
+        });
+        for f in found {
             let mut s = Surveyed {
                 role: role.to_string(),
-                path: rel.clone(),
+                path: f.path.clone(),
                 class: None,
                 version: None,
                 readable: decoder.is_none(),
             };
-            if let (Some(want), Ok(Ok(h))) = (decoder, container::read(&install.join(&rel))) {
-                s.readable = dispatch(&rel, &h) == Ok(want);
-                s.class = Some(h.class);
-                s.version = Some(h.version);
+            if let Some(want) = *decoder {
+                let read = header(install, &f.path).and_then(|h| {
+                    s.class = Some(h.class.clone());
+                    s.version = Some(h.version);
+                    expect(&f.path, role, &h, want)
+                });
+                s.readable = read.is_ok();
+                if *role == "surface" {
+                    surface = read.err();
+                }
             }
             files.push(s);
         }
     }
-    let refusal = match &listed.id {
-        None => Some(format!("{rel_root}/{ENTRY_FILE} declares no id")),
-        Some(_) => read_map(install, &listed.dir).err().map(|r| r.0),
-    };
+    if let (None, Some(e)) = (&refusal, surface) {
+        refusal = Some(e.0);
+    }
     Survey {
         dir: listed.dir.clone(),
         id: listed.id.clone(),
@@ -420,89 +548,124 @@ pub fn survey(install: &Path, listed: &Listed) -> Survey {
     }
 }
 
-/// The paths, relative to the install, that `find` names under the map.
-fn locate(root: &Path, rel_root: &str, find: &Find) -> Result<Vec<String>, Refusal> {
+/// The files, relative to the install, that `find` names for `role` under
+/// the map, with the size and time their listing gives.
+fn locate(
+    ls: &mut Listings,
+    root: &Path,
+    rel_root: &str,
+    role: &str,
+    find: &Find,
+) -> Result<Vec<Located>, Refusal> {
+    let found = |path: String, s: &Seen| {
+        Ok(Located {
+            role: role.to_string(),
+            size: s.size,
+            modified: s.modified.ok_or_else(|| no_time(&path))?,
+            path,
+        })
+    };
     match *find {
         Find::One(sub, ext) | Find::All(sub, ext) => {
-            let Some(sub) = child(root, sub) else {
+            let Some(sub) = ls.child(root, sub).map(|s| s.name) else {
                 return match find {
                     Find::One(..) => Err(Refusal(format!("{rel_root} has no {sub} directory"))),
                     _ => Ok(Vec::new()),
                 };
             };
-            let names = with_ext(&root.join(&sub), ext);
+            let mut names: Vec<Seen> = ls
+                .of(&root.join(&sub))
+                .iter()
+                .filter(|s| {
+                    s.file && s.name.len() > ext.len() && s.name.to_ascii_lowercase().ends_with(ext)
+                })
+                .cloned()
+                .collect();
+            names.sort_by(|a, b| a.name.cmp(&b.name));
             if matches!(find, Find::One(..)) && names.len() != 1 {
                 let found = if names.is_empty() {
                     "none".to_string()
                 } else {
-                    names.join(", ")
+                    let n: Vec<&str> = names.iter().map(|s| s.name.as_str()).collect();
+                    n.join(", ")
                 };
                 return Err(Refusal(format!(
                     "{rel_root}/{sub} must hold one {ext} file, and holds {found}"
                 )));
             }
-            Ok(names
-                .into_iter()
-                .map(|n| format!("{rel_root}/{sub}/{n}"))
-                .collect())
+            names
+                .iter()
+                .map(|s| found(format!("{rel_root}/{sub}/{}", s.name), s))
+                .collect()
         }
         Find::Named(parts) => {
             let mut at = root.to_path_buf();
             let mut rel = rel_root.to_string();
+            let mut last = None;
             for part in parts {
-                let Some(name) = child(&at, part) else {
+                let Some(s) = ls.child(&at, part) else {
                     return Ok(Vec::new());
                 };
-                at.push(&name);
-                rel = format!("{rel}/{name}");
+                at.push(&s.name);
+                rel = format!("{rel}/{}", s.name);
+                last = Some(s);
             }
-            Ok(if at.is_file() { vec![rel] } else { Vec::new() })
+            match last {
+                Some(s) if s.file => Ok(vec![found(rel, &s)?]),
+                _ => Ok(Vec::new()),
+            }
         }
     }
 }
 
-/// The manifest's entry for one file: its size, and for a container its
-/// class and version, refused unless they name the decoder its role needs.
-fn classify(
-    install: &Path,
-    role: &str,
-    rel: &str,
-    decoder: Option<Decoder>,
-) -> Result<FileEntry, Refusal> {
-    let path = install.join(rel);
-    let size = fs::metadata(&path)
-        .map_err(|e| Refusal(format!("{rel} cannot be read: {e}")))?
-        .len();
-    let Some(want) = decoder else {
-        return Ok(FileEntry {
-            role: role.to_string(),
-            path: rel.to_string(),
-            class: None,
-            version: None,
-            size,
-            payload_size: None,
-        });
+/// Each of `files` with the class and version its header states, refused
+/// unless they name the decoder its role needs. A file of a plain role,
+/// Lua source or `assets.assets`, is not opened.
+pub fn classify(install: &Path, files: &[Located]) -> Result<Vec<FileEntry>, Refusal> {
+    files.iter().map(|f| classify_one(install, f)).collect()
+}
+
+fn classify_one(install: &Path, f: &Located) -> Result<FileEntry, Refusal> {
+    let decoder = ROLES
+        .iter()
+        .find(|(r, ..)| *r == f.role)
+        .and_then(|(.., d)| *d);
+    let mut entry = FileEntry {
+        role: f.role.clone(),
+        path: f.path.clone(),
+        class: None,
+        version: None,
+        size: f.size,
+        payload_size: None,
     };
-    let header = container::read(&path)
+    if let Some(want) = decoder {
+        let h = header(install, &f.path)?;
+        let got = expect(&f.path, &f.role, &h, want)?;
+        entry.payload_size = got.has_data_base().then_some(h.data_base);
+        entry.class = Some(h.class);
+        entry.version = Some(h.version);
+    }
+    Ok(entry)
+}
+
+fn header(install: &Path, rel: &str) -> Result<container::Header, Refusal> {
+    container::read(&install.join(rel))
         .map_err(|e| Refusal(format!("{rel} cannot be read: {e}")))?
-        .map_err(|why| Refusal(format!("{rel} is not a map file: {why}")))?;
-    let got = dispatch(rel, &header)?;
+        .map_err(|why| Refusal(format!("{rel} is not a map file: {why}")))
+}
+
+/// The decoder `h` names, refused unless it is the one `role` needs.
+fn expect(rel: &str, role: &str, h: &container::Header, want: Decoder) -> Result<Decoder, Refusal> {
+    let got = dispatch(rel, h)?;
     if got != want {
         return Err(Refusal(format!(
             "{rel} is a {} version {}, where a {role} file is a {}",
-            header.class,
-            header.version,
+            h.class,
+            h.version,
             want.class()
         )));
     }
-    Ok(FileEntry {
-        role: role.to_string(),
-        path: rel.to_string(),
-        class: Some(header.class),
-        version: Some(header.version),
-        size,
-        payload_size: got.has_data_base().then_some(header.data_base),
-    })
+    Ok(got)
 }
 
 #[cfg(test)]
@@ -709,16 +872,29 @@ mod tests {
                 ("lua", format!("{m}/map/towns.lua").as_str()),
             ]
         );
-        let surface = &map.files[0];
+        let surface = &map.surface;
+        assert_eq!(surface.path, map.files[0].path);
         assert_eq!(surface.class.as_deref(), Some("landscape5::Surface5File"));
         assert_eq!(
             (surface.version, surface.payload_size),
             (Some(5), Some(4096))
         );
-        // The road network's u64 at 0x08 is not a data base.
-        assert_eq!(map.files[1].payload_size, None);
         assert_eq!(map.files[6].size, 5);
-        assert_eq!(map.files[6].class, None);
+
+        let all = classify(&r, &map.files).unwrap();
+        assert_eq!(all[0], map.surface);
+        // The road network's u64 at 0x08 is not a data base.
+        assert_eq!(all[1].class.as_deref(), Some("landscape4::lRoadNetwork"));
+        assert_eq!(all[1].payload_size, None);
+        assert_eq!((all[6].class.as_deref(), all[6].size), (None, 5));
+    }
+
+    #[test]
+    fn opening_reads_the_surface_header_and_no_other() {
+        let (_s, r) = install();
+        container::READS.set(0);
+        read_map(&r, "Synth").unwrap();
+        assert_eq!(container::READS.get(), 1);
     }
 
     #[test]
@@ -726,16 +902,73 @@ mod tests {
         let (_s, r) = install();
         put(
             &r,
-            "Mods/terrains/Synth/Scenes/Synth.scn5",
-            &head("landscape5::Scene5File", 10, 0, 0),
+            "Mods/terrains/Synth/surface/Synth.surface5",
+            &head("landscape5::Surface5File", 6, 0, 0),
         );
         let e = read_map(&r, "Synth").unwrap_err();
         assert!(
             e.0.starts_with(
-                "Mods/terrains/Synth/Scenes/Synth.scn5: landscape5::Scene5File version 10"
+                "Mods/terrains/Synth/surface/Synth.surface5: landscape5::Surface5File version 6"
             ),
             "{e}"
         );
+    }
+
+    #[test]
+    fn an_unknown_version_refuses_only_what_reads_its_role() {
+        let (_s, r) = install();
+        let rel = "Mods/terrains/Synth/AirfieldsTaxiways/A.rn5";
+        put(&r, rel, &head("t5::rn5file", 99, 0, 0));
+        let map = read_map(&r, "Synth").unwrap();
+        let roles = |want: &[&str]| -> Vec<Located> {
+            map.files
+                .iter()
+                .filter(|f| want.contains(&f.role.as_str()))
+                .cloned()
+                .collect()
+        };
+        let e = classify(&r, &roles(&["airfield_rn4", "airfield_rn5"])).unwrap_err();
+        assert!(
+            e.0.starts_with(&format!("{rel}: t5::rn5file version 99")),
+            "{e}"
+        );
+        classify(&r, &roles(&["roads", "scene"])).unwrap();
+    }
+
+    #[test]
+    fn states_a_role_from_metadata_and_sees_a_file_added_to_its_directory() {
+        let (_s, r) = install();
+        let map = read_map(&r, "Synth").unwrap();
+        container::READS.set(0);
+        let rows = |roles: &[&str]| -> Vec<(String, String)> {
+            map.stat(&r, roles)
+                .unwrap()
+                .into_iter()
+                .map(|f| (f.role, f.path.rsplit('/').next().unwrap().to_string()))
+                .collect()
+        };
+        let pairs = |p: &[(&str, &str)]| -> Vec<(String, String)> {
+            p.iter()
+                .map(|(a, b)| (a.to_string(), b.to_string()))
+                .collect()
+        };
+        assert_eq!(
+            rows(&["lua", "airfield_rn4", "surface"]),
+            pairs(&[
+                ("surface", "Synth.surface5"),
+                ("airfield_rn4", "A.rn4"),
+                ("airfield_rn4", "B.rn4"),
+                ("lua", "Beacons.lua"),
+                ("lua", "towns.lua"),
+            ])
+        );
+        put(
+            &r,
+            "Mods/terrains/Synth/AirfieldsTaxiways/C.rn4",
+            &head("landscape4::lRoadNetwork", 5, 0, 0),
+        );
+        assert_eq!(rows(&["airfield_rn4"]).len(), 3);
+        assert_eq!(container::READS.get(), 0, "a stat reads no header");
     }
 
     #[test]
@@ -746,7 +979,7 @@ mod tests {
             "Mods/terrains/Synth/roads/Synth.rn4",
             &head("t5::rn5file", 0, 0, 0),
         );
-        let e = read_map(&r, "Synth").unwrap_err();
+        let e = classify(&r, &read_map(&r, "Synth").unwrap().files).unwrap_err();
         assert!(
             e.0.contains("is a t5::rn5file version 0, where a roads file"),
             "{e}"
@@ -796,7 +1029,7 @@ mod tests {
     fn refuses_a_file_that_is_not_a_container() {
         let (_s, r) = install();
         put(&r, "Mods/terrains/Synth/Scenes/Synth.scn5", b"-- lua\n");
-        let e = read_map(&r, "Synth").unwrap_err();
+        let e = classify(&r, &read_map(&r, "Synth").unwrap().files).unwrap_err();
         assert!(e.0.contains("Synth.scn5 is not a map file"), "{e}");
     }
 
@@ -893,12 +1126,26 @@ mod tests {
                 ("scene", Some(10), false)
             ]
         );
-        let why = germany.refusal.unwrap();
-        assert!(why.contains("Scene5File version 10"), "{why}");
+        // Opening reads the surface alone, so the scene file refuses only
+        // what reads scenery.
+        assert_eq!(germany.refusal, None);
+        container::READS.set(0);
         let synth = survey(&r, &listed[1]);
+        assert_eq!(container::READS.get(), 6, "each header is read once");
         assert_eq!(synth.refusal, None);
         assert!(synth.files.iter().all(|f| f.readable));
         assert_eq!(synth.files.len(), 9);
+
+        put(
+            &r,
+            "Mods/terrains/GermanyColdWar/Surface/GermanyCW.surface5",
+            &head("landscape5::Surface5File", 6, 0, 0),
+        );
+        let germany = survey(&r, &listed[0]);
+        assert!(!germany.files[0].readable);
+        let why = germany.refusal.unwrap();
+        assert!(why.contains("Surface5File version 6"), "{why}");
+        assert_eq!(Some(why), read_map(&r, "GermanyColdWar").err().map(|e| e.0));
     }
 
     #[test]

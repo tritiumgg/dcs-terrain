@@ -255,7 +255,9 @@ fn lists_both_terrains_with_their_folders_and_an_unreadable_file() {
     assert_eq!(rows[0][..2], ["Caucasus", "Caucasus"], "{text}");
     assert_eq!(rows[0][2..], ["none", "3", "of", "3", "readable"], "{text}");
     assert_eq!(rows[1][..2], ["GermanyCW", "GermanyColdWar"], "{text}");
-    assert!(text.contains("2 of 3 readable, cannot open"), "{text}");
+    // A scene file no decoder reads refuses scenery, not the terrain.
+    assert_eq!(rows[1][3..], ["2", "of", "3", "readable"], "{text}");
+    assert!(!text.contains("cannot open"), "{text}");
     assert!(
         text.contains(
             "unreadable: Mods/terrains/GermanyColdWar/Scenes/GermanyColdWar.scn5 \
@@ -285,18 +287,30 @@ fn lists_both_terrains_with_their_folders_and_an_unreadable_file() {
         [("Caucasus", "Caucasus"), ("GermanyCW", "GermanyColdWar")]
     );
     assert_eq!(terrains[0]["readable"], true);
-    assert_eq!(terrains[1]["readable"], false);
+    assert_eq!(terrains[1]["readable"], true);
+    assert_eq!(terrains[1]["refusal"], Value::Null);
     let scene = &terrains[1]["files"][2];
     assert_eq!(
         (&scene["role"], &scene["version"], &scene["readable"]),
         (&"scene".into(), &10.into(), &false.into())
     );
+
+    let out = run(&[
+        "query",
+        "--install",
+        root,
+        "--terrain",
+        "GermanyCW",
+        "--cache",
+        cache,
+        "describe",
+    ]);
     assert!(
-        terrains[1]["refusal"]
-            .as_str()
-            .unwrap()
-            .contains("version 10")
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
     );
+    assert_eq!(stdout_json(&out)["terrain"], "GermanyCW");
 }
 
 #[test]

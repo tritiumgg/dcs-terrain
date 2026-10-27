@@ -45,7 +45,8 @@ fn maps(root: &Path) -> Vec<String> {
 
 fn decode(root: &Path, dir: &str) -> Airfields {
     let map = install::read_map(root, dir).unwrap_or_else(|e| panic!("{dir}: {e}"));
-    airfield::decode(root, &map.files).unwrap_or_else(|e| panic!("{dir}: {e}"))
+    airfield::decode(root, &install::classify(root, &map.files).unwrap())
+        .unwrap_or_else(|e| panic!("{dir}: {e}"))
 }
 
 fn table(dir: &Path, name: &str) -> Vec<Value> {

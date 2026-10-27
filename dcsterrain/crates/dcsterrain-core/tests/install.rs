@@ -71,7 +71,8 @@ fn every_map_reads_with_a_decoder_for_each_file() {
                 .unwrap_or_else(|| panic!("{dir} declares no id"));
         let map = install::open(&root, id).unwrap_or_else(|e| panic!("{dir}: {e}"));
         assert_eq!(&map.dir, dir);
-        let scene = map.files.iter().find(|f| f.role == "scene").unwrap();
+        let files = install::classify(&root, &map.files).unwrap_or_else(|e| panic!("{dir}: {e}"));
+        let scene = files.iter().find(|f| f.role == "scene").unwrap();
         eprintln!(
             "{dir}: theatre {}, {} files, scene version {}",
             map.theatre,

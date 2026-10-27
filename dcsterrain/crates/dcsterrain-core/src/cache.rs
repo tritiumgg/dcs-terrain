@@ -14,10 +14,9 @@ use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::UNIX_EPOCH;
 
-use crate::decode::container;
-use crate::decode::install::Map;
+use crate::decode::install::{self, Located, Map};
+use crate::extract::FileEntry;
 use crate::source::Refusal;
 
 /// The live validation sortie writes this; nothing can rebuild it, so
@@ -44,7 +43,9 @@ pub trait Entry: Sync {
     /// The roles of the install files it is derived from, as the terrain's
     /// files name them; its key covers these files only.
     fn roles(&self) -> &[&str];
-    fn build(&self, install: &Path, map: &Map) -> Result<Vec<u8>, Refusal>;
+    /// Builds the payload from `files`, the install files of its roles with
+    /// the class and version each header states, read for this build.
+    fn build(&self, install: &Path, map: &Map, files: &[FileEntry]) -> Result<Vec<u8>, Refusal>;
 }
 
 /// Every kind of entry `index` builds.
@@ -505,71 +506,84 @@ impl TerrainCache {
         &self.dir
     }
 
-    /// The key an entry built now would carry: the build, then for each
-    /// install file of the entry's roles its path, size, payload size,
-    /// modification time, class and version, each read from the disk now.
-    pub fn key(&self, entry: &dyn Entry) -> Result<String, Refusal> {
+    /// The part of a key a check compares: the build, then for each install
+    /// file of the entry's roles its path, size and modification time, from
+    /// a stat or a listing. Opens no install file, so checking an entry over
+    /// 450 airfield files costs one listing (ADR 0001).
+    fn checked(&self, entry: &dyn Entry) -> Result<(Vec<Located>, String), Refusal> {
+        let files = self.map.stat(&self.install, entry.roles())?;
         let b = &self.map.build;
         let mut key = format!("build {} {}\n", b.version, b.timestamp);
-        for f in self
-            .map
-            .files
-            .iter()
-            .filter(|f| entry.roles().contains(&f.role.as_str()))
-        {
-            let path = self.install.join(&f.path);
-            let meta = fs::metadata(&path).map_err(|e| cannot("read", &path, e))?;
-            let modified = meta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .ok_or_else(|| Refusal(format!("{} has no modification time", path.display())))?
-                .as_nanos();
-            let (class, version, payload) = match f.class {
-                None => ("-".to_string(), "-".to_string(), "-".to_string()),
-                Some(_) => {
-                    let h = container::read(&path)
-                        .map_err(|e| cannot("read", &path, e))?
-                        .map_err(|why| Refusal(format!("{}: {why}", f.path)))?;
-                    let payload = f
-                        .payload_size
-                        .map_or("-".to_string(), |_| h.data_base.to_string());
-                    (h.class, h.version.to_string(), payload)
-                }
-            };
+        for f in &files {
+            key.push_str(&format!("{}\t{}\t{}\n", f.path, f.size, f.modified));
+        }
+        Ok((files, key))
+    }
+
+    /// The key an entry built from `files` carries: each file's line of the
+    /// checked part followed by its class, version and payload size, read
+    /// from its header now. A header that changes while the file's size and
+    /// time do not is not seen until the build changes.
+    fn built_key(&self, files: &[Located]) -> Result<(Vec<FileEntry>, String), Refusal> {
+        let classified = install::classify(&self.install, files)?;
+        let b = &self.map.build;
+        let mut key = format!("build {} {}\n", b.version, b.timestamp);
+        let dash = || "-".to_string();
+        for (f, c) in files.iter().zip(&classified) {
             key.push_str(&format!(
-                "{}\t{}\t{payload}\t{modified}\t{class}\t{version}\n",
+                "{}\t{}\t{}\t{}\t{}\t{}\n",
                 f.path,
-                meta.len()
+                f.size,
+                f.modified,
+                c.class.clone().unwrap_or_else(dash),
+                c.version.map_or_else(dash, |v| v.to_string()),
+                c.payload_size.map_or_else(dash, |p| p.to_string()),
             ));
         }
-        Ok(key)
+        Ok((classified, key))
+    }
+
+    /// The key an entry built now would carry: the build, then for each
+    /// install file of the entry's roles its path, size, modification time,
+    /// class, version and payload size. Reads each file's header.
+    pub fn key(&self, entry: &dyn Entry) -> Result<String, Refusal> {
+        let (files, _) = self.checked(entry)?;
+        Ok(self.built_key(&files)?.1)
+    }
+
+    /// Whether `key`, carried by an entry built earlier, is current for
+    /// `entry`, from metadata alone.
+    pub fn matches(&self, entry: &dyn Entry, key: &str) -> Result<bool, Refusal> {
+        Ok(checked_part(key) == self.checked(entry)?.1)
     }
 
     pub fn state(&self, entry: &dyn Entry) -> Result<State, Refusal> {
-        let key = self.key(entry)?;
+        let (_, checked) = self.checked(entry)?;
         Ok(match read_head(&self.dir.join(entry.name())) {
-            Ok(head) => judge(&head, entry.version(), &key),
+            Ok(head) => judge(&head, entry.version(), &checked),
             Err(e) if e.kind() == io::ErrorKind::NotFound => State::Missing,
             Err(e) => State::Stale(format!("its header cannot be read: {e}")),
         })
     }
 
-    /// The entry, built first if it is missing or stale.
+    /// The entry, built first if it is missing or stale. Only a build reads
+    /// the headers of the files it derives from, so a file no decoder reads
+    /// refuses the entries of its role and no other.
     pub fn get(&self, entry: &dyn Entry) -> Result<Opened, Refusal> {
         let path = self.dir.join(entry.name());
-        let key = self.key(entry)?;
+        let (files, checked) = self.checked(entry)?;
         if let Ok(head) = read_head(&path)
-            && judge(&head, entry.version(), &key) == State::Current
+            && judge(&head, entry.version(), &checked) == State::Current
         {
             return Ok(head.opened(path, false));
         }
         // Refused before the build, which can take minutes, not after it.
         self.make_dir()?;
-        let payload = entry.build(&self.install, &self.map)?;
+        let (classified, key) = self.built_key(&files)?;
+        let payload = entry.build(&self.install, &self.map, &classified)?;
         let bytes = encode(entry.version(), &key, &payload);
         self.write(entry.name(), &bytes, |dest| {
-            read_head(dest).is_ok_and(|h| judge(&h, entry.version(), &key) == State::Current)
+            read_head(dest).is_ok_and(|h| judge(&h, entry.version(), &checked) == State::Current)
         })?;
         let head = read_head(&path).map_err(|e| cannot("read", &path, e))?;
         Ok(head.opened(path, true))
@@ -737,12 +751,29 @@ fn read_head(path: &Path) -> io::Result<Head> {
     })
 }
 
-fn judge(head: &Head, version: u32, key: &str) -> State {
+/// What a check compares of a stored key: each file's line without the
+/// fields its header gave when the entry was built.
+fn checked_part(key: &str) -> String {
+    let mut out = String::new();
+    for line in key.lines() {
+        let cut = line
+            .match_indices('\t')
+            .nth(2)
+            .map_or(line.len(), |(i, _)| i);
+        out.push_str(&line[..cut]);
+        out.push('\n');
+    }
+    out
+}
+
+/// Whether an entry is current, given the checked part of the key an
+/// entry built now would carry.
+fn judge(head: &Head, version: u32, checked: &str) -> State {
     if head.version != version {
         State::Stale(format!("its version is {}, not {version}", head.version))
     } else if head.offset.checked_add(head.len) != Some(head.file_len) {
         State::Stale("its length does not match its header".into())
-    } else if head.key != key {
+    } else if checked_part(&head.key) != checked {
         State::Stale("an install file or the build changed".into())
     } else {
         State::Current
@@ -752,7 +783,7 @@ fn judge(head: &Head, version: u32, key: &str) -> State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::decode::install;
+    use crate::decode::container;
     use crate::scratch::Scratch;
     use std::sync::atomic::AtomicUsize;
     use std::time::{Duration, SystemTime};
@@ -789,7 +820,7 @@ mod tests {
         fn roles(&self) -> &[&str] {
             self.roles
         }
-        fn build(&self, _: &Path, map: &Map) -> Result<Vec<u8>, Refusal> {
+        fn build(&self, _: &Path, map: &Map, _: &[FileEntry]) -> Result<Vec<u8>, Refusal> {
             self.builds.fetch_add(1, Ordering::SeqCst);
             Ok(format!("{} of {}", self.name, map.theatre).into_bytes())
         }
@@ -890,7 +921,9 @@ mod tests {
         f.touch(SURFACE, 1_000_000);
         assert_eq!(both(&t), (2, 1));
 
-        // The payload size alone, the file's size and time unchanged.
+        // The payload size alone, the file's size and time unchanged, is
+        // not seen: a check reads no header. The build change below
+        // rebuilds it.
         let mut moved = container::build("landscape5::Surface5File", 5, 101);
         moved.push(0);
         put(&f.install.0, SURFACE, &moved);
@@ -899,7 +932,14 @@ mod tests {
             fs::metadata(f.install.0.join(SURFACE)).unwrap().len(),
             grown.len() as u64
         );
+        assert_eq!(both(&t), (2, 1));
+        f.touch(SURFACE, 1_000_001);
         assert_eq!(both(&t), (3, 1));
+        assert!(
+            t.key(&mesh)
+                .unwrap()
+                .contains("\tlandscape5::Surface5File\t5\t101\n")
+        );
 
         // The time alone.
         f.touch(ROADS, 2_000_000);
@@ -922,6 +962,81 @@ mod tests {
         build_file(&f.install.0, "20000202-000000");
         let t = f.terrain();
         assert_eq!(both(&t), (5, 3));
+    }
+
+    const TAXIWAYS: &str = "Mods/terrains/Caucasus/AirfieldsTaxiways";
+
+    /// Adds `n` airfields, each an `.rn4` and an `.rn5`.
+    fn add_airfields(root: &Path, n: usize) {
+        for i in 0..n {
+            put(
+                root,
+                &format!("{TAXIWAYS}/F{i}.rn4"),
+                &container::build("landscape4::lRoadNetwork", 5, 0),
+            );
+            put(
+                root,
+                &format!("{TAXIWAYS}/F{i}.rn5"),
+                &container::build("t5::rn5file", 0, 0),
+            );
+        }
+    }
+
+    #[test]
+    fn a_check_reads_no_header_and_a_build_reads_each_once() {
+        let f = Fixture::new();
+        add_airfields(&f.install.0, 20);
+        let fields = Counted::new("tables.bin", &["airfield_rn4", "airfield_rn5"]);
+        container::READS.set(0);
+        let t = f.terrain();
+        assert_eq!(container::READS.get(), 1, "opening reads the surface alone");
+
+        container::READS.set(0);
+        assert!(t.get(&fields).unwrap().built);
+        assert_eq!(container::READS.get(), 40);
+        let key = t.key(&fields).unwrap();
+        assert!(key.contains("/F7.rn5\t"), "{key}");
+        assert!(key.contains("\tt5::rn5file\t0\t-\n"), "{key}");
+
+        container::READS.set(0);
+        assert!(!t.get(&fields).unwrap().built);
+        assert_eq!(t.state(&fields).unwrap(), State::Current);
+        assert!(t.matches(&fields, &key).unwrap());
+        assert_eq!(container::READS.get(), 0);
+    }
+
+    #[test]
+    fn a_file_added_to_a_role_directory_rebuilds_only_its_entries() {
+        let f = Fixture::new();
+        add_airfields(&f.install.0, 2);
+        let mesh = Counted::new("mesh.toc", &["surface"]);
+        let fields = Counted::new("tables.bin", &["airfield_rn4", "airfield_rn5"]);
+        let t = f.terrain();
+        t.get(&mesh).unwrap();
+        t.get(&fields).unwrap();
+        add_airfields(&f.install.0, 3);
+        assert!(matches!(t.state(&fields).unwrap(), State::Stale(_)));
+        assert!(!t.get(&mesh).unwrap().built);
+        assert!(t.get(&fields).unwrap().built);
+        assert_eq!((mesh.builds(), fields.builds()), (1, 2));
+    }
+
+    #[test]
+    fn an_unknown_taxiway_refuses_its_entries_and_no_other() {
+        let f = Fixture::new();
+        add_airfields(&f.install.0, 2);
+        let bad = format!("{TAXIWAYS}/F1.rn5");
+        put(&f.install.0, &bad, &container::build("t5::rn5file", 99, 0));
+        let mesh = Counted::new("mesh.toc", &["surface"]);
+        let fields = Counted::new("tables.bin", &["airfield_rn4", "airfield_rn5"]);
+        let t = f.terrain();
+        let e = t.get(&fields).unwrap_err();
+        assert!(
+            e.0.starts_with(&format!("{bad}: t5::rn5file version 99")),
+            "{e}"
+        );
+        assert_eq!(fields.builds(), 0);
+        assert!(t.get(&mesh).unwrap().built);
     }
 
     #[test]
