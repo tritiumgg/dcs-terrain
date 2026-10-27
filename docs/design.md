@@ -134,10 +134,11 @@ A failed check refuses the terrain the same way.
 - **Coverage.** A point is `nodata` only where no finest-mesh triangle covers
   it. Flat land at 5 m is land at 5 m; no fill value is tested. The sea is
   covered by sea triangles, so a sightline across a bay finds no holes.
-- **Regional operations** read 64-cell tiles at 50 m holding height, water and
-  cover, rasterized on first use from the triangles under them with the same
-  precedence, at each cell's center, and kept in a tile LRU. Height is
-  `floor(h + 0.5)` of the f32 interpolated height. There is no coarser base.
+- **Regional operations** read 64-cell tiles at 50 m holding height, water,
+  surface and cover, rasterized on first use from the triangles under them
+  with the same precedence, at each cell's center, and kept in a tile LRU.
+  Height is `floor(h + 0.5)` of the f32 interpolated height. There is no
+  coarser base.
 - **Positional reads.** The engine reads only the block arrays a query touches,
   prepares each block (vertices to world coordinates, triangles binned) into a
   small LRU, and never memory-maps a whole terrain file: on Windows that costs

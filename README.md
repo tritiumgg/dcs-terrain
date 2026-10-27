@@ -15,15 +15,16 @@ place and never writes to it. It keeps a small, rebuildable cache beside it in
 your user cache directory.
 
 > **Not usable yet.** The project was redesigned to read the install directly,
-> and the query engine is being built. Apart from `dcsterrain schema`, the
-> commands below are the planned interface, kept here so the shape is visible. Progress is in
-> [docs/STATE.md](docs/STATE.md).
+> and the query engine is being built. `list-terrains`, `schema` and
+> `query ... describe` work today; every other operation is planned, kept
+> here so the shape is visible. Progress is in [docs/STATE.md](docs/STATE.md).
 
 ## Requirements
 
 A DCS World install on the same machine, which does not have to be running.
-On Windows the tool will find it from the registry (planned). On macOS or
-Linux it needs a copy of the terrain's files and `--install <dir>`. No GPU.
+On Windows the tool finds it from the registry; `--install <dir>` names
+another. On macOS or Linux it needs a copy of the terrain's files and
+`--install <dir>`. No GPU.
 
 Building needs [mise](https://mise.jdx.dev), which installs the Rust pinned in
 `rust-toolchain.toml`. The optional hook's tests also need Lua 5.1; on Windows,
@@ -46,31 +47,27 @@ The binary lands at `dcsterrain/target/release/dcsterrain`.
 
 ## Use it
 
-List the terrains your install holds, with the id each one takes (planned):
+List the terrains your install holds, with the id each one takes and whether
+the tool reads each of its files (`--json` for a document):
 
 ```bash
 dcsterrain list-terrains
 ```
 
-Ask a question about a terrain by its id (planned, not usable yet):
+Describe a terrain by its id: its build, its files and their versions
+(`--terrain synth` needs no install):
 
 ```bash
-dcsterrain query --terrain Caucasus find_sites '{"...": "..."}'
+dcsterrain query --terrain Caucasus describe
 ```
 
-The first question on a terrain builds its cache in seconds; later ones start
-warm. Many questions can go in one call as JSON lines on stdin. To try it with
-no install, use the synthetic terrain: `--terrain synth` (planned).
-
-```bash
-dcsterrain check --terrain Caucasus
-```
-
-`check` reports what the tool can read from a terrain and the state of its
-cache (planned).
-
-`dcsterrain schema` works today: it prints every operation's request and
-response as JSON Schema.
+Ask a siting question the same way, `find_sites` with its JSON (planned, not
+usable yet). The first question on a terrain will build its cache in seconds,
+later ones start warm, and many can go in one call as JSON lines on stdin
+(planned).
+`dcsterrain check --terrain Caucasus` will report what the tool can read and
+the cache's state (planned). `dcsterrain schema` prints every operation's
+request and response as JSON Schema.
 
 ## Documentation
 
