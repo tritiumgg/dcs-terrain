@@ -202,11 +202,15 @@ the install, never in the repository.
 ### 4.2 How
 
 - Every entry but the two JSON files is a raw little-endian file starting with
-  a header: magic, entry format version, and its source file's key. It is
-  memory-mapped read-only; mapping a 200 MiB entry costs about 0.4 MiB of
-  commit.
+  a header: an 8-byte magic, the entry's u32 format version, its key as
+  length-prefixed text, and the u64 length of the payload that follows. The key
+  covers only the install files of the roles the entry reads (§5), so a
+  changed road file leaves `mesh.toc` alone. It is memory-mapped read-only;
+  mapping a 200 MiB entry costs about 0.4 MiB of commit.
 - An entry is written under a temporary name and renamed into place, so two
-  processes building it at once leave one valid copy.
+  processes building it at once leave one valid copy. A rename that fails, as
+  Windows fails one over a file another process holds, still succeeds when the
+  file already there carries the same key.
 - A missing entry, or one whose key or format version does not match, is
   rebuilt before the operation that needs it, and only that entry: `describe`
   needs `mesh.toc` and `tables.json` and reports the other entries' counts as
@@ -225,7 +229,11 @@ the install, never in the repository.
 - `dcsterrain index` builds a terrain's entries ahead of time; it is optional.
   `dcsterrain cache list`, `prune` and `clear` manage the directory. `prune`
   removes builds other than the installed one; `clear` asks before deleting
-  `validation.json`. Nothing is deleted without a command.
+  `validation.json`, and `--yes` deletes it without asking. Nothing is deleted
+  without a command, and neither deletes under a directory with no
+  `CACHEDIR.TAG`, which the cache writes at its root, so a mistyped `--cache`
+  cannot empty somebody's folder. `list-terrains`, `index` and `cache` take
+  `--cache`; `query` will once an operation reads an entry.
 
 ### 4.3 The hook's tables
 
