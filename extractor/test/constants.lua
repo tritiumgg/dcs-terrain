@@ -41,7 +41,7 @@ T.eq("height is meters", E.layers().height.unit, "m")
 T.eq("water is a class", E.layers().water.unit, "class")
 T.eq("surface is an enum", E.layers().surface.unit, "enum")
 
--- Which pass writes a layer is what tells pack whether an absent tile means
+-- Which pass writes a layer is what tells a reader whether an absent tile means
 -- omitted or not yet swept.
 T.eq("height is a hook layer", E.layers().height.pass, "hook")
 T.eq("water is a hook layer", E.layers().water.pass, "hook")

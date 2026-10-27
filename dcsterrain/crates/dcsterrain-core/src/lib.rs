@@ -7,10 +7,9 @@ pub mod crs;
 pub mod decode;
 pub mod extract;
 pub mod grid;
-// Constants only for now; the generator lands beside them. Tests always see
-// the module, and a consumer that wants `dcsterrain synth` in a release build
-// asks for the feature.
-#[cfg(any(test, feature = "synth"))]
+// Tests only, for now: the in-memory synthetic terrain that queries will
+// answer from does not exist yet, and its extract writer builds test fixtures.
+#[cfg(test)]
 pub mod synth;
 pub mod types;
 

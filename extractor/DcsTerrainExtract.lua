@@ -1709,7 +1709,7 @@ end
 -- the format stays parametric and a reader is told what the extract was built
 -- with; what none of them is any more is a question put to the user.
 --
--- The extract is always 50 m, because a coarser base is pack's choice and the
+-- The extract is always 50 m, because a coarser grid is the reader's choice and the
 -- DCS sweep is deliberately not multi-resolution. tile_size is internal
 -- chunking, 128 KB a tile. Omitting an all-sea tile is lossless, because water
 -- 2 is sea and a lake at altitude is 1: an omitted tile reads back as height 0
@@ -5162,7 +5162,7 @@ M.add_job("hook", M.water_height_job)
 -- scatters seeds, a lattice every kilometer plus every airdrome and town,
 -- snaps each to its nearest road, and asks for a route from each snap to its
 -- four nearest other snaps. The file records what the router said, one line
--- per answer; joining the routes into a graph is pack's job.
+-- per answer; joining the routes into a graph is left to the reader.
 --
 -- Seeds are numbered by their position in a fixed plan, lattice row-major
 -- then airdromes by id then towns by name, so a resumed run gives every seed

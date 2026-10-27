@@ -1,8 +1,8 @@
 //! The operation list and the JSON schema of its types.
 //!
 //! The list is the one place an operation is named. The CLI's `schema`
-//! prints from it, and the MCP tools are registered from it, so an operation
-//! added here appears on every surface at once.
+//! prints from it and `query` will dispatch on it, so an operation added
+//! here appears on both at once.
 
 use std::fmt;
 

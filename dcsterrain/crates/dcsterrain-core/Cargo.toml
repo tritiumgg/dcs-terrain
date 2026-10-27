@@ -8,9 +8,6 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-[features]
-synth = []
-
 [dependencies]
 mlua = { version = "0.12.2", features = ["lua51", "vendored"] }
 schemars = "1.2.3"

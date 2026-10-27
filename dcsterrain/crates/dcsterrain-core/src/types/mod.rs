@@ -1,9 +1,9 @@
 //! The request and response types every surface shares.
 //!
-//! An operation is one function in core, one `dcsterrain query` subcommand and
-//! one MCP tool, and all three take and return these structs. Keeping them in
-//! one place is what stops the three schemas drifting apart; `schema` prints
-//! them, and a snapshot test makes any change to them a deliberate diff.
+//! An operation is one function in core and one `dcsterrain query` request (planned),
+//! and both take and return these structs. Keeping them in one place is what
+//! stops the schemas drifting apart; `schema` prints them, and a snapshot
+//! test makes any change to them a deliberate diff.
 //!
 //! Lengths are metres and angles degrees. Radians never cross this boundary.
 //! Positions are DCS `x` (north) and `z` (east).
