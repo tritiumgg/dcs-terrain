@@ -37,7 +37,7 @@ The repository ships tools only. Users run them against their own install.
 
 ```
 DCS install (read-only)                 cache/<terrain>/<build>/   (rebuildable)
-  .surface5 ─┐                            mesh.toc        block offsets (0.15–8.2 MB)
+  .surface5 ─┐                            mesh.toc        block offsets (0.05–1.5 MB)
   .scn5   ───┤                            scene.nodes     pool-tree offsets (2.5–22 MiB)
   .rn4    ───┤   decoders                 tables.json     airdromes, runways, stands, beacons,
   airfield ──┤ ─────────────────────▶                     radio, towns, nodes, CRS, classes
@@ -147,7 +147,8 @@ A failed check refuses the terrain the same way.
   Height is `floor(h + 0.5)` of the f32 interpolated height. There is no
   coarser base.
 - **Positional reads.** The engine reads only the block arrays a query touches,
-  prepares each block (vertices to world coordinates, triangles binned) into a
+  prepares each block (vertices to world coordinates, its triangles and its
+  runway triangles binned, so a point over an airfield tests a few) into a
   small LRU, and never memory-maps a whole terrain file: on Windows that costs
   about 2 MiB of commit per GiB mapped (123 MiB for Germany's `.surface5`).
 
@@ -200,7 +201,7 @@ derived from.
 
 | Entry | Why it cannot be per query | Size | Build |
 |---|---|---|---|
-| `mesh.toc` | The `.surface5` table of contents can only be pattern-scanned: 21 ms (MarianasWWII) to 0.7 s (GermanyCW) per open | 0.15–8.2 MB, every block's arrays and material subsets | < 1 s |
+| `mesh.toc` | The `.surface5` table of contents can only be pattern-scanned: 21 ms (MarianasWWII) to 0.7 s (GermanyCW) per open | 0.05–1.5 MB, every block's arrays and its runway subsets, the one material read | < 1 s |
 | `scene.nodes` | Parsing the `.scn5` head costs 2 s and 559 MiB on Germany | 2.5–22 MiB | < 2 s |
 | `tables.json` | Airfields, stands, Lua tables, the fitted projection, scenery classes and any imported hook tables each cost a full decode; together they are small | < 1 MiB | < 2 s |
 | `roads.graph` | The `.rn4` has no spatial order: 5.5 s and 3.3 GB to scan on Germany. Betweenness is global | 9.3 MiB (Caucasus) to 200 MiB (Germany) | 7 ms–5 s; betweenness 1 s (Caucasus) to ~250 s CPU (Germany) |
@@ -411,8 +412,8 @@ correctness rule: a miss is a decision about the target.
 
 | Operation | Measured | Target |
 |---|---|---|
-| open / `describe` | open 3.5 / 14.8 / 8.9 ms (Caucasus / GermanyCW / Afghanistan) and 9.8 ms on Syria from the cache, OS cache warm, on 2.9.30.28738; on GermanyCW finding the files and reading the surface header take 2 ms, and reading and decoding `mesh.toc` 11 ms | 20 ms |
-| `sample` 10 k lattice | 10–12 ms | 100 ms |
+| open / `describe` | open 2.6 / 4.2 / 5.4 ms (Caucasus / GermanyCW / Afghanistan) and 4.9 ms on Syria from the cache, OS cache warm, on 2.9.30.28738; on GermanyCW finding the files and reading the surface header take 2 ms, and reading and decoding `mesh.toc` 1 ms | 20 ms |
+| `sample` 10 k lattice | 10–12 ms; over the block with the most runway triangles, OS cache warm, blocks held: 4.3 / 13.0 / 11.9 ms (Caucasus / GermanyCW / Afghanistan) against 2.8 / 5.1 / 3.0 ms over a block of like size with no runway, the gap the airfield's denser ground, its runway test 0.2–1.1 ms | 100 ms |
 | `sample` 10 k scattered over a whole terrain | 8.5 / 25.9 / 2.7 s at the 32 MiB block budget, 0.7 / 13.5 / 1.2 s sorted by tile Z-order, 0.7 / 2.9 / 1.3 s with each block prepared once (Caucasus / GermanyCW / Afghanistan) | 3 s on GermanyCW, answered block by block: each block prepared once and the results merged by rank |
 | `visible` 10–40 km | 5.4–12 ms cold, 0.01–0.05 ms warm | 1 ms within a batch, 20 ms cold |
 | one `query` call end to end, OS cache warm | not measured | 50 ms for `describe`, `sample`, `visible` |
