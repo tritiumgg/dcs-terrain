@@ -23,14 +23,14 @@ struct Footprint { width: f64, depth: f64, orientations_deg: Vec<f64> }   // def
 - Every `Region` becomes its bounding `Box` plus a membership test before any
   grid work; cells outside the test are skipped.
 - Lengths are meters and angles degrees in every request and response.
-- Every response carries `theatre`, `dcs_build`, `terrain_fingerprint`,
+- Every response carries `terrain`, `dcs_build`, `terrain_fingerprint`,
   `cell_size` and `elapsed_ms` (`design.md` §5).
 - Errors are a list of `{code, message, path}` issues. An operation returns a
   full result or an error, never a partial one.
 - **GeoJSON.** Every operation that returns geometry takes `geojson: true` and
   then also returns a `geojson` field: an RFC 7946 `FeatureCollection` that any
   map program opens. Coordinates are longitude and latitude (WGS84) through the
-  map's fitted projection, with area outlines simplified to half a cell. §1.1
+  terrain's fitted projection, with area outlines simplified to half a cell. §1.1
   lists what each operation's features are.
 - Point answers (`sample` at points, observer and target heights, `alt_agl`
   conversions) use point mode, the mesh triangle's own height. Regional answers
@@ -82,7 +82,7 @@ itself.
 
 ### `describe`
 
-Request: none. Response: the map id, build, fingerprint, extent, each terrain
+Request: none. Response: the terrain id, build, fingerprint, extent, each terrain
 file's class, version and decoder, the cache state of every entry, counts of
 airdromes, runways, stands, beacons, towns, nodes, road edges and scenery
 objects, and the validation figures if any.
@@ -100,7 +100,7 @@ sorted by mesh block and returned in request order.
 ### `geo`
 
 Request: `to_latlon: Vec<Point>` and/or `to_xz: Vec<{lat, lon}>`. Response:
-the converted lists in order, through the map's fitted projection, plus MGRS
+the converted lists in order, through the terrain's fitted projection, plus MGRS
 for `to_latlon`.
 
 ### `score_site`
@@ -291,7 +291,7 @@ over every cell and object the shape touches:
 - **Overlap:** the shape against each building, wall and wire box, each
   instance tree's radius, and each runway and taxiway, by exact intersection;
   `effect` objects never count.
-- **Removed objects:** the shape inside an area where the map removes
+- **Removed objects:** the shape inside an area where the terrain removes
   scenery.
 
 Procedural forest is not a collision; a placement in forest is reported from
@@ -308,7 +308,7 @@ does not hold an AGL between waypoints without terrain following.
 
 ### `towns`
 
-Request: `region` or none for the whole map, filters on size class, form and
+Request: `region` or none for the whole terrain, filters on size class, form and
 minimum building count, `sort` (building count, floor area, apartment share),
 `limit`, `outlines: bool`. Response: places (`design.md` §6.3) with id, name
 and other names, center, box, size class, form, building count, residential

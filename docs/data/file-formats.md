@@ -1,7 +1,7 @@
 # DCS terrain file formats
 
 This document describes the DCS World terrain files that carry heights, water, roads, airfields and scenery.
-It also covers the plain Lua files and the map projection, as far as decoding has reached.
+It also covers the plain Lua files and the terrain projection, as far as decoding has reached.
 All of it was measured on DCS build 2.9.30.28738. Caucasus was checked against a live extract of the same terrain
 files; Nevada and Syria were checked by cross-checks between decoders, since they have no live ground truth.
 **Every binary value is little-endian.** None of these files is compressed or encrypted.
@@ -14,13 +14,13 @@ Coordinates are DCS world meters: x is north, z is east, y is up.
 
 | file | class name | version field | Caucasus | Nevada | Syria |
 |---|---|---|---|---|---|
-| `Surface/<map>.surface5` | `landscape5::Surface5File` | u32 after class = 5 | 5 | 5 | 5 |
-| `roads/<map>.rn4` | `landscape4::lRoadNetwork` | u32 after class = 5 | 5 | 5 | 5 |
+| `Surface/<terrain>.surface5` | `landscape5::Surface5File` | u32 after class = 5 | 5 | 5 | 5 |
+| `roads/<terrain>.rn4` | `landscape4::lRoadNetwork` | u32 after class = 5 | 5 | 5 | 5 |
 | `AirfieldsTaxiways/<name>.rn4` | `landscape4::lRoadNetwork` | u32 after class = 5 | 5 | 5 | 5 |
 | `AirfieldsTaxiways/<name>.rn5` | `t5::rn5file` | u32 after class = 0 | 0 | 0 | 0 |
-| `Scenes/<map>.scn5` | `landscape5::Scene5File` | u32 after class | **9** | **8** | **9** |
+| `Scenes/<terrain>.scn5` | `landscape5::Scene5File` | u32 after class | **9** | **8** | **9** |
 
-Folder names vary in case (Syria uses `surface/`, `map/`), so match directory and extension names
+Folder names vary in case (Syria uses `surface/`, `terrain/`), so match directory and extension names
 case-insensitively. Where a folder holds several files with the extension, take the largest; exclude
 `*.onlay.sup4` when looking for other `.sup4` files.
 
@@ -78,7 +78,7 @@ A decoder does not need to walk the framing. It finds the parts by pattern over 
    that this pattern skips; it is not needed.
 3. Each descriptor belongs to the nearest matrix before it. A block is a matrix with a `Pbase` field.
 4. **Finest mesh** = the blocks whose first descriptor is `TRITYPE`. They are the first N blocks, and the count
-   matches the header's N on all three maps.
+   matches the header's N on all three terrains.
 
 Fields of a finest block, in file order:
 
@@ -110,7 +110,7 @@ A subset with no `baseIndex` before it is a decal over a vertex list of its own,
 Afghanistan, `RunwayOnlay5.1/Runway` subsets carry their own `parametricUVW` arrays (local coordinates in
 meters) and index those. A decoder skips them.
 
-Every finest-block vertex lies inside its block's stated box, on all eight maps installed on 2.9.30.28738.
+Every finest-block vertex lies inside its block's stated box, on all eight terrains installed on 2.9.30.28738.
 
 The material follows each `TRI` descriptor, within 160 bytes of its name. The observed framing is
 `u32 (0 or 3), u32 2, str shader, str material, u32 k, k × {str key, u32 0, u32 1, str value}, i32 -1`, then
@@ -122,7 +122,7 @@ material. Pairs seen include `Surface5.0/Land` (the full mesh), `Road5.1/Beach`,
 
 - **World vertex:** `x = Tx + P.x`, `z = Tz + P.z`, and `h = Ty + P.y + depth`. The result is the water surface
   over water and the ground elsewhere. Sea vertices sit at `P.y = -38.6` with `depth = 38.6`.
-- **Coverage:** a block covers `[Tx + bbox.minx, Tx + bbox.maxx] × [Tz + bbox.minz, Tz + bbox.maxz]`. The map
+- **Coverage:** a block covers `[Tx + bbox.minx, Tx + bbox.maxx] × [Tz + bbox.minz, Tz + bbox.maxz]`. The terrain
   extent is the union of the finest blocks' boxes. A point that no triangle covers is outside the mesh.
 - **Height at (x, z):** find every finest-mesh triangle containing the point in the x–z plane. Use barycentric
   `u, v` with tolerance `u ≥ -1e-7, v ≥ -1e-7, u + v ≤ 1 + 1e-7`, and skip triangles whose determinant is 0.
@@ -143,7 +143,7 @@ material. Pairs seen include `Surface5.0/Land` (the full mesh), `Road5.1/Beach`,
 | 2 | lake | confirmed |
 | 4 | river | confirmed |
 | 8 | road strip | confirmed: 99 % of road vertices sit on it |
-| 16 | rail strip | confirmed by cross-check: 98 % of rail vertices sit on it, on all three maps |
+| 16 | rail strip | confirmed by cross-check: 98 % of rail vertices sit on it, on all three terrains |
 | 32 | runway (160 = 128 + 32 on 96 % of the `Runway` subset's triangles) | measured, Caucasus only |
 | 64 | town (94 % of the `Town` subset; 192 on 4 %) | measured, Caucasus only |
 | 128 | field (98 % of the `Field` subset) | measured, Caucasus only |
@@ -155,12 +155,12 @@ triangle list (new-queries research, branch `claude/research-new-queries-2f4ba7`
 within 2 % between subset and bit; the town subsets cover 46 468 km² against bit 64's 27 110 km², unexplained.
 
 **Confirmed:** block and descriptor layout, the finest mesh, heights, water surface and water class, the
-precedence rule, and bits 1/2/4/8/16. The method behaves the same on three maps.
+precedence rule, and bits 1/2/4/8/16. The method behaves the same on three terrains.
 **Guessed:** the `surface` enum (ROAD, RUNWAY, SHALLOW_WATER), which no ground truth could score. It probably
 follows from bits 8/16, the `Runway` subset and a depth threshold. Also guessed: the subset framing words, the
 meaning of `nextLodIndex`/`maxEdge`/`flag`, and the coarser blocks.
 
-## `landscape4::lRoadNetwork`, map-wide (`roads/<map>.rn4`)
+## `landscape4::lRoadNetwork`, terrain-wide (`roads/<terrain>.rn4`)
 
 ### Layout
 
@@ -193,7 +193,7 @@ q      u32  n
 ```
 
 Runs that are not edges (no zero at `q-4`) are short connectors. In airfield files they read
-`u32 3, u32 a, u32 b, u32 n, points`. The map file has them too, after the edges: Caucasus 27 955 of 3 to 5
+`u32 3, u32 a, u32 b, u32 n, points`. The terrain file has them too, after the edges: Caucasus 27 955 of 3 to 5
 points, framed `u32 3, u32, u32, u32 n`, whose two u32 range over the edge count. They draw the inside of
 junctions (guessed: they join one edge to the next).
 
@@ -219,14 +219,14 @@ A road or rail polyline is an edge with kind 2 or 1. Its class name is `classes[
 the points. `y` is a height for kinds 1 and 2 only. For kind 0 it is not: the median is -200 m.
 
 The node ids name junctions, and an edge stops short of its junction: the ends naming one id lie p50 27 m,
-p99 176 m from their mean on Caucasus roads, and at most 2.2 km on any of the eight installed maps. Each
-map also has one catch-all id, named by dozens to hundreds of ends spread across the whole map (Caucasus 1697),
+p99 176 m from their mean on Caucasus roads, and at most 2.2 km on any of the eight installed terrains. Each
+terrain also has one catch-all id, named by dozens to hundreds of ends spread across the whole terrain (Caucasus 1697),
 which is no junction; the extract writes it, and 0xFFFFFFFF, as null.
 
 **Confirmed:** the class table, the point and tangent arrays, and that `y` is a height for roads and rail
 (Caucasus road vertices: 99.5 % within 0.5 m of the sampled ground; rail 98.8 %). The kind byte is confirmed
-because kind 1 equals exactly the rail classes on all three maps (Nevada `rail_two` 214 = kind-1 count 214;
-Syria 4 701). On all eight installed maps every kind-1 edge has a rail class; the converse fails once, on
+because kind 1 equals exactly the rail classes on all three terrains (Nevada `rail_two` 214 = kind-1 count 214;
+Syria 4 701). On all eight installed terrains every kind-1 edge has a rail class; the converse fails once, on
 MarianasWWII, whose 1 401 `rail_narrow` edges are kind 2 and are written as roads.
 **Confirmed (Caucasus):** `a` is the node at the first vertex: of 35 places where two edge ends coincide,
 34 name one id read that way and none read the other way.
@@ -235,7 +235,7 @@ tangents.
 
 ## `landscape4::lRoadNetwork`, airfield (`AirfieldsTaxiways/<name>.rn4`)
 
-The file basename is the airdrome's internal name (`name_id`). Same encoding as the map file:
+The file basename is the airdrome's internal name (`name_id`). Same encoding as the terrain file:
 
 ```
 container header, class name, u32 5
@@ -288,9 +288,9 @@ take the pair that maximizes (reciprocal, horizontal length). Within a pair, edg
 `crossroad_index`. Reading the live JSON needs a correctly rounded float parser: serde_json's default one
 reads some positions one unit in the last place off. 21/21 runways match names and ends bit-exactly, the course is exact, and the airdrome x, z is
 the midpoint. On Nevada and Syria, stand and runway-end y equals the sampled ground to 0.0 m.
-**Guessed:** pairing on maps with several runways (Nevada BoulderCity names the partner of runway 9 `1#27L`,
+**Guessed:** pairing on terrains with several runways (Nevada BoulderCity names the partner of runway 9 `1#27L`,
 so that pair is geometric); the stand heading; runway width, which is not in the airfield files. A lead for
-width: map rn4 class-7 lines run parallel to runways at ±25-29 m. Some Syria airfields have no runway ends
+width: terrain rn4 class-7 lines run parallel to runways at ±25-29 m. Some Syria airfields have no runway ends
 (helipads), and Lakatamia's "ends" are named `Stand01/Stand02`.
 
 ## `t5::rn5file` (`AirfieldsTaxiways/<name>.rn5`)
@@ -319,7 +319,7 @@ node at the same position: `|Δx| < 1e-3`, `|Δz| < 1e-3` and `y == 0`. On Cauca
 and returns class 1. That was the only one of 900 Caucasus stands that disagreed.
 
 **Confirmed:** the stand class (900/900 Caucasus stands give the live parameters through `assets.assets`).
-Every stand on all eight installed maps of 2.9.30.28738 gets a class.
+Every stand on all eight installed terrains of 2.9.30.28738 gets a class.
 **Guessed:** the k-list (probably links), the road-class table's use, and non-stand classes listed among the
 nodes: on 2.9.30.28738, 43 Syria nodes of `taxi_point_holding_position` and 4 MarianaIslands nodes of
 `rwy_point_takeoff_landing` are named like stands, and `assets.assets` holds no stand record for either class.
@@ -356,11 +356,11 @@ magnitude. Small icon geometry stays within ±2.0 and is excluded by this test.
 | flag | 64 if FOR_HELICOPTERS else 32 |
 | SHELTER | no key found; all Caucasus live values are 0 |
 
-The values differ per map (`stand_40x40m_end` LENGTH is 43.057953 on Caucasus and 39.857483 on Nevada), so read
-each map's own file and never parse dimensions from the class name.
+The values differ per terrain (`stand_40x40m_end` LENGTH is 43.057953 on Caucasus and 39.857483 on Nevada), so read
+each terrain's own file and never parse dimensions from the class name.
 **Confirmed:** Caucasus 900/900 on all six values plus flag, WIDTH and LENGTH equal to the live strings at six
 decimals (decoded on 2.9.30.28738 against the live extract of 2.9.29.27468, same terrain files).
-**Guessed:** the other maps, which have no live dump; SHELTER. Every stand class the other seven maps use has
+**Guessed:** the other terrains, which have no live dump; SHELTER. Every stand class the other seven terrains use has
 a record, Nevada's included.
 
 ## `landscape5::Scene5File` (`.scn5`)
@@ -417,7 +417,7 @@ sum of `n` over the nodes before it.
 
 `id = node << S | index`, where **S = 13 when every node holds at most 8 192 instances, else 15** (`design.md` §3.2).
 The version does not decide it: Nevada (version 8, largest node 8 808) and PersianGulf (version 9, 14 872) use
-15, and bits 13-14 of their ids are never set; the six other installed maps use 13. A decoder checks S by the
+15, and bits 13-14 of their ids are never set; the six other installed terrains use 13. A decoder checks S by the
 pool's own AABBs: an id split at the right S puts its instance inside its box (±0.5 m in x and z).
 
 The section table lies between the end of the last node and B. Its entries are 14 bytes each, `u64 count,
@@ -439,10 +439,10 @@ Find a pool by its structure: equal counts, `0 < count < 2^32`, and `offset2 - o
 | lines | 1 069 315 | 8 551 832 | 28 832 057 | wire, power poles, fences, walls, barriers |
 | trees | 12 967 324 | 889 299 | 25 809 719 | trees and shrubs |
 
-The u64 pools are named by order: objects, lines, trees. The contents agree on all three maps. Instances in no
-pool (light halos, lamps, small plants) are not scenery objects. No pool lists an id twice on any installed map,
+The u64 pools are named by order: objects, lines, trees. The contents agree on all three terrains. Instances in no
+pool (light halos, lamps, small plants) are not scenery objects. No pool lists an id twice on any installed terrain,
 but a few instances are in both the objects and the lines pool: 391 in-pavement lights on Caucasus and 9 439
-`leaf_wall` on Nevada, the only two maps measured for it, and none in another pair. Each pool keeps its own, so
+`leaf_wall` on Nevada, the only two terrains measured for it, and none in another pair. Each pool keeps its own, so
 such an instance is a scenery object and counts as a line.
 
 ### Non-instanced group
@@ -481,7 +481,7 @@ against a live `getName()`. Also guessed: `SEED_SCALE`/`SEED`, the f32 at p-32, 
 and the destroyed-model map. Pool t2 holds about 3 % more objects than the live catalogue (917 847 vs 888 854),
 which is unexplained.
 
-## Plain Lua files (`Mods/terrains/<map>/`)
+## Plain Lua files (`Mods/terrains/<terrain>/`)
 
 All are Lua 5.1 source and parse as is.
 
@@ -494,7 +494,7 @@ All are Lua 5.1 source and parse as is.
 | `NotInstances.lua` | `notinstances = { "t:<id>", … }` | ids of the scn5 non-instanced group (can be empty) |
 
 The `name_id` is also the basename of the airfield `.rn4/.rn5`. Caucasus only: `Scripts/Database/wsTypes.lua`
-maps `Anapa = 12 … Beslan = 32`. ICAO codes, airdrome class, civilian flag and display names for airdromes
+terrains `Anapa = 12 … Beslan = 32`. ICAO codes, airdrome class, civilian flag and display names for airdromes
 without beacons live only in the encrypted `terrain.cfg.lua.pak.crypt`.
 
 ### Projection fitted from the beacons
@@ -513,7 +513,7 @@ To fit, take the unique `(position, positionGeo)` pairs. For each integer `L` fr
 of the residuals. Keep the best `L`. Then drop pairs with a residual of 5 m or more and set easting and northing
 to the means of the rest. A wrong `L` scores at least about 1.7 km, so the choice is unambiguous.
 
-| map | lon_0 | easting | northing | fit |
+| terrain | lon_0 | easting | northing | fit |
 |---|---|---|---|---|
 | Caucasus | 33 | 99 517 | 4 998 115 | n 164, rms 0.04 m, max 0.07 |
 | Syria | 39 | -282 801 | 3 879 866 | n 151, 0.04 / 0.07 |
@@ -524,8 +524,8 @@ to the means of the rest. A wrong `L` scores at least about 1.7 km, so the choic
 | MarianaIslands (and MarianasWWII) | 147 | -238 418 | 1 491 840 | n 19, 0.05 / 0.07 |
 | Sinai | 33 | -169 222 | 3 325 313 | live table only, not refitted |
 
-**Confirmed:** every fitted map reproduces the live-measured parameters to 0.01 m or better.
-**Guessed:** none for the fitted maps. MarianasWWII has no beacon positions and shares MarianaIslands' values
+**Confirmed:** every fitted terrain reproduces the live-measured parameters to 0.01 m or better.
+**Guessed:** none for the fitted terrains. MarianasWWII has no beacon positions and shares MarianaIslands' values
 according to the live table.
 
 ## Files not needed
@@ -546,7 +546,7 @@ according to the live table.
 - Caucasus water class: all but 4 of 141 190 035 cells agree. The 4 are land 0.5 m over a lake, where the game
   reports land.
 - Caucasus coverage: no cell the live extract wrote lies outside the mesh. The 6.39 M cells it wrote as fill are
-  flat mesh land at exactly 5 m, which the sim reports with its off-map value.
+  flat mesh land at exactly 5 m, which the sim reports with its off-terrain value.
 - Caucasus road polylines against the live road router: p50 1.42 m, p99 4.3 m. Rail: p50 2.18 m. Both look like
   a lane or track offset from the stored centerline.
 - Road vertices within 0.5 m of the sampled ground: Caucasus 99.5 %, Nevada 99.0 %, Syria 92.5 %. On Syria the

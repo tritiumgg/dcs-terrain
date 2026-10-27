@@ -35,9 +35,9 @@ citations in code and Lua with their reasons, and update the README.
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **N0** — live gate: read a map's files while DCS has it loaded. Needs DCS;
+1. **N0** — live gate: read a terrain's files while DCS has it loaded. Needs DCS;
    only somebody at the install can run it, beside N1 onward.
-2. **N1** — the `Source` trait and `Synth` in memory; `--map synth`.
+2. **N1** — the `Source` trait and `Synth` in memory; `--terrain synth`.
 3. **N2** — the cache directory, keys and atomic entries.
 4. **N3** — the mesh in place: tiles on demand and point mode.
 5. **N4** — scenery in place: the pool-tree reader.

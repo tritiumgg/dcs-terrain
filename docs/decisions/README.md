@@ -4,7 +4,7 @@
 and are edited directly. An ADR is written when a decision changes that design
 and its reasoning is worth keeping beside it: a measurement that contradicts
 the design, an approach that does not work, a platform fact that turns out
-wrong, or a new DCS build or map measured differently. The design document is
+wrong, or a new DCS build or terrain measured differently. The design document is
 updated in the same pull request to match.
 
 No ADR is needed for work that does what the design already says, or for a

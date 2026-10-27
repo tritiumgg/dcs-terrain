@@ -1,7 +1,7 @@
 # dcs-terrain
 
 A command-line tool that answers terrain siting and routing questions about a
-DCS World map by reading the map's own files from the DCS install, read-only,
+DCS World terrain by reading the terrain's own files from the DCS install, read-only,
 in place, with a small rebuildable cache beside it. DCS does no terrain work at
 campaign runtime and need not be running. There is one interface,
 `dcsterrain query`, JSON in and out; an assistant learns it from a skill.
@@ -42,7 +42,7 @@ distinguished by one thing only: **DCS runs there**.
   `docs/plan.md`. The install's terrain files are here too, so the opt-in
   checks against a real install run here unless the files are copied.
 - **macOS and Linux.** Everything else — the Rust workspace, the decoders, the
-  query engine on the synthetic map, and every document tool. No DCS, no GPU.
+  query engine on the synthetic terrain, and every document tool. No DCS, no GPU.
 
 Do not assume a shell, a path separator or a tool is present because another
 platform has it: check before relying on one, and keep scripts portable.
@@ -78,7 +78,7 @@ reshapes it are one reviewable thought. Nothing in `docs/` is frozen.
 
 **An ADR records a decision that changes the design**, when its reasoning is
 worth keeping: a measurement that contradicts the design, an approach that does
-not work, a platform fact that turns out wrong, a new DCS build or map measured
+not work, a platform fact that turns out wrong, a new DCS build or terrain measured
 differently. Update `design.md` or `queries.md` to match in the same pull
 request. `docs/decisions/README.md` has the rules and the index. **Propose an
 ADR to the user before writing it**, unless they have already agreed to the
@@ -134,8 +134,8 @@ DCS.
   loaded**, which is `terrain.GetTerrainConfig("id")` returning non-nil. A
   `land.getHeight` reaching the `server` state at the main menu crashes DCS
   with an access violation. A mission is not required: with the Mission Editor
-  open on a map those calls answer correctly. The bridge's `phase` field
-  reports `menu` with the editor open on a map, so it cannot tell. Hook-side
+  open on a terrain those calls answer correctly. The bridge's `phase` field
+  reports `menu` with the editor open on a terrain, so it cannot tell. Hook-side
   `terrain.*` calls are safe at the menu; they return nil.
 - **Never load or use the `dcs-scripting` skill.** Symbol authority is the
   `dcs-api-lookup` skill for signatures and existence checks, the bridge for
@@ -201,7 +201,7 @@ it.
 
 ## Testing
 
-- **Test against the synthetic map first.** `--map synth` answers from a
+- **Test against the synthetic terrain first.** `--terrain synth` answers from a
   closed-form theatre in memory; almost every done test is stated against it.
 - **The decoders** have offline tests on byte buffers the test builds, and an
   opt-in group gated on `DCSTERRAIN_INSTALL` that reads a real install,
@@ -281,7 +281,7 @@ reading three files you can name is faster done directly.
   bridge, `lfs.currentdir()` in the hook state is the install root and
   `lfs.writedir()` the Saved Games directory. The shipped tool takes an
   install as `--install <dir>` where there is no registry.
-- **A map is named by its `entry.lua` id**, not its folder: Germany's folder
+- **A terrain is named by its `entry.lua` id**, not its folder: Germany's folder
   is `GermanyColdWar`, its id `GermanyCW`.
 - **Coordinates.** DCS x is north, z is east, meters. The terrain module takes
   `(x, z)` scalars; `land.*` takes `{x, y}` where `y` is DCS z, or `{x, y, z}`
@@ -292,9 +292,9 @@ reading three files you can name is faster done directly.
 - **Two stamps.** The DCS core build (`autoupdate.cfg`) is the version, since
   ED ships terrain only inside updates; the terrain files' sizes are a
   fingerprint of what answered. Every response carries both.
-- **Every map file states its format**: a container header, a class name and a
+- **Every terrain file states its format**: a container header, a class name and a
   format version. A decoder declares the pairs it reads, and an unknown one
-  refuses the map.
+  refuses the terrain.
 - **Hook-state Lua is 5.1** with no `string.pack`, no `bit`, no LuaJIT, and file
   handles with no `seek`.
 - **DCS's own sightline ignores buildings and trees.** So does `visible`.
