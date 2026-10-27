@@ -1,0 +1,295 @@
+# Queries
+
+The operations `dcsterrain query` answers. Each is one Rust function taking a
+`serde` request struct and returning a `serde` response struct; the command
+line and `dcsterrain schema` share the structs, so they cannot drift. How the
+data behind them is read and derived is in [`design.md`](design.md).
+
+Not frozen: edit it in the pull request that changes an operation.
+
+## 1. Common types
+
+```rust
+struct Box { min_x: f64, min_z: f64, max_x: f64, max_z: f64 }
+enum Region { Box(Box), Circle { x, z, radius }, Polygon { points: Vec<[f64; 2]> },
+              AirdromeBand { airdrome_id, min_dist, max_dist } }
+struct Point { x: f64, z: f64 }
+struct Point3 { x: f64, z: f64, alt: Option<f64>, alt_agl: Option<f64> }  // exactly one is set
+struct Observer { x: f64, z: f64, alt_agl: f64 }
+struct Footprint { width: f64, depth: f64, orientations_deg: Vec<f64> }   // default [0, 90]
+```
+
+- Coordinates are DCS x (north) and z (east) in meters.
+- Every `Region` becomes its bounding `Box` plus a membership test before any
+  grid work; cells outside the test are skipped.
+- Lengths are meters and angles degrees in every request and response.
+- Every response carries `theatre`, `dcs_build`, `terrain_fingerprint`,
+  `cell_size` and `elapsed_ms` (`design.md` §5).
+- Errors are a list of `{code, message, path}` issues. An operation returns a
+  full result or an error, never a partial one.
+- Point answers (`sample` at points, observer and target heights, `alt_agl`
+  conversions) use point mode, the mesh triangle's own height. Regional answers
+  read the 50 m raster.
+
+## 2. Layers
+
+`sample`, `chokepoints` and the criteria address layers by name: `height`,
+`water` (0 land, 1 lake, 2 sea, 3 river), `surface`, `cover` (`forest`,
+`field`, `town`, `beach`, `runway`, `plain`, or water), `valid`, `slope`,
+`aspect`, `roughness`, `tpi_300`, `tpi_2000`, `dist_road`, `dist_rail`,
+`dist_water`, `dist_builtup`, `count_building`, `count_industrial`,
+`tree_density`, `enclosure`, and the horizon bins. Definitions are in
+`design.md` §6.
+
+## 3. Operations from the original set
+
+### `describe`
+
+Request: none. Response: the map id, build, fingerprint, extent, each terrain
+file's class, version and decoder, the cache state of every entry, counts of
+airdromes, runways, stands, beacons, towns, nodes, road edges and scenery
+objects, and the validation figures if any.
+
+### `sample`
+
+Request: either `region` with `step` (meters, at least the cell size), or
+`points: Vec<Point>`; and `layers`. Response: rows `{x, z, values: {layer:
+number|null}}` at lattice points inside the region, or one row per given point
+in order, capped at `max_rows` (default 10 000; over the cap is an error).
+Points are read sorted by mesh block and returned in request order.
+
+### `geo`
+
+Request: `to_latlon: Vec<Point>` and/or `to_xz: Vec<{lat, lon}>`. Response:
+the converted lists in order, through the map's fitted projection, plus MGRS
+for `to_latlon`.
+
+### `score_site`
+
+Request: `x, z`, `footprint`, `criteria`. Response: for the best orientation,
+`{orientation_deg, terms: [{name, value, pass, score}], hard_fail}`. Each
+criterion gives one term; `pass` is its hard test, `score` a 0..1 soft value,
+1 best.
+
+### `find_sites`
+
+Request: `region`, `footprint`, `criteria`, `step` (default 2 × cell size),
+`spacing` (non-maximum suppression radius), `limit` (default 20, max 200),
+`weights: {name: f64}` (default 1 each). Response: candidates `{x, z,
+orientation_deg, score, terms}` ranked by the weighted sum of term scores
+after every hard test passes, suppressed at `spacing`, plus `stats
+{cells_considered, cells_passed, tiles_skipped, distance_capped}`. A tile whose
+height range or distance range cannot pass a hard criterion is skipped whole.
+Line-of-sight criteria run last.
+
+### `visible`
+
+Request: `a: Point3, b: Point3`. Response: `{visible, blocking: Point3 | null,
+clearance_m}`, where clearance is the least vertical gap between the sightline
+and the terrain (negative when blocked) and `blocking` carries an absolute
+`alt`. The height is sampled every half cell along the segment, bilinear, on a
+flat world. DCS's own sightline ignores buildings and trees, and so does this.
+
+### `viewshed`
+
+Request: `observer`, `radius`, `target_alt_agl`, `resolution` (default the
+cell size). Response: `{origin_x, origin_z, cell, width, height, bits:
+base64}`, `visible_fraction`, and `rings: Vec<Polygon>` when `as_polygons` is
+true (marching squares, simplified to half a cell). Radials are spaced to give
+one per cell on the outer ring.
+
+### `coverage`
+
+Request: `site: Observer`, `envelope {radius, alt_bands_agl}`, `asset: Region
+| null`, `min_masked_range` (default 8 km). Response per band: `{alt_agl,
+covered_fraction, dead_zones: Vec<Polygon>, asset_covered_fraction,
+blind_approach_exists}`, the last true when some radial stays masked from
+`radius` in to `min_masked_range`. Computed from the radar floor: a cell is
+covered at a band when its floor is at or below it.
+
+### `approach_spectrum`
+
+Request: `site: Observer`, `radius`, `alt_bands_agl`, `azimuth_step_deg`
+(default 5), `min_masked_range` (default 8 km), `sector: {from_deg, to_deg} |
+null`. Response per band: `radials: Vec<{bearing_deg, unmask_dist,
+masked_fraction, blind}>` — the range at which a target at that altitude
+coming in from `radius` is first visible (null if never), the masked share of
+the radial, and whether it stays masked in to `min_masked_range` — plus
+`blind_arc_fraction`, `widest_blind_arc_deg`, `blind_arcs`, and the minimum,
+median and maximum unmask distance; with `sector`, the same summaries
+restricted to it. Computed from the radar floor along each radial.
+
+### `unmask_profile`
+
+Request: `site: Observer`, `route: Vec<Point3>`, `step` (default 100 m).
+Response: `{first_seen: Point3 | null, first_seen_dist_from_site,
+first_seen_dist_along_route, masked_segments, visible_fraction}`.
+
+### `route`
+
+Request: `network: "roads" | "railroads"`, `from`, `to`, `avoid:
+Vec<Region>`, `exposure_observers: Vec<Observer>`, `exposure_weight` (default
+1), `max_detour_factor` (default 3). Response: `{waypoints, length, ascent,
+descent, max_grade_pct, legs: [{from, to, length, ascent, descent,
+max_grade_pct, exposure, class}], snapped_from, snapped_to, straight_line}`.
+
+`length` is the planar length of the road geometry between the snapped ends;
+ascent and descent are summed from height every 25 m; `max_grade_pct` is the
+steepest 100 m window; `length / straight_line` is the detour factor. The
+subgraph is the endpoints' box expanded 25 %, grown until connected or past
+`max_detour_factor`; edges crossing `avoid` are removed; edge weight is
+`length × (1 + exposure_weight × exposure)`, exposure being the share of 25 m
+samples any observer sees; A* with a Euclidean heuristic; the polyline is
+simplified to at most one point per 500 m, keeping every graph node.
+
+### `route_alternatives`
+
+Request: everything `route` takes, plus `k` (default 3, max 10),
+`max_stretch` (default 1.5), `max_overlap` (default 0.5), `penalty` (default
+1.6). Response: `routes`, each a full `route` response plus `stretch`,
+`overlap_with` (shared length share against each other route),
+`shared_edges_with_all` (edges every alternative uses: the true chokepoints of
+the pair) and `chokepoints` (edges on the route in the top decile of
+betweenness).
+
+The penalty method: route the shortest, then up to 4 × `k` times multiply the
+weight of every edge on the routes found so far by `penalty`, route again,
+accept a result within the stretch and overlap limits, and stop at `k` or when
+candidates repeat. Yen's k-shortest is not used: its alternatives differ by
+one edge and look the same to a player.
+
+### `nearest`
+
+Request: `kind: "road" | "rail" | "airdrome" | "town" | "node" | "beacon" |
+"scenery" | "place"`, `x, z`, `n` (default 1, max 50), `class` for scenery.
+Response: `Vec<{kind, id, name, x, z, distance}>`. Road and rail return the
+closest point on the nearest edge, its edge id and class.
+
+### `scenery_in`
+
+Request: `region`, or `footprint_at {x, z, footprint, orientation_deg}`.
+Response: `{objects: [{id, model, class, x, z, alt, rotation_deg, obb_w,
+obb_d, height}], counts_by_class}`, exact OBB overlap for the footprint form,
+capped by `--max-rows` (default 5 000; over is an error). `effect` objects are
+returned only when asked for by class.
+
+### `chokepoints`
+
+Request: `region`, `network`, `limit`. Response: edges ranked by betweenness,
+with class, `crosses_water`, the mean `tpi_300` along the geometry, and the
+midpoint. Errors with "still being built" until betweenness exists.
+
+### `trafficability`
+
+Request: `x, z`, `max_slope_deg`, `network`. Response: `{reachable,
+nearest_road, distance, blocking: Point | null, reason}`, by sampling the
+straight line to the nearest road every 25 m for slope and water.
+
+## 4. Operations added
+
+### `point_info`
+
+Request: `points: Vec<Point>`. Response per point: height (point mode), water
+class and depth, cover, slope and aspect, the nearest town with bearing and
+distance ("6 km NE of Zugdidi"), the place it stands in if any, the nearest
+road with its class and distance, the nearest airfield, lat/lon and MGRS.
+
+### `airfield_info`
+
+Request: an airdrome id or name, and optionally `fits {width, length, height,
+helicopter}`. Response: runways (designator, true course, length, width,
+threshold heights), elevation, navaids (TACAN channel, ILS, VOR and NDB
+frequencies), radio frequencies, stand counts by size, helicopter use and
+shelter; with `fits`, the stands an airframe of that size fits. Courses are
+true; there is no magnetic model. The caller supplies the airframe's size.
+
+### `radar_floor`
+
+Request: `site: Observer`, `radius`, `resolution` (default the cell size),
+and optionally `points`. Response: a raster of the lowest altitude, AGL and
+MSL, at which a target is visible from the site, or that value at each point.
+The viewshed sweep keeps the running maximum elevation angle along each
+radial; the floor at a cell is that angle times range, plus the site height,
+minus the ground. One sweep, the cost of a viewshed. Flat world.
+
+### `exposure`
+
+Request: `sites: Vec<{observer, radius, weight}>`, `region`, and a
+`target_alt_agl` or a band. Response per cell: the lowest floor over all sites
+and how many sites see the target altitude; optionally polygons of "unseen at
+or below h". Geometry only: no clutter, Doppler notch or minimum elevation.
+
+### `validate_placements`
+
+Request: `units: Vec<{id, kind: ground | ship | static | helicopter | plane |
+farp, x, z, heading, footprint?, draft?}>`. Response per unit: a list of
+issues, each naming the offending object — in water; a ship on land or in
+water shallower than its draft; slope over the kind's limit; footprint
+overlapping a building, tree, wire or wall, or a runway or taxiway; inside a
+removed-object area. Procedural forest is not a collision; a unit in forest is
+reported from `cover`.
+
+### `low_level_route`
+
+Request: `from`, `to`, `agl_band {min, max}`, `sites` as `exposure` takes,
+`max_climb_gradient`, `corridor_width`, `resolution` (default 200 m).
+Response: waypoints with AGL and MSL altitude, and per leg the sites that see
+it and for how long. An A* over an exposure cost raster in the corridor. It
+clears terrain only, not wires or masts, and says so in its response. DCS's AI
+does not hold an AGL between waypoints without terrain following.
+
+### `towns`
+
+Request: `region` or none for the whole map, filters on size class, form and
+minimum building count, `sort` (building count, floor area, apartment share),
+`limit`, `outlines: bool`. Response: places (`design.md` §6.3) with id, name
+and other names, center, box, size class, form, building count, residential
+floor area, apartment share and industrial count, and an outline when asked.
+Errors with "still being built" until the `places` entry exists.
+
+## 5. Criteria
+
+A criterion is `{name, params}` from this closed set. Each has a hard test and
+a soft score. `valid` is always applied.
+
+| Name | Params | Hard | Soft score |
+|---|---|---|---|
+| `slope_max` | `deg` | max slope over footprint ≤ deg | 1 − max/deg |
+| `span_max` | `m` | max − min height over footprint corners and center ≤ m | 1 − span/m |
+| `surface_in` | `classes: ["land"]` | every footprint cell's `water` in set | 1 |
+| `surface_enum_in` | `values` | same on `surface` | 1 |
+| `cover_in` | `classes` | every footprint cell's `cover` in set | 1 |
+| `cover_fraction_min` | `class, radius, min` | share of `class` within radius ≥ min | the share |
+| `dist_cover_band` | `class, min, max` | distance to `class` in band | 1 at min, 0 at max |
+| `dist_road_band`, `dist_rail_band` | `min, max` | distance in band | 1 at min, 0 at max |
+| `dist_water_min` | `m` | `dist_water` ≥ m | min(1, dist / 2m) |
+| `dist_airdrome_band` | `min, max, airdrome_id?` | to the nearest airdrome, or the one given | 1 at min, 0 at max |
+| `scenery_max` | `class, radius, max` | count within radius ≤ max | 1 − count/max |
+| `scenery_in_footprint_max` | `max` | OBB overlap count ≤ max | 1 − count/max |
+| `clearing_max` | `radius` (default 150), `max` | objects within radius ≤ max: what a heliport static removes at spawn | 1 − count/max |
+| `enclosure_min` | `deg` | `enclosure` ≥ deg | saturating |
+| `masked_from` | `bearing_deg, half_width_deg, min_elev_deg` | every horizon bin in the sector ≥ min_elev | mean margin |
+| `not_visible_from` | `observers, max_fraction, own_alt_agl` (default 2) | share of observers seeing the candidate ≤ max | 1 − share |
+| `visible_to` | `targets, min_fraction, own_alt_agl` (default 2) | share of targets the candidate sees ≥ min | the share |
+| `tpi_class_in` | `classes, threshold_m` (default 10) | with `t = threshold_m`: `ridge` when `tpi_300 > t`; `valley` when `< −t`; else `upper` when `tpi_2000 > t`; `lower` when `< −t`; else `mid` when slope > 5°; else `flat` | 1 |
+| `valid` | none | `valid == 1` | 1 |
+
+A distance with no stated maximum searches 5 km and reads anything farther as
+5 km; `stats.distance_capped` reports it.
+
+## 6. Testing
+
+Every operation has tests on `Synth` with closed-form expectations: `visible`
+across the hill and around it; `viewshed` fraction against brute force;
+`radar_floor` behind the hill against its geometry, and `coverage`'s dead zone
+from it; `unmask_profile` first-seen distance from the hill; `route` choosing
+the bridge and avoiding a box; `find_sites` accepting only the plane and
+rejecting the lake; `masked_from` true east of the big hill and false west;
+`chokepoints` ranking the bridge first; `scenery_in` counts against the
+generator's objects; `cover_in` on each cover patch; `towns` against
+brute-force linkage; one `validate_placements` case per issue kind. Every
+request and response struct round-trips through JSON.
+
+The opt-in group replays two live examples on a real Caucasus install:
+`find_sites` gives the same eight FARP candidates within one cell, and site 1
+of the SAM example is masked from all seven western points.
