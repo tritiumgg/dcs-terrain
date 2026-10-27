@@ -138,8 +138,8 @@ fn negated(v: f64) -> f64 {
 }
 
 /// Each measured map's projection, by theatre id, for a map whose files
-/// carry too few positioned beacons to fit one. Nevada's row is the fit of
-/// ADR 0038; the rest were measured in a running sim.
+/// carry too few positioned beacons to fit one. Nevada's row was fitted
+/// from its beacons; the rest were measured in a running sim.
 pub const TABLE: [(&str, Tmerc); 9] = [
     ("Afghanistan", tm(63, 300150.0, 3759657.0)),
     ("Caucasus", tm(33, 99517.0, 4998115.0)),

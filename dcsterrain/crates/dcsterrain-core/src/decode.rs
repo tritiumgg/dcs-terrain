@@ -1,8 +1,8 @@
 //! Reads a map's files from a DCS install. The install is only ever read.
 //!
 //! A decoder is chosen by the class and format version a file's header
-//! states, never by the DCS build or by probing the data (ADR 0035). A pair no
-//! decoder declares stops the run: a decoder written for one version can read
+//! states, never by the DCS build or by probing the data. A pair no decoder
+//! declares stops the run: a decoder written for one version can read
 //! another without error and return the wrong values.
 
 use std::fmt;

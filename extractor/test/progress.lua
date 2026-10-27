@@ -3,7 +3,7 @@
 --
 -- Run from the repository root with a plain lua5.1.
 --
--- The run reports no fraction of the whole (ADR 0025): what it knows is which
+-- The run reports no fraction of the whole: what it knows is which
 -- sweep it is on, of how many, and how far that sweep has got where the sweep
 -- can count. The first groups ask that of runs built by hand; the driver at
 -- the end drives a whole run through ten thousand frames and reads the log.

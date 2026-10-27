@@ -18,7 +18,7 @@ T.group("versions")
 
 -- The hook still writes the v1 directory its sweeps produce, while the shared
 -- constants describe v2. This compares against the shared value again once
--- the hook is reduced to the tables pass, which writes v2 (ADR 0037).
+-- the hook is reduced to the tables pass, which writes v2.
 T.eq("format version", E.FORMAT_VERSION, 1)
 T.eq("extractor version", E.EXTRACTOR_VERSION, S.EXTRACTOR_VERSION)
 

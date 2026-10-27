@@ -126,8 +126,8 @@ T.eq("at 50 m", written.grid.cell_size, 50)
 T.eq("in tiles of 256", written.grid.tile_size, 256)
 T.eq("the crop is the box", E.json(written.crop_m),
   '{"max_x":5000,"max_z":5000,"min_x":-5000,"min_z":-5000}')
--- ADR 0026: nothing is read from a theatre file, so a crop run has no
--- authored rectangle on any theatre, and ADR 0009 has both keys null.
+-- Nothing is read from a theatre file, so a crop run has no
+-- authored rectangle on any theatre, and both keys are null.
 T.eq("no authored rectangle", written.authored_bounds_m, E.JSON_NULL)
 T.eq("and no source for one", written.authored_bounds_source, E.JSON_NULL)
 T.eq("the bounds as DCS gave them", E.json(written.bounds_km),

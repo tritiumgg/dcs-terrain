@@ -43,7 +43,7 @@ T.eq("and the source is untouched", strict.files["a"], "1")
 
 -- And its handles report nothing, which is what DCS's own do. A fake that
 -- returned true here would agree with the assumption that made every live write
--- fail while the tests stayed green (ADR 0016).
+-- fail while the tests stayed green.
 local handle = strict.open("h", "wb")
 T.eq("write returns nothing", select("#", handle:write("x")), 0)
 T.eq("close returns nothing", select("#", handle:close()), 0)

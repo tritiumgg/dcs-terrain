@@ -127,8 +127,8 @@ pub struct LatLon {
 // rather than a doc comment, because the schema of a struct that flattens
 // this one and has no doc of its own would take this one's as its own.
 //
-// There is no terrain digest, because the build is the terrain version
-// (ADR 0023).
+// There is no terrain digest, because the build is the terrain version,
+// since ED ships terrain only inside updates.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Provenance {
     pub theatre: String,

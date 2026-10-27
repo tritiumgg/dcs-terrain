@@ -19,7 +19,7 @@ local nan = zero / zero
 T.group("snapping")
 --------------------------------------------------------------------------------
 
--- ADR 0007's Caucasus rectangle and the grid it publishes. This is the vector
+-- The measured Caucasus rectangle and the grid it gives. This is the vector
 -- that catches rounding to the nearest cell, which would give origin -418600
 -- and a height of 8900, and an x/z swap, since the two extents differ.
 local caucasus = E.grid_from_rect(
@@ -86,7 +86,7 @@ local crop = { min_x = -285000, min_z = 683000, max_x = -275000, max_z = 693000 
 local authored = { min_x = -400000, min_z = 100000, max_x = 0, max_z = 900000 }
 local presweep = { min_x = -390000, min_z = 110000, max_x = -10000, max_z = 890000 }
 
--- ADR 0009: a crop with no authored rectangle records both keys nil, and nil
+-- A crop with no authored rectangle records both keys nil, and nil
 -- means unknown rather than empty.
 local by_crop = E.plan_grid({ cell_size = 50, tile_size = 256, crop_m = crop })
 T.eq("the crop drives the grid", by_crop.grid.origin_x, -285000)
@@ -108,7 +108,7 @@ T.eq("the crop wins", by_both.grid.origin_x, -285000)
 T.eq("the rectangle survives", by_both.authored_bounds_m, presweep)
 T.eq("with its source", by_both.authored_bounds_source, "presweep")
 
--- ADR 0026: a rectangle read from a theatre file is not a source. The old
+-- A rectangle read from a theatre file is not a source. The old
 -- option is not merely unused; it is ignored, so a caller that still passes
 -- one gets the pre-sweep's rectangle or none.
 local by_file = E.plan_grid({

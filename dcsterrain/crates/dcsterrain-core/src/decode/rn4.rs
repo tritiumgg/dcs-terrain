@@ -284,7 +284,7 @@ fn node(id: u32) -> Option<u32> {
 }
 
 /// Clears every end naming an id whose road and rail ends do not all lie
-/// within reach of their mean, and returns those ids. ADR 0044: each map has
+/// within reach of their mean, and returns those ids. Each map has
 /// one id whose ends are spread across it, and joined through one node they
 /// would weld its dead ends together.
 fn unjoin_catch_alls(edges: &mut [Edge]) -> Vec<u32> {

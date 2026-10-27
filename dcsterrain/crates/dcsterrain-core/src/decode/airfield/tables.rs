@@ -91,7 +91,7 @@ pub fn runway_rows(name_id: &str, a: &Airfield) -> Vec<RunwayRow> {
 
 /// The rows of each of `a`'s stands, its class from `classes` and that
 /// class's parameters from `params`. A named node whose class has no
-/// record is not a stand (ADR 0046): a holding point, say.
+/// record is not a stand: a holding point, say.
 pub fn stand_rows(
     name_id: &str,
     a: &Airfield,

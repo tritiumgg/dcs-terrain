@@ -1,5 +1,5 @@
 //! Tile addressing over the cell grid, and tiles read back whole whether or
-//! not they were written (ADR 0039).
+//! not they were written.
 //!
 //! Rows run north with DCS x and columns east with DCS z. Cell `(row, col)`
 //! covers `[origin + index × cell_size, origin + (index + 1) × cell_size)` on

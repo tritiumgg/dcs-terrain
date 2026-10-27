@@ -4,7 +4,7 @@
 --
 -- The callback table is the only part of the hook DCS itself calls, so this is
 -- where a fake DCS goes. Beyond onSimulationFrame the callbacks do very
--- little: ADR 0010 took the gating off them, since the sweeps need loaded
+-- little: none of them gates anything, since the sweeps need loaded
 -- terrain rather than a mission, so two of the three now only end the idle
 -- wait early or write a line for the progress log.
 --
@@ -153,7 +153,7 @@ _G.DCS = restore
 T.group("a simulation start ends the idle wait and gates nothing")
 --------------------------------------------------------------------------------
 
--- ADR 0010: the sweeps need terrain, not a mission, so a simulation starting
+-- The sweeps need terrain, not a mission, so a simulation starting
 -- is only another way to learn a terrain is there. It admits no phase.
 terrain = nil
 run = new_run()

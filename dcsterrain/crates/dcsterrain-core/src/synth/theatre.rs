@@ -70,7 +70,7 @@ pub struct Object {
 }
 
 impl Theatre {
-    /// The extract is always 50 m (ADR 0036), and the features sit on that
+    /// The extract is always 50 m, and the features sit on that
     /// lattice's cell centres, so any other cell size is refused rather than
     /// written with roads that miss every cell.
     pub fn new(seed: u32, size_km: u32, cell_size: u32) -> Result<Self, SynthError> {

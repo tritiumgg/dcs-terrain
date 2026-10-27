@@ -28,8 +28,8 @@ mod write;
 pub use theatre::{Cell, Edge, Object, SynthError, Theatre};
 pub use write::{Written, write};
 
-// Extract format, v2 (ADR 0039). The tile layout, the water codes and the
-// height, water and surface nodata values are ADR 0007's. The two count
+// Extract format, v2. The tile layout, the water codes and the height,
+// water and surface nodata values are unchanged from v1. The two count
 // layers, `trees` and `lines`, hold instances per cell, clamped one short of
 // their nodata.
 
@@ -76,7 +76,7 @@ pub const FILL_SEABED_M: f64 = 0.0;
 // is the DCS build, so the file list is a record and not a version: each
 // file's path, the class name and format version its container header names,
 // its size, and the data base the header carries, which only the surface and
-// scene classes fill. Nothing is hashed and no time is recorded (ADR 0023).
+// scene classes fill. Nothing is hashed and no time is recorded.
 // The surface, roads and scene entries are the terrain fingerprint. A Lua
 // file or the asset file has no header, so no class, version or payload.
 

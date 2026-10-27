@@ -153,7 +153,7 @@ fn caucasus_matches_the_live_extract() {
                 match (w[i] == 255, t.water[i] == 255) {
                     (true, false) => {
                         fill_covered += 1;
-                        // The live fill test took flat 5 m land for no terrain (ADR 0042).
+                        // The live fill test took flat 5 m land for no terrain, though it is ground.
                         fill_not_flat += u64::from(t.height[i] != 5 || t.water[i] != 0);
                     }
                     (false, true) => covered_fill += 1,

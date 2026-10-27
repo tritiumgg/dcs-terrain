@@ -226,7 +226,7 @@ fn caucasus_router_points_lie_on_decoded_edges() {
     report("roads", &roads);
     report("rail", &rail);
     assert!(!roads.is_empty() && !rail.is_empty(), "no router points");
-    // ADR 0043: the router drives a lane or a track off the centerline.
+    // The router drives a lane or a track off the centerline, not on it.
     assert!(quantile(&roads, 0.9) <= 2.0, "road router points at p90");
     assert!(quantile(&rail, 0.9) <= 3.0, "rail router points at p90");
 }
@@ -245,7 +245,7 @@ fn junctions(net: &Network) -> HashMap<u32, Vec<[f64; 2]>> {
     ends
 }
 
-/// Edges sharing an id end within a junction of each other (ADR 0044): each
+/// Edges sharing an id end within a junction of each other: each
 /// map's catch-all id is cleared, and what is left spans at most a few
 /// kilometers.
 #[test]

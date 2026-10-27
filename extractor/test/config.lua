@@ -106,7 +106,7 @@ T.group("the six that became constants")
 
 config = E.validate_config(good())
 
--- ADR 0011: these are constants, not fields, so they are absent from a
+-- These are constants, not fields, so they are absent from a
 -- validated config however the file was written. The unknown-key group proves
 -- the other half -- that writing one down is reported rather than ignored.
 T.eq("cell_size is not a field", config.cell_size, nil)
@@ -206,7 +206,7 @@ config, problems = E.validate_config(with("outputdir", "C:/typo"))
 T.eq("one line", joined(problems), "outputdir is not a config field")
 T.eq("and the key does not survive", config.outputdir, nil)
 
--- ADR 0011 under test: every field that left the table is reported like any
+-- Every field that left the table is reported like any
 -- other typo rather than quietly tolerated, whether it was dropped outright, is
 -- derived from the install now, or became a constant. A config carried over from
 -- the specified sixteen tells its owner exactly which lines to delete.

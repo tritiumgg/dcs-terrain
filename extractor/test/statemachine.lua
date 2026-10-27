@@ -155,7 +155,7 @@ T.eq("tiles is an array", E.json(manifest.tiles), "[]")
 T.group("no pass can be switched off")
 --------------------------------------------------------------------------------
 
--- ADR 0011: prepare, hook, mission, done is a walk and not a choice. The switch
+-- Prepare, hook, mission, done is a walk and not a choice. The switch
 -- that used to skip a pass is not a config field any more, and a config still
 -- carrying it changes nothing about the order.
 run = new_run({

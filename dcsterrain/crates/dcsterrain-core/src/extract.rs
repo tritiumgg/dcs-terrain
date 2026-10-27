@@ -1,4 +1,4 @@
-//! Reads an extract directory: its manifest and its tiles (ADR 0039).
+//! Reads an extract directory: its manifest and its tiles.
 //!
 //! The manifest is written last, so a directory without one is an
 //! interrupted run and is refused rather than read in part. `check` validates

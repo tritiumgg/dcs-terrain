@@ -23,7 +23,7 @@
 //! ```
 //!
 //! An instance id is `node << S | index`, S being 15 in a file with a node
-//! of more than 8 192 instances and 13 in any other (ADR 0045). Group
+//! of more than 8 192 instances and 13 in any other. Group
 //! record `i` takes the id that follows the last node's, `(nodes << S) + i`:
 //! a flat range, so a group id past 2^S - 1 above the first does not split
 //! into a node and an index.
@@ -121,7 +121,7 @@ struct Layout {
     axis_stride: u16,
 }
 
-/// ADR 0045: the bits of an id that hold an instance's index are 13 where
+/// The bits of an id that hold an instance's index are 13 where
 /// every node holds at most 8 192 instances, else 15. The version does not
 /// decide it: Nevada, version 8, and PersianGulf, version 9, each have a
 /// node past 8 192 and take 15; the six other maps seen take 13.

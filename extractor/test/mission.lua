@@ -3,7 +3,7 @@
 --
 -- Run from the repository root with a plain lua5.1.
 --
--- ADR 0010: this pass reaches the mission-scripting state, and what those
+-- This pass reaches the mission-scripting state, and what those
 -- calls need is loaded terrain rather than a running mission. So the gate is
 -- the same terrain check idle polls with, made every frame, and there is no
 -- waiting for a mission and no mission clock. It keeps the name "mission
@@ -101,9 +101,9 @@ end
 T.group("the pass runs with a terrain and no mission")
 --------------------------------------------------------------------------------
 
--- The measurement behind ADR 0010: with the Mission Editor open on Caucasus
--- and no mission running, land.getHeight, land.getSurfaceType and
--- world.searchObjects all answer correctly. Nothing here waits for one.
+-- The measurement behind gating on terrain, not a mission: with the Mission
+-- Editor open on Caucasus and no mission running, land.getHeight,
+-- land.getSurfaceType and world.searchObjects all answer correctly. Nothing here waits for one.
 terrain = "Caucasus"
 local run = new_run()
 up_to_mission(run)
@@ -138,7 +138,7 @@ T.eq("idle to prepare to hook to mission to done",
 T.group("no pass can be switched off")
 --------------------------------------------------------------------------------
 
--- ADR 0011: the two passes are the two Lua states the sweeps call from, not a
+-- The two passes are the two Lua states the sweeps call from, not a
 -- choice a user was ever in a position to make usefully, so both always run. A
 -- config carrying the switch that used to skip one changes nothing.
 run = new_run({

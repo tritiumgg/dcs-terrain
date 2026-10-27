@@ -645,9 +645,9 @@ end
 -- tells a later reader which of those cells are terrain someone built rather
 -- than the fill the engine returns outside it.
 --
--- ADR 0026: the authored rectangle has one source, the pre-sweep, which
+-- The authored rectangle has one source, the pre-sweep, which
 -- measures the terrain the same way on every theatre; nothing read from a
--- theatre file is one. ADR 0009: a crop run with no pre-sweep leaves both
+-- theatre file is one. A crop run with no pre-sweep leaves both
 -- nil, and the manifest writes them as null. Nil here means unknown, never
 -- empty.
 function M.plan_grid(opts)
@@ -832,7 +832,7 @@ end
 -- A road close enough makes a cell built. Enough breakpoints make it built
 -- too, but only where a road lies within the wider distance, because rough
 -- ground far from every road is a coarse model of real mountains and not
--- built terrain (ADR 0027). A nil road is no road reachable at all, which
+-- built terrain. A nil road is no road reachable at all, which
 -- constrains nothing: the breakpoints then decide alone, so an island with
 -- detailed ground and no road is kept.
 function M.cell_authored(breaks, road_m, opts)
@@ -860,7 +860,7 @@ function M.presweep_record(lattice, authored, opts)
     cell_km = lattice.cell_m / 1000,
     breakpoint_min = opts.breakpoint_min,
     road_max_m = opts.road_max_m,
-    -- ADR 0027: how far from a road the breakpoints still count.
+    -- How far from a road the breakpoints still count.
     breakpoint_road_max_m = opts.breakpoint_road_max_m,
     authored_cells = count,
     total_cells = total,
@@ -937,7 +937,7 @@ end
 --
 -- A write is checked by the bytes that landed and never by what the call
 -- returned, because in DCS a file handle's write and close return no values at
--- all -- on success and on failure alike (ADR 0016). os.rename and os.remove do
+-- all -- on success and on failure alike. os.rename and os.remove do
 -- report, and are still checked on their result.
 --------------------------------------------------------------------------------
 
@@ -1355,7 +1355,7 @@ function M.new_manifest(opts)
     error("new_manifest: omit_sea_tiles is not a boolean: "
       .. tostring(opts.omit_sea_tiles), 2)
   end
-  -- ADR 0009: the authored rectangle and its source are known together or
+  -- The authored rectangle and its source are known together or
   -- unknown together. A source naming where an absent rectangle came from, or
   -- a rectangle with no provenance, is a state no reader can interpret.
   if (opts.authored_bounds_m == nil) ~= (opts.authored_bounds_source == nil) then
@@ -1688,7 +1688,7 @@ end
 --
 -- What the user gets to decide, and what happens to a value they got wrong.
 --
--- ADR 0012: validation never raises and always hands back a usable table. Each
+-- Validation never raises and always hands back a usable table. Each
 -- bad field costs one line and takes its default, so no bad value can reach a
 -- sweep and there is nothing to disable. output_dir is the exception, because
 -- it is the one field with no default: a bad one leaves it nil, and a run
@@ -1705,7 +1705,7 @@ end
 -- stop at the first of it.
 --------------------------------------------------------------------------------
 
--- ADR 0011: constants, not config. Each is still written into the manifest, so
+-- Constants, not config. Each is still written into the manifest, so
 -- the format stays parametric and a reader is told what the extract was built
 -- with; what none of them is any more is a question put to the user.
 --
@@ -1737,7 +1737,7 @@ M.ROAD_SEED_NEIGHBOURS = 4
 -- with no road of its own reads 100 to 170, so a cell also counts when it
 -- reads 60 and a road lies within 25 km; not farther, because on Caucasus
 -- the mountains of Turkey and Crimea read 120 to 144 with the nearest road
--- 85 to 200 km away, and they are not built terrain (ADR 0027). Where the
+-- 85 to 200 km away, and they are not built terrain. Where the
 -- snap answers nothing at all, as on an island with no road, the
 -- breakpoints decide alone. The rectangle around the built cells is grown by
 -- 10 km so a cell on the edge is whole. The epsilon is what "not zero" means
@@ -1765,7 +1765,7 @@ local CROP_KEYS = { "x", "z", "radius_m" }
 
 -- The smallest crop worth extracting: a 2 km box. The cell is 50 m, and the
 -- derived layers want windows of 300 m and 2 km, so anything smaller packs
--- to cells with no usable layer over them (ADR 0019).
+-- to cells with no usable layer over them.
 M.MIN_RADIUS_M = 1000
 local CROP_BY_NAME = { x = true, z = true, radius_m = true }
 
@@ -1815,7 +1815,7 @@ end
 -- publishes. On Caucasus it is larger than the authored land, and a crop in
 -- the sea outside the coast passes here and extracts sea, which is what it
 -- asked for; the authored hull is only known for one theatre and costs a
--- pre-sweep to find for the rest (ADR 0019).
+-- pre-sweep to find for the rest.
 function M.crop_outside(crop, bounds)
   if crop == nil or bounds == nil then
     return nil
@@ -1849,7 +1849,7 @@ end
 -- Why the output directory cannot be made, or nil where it can. The run makes
 -- every missing component of the path, so the directory need not exist; its
 -- root must, because a drive letter cannot be made and a share that is not
--- there fails at the first component (ADR 0020). One `lfs.attributes` on the
+-- there fails at the first component. One `lfs.attributes` on the
 -- root, through the seam the tests fake. A path that fails the shape check
 -- is not asked about, because the checker has already said what is wrong.
 function M.drive_problem(path)
@@ -2180,7 +2180,7 @@ end
 --
 -- A Lua chunk in Saved Games returning a table. The window owns it: it fills its
 -- controls from this file and writes it back at Start, which is the whole of
--- "the window is the only surface the config has" (ADR 0011).
+-- how the config is set: nothing else writes it.
 --
 -- Read through M.read_file and loadstring rather than dofile, so the M.fs seam
 -- every other read already goes through covers this one too and the offline
@@ -2321,7 +2321,7 @@ end
 -- stopped is where a run begins and waits. A run used to begin at idle and poll
 -- for terrain the moment the hook loaded; the window puts a Start button in
 -- front of that, so there has to be a state that costs nothing and does nothing
--- until somebody presses it (ADR 0014).
+-- until somebody presses it.
 M.STATE_STOPPED = "stopped"
 M.STATE_IDLE = "idle"
 M.STATE_PREPARE = "prepare"
@@ -2333,7 +2333,7 @@ M.STATE_DONE = "done"
 -- lasts for as long as DCS sits at the main menu, which can be hours.
 M.IDLE_POLL_FRAMES = 60
 
--- ADR 0024. Two cadences for one record of where the run has got to. The record is
+-- Two cadences for one record of where the run has got to. The record is
 -- refreshed every second for the window's line, which is what somebody
 -- watching reads; the log gets a heartbeat line every ten, which is what
 -- somebody reading afterwards greps. Both are wall-clock seconds, because a
@@ -2456,7 +2456,7 @@ end
 -- nothing per tile -- at this hook's rate that would bury every other
 -- subsystem's output.
 --
--- ADR 0013: the path is a value rather than a function to swap. Nil means log
+-- The path is a value rather than a function to swap. Nil means log
 -- nowhere, which is a run with no Saved Games under it and is also every
 -- offline test, so nothing here opens a file until something sets a path.
 --
@@ -2538,7 +2538,7 @@ function M.new_run(opts)
     -- reason it is empty.
     config_problems = opts.problems or {},
     config_tags = opts.tags or {},
-    -- A constant, not config (ADR 0011). It stays a field on the run so a test
+    -- A constant, not config. It stays a field on the run so a test
     -- can drive the budget by hand, which no config file could ever ask for.
     budget_ms = config.frame_budget_ms or M.FRAME_BUDGET_MS,
     -- Filled in by the prepare jobs, which is where the theatre, the build,
@@ -2591,7 +2591,7 @@ function M.new_run(opts)
   return run
 end
 
--- Points a run at the settings the window now holds (ADR 0017).
+-- Points a run at the settings the window now holds.
 --
 -- Where the output directory and the crop are unchanged, only the config is
 -- replaced and the run carries on where it left off, which is what makes a Stop
@@ -2678,7 +2678,7 @@ end
 -- prepare, hook, mission, in the order the queues are built -- or nil outside
 -- a pass, or with nothing registered.
 --
--- That is all the run says about the whole (ADR 0025). Nothing here knows
+-- That is all the run says about the whole. Nothing here knows
 -- what a sweep costs: the design's minutes per sweep were one machine's
 -- per-call costs times a guess at the counts, and a bar built on them would
 -- have been describing the guess. "Sweep 5 of 9" is true on any machine.
@@ -2831,7 +2831,7 @@ local function complete_pass(run, pass)
   p.finished_at = M.now_iso()
 end
 
--- ADR 0011: both passes always run, so this is a walk and not a choice. The two
+-- Both passes always run, so this is a walk and not a choice. The two
 -- passes are the two Lua states the sweeps call from, which is not something a
 -- user was ever in a position to switch off usefully.
 local function next_state(run)
@@ -2844,7 +2844,7 @@ local function next_state(run)
   return M.STATE_DONE
 end
 
--- ADR 0010: what a server-state land or world call needs is loaded terrain,
+-- What a server-state land or world call needs is loaded terrain,
 -- not a running mission. Those calls answer correctly with the Mission Editor
 -- open on a map, and crash DCS only when there is no terrain under them.
 --
@@ -2892,7 +2892,7 @@ local function frame_idle(run)
   -- written at the main menu could not be checked when Start was pressed, so
   -- it is checked here, and a crop that reaches outside the map stops the run
   -- before prepare writes anything: the reason is kept on the run for the
-  -- window to show and warned to the log (ADR 0019).
+  -- window to show and warned to the log.
   local outside = M.crop_outside(run.config.crop, M.terrain_bounds())
   if outside then
     run.refusal = outside
@@ -3020,13 +3020,13 @@ end
 
 -- Leaves the stopped state and begins looking for terrain. Start always
 -- re-enters idle, whether this is the first press or one after a Stop, so
--- there is one way back into a run rather than two (ADR 0014).
+-- there is one way back into a run rather than two.
 --
 -- Nothing is reset. frames and the timings accumulate across a Stop, so what
 -- the manifest records is the whole of the work done in this output directory
 -- rather than the last attempt at it.
 function M.start(run)
-  -- From done as well as from stopped (ADR 0017). A finished run is not a
+  -- From done as well as from stopped. A finished run is not a
   -- running one, and refusing here made the window a single-use control: with
   -- no sweeps registered a run reaches done within a few frames of the first
   -- press, and both buttons were then inert until DCS was restarted. Restarted
@@ -3093,10 +3093,10 @@ end
 --
 -- What the extract is an extract of: the DCS build, the theatre's directory
 -- under the install, and a fingerprint of the three terrain data files. All of
--- it is read from the install and none of it from the user (ADR 0011).
+-- it is read from the install and none of it from the user.
 --
 -- The fingerprint is a record of the three files -- where each was, how big,
--- and what its container said it held -- and not a version (ADR 0023). The
+-- and what its container said it held -- and not a version. The
 -- version of a theatre's data is the DCS build: ED ships terrain data only
 -- inside a DCS update, and every update carries a new build string, so a
 -- resume keys on the build and the fingerprint only catches an install that
@@ -3115,7 +3115,7 @@ M.ENTRY_FILE = "entry.lua"
 -- The three files as the manifest keys them: the directory each lives in and
 -- its extension. The base name is derived from nothing, because it is the id
 -- on Sinai and the directory name on Cold War Germany, so the file is the one
--- in the directory with that extension (ADR 0022).
+-- in the directory with that extension.
 M.FINGERPRINT_FILES = {
   { key = "surface5", dir = "Surface", ext = ".surface5" },
   { key = "rn4", dir = "roads", ext = ".rn4" },
@@ -3211,7 +3211,7 @@ end
 -- The directory under Mods/terrains whose entry.lua declares `id`. A directory
 -- with no entry file is not a theatre and is passed over: Kola and Nevada sit
 -- there with a radio.lua each and nothing else. Before failing, the id itself
--- is tried as a directory name (ADR 0011).
+-- is tried as a directory name.
 function M.find_terrain_dir(install, id)
   if type(id) ~= "string" or id == "" then
     return nil, "no theatre id to look for: " .. tostring(id)
@@ -3429,7 +3429,7 @@ M.identity_job = {
 -- the run has a manifest, and every sweep that follows has a grid to walk and
 -- a journal to skip by.
 --
--- ADR 0026: no rectangle is read from a theatre file. The theatre's own
+-- No rectangle is read from a theatre file. The theatre's own
 -- nodesMapBorders is the extent of a picture, cut to the built terrain on one
 -- theatre and to the whole map or the middle of it on others, so a rule that
 -- read it would be right on one theatre by an artist's choice. The authored
@@ -3460,7 +3460,7 @@ end
 --------------------------------------------------------------------------------
 -- The pre-sweep
 --
--- The authored rectangle is measured, on every theatre (ADR 0026): a 5 km
+-- The authored rectangle is measured, on every theatre: a 5 km
 -- lattice over the theatre's bounds, and per cell a 2 km line of heights and,
 -- where the line does not settle it, one road snap. It is a prepare job
 -- because the grid is planned from what it finds, and it sits before the grid
@@ -3468,7 +3468,7 @@ end
 -- already holds this theatre's extract holds the rectangle the grid was
 -- planned from, and measuring again could move the lattice by a cell and
 -- refuse a half-finished extract that was perfectly good. A crop run measures
--- nothing and has no rectangle (ADR 0009).
+-- nothing and has no rectangle.
 --
 -- A Stop during the measurement loses it, because nothing is on disk yet, and
 -- the next Start measures again. The rectangle left on the run by the lost
@@ -3760,8 +3760,8 @@ M.grid_job = {
     end
 
     -- A crop wins; else what the pre-sweep found; else there is nothing to
-    -- sweep. The pre-sweep is the only whole-map source on every theatre
-    -- (ADR 0026), so this only fires when the job list lacks it.
+    -- sweep. The pre-sweep is the only whole-map source on every theatre,
+    -- so this only fires when the job list lacks it.
     local crop_m = M.crop_box(run.config.crop)
     local presweep_m = run.presweep_bounds or nil
     if not crop_m and not presweep_m then
@@ -3894,7 +3894,7 @@ end
 
 -- The water codes of the format. A string not in the table is 254, so that
 -- a cell whose surface the hook did not recognise stays apart from a fill
--- cell, which is 255 (ADR 0007).
+-- cell, which is 255.
 local WATER_CODES = { land = 0, lake = 1, sea = 2, river = 3 }
 M.WATER_UNRECOGNISED = 254
 M.WATER_NODATA = 255
@@ -4030,8 +4030,7 @@ function M.config_record(opts)
     default_camera_km = camera,
     summer_time_delta = scalar_or_null(opts.summer_time_delta),
     shape = scalar_or_null(opts.shape),
-    -- Fitted by pack from the samples below; the extractor never carries one
-    -- (ADR 0011).
+    -- Fitted from the samples below by the Rust side; the hook never carries one.
     crs = M.JSON_NULL,
     latlon_samples = M.as_array(opts.latlon_samples or {}),
     fill = fill,
@@ -4166,8 +4165,8 @@ M.add_job("hook", M.config_job)
 -- value is, and a sweep that stopped on one odd airfield would stop on a
 -- theatre nobody has measured. A field that is not what was expected is
 -- written null, or an empty list, with one log line saying where, and the
--- rest of the row is kept. Keys the format does not name are not copied
--- (ADR 0007): the encoder raises on a function or a userdata, and a theatre
+-- rest of the row is kept. Keys the format does not name are not copied:
+-- the encoder raises on a function or a userdata, and a theatre
 -- may put anything in a key nobody reads.
 --------------------------------------------------------------------------------
 
@@ -4295,7 +4294,7 @@ function M.airdrome_rows(airdromes)
 end
 
 -- The runway name is the two edge names joined by a hyphen, which is what ED
--- calls the same runway in the airdrome's own table (ADR 0007).
+-- calls the same runway in the airdrome's own table.
 function M.runway_rows(airdrome_id, list)
   local rows = M.as_array({})
   local runways = table_list(list, "airdrome " .. tostring(airdrome_id) .. " runways")
@@ -4491,7 +4490,7 @@ function M.town_rows(towns, to_meters)
 end
 
 -- The node's positions are positional pairs, {x, z}, not {x, y} tables; its
--- id is its own and not its index in the list (ADR 0007).
+-- id is its own and not its index in the list.
 function M.node_rows(nodes)
   local rows = M.as_array({})
   local list = table_list(nodes, "missionNodes")
@@ -4768,7 +4767,7 @@ M.add_job("hook", M.tables_job)
 -- walked once with both calls costs less than either layer walked alone,
 -- because the second call at a cell finds the terrain the first just loaded;
 -- the design's rule against interleaving layers was measured on scattered
--- points, not on two calls at one (ADR 0028). Reading both at once also
+-- points, not on two calls at one. Reading both at once also
 -- makes the fill test one test: a cell is fill when the class, the unrounded
 -- height and, where the fill is sea, the seabed all equal the triple, and it
 -- is nodata in both layers.
@@ -4869,7 +4868,7 @@ M.water_height_job = {
     local total = high * wide
 
     -- Journalled tiles count as done from the start, so a resumed sweep's
-    -- bar climbs rather than falling back (ADR 0025).
+    -- bar climbs rather than falling back.
     local journalled = 0
     for tx, tz in M.each_tile(grid) do
       if run.done[M.tile_key("water", tx, tz)] then
@@ -5167,7 +5166,7 @@ M.add_job("hook", M.water_height_job)
 --
 -- Seeds are numbered by their position in a fixed plan, lattice row-major
 -- then airdromes by id then towns by name, so a resumed run gives every seed
--- the id it had without reading anything (ADR 0030). A position whose seed
+-- the id it had without reading anything. A position whose seed
 -- cannot be placed, off the grid or in a tile the tile sweep left out, keeps
 -- its number and gets no line.
 --
@@ -5178,8 +5177,8 @@ M.add_job("hook", M.water_height_job)
 -- Two snaps within the merge distance are one road point, and the seeds that
 -- made them are one seed for pairing: near Kutaisi 126 of 441 merged. A seed
 -- provably farther than ROAD_SEED_MAX_M from every road is on ground the
--- pre-sweep calls unbuilt (ADR 0027) and is neither asked nor written, and
--- one whose own answer is that far is written and not paired (ADR 0031). A
+-- pre-sweep calls unbuilt and is neither asked nor written, and
+-- one whose own answer is that far is written and not paired. A
 -- seed with fewer than four kept seeds within ROAD_NEIGHBOUR_MAX_M takes the
 -- ones it has. Lines go to the file in batches of ROAD_LINE_BATCH, because an
 -- append is an open, a close and two size checks, and Caucasus writes two
@@ -6566,7 +6565,7 @@ M.surface_job = {
     local high, wide = M.tile_counts(grid)
     local total = high * wide
     -- Tiles journalled or left out count as done from the start, so a
-    -- resumed sweep's bar climbs rather than falling back (ADR 0025).
+    -- resumed sweep's bar climbs rather than falling back.
     local handled = 0
     for tx, tz in M.each_tile(grid) do
       if skip[skip_key(tx, tz)] or run.done[M.tile_key("surface", tx, tz)] then
@@ -6723,7 +6722,7 @@ M.add_job("mission", M.surface_job)
 -- Scenery is searched a box at a time on a lattice anchored on the grid
 -- origin, row-major, each box clipped to the grid and keeping only the
 -- objects whose position lies inside it, lower edges included and upper
--- edges not (ADR 0032). So every object belongs to exactly one box, and the
+-- edges not. So every object belongs to exactly one box, and the
 -- file needs no set of ids to stay free of repeats. Afghanistan's cities hold
 -- a million objects in 20 km, so the box is small enough that the densest
 -- one is under a megabyte in one call.
@@ -7005,7 +7004,7 @@ M.scenery_job = {
     local file = TABLE_FILES.scenery
     local path = M.join(run.dir, file)
 
-    -- The file is the journal (ADR 0033), so the job reads it back on every
+    -- The file is the journal, so the job reads it back on every
     -- Start, whatever the manifest says of the pass: a directory extracted
     -- before this sweep existed has the mission pass complete and no file.
     local recovered = M.recover_swap(path)
@@ -7198,7 +7197,7 @@ M.scenery_job = {
     end
 
     -- Boxes before the one being asked count as done from the start, so a
-    -- resumed sweep's bar climbs rather than falling back (ADR 0025).
+    -- resumed sweep's bar climbs rather than falling back.
     local function progress()
       if phase == "read" then
         return reader.read, reader.size
@@ -7258,7 +7257,7 @@ function M.callbacks(run)
     end,
 
     -- A mission starting means a terrain too, so this ends the idle wait for
-    -- the same reason a mission load does. It gates nothing: ADR 0010, the
+    -- the same reason a mission load does. It gates nothing: the
     -- sweeps need terrain rather than a mission.
     onSimulationStart = function()
       M.log("simulation started")
@@ -7523,7 +7522,7 @@ end
 
 M.WINDOW_TITLE = "DCS TERRAIN EXTRACT"
 
--- Above DCS's own chrome (ADR 0018). A window at the default zero is drawn
+-- Above DCS's own chrome. A window at the default zero is drawn
 -- underneath the menu, the Mission Editor and the map view, which looks exactly
 -- like a window that has been destroyed: it goes on answering every question put
 -- to it, getVisible included, while nobody can see it. Raised, it stays up
@@ -7543,7 +7542,7 @@ M.WINDOW_Z_ORDER = 10001
 -- x and y are where the window opens when the screen cannot be measured. When
 -- it can, the window opens centerd along the top, because the top-left corner
 -- is the Mission Editor's own toolbar and a window raised above everything
--- (ADR 0018) would sit on it until it was dragged away.
+-- would sit on it until it was dragged away.
 --
 -- The heights are the Mission Editor's: its own dialogs place a label and a box
 -- at 20 pixels and a button at 24, and a control drawn taller than its skin
@@ -7978,7 +7977,7 @@ local function start_pressed()
   end
 
   -- Before the run is told to go, and after the file is written, so what is on
-  -- disk and what the run is about to use are the same settings (ADR 0017).
+  -- disk and what the run is about to use are the same settings.
   M.retarget(run, settings)
   M.start(run)
 end
@@ -8297,7 +8296,7 @@ function M.build_window()
   -- The center of the screen, now that the frame has its size, and the fixed
   -- corner where the screen cannot be measured. The center rather than a
   -- corner because every corner is somebody's: the top-left is the Mission
-  -- Editor's toolbar, and a window raised above everything (ADR 0018) would
+  -- Editor's toolbar, and a window raised above everything would
   -- sit on it until it was dragged away. Through M.ui and returning a table,
   -- because the seam hands back one value and the screen is two.
   local screen = M.ui(function()
@@ -8433,7 +8432,7 @@ end
 
 -- Where the bar stands: the running sweep's own count as a whole percentage,
 -- nothing where the sweep cannot count or none is running, and full at done.
--- The sweep's, not the run's (ADR 0025): the line beside it says which sweep
+-- The sweep's, not the run's: the line beside it says which sweep
 -- of how many, and that is as much as the run knows about the whole. Whole,
 -- because the bar is written when this changes and a fraction that moved
 -- every frame would be a write every frame; a hundred writes a sweep is the

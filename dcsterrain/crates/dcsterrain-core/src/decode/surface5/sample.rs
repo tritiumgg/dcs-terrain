@@ -5,7 +5,7 @@
 //! reports the strip. Through the Roki tunnel a road runs under a mountain
 //! triangle, and taking the mountain puts the road 729 m too high; where a
 //! lake is laid over land, the game reports the lake. So a road strip wins,
-//! then water, then the later block, then the later triangle (ADR 0041).
+//! then water, then the later block, then the later triangle.
 
 use super::mesh::{Block, Mesh};
 
@@ -38,7 +38,7 @@ pub fn cover(a: [f64; 2], b: [f64; 2], c: [f64; 2], p: [f64; 2]) -> Option<(f64,
 }
 
 /// The `water` layer's class for a triangle type: 0 land, 1 lake, 2 sea,
-/// 3 river. A river bit wins over a lake or sea bit beside it (ADR 0041).
+/// 3 river. A river bit wins over a lake or sea bit beside it.
 pub fn water_class(tritype: u32) -> u8 {
     if tritype & RIVER != 0 {
         3
@@ -59,7 +59,7 @@ pub fn rank(tritype: u32, block: usize, tri: usize) -> u64 {
 }
 
 /// The `height` layer's metres: rounded at the game's own precision, f32,
-/// which matches it on more cells than rounding the f64 (ADR 0041).
+/// which matches it on more cells than rounding the f64.
 pub fn round_height(h: f64) -> i16 {
     // Clamped short of nodata, which no ground reaches.
     ((h as f32) + 0.5).floor().clamp(-32767.0, 32767.0) as i16

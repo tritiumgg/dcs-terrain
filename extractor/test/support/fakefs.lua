@@ -15,8 +15,8 @@
 -- directory reaches the rename and fails there rather than quietly deleting
 -- the directory first.
 --
--- Handles report nothing from write and close, which is what DCS's own io does
--- (ADR 0016). A fake that returned true would agree with the assumption that
+-- Handles report nothing from write and close, which is what DCS's own io does.
+-- A fake that returned true would agree with the assumption that
 -- caused the bug, so this one returns what the real thing returns and the code
 -- has to check the size instead.
 

@@ -162,7 +162,7 @@ T.eq("naming the id", mwhy:find("no theatre under Mods/terrains has id Nowhere",
 T.eq("and what was scanned", mwhy:find("Sinai=SinaiMap", 1, true) ~= nil, true)
 T.eq("a directory with no entry file is passed over", mwhy:find("Kola", 1, true), nil)
 
--- ADR 0011: before failing, the id as a directory name.
+-- Before failing, the id as a directory name.
 fs.mkdir(TERRAINS .. "/Nevada")
 T.eq("a directory named for the id is the fallback", E.find_terrain_dir(INSTALL, "Nevada"), "Nevada")
 

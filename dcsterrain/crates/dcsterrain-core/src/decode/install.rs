@@ -180,7 +180,7 @@ pub struct Map {
 
 /// Where a role's files live under the map directory, and how many.
 enum Find {
-    /// Exactly one file with this extension in this directory (ADR 0022).
+    /// Exactly one file with this extension in this directory.
     One(&'static str, &'static str),
     /// Every file with this extension in this directory, perhaps none.
     All(&'static str, &'static str),

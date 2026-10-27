@@ -1,5 +1,4 @@
-//! Runs a map's Lua files in a sandbox and reads back the tables they set
-//! (ADR 0047).
+//! Runs a map's Lua files in a sandbox and reads back the tables they set.
 //!
 //! The files are data written as Lua 5.1, so Lua 5.1 itself reads them. Each
 //! runs in an environment of its own holding the pure parts of the base
