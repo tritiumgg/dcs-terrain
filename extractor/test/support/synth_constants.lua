@@ -361,6 +361,20 @@ M.BUILT_UP_NORTH_M = 56900.0
 M.BUILT_UP_WEST_M = 29100.0
 M.BUILT_UP_EAST_M = 30900.0
 
+-- Ground cover. The town patch is the built-up rectangle and the forest patch
+-- the forest square less its hole; the field and the beach are rectangles of
+-- their own. The beach runs into the sea, whose cells stay water. Every edge
+-- is on a cell edge, and each patch is half-open on its north and east.
+
+M.FIELD_SOUTH_M = 20000.0
+M.FIELD_NORTH_M = 23000.0
+M.FIELD_WEST_M = 60000.0
+M.FIELD_EAST_M = 63000.0
+M.BEACH_SOUTH_M = 30000.0
+M.BEACH_NORTH_M = 32000.0
+M.BEACH_WEST_M = 20000.0
+M.BEACH_EAST_M = 24000.0
+
 -- Projection. Caucasus's parameters, because a fit must reproduce the published
 -- Caucasus row within a metre. The samples are the beacons', one per beacon;
 -- with fewer than three the extractor takes the parameters from its table

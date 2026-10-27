@@ -8,6 +8,7 @@
 use std::fmt;
 
 use super::*;
+use crate::source::Cover;
 
 /// A setting `Theatre::new` refuses.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -201,6 +202,35 @@ impl Theatre {
             SURFACE_WATER
         } else {
             SURFACE_LAND
+        }
+    }
+
+    /// The ground cover, first match winning: water, the runway, then the
+    /// town, forest, field and beach patches, else plain. A road keeps the
+    /// cover of the ground under it.
+    pub fn cover(&self, north: f64, east: f64) -> Cover {
+        let in_box =
+            |s: f64, n: f64, w: f64, e: f64| (s..n).contains(&north) && (w..e).contains(&east);
+        let town = in_box(
+            BUILT_UP_SOUTH_M,
+            BUILT_UP_NORTH_M,
+            BUILT_UP_WEST_M,
+            BUILT_UP_EAST_M,
+        );
+        if self.water(north, east) != WATER_LAND {
+            Cover::Water
+        } else if self.on_runway(north, east) {
+            Cover::Runway
+        } else if town {
+            Cover::Town
+        } else if self.trees(north, east) > 0 {
+            Cover::Forest
+        } else if in_box(FIELD_SOUTH_M, FIELD_NORTH_M, FIELD_WEST_M, FIELD_EAST_M) {
+            Cover::Field
+        } else if in_box(BEACH_SOUTH_M, BEACH_NORTH_M, BEACH_WEST_M, BEACH_EAST_M) {
+            Cover::Beach
+        } else {
+            Cover::Plain
         }
     }
 

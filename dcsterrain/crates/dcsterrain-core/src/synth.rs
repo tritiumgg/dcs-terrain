@@ -22,9 +22,11 @@
 //! * primitives only; anything derivable (grid extents, feature positions in
 //!   absolute metres, tile counts) is computed by the generator
 
+mod memory;
 mod theatre;
 mod write;
 
+pub use memory::{Synth, TERRAIN_ID};
 pub use theatre::{Cell, Edge, Object, SynthError, Theatre};
 pub use write::{Written, write};
 
@@ -369,6 +371,20 @@ pub const BUILT_UP_SOUTH_M: f64 = 55100.0;
 pub const BUILT_UP_NORTH_M: f64 = 56900.0;
 pub const BUILT_UP_WEST_M: f64 = 29100.0;
 pub const BUILT_UP_EAST_M: f64 = 30900.0;
+
+// Ground cover. The town patch is the built-up rectangle and the forest patch
+// the forest square less its hole; the field and the beach are rectangles of
+// their own. The beach runs into the sea, whose cells stay water. Every edge
+// is on a cell edge, and each patch is half-open on its north and east.
+
+pub const FIELD_SOUTH_M: f64 = 20000.0;
+pub const FIELD_NORTH_M: f64 = 23000.0;
+pub const FIELD_WEST_M: f64 = 60000.0;
+pub const FIELD_EAST_M: f64 = 63000.0;
+pub const BEACH_SOUTH_M: f64 = 30000.0;
+pub const BEACH_NORTH_M: f64 = 32000.0;
+pub const BEACH_WEST_M: f64 = 20000.0;
+pub const BEACH_EAST_M: f64 = 24000.0;
 
 // Projection. Caucasus's parameters, because a fit must reproduce the published
 // Caucasus row within a metre. The samples are the beacons', one per beacon;
