@@ -12,7 +12,7 @@ use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use super::{Ground, Identity, Layer, Refusal, Source, TILE_SIZE};
+use super::{CELL_SIZE, Ground, Identity, Layer, Refusal, Source, TILE_SIZE};
 use crate::cache::{Cache, Entry};
 use crate::decode::install::{self, Map};
 use crate::decode::surface5::ground::{self, Prepared, Tile, cover_of, grid_units, surface_of};
@@ -161,10 +161,7 @@ impl Install {
         let path = f.path.clone();
         let file = File::open(root.join(&path)).map_err(|e| refusal(&path, e))?;
         let boxes: Vec<[f64; 4]> = toc.blocks.iter().map(|b| b.world_box()).collect();
-        let grid = Grid {
-            tile_size: TILE_SIZE,
-            ..grid_for(&toc.bounds())
-        };
+        let grid = grid_for(&toc.bounds(), CELL_SIZE, TILE_SIZE);
         Ok(Install {
             identity: Identity {
                 terrain: map.theatre.clone(),

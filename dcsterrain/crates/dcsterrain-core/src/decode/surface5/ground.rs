@@ -9,14 +9,33 @@
 //! that bin's cells.
 
 use super::mesh::Block;
-use super::raster::RUNWAY_MATERIAL;
 use super::sample::{ROAD_STRIP, cover, rank, round_height, water_class};
+use crate::extract::Bounds;
 use crate::grid::Grid;
 use crate::source::{Cover, Layer};
 
 /// Cells along each side of a bin of the triangle index. A tile's side is a
 /// whole number of bins.
 pub const BIN_CELLS: u32 = 8;
+
+/// The material whose subset marks a runway.
+pub const RUNWAY_MATERIAL: &str = "Runway";
+
+/// The grid of `cell_size` cells over bounds `b`: its origin and extent
+/// snapped outward to whole cells.
+pub fn grid_for(b: &Bounds, cell_size: u32, tile_size: u32) -> Grid {
+    let cs = f64::from(cell_size);
+    let (x0, z0) = ((b.min_x / cs).floor() * cs, (b.min_z / cs).floor() * cs);
+    let (x1, z1) = ((b.max_x / cs).ceil() * cs, (b.max_z / cs).ceil() * cs);
+    Grid {
+        cell_size,
+        origin_x: x0,
+        origin_z: z0,
+        height: ((x1 - x0) / cs).round() as u32,
+        width: ((z1 - z0) / cs).round() as u32,
+        tile_size,
+    }
+}
 
 /// How far past its box a triangle is listed, in cells: a point on its edge
 /// is covered within the edge tolerance, and must find it in its bin.
@@ -508,6 +527,23 @@ mod tests {
                 assert_eq!(cell(&t, r as usize, c as usize), want, "({r}, {c})");
             }
         }
+    }
+
+    #[test]
+    fn the_grid_is_the_bounds_snapped_outward() {
+        let g = grid_for(
+            &Bounds {
+                min_x: -490048.7,
+                min_z: -570000.0,
+                max_x: 270000.0,
+                max_z: 960039.4,
+            },
+            50,
+            64,
+        );
+        assert_eq!((g.origin_x, g.origin_z), (-490050.0, -570000.0));
+        assert_eq!((g.height, g.width), (15201, 30601));
+        assert_eq!((g.cell_size, g.tile_size), (50, 64));
     }
 
     #[test]

@@ -64,6 +64,8 @@ pub struct Ground {
 
 /// Cells along each side of a tile.
 pub const TILE_SIZE: u32 = 64;
+/// Metres along each side of a cell.
+pub const CELL_SIZE: u32 = 50;
 
 /// A layer of the cell grid, each cell sampled at its centre.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

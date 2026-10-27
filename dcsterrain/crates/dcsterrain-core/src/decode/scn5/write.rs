@@ -16,9 +16,31 @@ use std::path::Path;
 use serde::Serialize;
 
 use super::{Error, Pool, Scene, malformed};
-use crate::decode::surface5::{put_tile, tile_entry};
 use crate::extract::{TileEntry, layer};
 use crate::grid::Grid;
+
+/// Writes `rel` under `dir` through a `.tmp` renamed into place.
+fn put_tile(dir: &Path, rel: &str, bytes: &[u8]) -> std::io::Result<()> {
+    let path = dir.join(rel);
+    fs::create_dir_all(path.parent().unwrap())?;
+    let tmp = dir.join(format!("{rel}.tmp"));
+    fs::write(&tmp, bytes)?;
+    fs::rename(&tmp, &path)
+}
+
+/// The manifest entry of tile `(tx, tz)` of layer `name`, holding `values`.
+fn tile_entry(name: &str, tx: u32, tz: u32, values: impl Iterator<Item = i64>) -> TileEntry {
+    let nodata = i64::from(layer(name).unwrap().nodata);
+    let present: Vec<i64> = values.filter(|&v| v != nodata).collect();
+    TileEntry {
+        layer: name.to_string(),
+        tx,
+        tz,
+        path: format!("tiles/{name}/{tx}_{tz}.bin"),
+        min: present.iter().copied().min(),
+        max: present.iter().copied().max(),
+    }
+}
 
 pub const SCENERY_FILE: &str = "scenery.jsonl";
 pub const MODELS_FILE: &str = "scenery_models.json";

@@ -12,10 +12,14 @@ use std::time::Instant;
 
 use serde_json::Value;
 
+use dcsterrain_core::cache::Cache;
 use dcsterrain_core::decode::airfield;
 use dcsterrain_core::decode::install::{self, TERRAINS_DIR};
 use dcsterrain_core::decode::scn5::{self, Pool, Scene};
-use dcsterrain_core::decode::surface5;
+use dcsterrain_core::extract::TileEntry;
+use dcsterrain_core::grid::{Grid, Window};
+use dcsterrain_core::source::install::Install;
+use dcsterrain_core::source::{Layer, Source};
 
 fn install_root() -> Option<PathBuf> {
     match std::env::var_os("DCSTERRAIN_INSTALL") {
@@ -266,11 +270,44 @@ impl Drop for TempDir {
     }
 }
 
-fn surface(root: &Path, dir: &str) -> (PathBuf, surface5::Surface5) {
-    let map = install::read_map(root, dir).unwrap();
-    let path = root.join(&map.files.iter().find(|f| f.role == "surface").unwrap().path);
-    let file = surface5::open(&path).unwrap_or_else(|e| panic!("{dir}: {e}"));
-    (path, file)
+/// Writes the `water` tiles of `id` on a grid of `tile_size` tiles under
+/// `out`, as the scenery writer reads them to tell where the mesh covers,
+/// and returns that grid and their entries. A tile wholly outside the mesh
+/// is not written.
+fn water_tiles(root: &Path, id: &str, tile_size: u32, out: &Path) -> (Grid, Vec<TileEntry>) {
+    let cache = TempDir::new("cache");
+    let t = Install::open(root, id, &Cache::new(&cache.0))
+        .unwrap()
+        .with_block_budget(4 << 30);
+    let grid = Grid {
+        tile_size,
+        ..t.grid()
+    };
+    let mut entries = Vec::new();
+    let (ntx, ntz) = grid.tiles();
+    let ts = i64::from(tile_size);
+    for tx in 0..ntx {
+        for tz in 0..ntz {
+            let (r, c) = (i64::from(tx) * ts, i64::from(tz) * ts);
+            let w = Window::read(&t, Layer::Water, r, c, tile_size, tile_size).unwrap();
+            if w.data.iter().all(|&v| v == Layer::Water.nodata()) {
+                continue;
+            }
+            let path = format!("tiles/water/{tx}_{tz}.bin");
+            let bytes: Vec<u8> = w.data.iter().map(|&v| v as u8).collect();
+            fs::create_dir_all(out.join("tiles/water")).unwrap();
+            fs::write(out.join(&path), bytes).unwrap();
+            entries.push(TileEntry {
+                layer: "water".into(),
+                tx,
+                tz,
+                path,
+                min: None,
+                max: None,
+            });
+        }
+    }
+    (grid, entries)
 }
 
 /// Writes Caucasus's water tiles, then its scenery, and checks what landed.
@@ -278,10 +315,8 @@ fn surface(root: &Path, dir: &str) -> (PathBuf, surface5::Surface5) {
 fn caucasus_writes_its_scenery_and_counts() {
     let Some(root) = install_root() else { return };
     let out = TempDir::new("caucasus");
-    let (spath, sfile) = surface(&root, "Caucasus");
-    let grid = surface5::grid_for(&sfile.bounds());
     let started = Instant::now();
-    let tiles = surface5::write_tiles(&sfile, &File::open(&spath).unwrap(), &grid, &out.0).unwrap();
+    let (grid, tiles) = water_tiles(&root, "Caucasus", 256, &out.0);
     eprintln!("ground tiles in {:.1} s", started.elapsed().as_secs_f64());
 
     let path = scene_path(&root, "Caucasus");
