@@ -114,7 +114,7 @@ pub fn read(path: &Path) -> io::Result<Result<Header, NotContainer>> {
 }
 
 /// A header as the files write it, for tests that build one.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub fn build(class: &str, version: u32, data_base: u64) -> Vec<u8> {
     let mut b = Vec::new();
     b.extend_from_slice(&CONTAINER_VERSION.to_le_bytes());

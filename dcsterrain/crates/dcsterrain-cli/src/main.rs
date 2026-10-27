@@ -57,6 +57,8 @@ enum Command {
         op: String,
         /// The request as JSON; `{}` when omitted.
         request: Option<String>,
+        #[command(flatten)]
+        cache: CacheDir,
     },
     /// List the terrains an install holds: each id, its folder, and whether
     /// a decoder reads each of its terrain files.
@@ -177,7 +179,15 @@ fn main() -> ExitCode {
             cell,
             op,
             request,
-        } => run_query(install, &terrain, (seed, size_km, cell), &op, request),
+            cache,
+        } => run_query(
+            install,
+            &terrain,
+            (seed, size_km, cell),
+            &op,
+            request,
+            cache,
+        ),
         Command::ListTerrains {
             install,
             json,
@@ -259,6 +269,7 @@ fn run_query(
     (seed, size_km, cell): (u32, u32, u32),
     op: &str,
     request: Option<String>,
+    cache: CacheDir,
 ) -> ExitCode {
     let refused = |code: &str, message: String| refuse(vec![Issue::new(code, &message, "")]);
     let request: Value = match request.as_deref().map(serde_json::from_str).transpose() {
@@ -286,7 +297,11 @@ fn run_query(
             Ok(r) => r,
             Err(e) => return refused("no_install", e),
         };
-        match Terrain::open(&root, id) {
+        let cache = match cache.open() {
+            Ok(c) => c,
+            Err(e) => return refused("no_cache", e),
+        };
+        match Terrain::open(&root, id, &cache) {
             Ok(t) => t,
             Err(e) => return refused("terrain_refused", e.0),
         }

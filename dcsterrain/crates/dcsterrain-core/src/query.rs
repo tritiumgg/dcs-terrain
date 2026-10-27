@@ -1,12 +1,14 @@
 //! One request against one terrain: the terrain opened, the operation found,
 //! the request read, the answer stamped.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Instant;
 
 use serde_json::Value;
 
-use crate::decode::install::{self, Map};
+use crate::cache::Cache;
+use crate::grid::Grid;
+use crate::source::install::Install;
 use crate::source::{Refusal, Source};
 use crate::synth::{self, Synth};
 use crate::types::{
@@ -21,54 +23,47 @@ pub const CELL_SIZE_M: f64 = 50.0;
 pub enum Terrain {
     /// The synthetic terrain, in memory.
     Synth(Synth),
-    /// A terrain of a DCS install, its files classified from their headers.
-    Install { root: PathBuf, map: Map },
+    /// A terrain of a DCS install, read in place.
+    Install(Box<Install>),
 }
 
 impl Terrain {
-    /// The install terrain whose `entry.lua` declares `id`.
-    pub fn open(install: &Path, id: &str) -> Result<Terrain, Refusal> {
-        Ok(Terrain::Install {
-            root: install.to_path_buf(),
-            map: install::open(install, id)?,
-        })
+    /// The install terrain whose `entry.lua` declares `id`, its cache
+    /// entries in `cache`.
+    pub fn open(install: &Path, id: &str, cache: &Cache) -> Result<Terrain, Refusal> {
+        Ok(Terrain::Install(Box::new(Install::open(
+            install, id, cache,
+        )?)))
+    }
+
+    pub fn source(&self) -> &dyn Source {
+        match self {
+            Terrain::Synth(s) => s,
+            Terrain::Install(i) => i.as_ref(),
+        }
     }
 
     fn provenance(&self) -> Provenance {
-        let (terrain, dcs_build, terrain_fingerprint) = match self {
-            Terrain::Synth(s) => {
-                let i = s.identity();
-                (
-                    i.terrain.clone(),
-                    i.dcs_build.clone(),
-                    i.fingerprint.clone(),
-                )
-            }
-            Terrain::Install { map, .. } => (
-                map.theatre.clone(),
-                map.build.version.clone(),
-                fingerprint(map),
-            ),
-        };
+        let i = self.source().identity();
         Provenance {
-            terrain,
-            dcs_build,
-            terrain_fingerprint,
+            terrain: i.terrain.clone(),
+            dcs_build: i.dcs_build.clone(),
+            terrain_fingerprint: i.fingerprint.clone(),
             cell_size: CELL_SIZE_M,
             elapsed_ms: 0,
         }
     }
 }
 
-/// The sizes of the surface, road and scene files, joined by `-`.
-fn fingerprint(map: &Map) -> String {
-    let size = |role: &str| {
-        map.files
-            .iter()
-            .find(|f| f.role == role)
-            .map_or_else(|| "0".to_string(), |f| f.size.to_string())
-    };
-    format!("{}-{}-{}", size("surface"), size("roads"), size("scene"))
+/// The grid's extent: whole cells around everything the mesh covers.
+fn extent(g: &Grid) -> BoundingBox {
+    let c = f64::from(g.cell_size);
+    BoundingBox {
+        min_x: g.origin_x,
+        min_z: g.origin_z,
+        max_x: g.origin_x + f64::from(g.height) * c,
+        max_z: g.origin_z + f64::from(g.width) * c,
+    }
 }
 
 /// Answers one request, `op` with its JSON, timing it from here.
@@ -111,24 +106,17 @@ fn to_value(r: impl serde::Serialize) -> Value {
     serde_json::to_value(r).expect("a response serializes")
 }
 
-/// What the terrain is and what is known of it. An install terrain's extent
-/// and counts are null until its mesh and tables have been read.
+/// What the terrain is and what is known of it. An install terrain's counts
+/// are null until its tables have been read.
 pub fn describe(terrain: &Terrain) -> DescribeResponse {
     let provenance = terrain.provenance();
     match terrain {
         Terrain::Synth(s) => {
-            let g = s.grid();
-            let c = f64::from(g.cell_size);
             let form = s.form();
             DescribeResponse {
                 provenance,
                 dcs_build_timestamp: synth::DCS_BUILD_TIMESTAMP.to_string(),
-                extent: Some(BoundingBox {
-                    min_x: g.origin_x,
-                    min_z: g.origin_z,
-                    max_x: g.origin_x + f64::from(g.height) * c,
-                    max_z: g.origin_z + f64::from(g.width) * c,
-                }),
+                extent: Some(extent(&s.grid())),
                 files: Vec::new(),
                 counts: Counts {
                     airdromes: Some(1),
@@ -143,11 +131,12 @@ pub fn describe(terrain: &Terrain) -> DescribeResponse {
                 validation: None,
             }
         }
-        Terrain::Install { map, .. } => DescribeResponse {
+        Terrain::Install(i) => DescribeResponse {
             provenance,
-            dcs_build_timestamp: map.build.timestamp.clone(),
-            extent: None,
-            files: map
+            dcs_build_timestamp: i.map().build.timestamp.clone(),
+            extent: Some(extent(&i.grid())),
+            files: i
+                .map()
                 .files
                 .iter()
                 .map(|f| TerrainFile {

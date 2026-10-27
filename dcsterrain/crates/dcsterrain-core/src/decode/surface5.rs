@@ -261,7 +261,7 @@ pub fn scan(head: &[u8], body: usize) -> Result<Toc, Malformed> {
 
 /// Builds surface5 files for tests: the parts a decoder finds, with framing
 /// words between them that it must step over.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub mod build {
     use super::super::container;
 

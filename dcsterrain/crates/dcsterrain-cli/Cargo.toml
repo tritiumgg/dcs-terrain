@@ -19,5 +19,8 @@ serde_json = "1.0.154"
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 
+[dev-dependencies]
+dcsterrain-core = { path = "../dcsterrain-core", features = ["testing"] }
+
 [target."cfg(windows)".dependencies]
 winreg = "0.56.0"

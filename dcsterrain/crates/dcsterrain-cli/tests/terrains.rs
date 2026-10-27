@@ -1,12 +1,15 @@
 //! Opening a terrain by its id, and listing an install's terrains, on an
-//! install tree the test builds: headers only, no terrain data.
+//! install tree the test builds: headers only, but for a surface file of
+//! one block of two triangles.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use serde_json::Value;
+use serde_json::{Value, json};
+
+use dcsterrain_core::decode::surface5::build::{Block, file, tri, u32s, vec3};
 
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_dcsterrain"))
@@ -62,12 +65,33 @@ fn terrain(root: &Path, folder: &str, id: &str, scene_version: u32) {
         ("Scenes", "scn5", "landscape5::Scene5File", scene_version),
     ];
     for (dir, ext, class, version) in files {
-        put(
-            root,
-            &format!("{m}/{dir}/{folder}.{ext}"),
-            &header(class, version),
-        );
+        let bytes = match ext {
+            "surface5" => surface(),
+            _ => header(class, version),
+        };
+        put(root, &format!("{m}/{dir}/{folder}.{ext}"), &bytes);
     }
+}
+
+/// A mesh of one block: two triangles over a kilometre square at the
+/// origin, flat at 10 m.
+fn surface() -> Vec<u8> {
+    let v = [
+        [0.0, 10.0, 0.0],
+        [1000.0, 10.0, 0.0],
+        [0.0, 10.0, 1000.0],
+        [1000.0, 10.0, 1000.0],
+    ];
+    let block = Block {
+        t: [0.0; 3],
+        bbox: [0.0, 0.0, 0.0, 1000.0, 100.0, 1000.0],
+        arrays: vec![
+            u32s("TRITYPE", &[0, 0]),
+            tri(&[[0, 1, 2], [1, 3, 2]], None),
+            vec3("Pbase", &v),
+        ],
+    };
+    file(&[block], 1)
 }
 
 /// A fresh, empty directory under the system temp.
@@ -147,12 +171,16 @@ fn refuses_an_operation_not_built_and_a_flag_for_another_terrain() {
 fn opens_a_terrain_by_the_id_its_entry_declares() {
     let t = install(false);
     let root = t.0.to_str().unwrap();
+    let c = scratch();
+    let cache = c.0.to_str().unwrap();
     let out = run(&[
         "query",
         "--install",
         root,
         "--terrain",
         "GermanyCW",
+        "--cache",
+        cache,
         "describe",
     ]);
     assert!(
@@ -169,12 +197,20 @@ fn opens_a_terrain_by_the_id_its_entry_declares() {
     let size = |class: &str| header(class, 0).len();
     let want = format!(
         "{}-{}-{}",
-        size("landscape5::Surface5File"),
+        surface().len(),
         size("landscape4::lRoadNetwork"),
         size("landscape5::Scene5File")
     );
     assert_eq!(v["terrain_fingerprint"], want);
-    assert_eq!(v["extent"], Value::Null);
+    let extent = json!({"min_x": 0.0, "min_z": 0.0, "max_x": 1000.0, "max_z": 1000.0});
+    assert_eq!(v["extent"], extent);
+    // Its table of contents was built into the cache on the way.
+    assert!(
+        c.0.join("GermanyCW")
+            .join("0.0.0.1")
+            .join("mesh.toc")
+            .is_file()
+    );
 
     // A folder's name is not an id, and the refusal lists the ids.
     let out = run(&[
@@ -183,6 +219,8 @@ fn opens_a_terrain_by_the_id_its_entry_declares() {
         root,
         "--terrain",
         "GermanyColdWar",
+        "--cache",
+        cache,
         "describe",
     ]);
     assert_eq!(out.status.code(), Some(1));
@@ -340,11 +378,13 @@ fn list_terrains_shows_a_cache_after_index_and_none_after_clear() {
     assert_eq!(v["terrains"][0]["cache"], Value::Null, "Caucasus has none");
     let germany = &v["terrains"][1]["cache"];
     assert_eq!(germany["path"], dir.to_str().unwrap());
-    assert_eq!(germany["entries"], serde_json::json!([]));
+    assert_eq!(germany["entries"][0]["name"], "mesh.toc");
+    let size = germany["entries"][0]["size"].as_u64().unwrap();
+    assert_eq!(germany["entries"].as_array().unwrap().len(), 1);
 
     let out = run(&["list-terrains", "--install", root, "--cache", cache]);
     let text = String::from_utf8(out.stdout).unwrap();
-    assert!(text.contains("0 entries, 0 B"), "{text}");
+    assert!(text.contains(&format!("1 entry, {size} B")), "{text}");
 
     let out = run(&[
         "cache",

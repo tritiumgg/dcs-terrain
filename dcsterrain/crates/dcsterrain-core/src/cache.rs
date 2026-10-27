@@ -47,10 +47,9 @@ pub trait Entry: Sync {
     fn build(&self, install: &Path, map: &Map) -> Result<Vec<u8>, Refusal>;
 }
 
-/// Every kind of entry `index` builds. None yet: each arrives with the
-/// decoder that fills it.
+/// Every kind of entry `index` builds.
 pub fn entries() -> Vec<&'static dyn Entry> {
-    Vec::new()
+    vec![&crate::source::install::MESH_TOC]
 }
 
 /// Where the cache lives when `--cache` does not say.
