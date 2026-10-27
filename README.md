@@ -54,8 +54,9 @@ the tool reads each of its files (`--json` for a document):
 dcsterrain list-terrains
 ```
 
-Describe a terrain by its id: its build, its files and their versions
-(`--terrain synth` needs no install):
+Describe a terrain by its id: its build, its extent, its files and their
+versions (`--terrain synth` needs no install). The first query on a terrain
+builds its cache, in about a second; later ones read it:
 
 ```bash
 dcsterrain query --terrain Caucasus describe
@@ -64,8 +65,8 @@ dcsterrain query --terrain Caucasus describe
 `dcsterrain cache list` shows the cache (`--cache <dir>` names another),
 `cache prune` deletes builds other than the installed one, and `cache clear`
 deletes all of it, asking before the live validation figures.
-`dcsterrain index --terrain Caucasus` builds a cache ahead of time; no entry
-exists to build yet (not usable yet).
+`dcsterrain index --terrain Caucasus` builds a cache ahead of time. `query`,
+`index` and `list-terrains` take `--cache <dir>` too.
 
 Ask a siting question the same way, `find_sites` with its JSON (planned, not
 usable yet). The first question on a terrain will build its cache in seconds,

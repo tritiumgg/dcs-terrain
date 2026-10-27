@@ -37,7 +37,7 @@ The repository ships tools only. Users run them against their own install.
 
 ```
 DCS install (read-only)                 cache/<terrain>/<build>/   (rebuildable)
-  .surface5 ─┐                            mesh.toc        block offsets (0.2–2 MiB)
+  .surface5 ─┐                            mesh.toc        block offsets (0.15–8.2 MB)
   .scn5   ───┤                            scene.nodes     pool-tree offsets (2.5–22 MiB)
   .rn4    ───┤   decoders                 tables.json     airdromes, runways, stands, beacons,
   airfield ──┤ ─────────────────────▶                     radio, towns, nodes, CRS, classes
@@ -191,7 +191,7 @@ the install, never in the repository.
 
 | Entry | Why it cannot be per query | Size | Build |
 |---|---|---|---|
-| `mesh.toc` | The `.surface5` table of contents can only be pattern-scanned: 100 ms (Caucasus) to ~1 s (Germany) per open | 0.2–2 MiB | < 1 s |
+| `mesh.toc` | The `.surface5` table of contents can only be pattern-scanned: 21 ms (MarianasWWII) to 0.7 s (GermanyCW) per open | 0.15–8.2 MB, every block's arrays and material subsets | < 1 s |
 | `scene.nodes` | Parsing the `.scn5` head costs 2 s and 559 MiB on Germany | 2.5–22 MiB | < 2 s |
 | `tables.json` | Airfields, stands, Lua tables, the fitted projection, scenery classes and any imported hook tables each cost a full decode; together they are small | < 1 MiB | < 2 s |
 | `roads.graph` | The `.rn4` has no spatial order: 5.5 s and 3.3 GB to scan on Germany. Betweenness is global | 9.3 MiB (Caucasus) to 200 MiB (Germany) | 7 ms–5 s; betweenness 1 s (Caucasus) to ~250 s CPU (Germany) |
@@ -234,8 +234,8 @@ the install, never in the repository.
   is deleted without a command, neither deletes under a directory with no
   `CACHEDIR.TAG`, and neither follows a link. The cache tags its root only
   when the root is new or empty, and never makes one inside the install, so a
-  mistyped `--cache` cannot empty somebody's folder. `list-terrains`, `index` and `cache` take
-  `--cache`; `query` will once an operation reads an entry.
+  mistyped `--cache` cannot empty somebody's folder. `query`, `list-terrains`,
+  `index` and `cache` take `--cache`.
 
 ### 4.3 The hook's tables
 
@@ -390,7 +390,7 @@ correctness rule: a miss is a decision about the target.
 
 | Operation | Measured | Target |
 |---|---|---|
-| open / `describe` | 2.1 / 7.2 / 14.2 ms (Caucasus / Germany / Afghanistan) | 20 ms |
+| open / `describe` | 9 / 57 / 14 ms (Caucasus / GermanyCW / Afghanistan), OS cache warm; on GermanyCW and Syria 42 ms of it is classifying the terrain's files, the airfield files' headers among them, and reading `mesh.toc` takes 12 ms | 20 ms |
 | `sample` 10 k lattice | 10–12 ms | 100 ms |
 | `sample` 10 k scattered over a whole terrain | 1.8–8.7 s | none; points are sorted by block first |
 | `visible` 10–40 km | 5.4–12 ms cold, 0.01–0.05 ms warm | 1 ms within a batch, 20 ms cold |
