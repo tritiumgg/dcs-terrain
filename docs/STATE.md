@@ -4,18 +4,24 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `design.md` and `queries.md` hold the design.
 
-**Last updated:** 2026-10-27T21:23Z
+**Last updated:** 2026-10-27T21:40Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **N0: the live gate.** DCS opens its terrain files read-only, sharing
+1. **The cache guard.** A cache inside the install is refused however its
+   path is spelled — case, 8.3 name, relative, link, junction, loopback
+   share, `..` — by resolving both paths and comparing file identity,
+   and before any entry is built. A bind mount of a directory inside the
+   install is not caught. *Verified by:* an agent, through `mise run check`
+   on Windows.
+2. **N0: the live gate.** DCS opens its terrain files read-only, sharing
    read, through the OS cache; it maps `.surface5` and `.scn5` and keeps
    them open, 1.5 % of each resident. The tool can run beside it.
    *Verified by:* the user at the install (Process Monitor, RAMMap) and an
    agent's open test, on 2.9.30.28738.
-2. **N3: the mesh in place.** An install terrain is a `Source`:
+3. **N3: the mesh in place.** An install terrain is a `Source`:
    `mesh.toc` is the first cache entry; blocks are read at their offsets,
    prepared with a triangle bin index into a byte-budgeted LRU; 64-cell
    tiles of height, water, surface and cover on demand, and point mode.
@@ -23,22 +29,17 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    is gone. *Verified by:* an agent, through `mise run check`, and opt-in on
    2.9.30.28738: Caucasus heights 99.9485 % exact, water off on 4 cells,
    open from the cache 8 ms.
-3. **N2: the cache.** `cache` keeps raw entries under
+4. **N2: the cache.** `cache` keeps raw entries under
    `<cache>/<terrain>/<build>/`, keyed on the build and a fresh stat and
    header read of the files of each entry's roles, written by rename;
    `index`, `cache list|prune|clear`, and a cache column in `list-terrains`.
    *Verified by:* an agent, through `mise run check`.
-4. **N1: Synth as the Source.** `Source` with `Synth` in memory, a patch
+5. **N1: Synth as the Source.** `Source` with `Synth` in memory, a patch
    of each cover class; `grid` reads through it and its tests run on `Synth`;
    the synthetic extract writer is gone. A terrain opens by its
    `entry.lua` id; `query --terrain <id|synth> describe` and `list-terrains`
    work, `--install` from the registry on Windows. *Verified by:* an agent,
    through `mise run check`, and the opt-in install test on 2.9.30.28738.
-5. **A1: the reset's code.** The CLI keeps only `schema`; `pack/`,
-   `rusqlite`, the MCP crate and the theatre probe are gone; no code cites a
-   pre-reset ADR. The extract writers stay until N1, N3 and N4 replace the
-   tests that build fixtures with them. *Verified by:* an agent, through
-   `mise run check` and `mise run lua-test`.
 
 ## Next
 
