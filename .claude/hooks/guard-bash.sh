@@ -81,7 +81,7 @@ INSTALL='(Eagle Dynamics|DCS World|autoupdate\.cfg)'
 if writes_to "$INSTALL"; then
     refuse "a write into the DCS install." \
 "The install is read-only. Nothing in this project writes to it, and a probe
-that does can leave a theatre unloadable.
+that does can leave a terrain unloadable.
 
 Read from it freely. What the hook needs goes in the Saved Games write
 directory, which lfs.writedir() reports and which is not the install."

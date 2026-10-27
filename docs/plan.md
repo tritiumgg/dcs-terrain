@@ -46,8 +46,8 @@ Kept from before the reset, tested, and not tasks here:
 | Id | Deliverable | Done | Depends on | Verified by |
 |---|---|---|---|---|
 | N0 | Live gate: can the tool read a terrain's files while DCS has that terrain loaded, and does DCS read them through the OS cache | With DCS in the Mission Editor on Caucasus, the three files open read-only and a header read answers; DCS's `CreateFile` flags on `.surface5` recorded (Process Monitor), and whether its pages are resident before the tool reads them (RAMMap) | — | live |
-| N1 | `Source` trait; `Synth` implements it in memory with a patch of each cover class; `grid::Window` reads through it; `--terrain synth`. Opening an install terrain by its `entry.lua` id, with `--install` defaulting to the registry value on Windows; `dcsterrain list-terrains` | Every `grid` test passes through `Synth`; `query --terrain synth describe` answers with no install; offline: a built install tree resolves `GermanyCW` from a `GermanyColdWar` folder, and an unknown id is refused with the list of ids; `list-terrains` on that tree shows both terrains with their folders | A1 | agent |
-| N2 | The cache: location, `--cache`, layout keyed by terrain id and build, entry header and key, atomic write, stale-entry rebuild; `dcsterrain index`, `dcsterrain cache list|prune|clear` | A changed size, payload size, time, build or entry version rebuilds only that entry; two concurrent builders leave a valid entry; `clear` asks before deleting `validation.json` | N1 | agent |
+| N1 | `Source` trait; `Synth` implements it in memory with a patch of each cover class; `grid::Window` reads through it; `--terrain synth`. Opening an install terrain by its `entry.lua` id, with `--install` defaulting to the registry value on Windows; `dcsterrain list-terrains` with ids, folders and decoder support | Every `grid` test passes through `Synth`; `query --terrain synth describe` answers with no install; offline: a built install tree resolves `GermanyCW` from a `GermanyColdWar` folder, and an unknown id is refused with the list of ids; `list-terrains` and `list-terrains --json` on that tree show both terrains with their folders, and a file with an unknown version marked unreadable | A1 | agent |
+| N2 | The cache: location, `--cache`, layout keyed by terrain id and build, entry header and key, atomic write, stale-entry rebuild; `dcsterrain index`, `dcsterrain cache list|prune|clear`; the cache column of `list-terrains` | A changed size, payload size, time, build or entry version rebuilds only that entry; two concurrent builders leave a valid entry; `clear` asks before deleting `validation.json`; `list-terrains` shows a terrain's cache after `index` and none after `clear` | N1 | agent |
 | N3 | The mesh in place: `mesh.toc`, positional block reads, block LRU, 50 m tiles on demand with height, water and cover, point mode with a triangle index | Offline: a built two-triangle block through the full path. Opt-in: Caucasus tiles match the live extract on 99.9 % of cells; open under 20 ms cold on Caucasus | N2 | agent, opt-in |
 | N4 | Scenery in place: the pool-tree reader, `scene.nodes`, the trees and lines pools, the removed-object areas | Offline: built files for versions 8 and 9. Opt-in: 400 Caucasus boxes equal a full walk | N2 | agent, opt-in |
 | N5 | `tables.json`: airfields, stands, runways, beacons, radio, towns, nodes, the projection fit and residual check with `--allow-crs-residual`; `index --hook` | Opt-in: field for field equal to the live extract; a hook directory from another build is refused by name | N2 | agent, opt-in |
@@ -60,9 +60,9 @@ Kept from before the reset, tested, and not tasks here:
 
 ### Q: query operations
 
-Every operation that returns geometry is tested for its GeoJSON in its own
-task: a valid RFC 7946 `FeatureCollection` whose features match the JSON
-response.
+**Part of every Q task's done test,** without repeating it in each row: each
+operation the task delivers that returns geometry gives, with `geojson: true`,
+a valid RFC 7946 `FeatureCollection` whose features match its JSON response.
 
 | Id | Deliverable | Done | Depends on | Verified by |
 |---|---|---|---|---|

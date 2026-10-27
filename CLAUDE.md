@@ -202,7 +202,7 @@ it.
 ## Testing
 
 - **Test against the synthetic terrain first.** `--terrain synth` answers from a
-  closed-form theatre in memory; almost every done test is stated against it.
+  closed-form terrain in memory; almost every done test is stated against it.
 - **The decoders** have offline tests on byte buffers the test builds, and an
   opt-in group gated on `DCSTERRAIN_INSTALL` that reads a real install,
   comparing against the live Caucasus extract when `DCSTERRAIN_EXTRACT` names

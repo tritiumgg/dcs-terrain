@@ -346,6 +346,9 @@ largest component, sampled from 2 000 sources on large graphs, normalized
 - With no `<json>`, `query` reads JSON lines from stdin, one request per line,
   each naming its `op`, and writes one response line per request. A batch
   opens the terrain once and keeps its block and tile caches across requests.
+- Every operation that returns geometry takes `geojson: true` and adds a
+  GeoJSON `FeatureCollection` in longitude and latitude, for drawing the
+  answer in any map program (`queries.md` §1.1).
 - `sample` and `scenery_in` take a `max_rows` request field (defaults 10 000
   and 5 000); over the cap is an error, never a truncation. Errors are a list of `{code, message, path}` issues; an
   operation returns a full result or an error.

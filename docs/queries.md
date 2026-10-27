@@ -52,9 +52,10 @@ endpoints also returns them as `Point` features.
 | `unmask_profile` | the route as a `LineString`; a `LineString` per masked segment; the first-seen point |
 | `exposure` | the unseen polygons with `alt_agl` |
 | `score_site`, `find_sites` | a `Point` per candidate with its rank, score and orientation, and its footprint as a `Polygon` |
-| `route` | the route as a `LineString`, and each leg as one with its length, climb, grade, exposure and class |
+| `visible` | the sightline as a `LineString` with `visible` and `clearance_m`, and the blocking point when there is one |
+| `route` | the route as a `LineString`, and each leg as one with its `length`, `ascent`, `descent`, `max_grade_pct`, `exposure` and `class` |
 | `route_alternatives` | each route as a `LineString` with its stretch and overlap; the edges every alternative shares, as `LineString`s marked `shared` |
-| `low_level_route` | the path as a `LineString` with altitude MSL as the third coordinate, and each leg with its height above ground and the sites that see it |
+| `low_level_route` | the path as a `LineString`, with the waypoints' MSL and AGL altitudes as `alt_msl` and `alt_agl` arrays in its properties, and each leg with its height above ground and the sites that see it. Coordinates stay two-dimensional, because RFC 7946 reads a third one as height above the ellipsoid, not MSL |
 | `nearest` | a `Point` per result with its kind, name and distance; for roads and rail, the matched edge as a `LineString` |
 | `scenery_in` | each object's box as a `Polygon` with its model, class and height; the region or footprint queried |
 | `chokepoints` | each edge as a `LineString` with its rank, betweenness, class and `crosses_water` |
@@ -135,7 +136,8 @@ Request: `observer`, `radius`, `target_alt_agl`, `resolution` (default the
 cell size). Response: `{origin_x, origin_z, cell, width, height, bits:
 base64}`, `visible_fraction`, and `rings: Vec<Polygon>` when `as_polygons` is
 true (marching squares, simplified to half a cell). Radials are spaced to give
-one per cell on the outer ring.
+one per cell on the outer ring. `geojson` traces the same polygons whether or
+not `as_polygons` is set.
 
 ### `coverage`
 
@@ -240,9 +242,10 @@ road with its class and distance, the nearest airfield, lat/lon and MGRS.
 
 Request: an airdrome id or name, and optionally `fits {width, length, height,
 helicopter}`. Response: runways (designator, true course, length, width,
-threshold heights), elevation, navaids (TACAN channel, ILS, VOR and NDB
-frequencies), radio frequencies, stand counts by size, helicopter use and
-shelter; with `fits`, the stands an airframe of that size fits. Courses are
+and each threshold's position and height), elevation, navaids (TACAN channel,
+ILS, VOR and NDB frequencies), radio frequencies, and stands, each with its
+name, position, width, length, height, helicopter use and shelter, plus counts
+by size; with `fits`, each stand says whether an airframe of that size fits. Courses are
 true; there is no magnetic model. The caller supplies the airframe's size.
 
 ### `radar_floor`
@@ -276,6 +279,8 @@ enum Shape { Point,                                // the position alone
              Circle { radius: f64 },               // centered
              Polygon { points: Vec<[f64; 2]> } }   // absolute DCS x, z
 ```
+
+`heading` turns only a `Rect`; a circle and a polygon ignore it.
 
 The tool knows nothing about units: the caller gives the size and what the
 placement needs.

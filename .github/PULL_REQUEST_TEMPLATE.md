@@ -47,7 +47,7 @@ one command per block, tagged powershell or bash, no prompt character and no
 output inside it. A command named in a sentence is not a step anyone can copy.
 
 Without DCS: builds, unit tests, the offline Lua tests, the document tools,
-the synthetic theatre. Windows steps in PowerShell wherever the command can
+the synthetic terrain. Windows steps in PowerShell wherever the command can
 run there; where a task needs `sh` (the mise tasks that run tools/*.sh), name
 Git Bash and say why. macOS and Linux steps in bash. Where the two are the
 same command, give it once under "All platforms".

@@ -20,7 +20,7 @@ Coordinates are DCS world meters: x is north, z is east, y is up.
 | `AirfieldsTaxiways/<name>.rn5` | `t5::rn5file` | u32 after class = 0 | 0 | 0 | 0 |
 | `Scenes/<terrain>.scn5` | `landscape5::Scene5File` | u32 after class | **9** | **8** | **9** |
 
-Folder names vary in case (Syria uses `surface/`, `terrain/`), so match directory and extension names
+Folder names vary in case (Syria uses `surface/`, `map/`), so match directory and extension names
 case-insensitively. Where a folder holds several files with the extension, take the largest; exclude
 `*.onlay.sup4` when looking for other `.sup4` files.
 
@@ -546,7 +546,7 @@ according to the live table.
 - Caucasus water class: all but 4 of 141 190 035 cells agree. The 4 are land 0.5 m over a lake, where the game
   reports land.
 - Caucasus coverage: no cell the live extract wrote lies outside the mesh. The 6.39 M cells it wrote as fill are
-  flat mesh land at exactly 5 m, which the sim reports with its off-terrain value.
+  flat mesh land at exactly 5 m, which the sim reports with its off-map value.
 - Caucasus road polylines against the live road router: p50 1.42 m, p99 4.3 m. Rail: p50 2.18 m. Both look like
   a lane or track offset from the stored centerline.
 - Road vertices within 0.5 m of the sampled ground: Caucasus 99.5 %, Nevada 99.0 %, Syria 92.5 %. On Syria the
