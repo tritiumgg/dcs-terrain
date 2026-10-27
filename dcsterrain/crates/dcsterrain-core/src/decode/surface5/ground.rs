@@ -693,6 +693,21 @@ mod tests {
         for v in &b.rc {
             assert_eq!(b.on_runway(*v), scan(*v), "{v:?}");
         }
+        // A tile marks the cells the scan finds, across bins and tile edges.
+        let (ntx, ntz) = g.tiles();
+        for tx in 0..ntx {
+            for tz in 0..ntz {
+                let t = tile(&[b], &g, tx, tz);
+                for i in 0..64 * 64 {
+                    let (r, c) = (tx * 64 + i / 64, tz * 64 + i % 64);
+                    if r >= 400 || c >= 400 {
+                        continue;
+                    }
+                    let want = scan([f64::from(r), f64::from(c)]);
+                    assert_eq!(t.surface[i as usize] == SURFACE_RUNWAY, want, "({r}, {c})");
+                }
+            }
+        }
     }
 
     #[test]
