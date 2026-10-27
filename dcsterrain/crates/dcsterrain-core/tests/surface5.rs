@@ -16,6 +16,7 @@ use serde_json::Value;
 use dcsterrain_core::cache::Cache;
 use dcsterrain_core::decode::install::{self, TERRAINS_DIR};
 use dcsterrain_core::decode::surface5;
+use dcsterrain_core::decode::surface5::ground::{Prepared, grid_units};
 use dcsterrain_core::grid::Grid;
 use dcsterrain_core::source::Source;
 use dcsterrain_core::source::install::Install;
@@ -136,6 +137,107 @@ fn every_terrain_opens_from_its_cache() {
             g.height,
             g.width,
             fields.len()
+        );
+    }
+}
+
+/// 10 000 points on a 100 by 100 lattice over `[x0, z0, x1, z1]`.
+fn lattice([x0, z0, x1, z1]: [f64; 4]) -> Vec<(f64, f64)> {
+    let at = |lo: f64, hi: f64, k: u32| lo + (hi - lo) * (f64::from(k) + 0.5) / 100.0;
+    (0..100)
+        .flat_map(|i| (0..100).map(move |j| (at(x0, x1, i), at(z0, z1, j))))
+        .collect()
+}
+
+/// Milliseconds for the fastest of three passes of `f` over `points`, and
+/// what the last pass counted.
+fn timed(points: &[(f64, f64)], f: impl Fn(f64, f64) -> bool) -> (f64, usize) {
+    let mut best = (f64::INFINITY, 0);
+    for _ in 0..3 {
+        let started = Instant::now();
+        let n = points.iter().filter(|&&(x, z)| f(x, z)).count();
+        best = (best.0.min(started.elapsed().as_secs_f64() * 1e3), n);
+    }
+    best
+}
+
+/// Over the block with the most runway triangles, the runway test costs no
+/// more than finding the winning triangle, because a point looks only at the
+/// runway triangles near it, where it once tried every one. Asks every
+/// terrain, and reports the size of the table of contents the cache keeps
+/// and the time for the same lattice over a block of like size with no
+/// runway.
+#[test]
+fn points_over_an_airfield_answer_as_fast_as_points_elsewhere() {
+    let Some(root) = install_root() else { return };
+    let build = install::read_build(&root).unwrap();
+    eprintln!("DCS {} ({})", build.version, build.timestamp);
+    let cache = Scratch::new("runway-cache");
+    for listed in install::terrains(&root).unwrap() {
+        let Some(id) = listed.id else { continue };
+        let map = install::open(&root, &id).unwrap();
+        let path = root.join(&map.surface.path);
+        let file = surface5::open(&path).unwrap();
+        let r = fs::File::open(&path).unwrap();
+        let mut runway: Vec<(usize, usize)> = (0..file.blocks.len())
+            .map(|i| {
+                let b = file.read_block(&r, i, &["Runway"]).unwrap();
+                (b.subsets.iter().map(|s| s.tri.len()).sum::<usize>(), i)
+            })
+            .collect();
+        runway.sort_unstable();
+        let (most, busiest) = *runway.last().unwrap();
+        if most == 0 {
+            continue;
+        }
+        let size = |i: usize| {
+            let [x0, z0, x1, z1] = file.blocks[i].world_box();
+            (x1 - x0) * (z1 - z0)
+        };
+        let plain = runway
+            .iter()
+            .filter(|&&(n, _)| n == 0)
+            .min_by(|a, b| {
+                let d = |i| (size(i) / size(busiest)).ln().abs();
+                d(a.1).total_cmp(&d(b.1))
+            })
+            .map(|&(_, i)| i)
+            .unwrap();
+
+        let t = Install::open(&root, &id, &Cache::new(&cache.0)).unwrap();
+        let toc = fs::metadata(
+            cache
+                .0
+                .join(&map.theatre)
+                .join(&build.version)
+                .join("mesh.toc"),
+        )
+        .unwrap()
+        .len();
+        let g = t.grid();
+        let over = lattice(file.blocks[busiest].world_box());
+        let (all, on) = timed(&over, |x, z| {
+            t.point(x, z).unwrap().is_some_and(|p| p.surface == 5)
+        });
+        let (elsewhere, _) = timed(&lattice(file.blocks[plain].world_box()), |x, z| {
+            t.point(x, z).unwrap().is_some()
+        });
+        let b = Prepared::new(file.read_block(&r, busiest, &["Runway"]).unwrap(), &g);
+        let (ground, _) = timed(&over, |x, z| b.point(grid_units(&g, x, z)).is_some());
+        let (strip, _) = timed(&over, |x, z| b.on_runway(grid_units(&g, x, z)));
+        eprintln!(
+            "{id}: mesh.toc {:.2} MB; block {busiest}, {most} runway triangles, {on} of the \
+             points on a runway: {all:.1} ms, of which its winning triangle {ground:.1} ms and \
+             its runway {strip:.1} ms; block {plain}, no runway: {elsewhere:.1} ms",
+            toc as f64 / 1e6
+        );
+        assert!(
+            on > 0,
+            "{id}: no point over its busiest airfield is on a runway"
+        );
+        assert!(
+            strip < ground.max(0.5),
+            "{id}: the runway test takes {strip:.1} ms, the winning triangle {ground:.1} ms"
         );
     }
 }
