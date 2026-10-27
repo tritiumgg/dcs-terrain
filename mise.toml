@@ -2,9 +2,6 @@
 # builds or tests with, so nothing has to be installed system-wide.
 
 [tools]
-# fit.py, which fits a theatre's projection constants.
-python = "3.12"
-
 # The offline extractor tests. 5.1 is not a preference: it is the version the
 # DCS hook state runs, and the tests exist to catch what 5.1 does differently.
 # mise's plugin builds it from source with make, so Windows is excluded here

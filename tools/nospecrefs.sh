@@ -19,7 +19,7 @@
 #
 # Everything under docs/ is exempt, and so is any README. Documents cite
 # documents by design, and a README is navigation: CLAUDE.md says so of the
-# root one, and tools/probe-theatre/README.md does the same job for its
+# root one, and a README under tools/ does the same job for its
 # directory.
 #
 # POSIX sh only. Run it by hand, or through `mise run docs`.
