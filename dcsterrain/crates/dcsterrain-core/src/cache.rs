@@ -12,7 +12,7 @@
 use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::UNIX_EPOCH;
 
@@ -348,6 +348,76 @@ fn is_temporary(name: &str) -> bool {
     name.starts_with('.') && name.ends_with(".tmp")
 }
 
+/// Whether `dir`, relative to `cwd` if it is relative, is or would be
+/// created inside `install`. The install is DCS's own and is only ever read,
+/// so a path that names it another way, by case, by a short name, through a
+/// link or junction, or from the working directory, must still be caught:
+/// both are resolved as the file system resolves them before they are
+/// compared.
+fn is_inside(dir: &Path, install: &Path, cwd: &Path) -> io::Result<bool> {
+    let install = fs::canonicalize(install)?;
+    let dir = resolve(&std::path::absolute(cwd.join(dir))?)?;
+    // The same directory by device and inode, which no spelling of a path
+    // can disguise: a case-folding volume, or a bind mount.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let id = |p: &Path| fs::metadata(p).map(|m| (m.dev(), m.ino()));
+        let target = id(&install)?;
+        if dir.ancestors().any(|a| id(a).is_ok_and(|i| i == target)) {
+            return Ok(true);
+        }
+    }
+    // Windows and macOS volumes ignore case unless set otherwise.
+    let fold = |p: &Path| {
+        if cfg!(any(windows, target_os = "macos")) {
+            PathBuf::from(p.to_string_lossy().to_lowercase())
+        } else {
+            p.to_path_buf()
+        }
+    };
+    Ok(fold(&dir).starts_with(fold(&install)))
+}
+
+/// An absolute `path` with its longest existing part resolved through every
+/// link and short name, and the part that does not exist yet appended. A
+/// `..` in that part climbs a directory creating it would make, so it is
+/// taken lexically, and the result is resolved again, since the climb may
+/// end in an existing link.
+fn resolve(path: &Path) -> io::Result<PathBuf> {
+    let parts: Vec<Component> = path.components().collect();
+    for n in (1..=parts.len()).rev() {
+        let head: PathBuf = parts[..n].iter().collect();
+        match fs::canonicalize(&head) {
+            Ok(mut base) => {
+                let rest = &parts[n..];
+                if !rest.contains(&Component::ParentDir) {
+                    base.extend(rest);
+                    return Ok(base);
+                }
+                for c in rest {
+                    match c {
+                        Component::ParentDir => {
+                            base.pop();
+                        }
+                        c => base.push(c),
+                    }
+                }
+                return resolve(&base);
+            }
+            // Something is there that does not resolve, such as a dangling
+            // link; creating a directory through it fails too, but where it
+            // points is unknown.
+            Err(e) if fs::symlink_metadata(&head).is_ok() => return Err(e),
+            Err(_) => {}
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        format!("no part of {} exists", path.display()),
+    ))
+}
+
 fn cannot(what: &str, path: &Path, e: io::Error) -> Refusal {
     Refusal(format!("cannot {what} {}: {e}", path.display()))
 }
@@ -480,12 +550,28 @@ impl TerrainCache {
     /// Creates the directory, refusing one inside the install, which is
     /// never written to, and sweeps temporary files a crashed builder left.
     fn make_dir(&self) -> Result<(), Refusal> {
-        if self.dir.starts_with(&self.install) {
-            return Err(Refusal(format!(
-                "the cache {} is inside the install {}, which is never written to",
+        let cwd = std::env::current_dir()
+            .map_err(|e| Refusal(format!("cannot read the working directory: {e}")))?;
+        let refuse = |why: String| {
+            Refusal(format!(
+                "the cache {} {why}, which is never written to",
                 self.cache.root().display(),
-                self.install.display()
-            )));
+            ))
+        };
+        match is_inside(&self.dir, &self.install, &cwd) {
+            Ok(false) => {}
+            Ok(true) => {
+                return Err(refuse(format!(
+                    "is inside the install {}",
+                    self.install.display()
+                )));
+            }
+            Err(e) => {
+                return Err(refuse(format!(
+                    "cannot be told apart from the install {}: {e}",
+                    self.install.display()
+                )));
+            }
         }
         self.cache.claim()?;
         fs::create_dir_all(&self.dir).map_err(|e| cannot("create", &self.dir, e))?;
@@ -904,6 +990,128 @@ mod tests {
         let err = inside.index(&[&mesh]).unwrap_err().0;
         assert!(err.contains("inside the install"), "{err}");
         assert!(!f.install.0.join("cache").exists());
+    }
+
+    /// Asserts a cache at `root` is refused for the fixture's install and
+    /// that nothing was made inside the install.
+    fn refused(f: &Fixture, root: &Path) {
+        let before = entries_in(&f.install.0);
+        let map = install::open(&f.install.0, "Caucasus").unwrap();
+        let mesh = Counted::new("mesh.toc", &["surface"]);
+        let err = Cache::new(root)
+            .terrain(&f.install.0, &map)
+            .index(&[&mesh])
+            .unwrap_err()
+            .0;
+        assert!(err.contains("inside the install"), "{err}");
+        assert_eq!(entries_in(&f.install.0), before, "the install is untouched");
+    }
+
+    #[test]
+    fn refuses_the_install_spelled_in_another_case_where_the_volume_ignores_it() {
+        let f = Fixture::new();
+        let upper = PathBuf::from(f.install.0.to_string_lossy().to_uppercase());
+        if upper == f.install.0 || !upper.is_dir() {
+            eprintln!("this volume tells case apart; skipped");
+            return;
+        }
+        refused(&f, &upper.join("cache"));
+    }
+
+    #[test]
+    fn refuses_a_relative_cache_from_the_install() {
+        let f = Fixture::new();
+        let dir = Path::new("cache").join("Caucasus").join("2.9.0.1");
+        assert!(is_inside(&dir, &f.install.0, &f.install.0).unwrap());
+        let elsewhere = Scratch::new();
+        fs::create_dir_all(&elsewhere.0).unwrap();
+        assert!(!is_inside(&dir, &f.install.0, &elsewhere.0).unwrap());
+    }
+
+    #[test]
+    fn refuses_a_cache_that_climbs_into_the_install_through_a_new_directory() {
+        let f = Fixture::new();
+        fs::create_dir_all(&f.cache.0).unwrap();
+        let name = f.install.0.file_name().unwrap();
+        let climb = f.cache.0.join("new").join("..").join("..").join(name);
+        refused(&f, &climb.join("cache"));
+    }
+
+    #[test]
+    fn allows_a_cache_beside_the_install_whose_name_extends_it() {
+        let f = Fixture::new();
+        let mut beside = f.install.0.clone().into_os_string();
+        beside.push("-cache");
+        let beside = PathBuf::from(beside);
+        let dir = beside.join("Caucasus");
+        let cwd = std::env::temp_dir();
+        assert!(!is_inside(&dir, &f.install.0, &cwd).unwrap());
+    }
+
+    #[test]
+    fn refuses_a_cache_through_a_dangling_link() {
+        let f = Fixture::new();
+        fs::create_dir_all(&f.cache.0).unwrap();
+        let link = f.cache.0.join("gone");
+        if !link_dir(&f.cache.0.join("never-made"), &link) {
+            return;
+        }
+        let err = is_inside(&link.join("cache"), &f.install.0, &f.cache.0);
+        assert!(err.is_err(), "{err:?}");
+    }
+
+    #[test]
+    fn refuses_a_cache_through_a_link_into_the_install() {
+        let f = Fixture::new();
+        fs::create_dir_all(&f.cache.0).unwrap();
+        let link = f.cache.0.join("dcs");
+        if !link_dir(&f.install.0, &link) {
+            return;
+        }
+        refused(&f, &link.join("cache"));
+    }
+
+    /// Links `link` to the directory `target`: a symlink on Unix, a junction
+    /// on Windows, which needs no privilege. False, with a note, where the
+    /// link cannot be made.
+    fn link_dir(target: &Path, link: &Path) -> bool {
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(target, link).is_ok();
+        #[cfg(windows)]
+        let made = std::process::Command::new("cmd")
+            .args(["/c", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if !made {
+            eprintln!(
+                "cannot link {} to {}; skipped",
+                link.display(),
+                target.display()
+            );
+        }
+        made
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn refuses_the_install_by_its_short_name() {
+        use std::os::windows::process::CommandExt;
+        let f = Fixture::new();
+        let out = std::process::Command::new("cmd")
+            .raw_arg(format!(
+                "/c for %I in (\"{}\") do @echo %~sI",
+                f.install.0.display()
+            ))
+            .output()
+            .unwrap();
+        let short = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+        if short.file_name() == f.install.0.file_name() || !short.is_dir() {
+            eprintln!("this volume makes no short names; skipped");
+            return;
+        }
+        refused(&f, &short.join("cache"));
     }
 
     #[test]
