@@ -49,8 +49,10 @@ impl Entry for MeshToc {
         "mesh.toc"
     }
 
+    /// 2 keeps only the runway subsets, the one material a block is read
+    /// with.
     fn version(&self) -> u32 {
-        1
+        2
     }
 
     fn roles(&self) -> &[&str] {
@@ -67,7 +69,7 @@ impl Entry for MeshToc {
         if toc.blocks.is_empty() {
             return Err(Refusal(format!("{}: the mesh has no blocks", f.path)));
         }
-        Ok(toc.encode())
+        Ok(toc.keep(&[RUNWAY_MATERIAL]).encode())
     }
 }
 

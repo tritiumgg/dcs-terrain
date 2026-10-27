@@ -392,6 +392,45 @@ impl Surface5 {
         })
     }
 
+    /// The table of contents with only the subsets of `materials`, and only
+    /// the names they use. A large terrain has two hundred subsets for each
+    /// one of a material that is read.
+    pub fn keep(&self, materials: &[&str]) -> Surface5 {
+        let mut names = Vec::new();
+        let mut rename = |k: u16| {
+            let s = &self.names[usize::from(k)];
+            match names.iter().position(|n| n == s) {
+                Some(i) => i as u16,
+                None => {
+                    names.push(s.clone());
+                    (names.len() - 1) as u16
+                }
+            }
+        };
+        let blocks = self
+            .blocks
+            .iter()
+            .map(|b| BlockInfo {
+                subsets: b
+                    .subsets
+                    .iter()
+                    .filter(|s| materials.contains(&self.names[usize::from(s.material)].as_str()))
+                    .map(|s| SubsetToc {
+                        shader: rename(s.shader),
+                        material: rename(s.material),
+                        ..*s
+                    })
+                    .collect(),
+                ..b.clone()
+            })
+            .collect();
+        Surface5 {
+            blocks,
+            names,
+            ..*self
+        }
+    }
+
     /// The table of contents as bytes, for a cache: finding it in the file
     /// takes a pattern scan, and reading it back takes none.
     pub fn encode(&self) -> Vec<u8> {
@@ -816,6 +855,26 @@ mod tests {
             back.read_all(&f[..], &m).unwrap(),
             s.read_all(&f[..], &m).unwrap()
         );
+    }
+
+    #[test]
+    fn a_kept_table_of_contents_holds_and_reads_only_its_materials() {
+        let f = file(&[two_triangles(), two_triangles()], 2);
+        let s = Surface5::open(&f[..], "t").unwrap();
+        let kept = s.keep(&["Runway"]);
+        assert_eq!(kept.names, ["Runway5.0", "Runway"]);
+        assert!(kept.blocks.iter().all(|b| b.subsets.len() == 1));
+        assert!(kept.encode().len() < s.encode().len());
+        let back = Surface5::decode(&kept.encode()).unwrap();
+        assert_eq!(back, kept);
+        let m = ["Runway"];
+        assert_eq!(
+            back.read_all(&f[..], &m).unwrap(),
+            s.read_all(&f[..], &m).unwrap()
+        );
+        // A material it dropped reads as absent.
+        let lake = back.read_all(&f[..], &["Lake"]).unwrap();
+        assert!(lake.blocks.iter().all(|b| b.subsets.is_empty()));
     }
 
     #[test]
