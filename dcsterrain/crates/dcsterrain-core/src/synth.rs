@@ -1,6 +1,7 @@
-//! Reference constants for the synthetic theatre.
+//! The synthetic terrain: its reference constants, the closed form they
+//! define, and the `Source` that answers from it in memory.
 //!
-//! Its twin is `extractor/test/support/synth_constants.lua`, which holds the
+//! The constants' twin is `extractor/test/support/synth_constants.lua`, which holds the
 //! same names with the same values. The test at the foot of this file parses
 //! that one and fails when the two sets differ, so neither can be edited
 //! alone.
@@ -8,8 +9,8 @@
 //! The synthetic theatre is the thing almost every test is stated against: a
 //! closed-form terrain with no DCS in the loop. This file holds only the
 //! numbers that define it, never the functions that evaluate them, because two
-//! languages have to agree on the numbers and only one of them generates the
-//! extract. The generator is beside them, in `synth/`.
+//! languages have to agree on the numbers and only one of them evaluates
+//! them. The closed form is beside them, in `synth/`.
 //!
 //! Positions are offsets from the grid origin, in metres: `_NORTH_M` grows
 //! with DCS x, `_EAST_M` grows with DCS z. Nothing here is absolute, so
@@ -20,15 +21,13 @@
 //! * one `pub const NAME: T = <literal>;` per line, nothing else on it
 //! * no trailing comments
 //! * primitives only; anything derivable (grid extents, feature positions in
-//!   absolute metres, tile counts) is computed by the generator
+//!   absolute metres, tile counts) is computed by the closed form
 
 mod memory;
 mod theatre;
-mod write;
 
 pub use memory::{Synth, TERRAIN_ID};
 pub use theatre::{Cell, Edge, Object, SynthError, Theatre};
-pub use write::{Written, write};
 
 // Extract format, v2. The tile layout, the water codes and the height,
 // water and surface nodata values are unchanged from v1. The two count

@@ -264,15 +264,42 @@ impl<'a> Keyed<'a> {
     }
 }
 
+/// Writes one row of every table, each key null, and returns the manifest's
+/// `tables`. A Lines table gets two rows.
+#[cfg(test)]
+pub(super) fn write_rows(dir: &Path) -> serde_json::Map<String, Value> {
+    let mut named = serde_json::Map::new();
+    for (key, shape, keys) in TABLES {
+        let row: serde_json::Map<String, Value> =
+            keys.iter().map(|k| (k.to_string(), Value::Null)).collect();
+        let row = Value::Object(row);
+        let (name, text) = match shape {
+            Shape::Object => (format!("{key}.json"), row.to_string()),
+            Shape::Array => (format!("{key}.json"), Value::Array(vec![row]).to_string()),
+            Shape::Lines => (
+                format!("{key}.jsonl"),
+                format!(
+                    "{row}
+{row}
+"
+                ),
+            ),
+        };
+        fs::write(dir.join(&name), text).unwrap();
+        named.insert(key.to_string(), name.into());
+    }
+    named
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::extract::MANIFEST;
-    use crate::extract::check::tests::{edit_manifest, failures, has, synth_extract};
+    use crate::extract::check::tests::{edit_manifest, failures, fixture_extract, has};
 
     #[test]
     fn refuses_a_row_that_lacks_a_key() {
-        let s = synth_extract();
+        let s = fixture_extract();
         fs::write(
             s.0.join("towns.json"),
             r#"[{"name": "A", "display_name": "A", "lat": 0, "lon": 0, "x": 0, "z": 0},
@@ -289,7 +316,7 @@ mod tests {
 
     #[test]
     fn a_null_hook_field_is_present() {
-        let s = synth_extract();
+        let s = fixture_extract();
         let path = s.0.join("config.json");
         let mut c: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         c["bounds_km"] = Value::Null;
@@ -299,7 +326,7 @@ mod tests {
 
     #[test]
     fn refuses_a_line_that_is_not_json() {
-        let s = synth_extract();
+        let s = fixture_extract();
         let path = s.0.join("ground.jsonl");
         let mut text = fs::read_to_string(&path).unwrap();
         text.push_str("{\"class\": \n");
@@ -310,7 +337,7 @@ mod tests {
 
     #[test]
     fn refuses_a_missing_table() {
-        let s = synth_extract();
+        let s = fixture_extract();
         fs::remove_file(s.0.join("radio.json")).unwrap();
         let f = failures(&s.0);
         assert!(has(&f, "radio.json", "not a file"), "{f:?}");
@@ -319,7 +346,7 @@ mod tests {
     #[test]
     fn refuses_a_table_name_that_leaves_the_directory() {
         for name in ["../nodes.json", "C:nodes.json", "/nodes.json", ".", ""] {
-            let s = synth_extract();
+            let s = fixture_extract();
             edit_manifest(&s.0, |m| m["tables"]["nodes"] = name.into());
             let f = failures(&s.0);
             assert!(has(&f, MANIFEST, "tables.nodes"), "{name}: {f:?}");
@@ -328,7 +355,7 @@ mod tests {
 
     #[test]
     fn refuses_a_table_that_is_a_directory() {
-        let s = synth_extract();
+        let s = fixture_extract();
         edit_manifest(&s.0, |m| m["tables"]["nodes"] = "tiles".into());
         let f = failures(&s.0);
         assert!(has(&f, "tiles", "not a file"), "{f:?}");
@@ -336,7 +363,7 @@ mod tests {
 
     #[test]
     fn refuses_a_manifest_that_names_no_table() {
-        let s = synth_extract();
+        let s = fixture_extract();
         edit_manifest(&s.0, |m| {
             m["tables"].as_object_mut().unwrap().remove("ground");
         });

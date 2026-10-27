@@ -256,15 +256,13 @@ fn check_unlisted(x: &Extract, out: &mut Vec<Failure>) {
 pub(super) mod tests {
     use super::*;
     use crate::extract::MANIFEST;
+    use crate::extract::fixture;
     use crate::scratch::Scratch;
-    use crate::synth;
     use serde_json::Value;
 
-    pub(crate) fn synth_extract() -> Scratch {
+    pub(crate) fn fixture_extract() -> Scratch {
         let s = Scratch::new();
-        let t =
-            synth::Theatre::new(synth::DEFAULT_SEED, synth::DEFAULT_SIZE_KM, CELL_SIZE_M).unwrap();
-        synth::write(&t, &s.0).unwrap();
+        fixture::write(&s.0);
         s
     }
 
@@ -285,16 +283,16 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn accepts_the_synthetic_extract() {
-        let s = synth_extract();
+    fn accepts_the_fixture() {
+        let s = fixture_extract();
         let sum = check(&s.0).unwrap();
-        assert_eq!(sum.theatre, synth::THEATRE);
+        assert_eq!(sum.theatre, "Fixture");
         assert!(sum.tiles > 0);
     }
 
     #[test]
     fn refuses_a_tile_of_the_wrong_size() {
-        let s = synth_extract();
+        let s = fixture_extract();
         let p = "tiles/water/0_0.bin";
         let bytes = fs::read(s.0.join(p)).unwrap();
         fs::write(s.0.join(p), &bytes[..bytes.len() - 1]).unwrap();
@@ -304,7 +302,7 @@ pub(super) mod tests {
 
     #[test]
     fn refuses_a_missing_tile() {
-        let s = synth_extract();
+        let s = fixture_extract();
         let p = "tiles/height/0_0.bin";
         fs::remove_file(s.0.join(p)).unwrap();
         let f = failures(&s.0);
@@ -313,10 +311,10 @@ pub(super) mod tests {
 
     #[test]
     fn refuses_an_extra_file() {
-        let s = synth_extract();
-        // (1, 1) is all sea, so its height tile is omitted; one put back by
+        let s = fixture_extract();
+        // (0, 1) is all sea, so its height tile is omitted; one put back by
         // hand is a file the manifest does not list.
-        let p = "tiles/height/1_1.bin";
+        let p = "tiles/height/0_1.bin";
         fs::write(s.0.join(p), vec![0u8; 256 * 256 * 2]).unwrap();
         let f = failures(&s.0);
         assert!(has(&f, p, "not in the manifest"), "{f:?}");
@@ -324,7 +322,7 @@ pub(super) mod tests {
 
     #[test]
     fn refuses_a_bad_min_or_max() {
-        let s = synth_extract();
+        let s = fixture_extract();
         edit_manifest(&s.0, |m| {
             let t = m["tiles"]
                 .as_array_mut()
@@ -335,12 +333,12 @@ pub(super) mod tests {
             t["max"] = 4.into();
         });
         let f = failures(&s.0);
-        assert!(has(&f, "tiles/trees/3_4.bin", "min 0 max 4"), "{f:?}");
+        assert!(has(&f, "tiles/trees/0_0.bin", "min 0 max 4"), "{f:?}");
     }
 
     #[test]
     fn refuses_an_unknown_version() {
-        let s = synth_extract();
+        let s = fixture_extract();
         edit_manifest(&s.0, |m| m["format_version"] = 1.into());
         let f = failures(&s.0);
         assert!(has(&f, MANIFEST, "format_version 1"), "{f:?}");
@@ -348,7 +346,7 @@ pub(super) mod tests {
 
     #[test]
     fn refuses_a_directory_with_no_manifest() {
-        let s = synth_extract();
+        let s = fixture_extract();
         fs::remove_file(s.0.join(MANIFEST)).unwrap();
         let f = failures(&s.0);
         assert!(has(&f, MANIFEST, "did not finish"), "{f:?}");
@@ -356,7 +354,7 @@ pub(super) mod tests {
 
     #[test]
     fn refuses_an_unlisted_tile_that_a_reader_would_need() {
-        let s = synth_extract();
+        let s = fixture_extract();
         edit_manifest(&s.0, |m| {
             m["tiles"]
                 .as_array_mut()
@@ -372,7 +370,7 @@ pub(super) mod tests {
 
     #[test]
     fn refuses_a_tile_whose_water_tile_is_absent() {
-        let s = synth_extract();
+        let s = fixture_extract();
         fs::remove_file(s.0.join("tiles/water/0_0.bin")).unwrap();
         edit_manifest(&s.0, |m| {
             m["tiles"]
@@ -386,7 +384,7 @@ pub(super) mod tests {
 
     #[test]
     fn refuses_a_path_outside_the_tiles() {
-        let s = synth_extract();
+        let s = fixture_extract();
         edit_manifest(&s.0, |m| m["tiles"][0]["path"] = "../elsewhere.bin".into());
         let f = failures(&s.0);
         assert!(has(&f, "../elsewhere.bin", "must be tiles/"), "{f:?}");
@@ -394,7 +392,7 @@ pub(super) mod tests {
 
     #[test]
     fn refuses_a_water_value_outside_the_codes() {
-        let s = synth_extract();
+        let s = fixture_extract();
         let p = "tiles/water/0_0.bin";
         let mut bytes = fs::read(s.0.join(p)).unwrap();
         bytes[7] = 9;
@@ -405,7 +403,7 @@ pub(super) mod tests {
 
     #[test]
     fn refuses_a_layer_whose_dtype_differs() {
-        let s = synth_extract();
+        let s = fixture_extract();
         edit_manifest(&s.0, |m| m["layers"]["trees"]["dtype"] = "u8".into());
         let f = failures(&s.0);
         assert!(has(&f, MANIFEST, "layers.trees is u8"), "{f:?}");
@@ -413,8 +411,8 @@ pub(super) mod tests {
 
     #[test]
     fn refuses_a_water_tile_with_no_cell_in_the_mesh() {
-        let s = synth_extract();
-        let p = "tiles/water/1_1.bin";
+        let s = fixture_extract();
+        let p = "tiles/water/0_1.bin";
         fs::write(s.0.join(p), vec![255u8; 256 * 256]).unwrap();
         edit_manifest(&s.0, |m| {
             let t = m["tiles"]
@@ -432,7 +430,7 @@ pub(super) mod tests {
 
     #[test]
     fn refuses_a_tile_listed_twice() {
-        let s = synth_extract();
+        let s = fixture_extract();
         edit_manifest(&s.0, |m| {
             let a = m["tiles"].as_array_mut().unwrap();
             a.push(a[0].clone());
@@ -443,23 +441,23 @@ pub(super) mod tests {
 
     #[test]
     fn refuses_a_tile_outside_the_grid() {
-        let s = synth_extract();
-        let p = "tiles/height/6_0.bin";
+        let s = fixture_extract();
+        let p = "tiles/height/2_0.bin";
         fs::write(s.0.join(p), vec![0u8; 256 * 256 * 2]).unwrap();
         edit_manifest(&s.0, |m| {
             let a = m["tiles"].as_array_mut().unwrap();
             let mut t = a[0].clone();
-            t["tx"] = 6.into();
+            t["tx"] = 2.into();
             t["path"] = p.into();
             a.push(t);
         });
         let f = failures(&s.0);
-        assert!(has(&f, p, "outside the grid's 6 by 6"), "{f:?}");
+        assert!(has(&f, p, "outside the grid's 2 by 3"), "{f:?}");
     }
 
     #[test]
     fn refuses_a_tile_of_an_unknown_layer() {
-        let s = synth_extract();
+        let s = fixture_extract();
         edit_manifest(&s.0, |m| {
             let a = m["tiles"].as_array_mut().unwrap();
             let mut t = a[0].clone();
@@ -473,7 +471,7 @@ pub(super) mod tests {
 
     #[test]
     fn refuses_a_grid_of_another_cell_or_tile_size() {
-        let s = synth_extract();
+        let s = fixture_extract();
         edit_manifest(&s.0, |m| {
             m["grid"]["cell_size"] = 100.into();
             m["grid"]["tile_size"] = 128.into();
@@ -485,7 +483,7 @@ pub(super) mod tests {
 
     #[test]
     fn refuses_layers_the_format_does_not_have() {
-        let s = synth_extract();
+        let s = fixture_extract();
         edit_manifest(&s.0, |m| {
             let layers = m["layers"].as_object_mut().unwrap();
             let lines = layers.remove("lines").unwrap();
@@ -503,7 +501,7 @@ pub(super) mod tests {
 
     #[test]
     fn refuses_a_surface_value_above_runway() {
-        let s = synth_extract();
+        let s = fixture_extract();
         let p = "tiles/surface/0_0.bin";
         let mut bytes = fs::read(s.0.join(p)).unwrap();
         bytes[0] = 6;
@@ -514,15 +512,15 @@ pub(super) mod tests {
 
     #[test]
     fn an_all_sea_tile_needs_its_height_when_sea_tiles_are_kept() {
-        let s = synth_extract();
+        let s = fixture_extract();
         edit_manifest(&s.0, |m| m["omit_sea_tiles"] = false.into());
         let f = failures(&s.0);
-        assert!(has(&f, "tiles/height/1_1.bin", "not all sea"), "{f:?}");
+        assert!(has(&f, "tiles/height/0_1.bin", "not all sea"), "{f:?}");
     }
 
     #[test]
     fn refuses_a_stray_file_anywhere_under_the_tiles() {
-        let s = synth_extract();
+        let s = fixture_extract();
         fs::create_dir_all(s.0.join("tiles/bogus")).unwrap();
         fs::write(s.0.join("tiles/bogus/0_0.bin"), b"x").unwrap();
         fs::write(s.0.join("tiles/water/notes.txt"), b"x").unwrap();
@@ -539,7 +537,7 @@ pub(super) mod tests {
 
     #[test]
     fn refuses_a_leftover_temporary_file() {
-        let s = synth_extract();
+        let s = fixture_extract();
         fs::write(s.0.join("towns.json.tmp"), "[]").unwrap();
         let f = failures(&s.0);
         assert!(has(&f, "towns.json.tmp", "never finished"), "{f:?}");

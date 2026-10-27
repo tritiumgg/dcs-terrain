@@ -1,9 +1,9 @@
-//! The synthetic theatre as closed-form functions of position.
+//! The synthetic terrain as closed-form functions of position.
 //!
 //! Positions here are offsets from the grid origin, `north` and `east` in
 //! metres, as the constants are written; `Theatre::abs` turns one into DCS
 //! `x` and `z`. Every function is the value at a point, so a test can ask for
-//! the expected value of any cell without generating the extract.
+//! the expected value of any cell.
 
 use std::fmt;
 
@@ -29,22 +29,20 @@ pub struct Theatre {
     pub cell_size: u32,
 }
 
-/// One cell of every tile layer, nodata where the cell is outside the mesh.
+/// One cell of every layer, nodata where the cell is outside the mesh.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cell {
     pub height: i16,
     pub water: u8,
     pub surface: u8,
-    pub trees: u16,
-    pub lines: u16,
+    pub cover: u8,
 }
 
 const OUTSIDE: Cell = Cell {
     height: HEIGHT_NODATA,
     water: WATER_NODATA,
     surface: SURFACE_NODATA,
-    trees: COUNT_NODATA,
-    lines: COUNT_NODATA,
+    cover: 0,
 };
 
 /// One edge of a road or rail network, in DCS coordinates.
@@ -71,13 +69,13 @@ pub struct Object {
 }
 
 impl Theatre {
-    /// The extract is always 50 m, and the features sit on that
-    /// lattice's cell centres, so any other cell size is refused rather than
-    /// written with roads that miss every cell.
+    /// The features sit on the 50 m lattice's cell centres, so any other
+    /// cell size is refused rather than answered with roads that miss every
+    /// cell.
     pub fn new(seed: u32, size_km: u32, cell_size: u32) -> Result<Self, SynthError> {
         if cell_size != CELL_SIZE_M {
             return Err(SynthError(format!(
-                "the extract cell is always {CELL_SIZE_M} m, not {cell_size}"
+                "the synthetic terrain's cell is always {CELL_SIZE_M} m, not {cell_size}"
             )));
         }
         if seed == 0 || seed >= PRNG_MODULUS {
@@ -290,8 +288,7 @@ impl Theatre {
             height: h.clamp(f64::from(HEIGHT_MIN), f64::from(HEIGHT_MAX)) as i16,
             water: self.water(n, e),
             surface: self.surface(n, e),
-            trees: self.trees(n, e).min(COUNT_MAX),
-            lines: self.lines(n, e).min(COUNT_MAX),
+            cover: self.cover(n, e) as u8,
         }
     }
 
@@ -441,7 +438,7 @@ mod tests {
     }
 
     #[test]
-    fn refuses_what_it_cannot_write() {
+    fn refuses_what_it_cannot_hold() {
         assert!(Theatre::new(1, 70, 100).is_err());
         assert!(Theatre::new(0, 70, 50).is_err());
         assert!(Theatre::new(1, 69, 50).is_err());
@@ -500,13 +497,16 @@ mod tests {
 
     #[test]
     fn the_forest_has_trees_and_its_hole_has_none() {
-        assert_eq!(at(40025.0, 55025.0).trees, 3);
-        assert_eq!(at(42000.0, 57000.0).trees, 0);
-        assert_eq!(at(39975.0, 55025.0).trees, 0);
+        let trees = |n: f64, e: f64| {
+            let (n, e) = t().centre((n / 50.0) as u32, (e / 50.0) as u32);
+            t().trees(n, e)
+        };
+        assert_eq!(trees(40025.0, 55025.0), 3);
+        assert_eq!(trees(42000.0, 57000.0), 0);
+        assert_eq!(trees(39975.0, 55025.0), 0);
         let sum: u32 = (0..t().cells())
-            .flat_map(|r| (0..t().cells()).map(move |c| (r, c)))
-            .map(|(r, c)| u32::from(t().cell(r, c).trees))
-            .filter(|&v| v != u32::from(COUNT_NODATA))
+            .flat_map(|r| (0..t().cells()).map(move |c| t().centre(r, c)))
+            .map(|(n, e)| u32::from(t().trees(n, e)))
             .sum();
         assert_eq!(sum, t().tree_count());
     }
@@ -514,15 +514,15 @@ mod tests {
     #[test]
     fn every_pole_is_counted_once() {
         let col = (LINE_EAST_M / 50.0) as u32;
-        let sum: u32 = (0..t().cells())
-            .map(|r| t().cell(r, col).lines)
-            .filter(|&v| v != COUNT_NODATA)
-            .map(u32::from)
-            .sum();
+        let lines = |r: u32| {
+            let (n, e) = t().centre(r, col);
+            t().lines(n, e)
+        };
+        let sum: u32 = (0..t().cells()).map(|r| u32::from(lines(r))).sum();
         assert_eq!(sum, t().pole_count());
         assert_eq!(t().pole_count(), 201);
-        assert_eq!(at(20025.0, LINE_EAST_M).lines, 1);
-        assert_eq!(at(20075.0, LINE_EAST_M).lines, 0);
+        assert_eq!(lines(400), 1);
+        assert_eq!(lines(401), 0);
     }
 
     #[test]

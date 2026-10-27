@@ -16,6 +16,8 @@ use serde_json::Value;
 use crate::grid::Grid;
 
 mod check;
+#[cfg(test)]
+mod fixture;
 mod tables;
 
 pub use check::{Summary, check};
@@ -25,6 +27,10 @@ pub const FORMAT_VERSION: u32 = 2;
 pub const CELL_SIZE_M: u32 = 50;
 pub const TILE_SIZE: u32 = 256;
 pub const MANIFEST: &str = "manifest.json";
+
+const WATER_SEA: i32 = 2;
+const HEIGHT_SEA: i32 = 0;
+const SURFACE_WATER: i32 = 3;
 
 /// How a layer's samples are stored: little-endian, no header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -369,62 +375,182 @@ impl Extract {
         }
         Ok(Samples::decode(layer.dtype, &bytes))
     }
+
+    /// One tile of a layer, every sample of it, rebuilt from the `water` tile
+    /// at the same place when it was not written: no `water` tile means every
+    /// cell is outside the mesh; an all-sea one stands for its `height` and
+    /// `surface`; and a count tile is left out when every covered cell is 0.
+    pub fn tile(&self, layer: Layer, tx: u32, tz: u32) -> Result<Samples, Failure> {
+        let stored = |name: &str| {
+            let listed = self.manifest.tiles.iter();
+            match listed
+                .into_iter()
+                .find(|t| t.layer == name && (t.tx, t.tz) == (tx, tz))
+            {
+                Some(t) => self.read_tile(t).map(Some),
+                None => Ok(None),
+            }
+        };
+        if let Some(s) = stored(layer.name)? {
+            return Ok(s);
+        }
+        let n = self.manifest.grid.tile_size as usize;
+        let n = n * n;
+        let fill = |v: i32| Samples::filled(layer.dtype, v, n);
+        let water = LAYERS[1];
+        let w = match layer.name {
+            "water" => None,
+            _ => stored(water.name)?,
+        };
+        let Some(w) = w else {
+            return Ok(fill(layer.nodata));
+        };
+        match layer.name {
+            "trees" | "lines" => Ok(Samples::from_fn(layer.dtype, n, |i| {
+                if w.get(i) == water.nodata {
+                    layer.nodata
+                } else {
+                    0
+                }
+            })),
+            "height" | "surface" if w.iter().all(|v| v == WATER_SEA) => {
+                Ok(fill(match layer.name {
+                    "height" => HEIGHT_SEA,
+                    _ => SURFACE_WATER,
+                }))
+            }
+            _ => Err(Failure::new(
+                format!("tiles/{}/{tx}_{tz}.bin", layer.name),
+                "not written, though its water tile is and is not all sea",
+            )),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::scratch::Scratch;
-    use crate::synth;
 
-    fn synth_extract() -> Scratch {
+    fn fixture_extract() -> Scratch {
         let s = Scratch::new();
-        let t =
-            synth::Theatre::new(synth::DEFAULT_SEED, synth::DEFAULT_SIZE_KM, CELL_SIZE_M).unwrap();
-        synth::write(&t, &s.0).unwrap();
+        fixture::write(&s.0);
         s
     }
 
-    #[test]
-    fn the_format_matches_what_synth_writes() {
-        assert_eq!(FORMAT_VERSION, synth::FORMAT_VERSION);
-        assert_eq!(TILE_SIZE, synth::TILE_SIZE);
-        assert_eq!(CELL_SIZE_M, synth::CELL_SIZE_M);
-        let nodata = [
-            i32::from(synth::HEIGHT_NODATA),
-            i32::from(synth::WATER_NODATA),
-            i32::from(synth::SURFACE_NODATA),
-            i32::from(synth::COUNT_NODATA),
-            i32::from(synth::COUNT_NODATA),
-        ];
-        assert_eq!(LAYERS.map(|l| l.nodata), nodata);
+    fn edit_manifest(dir: &Path, f: impl FnOnce(&mut Value)) {
+        let path = dir.join(MANIFEST);
+        let mut m: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        f(&mut m);
+        fs::write(&path, m.to_string()).unwrap();
+    }
+
+    fn l(name: &str) -> Layer {
+        layer(name).unwrap()
     }
 
     #[test]
-    fn opens_the_synthetic_extract_and_reads_a_tile() {
-        let s = synth_extract();
+    fn opens_the_fixture_and_reads_a_tile() {
+        let s = fixture_extract();
         let x = Extract::open(&s.0).unwrap();
-        assert_eq!(x.manifest.theatre, synth::THEATRE);
-        assert_eq!(x.manifest.grid.tiles(), (6, 6));
-
-        let t =
-            synth::Theatre::new(synth::DEFAULT_SEED, synth::DEFAULT_SIZE_KM, CELL_SIZE_M).unwrap();
+        assert_eq!(x.manifest.theatre, "Fixture");
+        assert_eq!(x.manifest.grid.tiles(), (2, 3));
         let entry = x
             .manifest
             .tiles
             .iter()
-            .find(|e| e.layer == "height" && e.tx == 1 && e.tz == 5)
+            .find(|e| e.layer == "height" && e.tx == 1 && e.tz == 2)
             .unwrap();
         let samples = x.read_tile(entry).unwrap();
         assert!(matches!(samples, Samples::I16(_)));
-        let (row, col) = (300u32, 1300u32);
-        let i = ((row - 256) * 256 + (col - 1280)) as usize;
-        assert_eq!(samples.get(i), i32::from(t.cell(row, col).height));
+        let (row, col) = (270u32, 530u32);
+        let i = ((row - 256) * 256 + (col - 512)) as usize;
+        assert_eq!(samples.get(i), fixture::cell("height", row, col));
+        assert_eq!(x.tile(l("height"), 1, 2).unwrap(), samples);
+    }
+
+    #[test]
+    fn an_all_sea_tile_reads_as_sea_level_water() {
+        let s = fixture_extract();
+        let x = Extract::open(&s.0).unwrap();
+        // (0, 1) is all sea, so only its water tile was written.
+        let water = x.tile(l("water"), 0, 1).unwrap();
+        assert!(water.iter().all(|v| v == 2));
+        let height = x.tile(l("height"), 0, 1).unwrap();
+        assert!(height.iter().all(|v| v == 0));
+        assert_eq!(height.len(), 256 * 256);
+        assert!(x.tile(l("surface"), 0, 1).unwrap().iter().all(|v| v == 3));
+    }
+
+    #[test]
+    fn an_absent_count_tile_is_zero_on_the_mesh_and_nodata_off_it() {
+        let s = fixture_extract();
+        let x = Extract::open(&s.0).unwrap();
+        // The first row of tile (0, 0) is outside the mesh, and no lines
+        // tile is written.
+        let t = x.tile(l("lines"), 0, 0).unwrap();
+        assert!(matches!(t, Samples::U16(_)));
+        for (i, v) in t.iter().enumerate() {
+            let want = if i < 256 { 65535 } else { 0 };
+            assert_eq!(v, want, "sample {i}");
+        }
+        // A written count tile reads as written.
+        let trees = x.tile(l("trees"), 0, 0).unwrap();
+        assert_eq!(trees.get(2 * 256 + 4), fixture::TREES);
+        assert_eq!(trees.get(2 * 256 + 5), 0);
+    }
+
+    #[test]
+    fn a_tile_with_no_water_tile_is_nodata_in_every_layer() {
+        let s = fixture_extract();
+        let x = Extract::open(&s.0).unwrap();
+        for layer in LAYERS {
+            let t = x.tile(layer, 1, 0).unwrap();
+            assert_eq!(t.len(), 256 * 256);
+            assert!(t.iter().all(|v| v == layer.nodata), "{}", layer.name);
+        }
+    }
+
+    #[test]
+    fn refuses_an_absent_height_whose_water_is_not_all_sea() {
+        let s = fixture_extract();
+        edit_manifest(&s.0, |m| {
+            m["tiles"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|t| !(t["layer"] == "height" && t["tx"] == 0 && t["tz"] == 0));
+        });
+        let x = Extract::open(&s.0).unwrap();
+        let f = x.tile(l("height"), 0, 0).unwrap_err();
+        assert_eq!(f.path, "tiles/height/0_0.bin");
+        assert!(f.message.contains("not all sea"), "{f}");
+    }
+
+    #[test]
+    fn each_absent_rule_stands_on_the_water_tile_alone() {
+        let s = fixture_extract();
+        // Sea beside a cell off the mesh is not all sea: the all-sea water
+        // tile given one cell outside the mesh.
+        let p = "tiles/water/0_1.bin";
+        let mut w = vec![2u8; 256 * 256];
+        w[256 * 256 - 1] = 255;
+        fixture::put(&s.0, p, &w);
+        let x = Extract::open(&s.0).unwrap();
+        assert!(x.tile(l("height"), 0, 1).is_err());
+        let lines = x.tile(l("lines"), 0, 1).unwrap();
+        assert_eq!(lines.get(0), 0);
+        assert_eq!(lines.get(256 * 256 - 1), 65535);
+        // A water tile with no covered cell, read anyway, stands for no sea
+        // and no count.
+        fixture::put(&s.0, p, &vec![255u8; 256 * 256]);
+        assert!(x.tile(l("surface"), 0, 1).is_err());
+        let trees = x.tile(l("trees"), 0, 1).unwrap();
+        assert_eq!(trees, Samples::U16(vec![65535; 256 * 256]));
     }
 
     #[test]
     fn refuses_a_directory_without_a_manifest() {
-        let s = synth_extract();
+        let s = fixture_extract();
         fs::remove_file(s.0.join(MANIFEST)).unwrap();
         let f = Extract::open(&s.0).unwrap_err();
         assert_eq!(f.path, MANIFEST);
@@ -433,7 +559,7 @@ mod tests {
 
     #[test]
     fn refuses_a_version_it_does_not_read_before_its_keys() {
-        let s = synth_extract();
+        let s = fixture_extract();
         fs::write(s.0.join(MANIFEST), r#"{"format_version": 3}"#).unwrap();
         let f = Extract::open(&s.0).unwrap_err();
         assert!(f.message.contains("format_version 3"), "{f}");
@@ -441,7 +567,7 @@ mod tests {
 
     #[test]
     fn names_every_manifest_key_it_lacks() {
-        let s = synth_extract();
+        let s = fixture_extract();
         fs::write(
             s.0.join(MANIFEST),
             r#"{"format_version": 2, "theatre": "x"}"#,
@@ -457,7 +583,7 @@ mod tests {
 
     #[test]
     fn a_nullable_entry_key_must_still_be_present() {
-        let s = synth_extract();
+        let s = fixture_extract();
         let path = s.0.join(MANIFEST);
         let mut m: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         m["tiles"][2].as_object_mut().unwrap().remove("max");
@@ -477,7 +603,7 @@ mod tests {
 
     #[test]
     fn refuses_a_tile_of_the_wrong_size() {
-        let s = synth_extract();
+        let s = fixture_extract();
         let x = Extract::open(&s.0).unwrap();
         let entry = &x.manifest.tiles[0];
         fs::write(s.0.join(&entry.path), [0u8; 10]).unwrap();

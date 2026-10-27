@@ -37,23 +37,16 @@ impl Synth {
     /// A cell's value in one layer by the closed form, the layer's `nodata`
     /// past the grid or outside the mesh.
     pub fn cell(&self, layer: Layer, row: i64, col: i64) -> i32 {
-        let t = &self.form;
-        let n = i64::from(t.cells());
+        let n = i64::from(self.form.cells());
         if !(0..n).contains(&row) || !(0..n).contains(&col) {
             return layer.nodata();
         }
-        let (north, east) = t.centre(row as u32, col as u32);
-        if !t.covered(north, east) {
-            return layer.nodata();
-        }
+        let c = self.form.cell(row as u32, col as u32);
         match layer {
-            Layer::Height => {
-                let h = (t.height(north, east) + 0.5).floor();
-                h.clamp(f64::from(HEIGHT_MIN), f64::from(HEIGHT_MAX)) as i32
-            }
-            Layer::Water => i32::from(t.water(north, east)),
-            Layer::Surface => i32::from(t.surface(north, east)),
-            Layer::Cover => t.cover(north, east).code(),
+            Layer::Height => i32::from(c.height),
+            Layer::Water => i32::from(c.water),
+            Layer::Surface => i32::from(c.surface),
+            Layer::Cover => i32::from(c.cover),
         }
     }
 }
