@@ -391,6 +391,113 @@ impl Surface5 {
         })
     }
 
+    /// The table of contents as bytes, for a cache: finding it in the file
+    /// takes a pattern scan, and reading it back takes none.
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        let array = |out: &mut Vec<u8>, a: &Array| {
+            out.extend_from_slice(&a.offset.to_le_bytes());
+            out.extend_from_slice(&a.size.to_le_bytes());
+            out.extend_from_slice(&a.stride.to_le_bytes());
+        };
+        out.extend_from_slice(&self.data_base.to_le_bytes());
+        out.extend_from_slice(&self.len.to_le_bytes());
+        out.extend_from_slice(&(self.names.len() as u32).to_le_bytes());
+        for n in &self.names {
+            out.extend_from_slice(&(n.len() as u32).to_le_bytes());
+            out.extend_from_slice(n.as_bytes());
+        }
+        out.extend_from_slice(&(self.blocks.len() as u32).to_le_bytes());
+        for b in &self.blocks {
+            for v in b.t.iter().chain(&b.bbox) {
+                out.extend_from_slice(&v.to_le_bytes());
+            }
+            for a in [&b.tritype, &b.tri, &b.pbase] {
+                array(&mut out, a);
+            }
+            out.push(u8::from(b.depth.is_some()));
+            if let Some(a) = &b.depth {
+                array(&mut out, a);
+            }
+            out.extend_from_slice(&(b.subsets.len() as u32).to_le_bytes());
+            for s in &b.subsets {
+                out.extend_from_slice(&s.shader.to_le_bytes());
+                out.extend_from_slice(&s.material.to_le_bytes());
+                array(&mut out, &s.base);
+                array(&mut out, &s.tri);
+            }
+        }
+        out
+    }
+
+    /// Reads back what `encode` wrote.
+    pub fn decode(bytes: &[u8]) -> Result<Surface5, Malformed> {
+        let mut r = Bytes { b: bytes, at: 0 };
+        let data_base = r.u64()?;
+        let len = r.u64()?;
+        let names = (0..r.u32()?)
+            .map(|_| {
+                let n = r.u32()? as usize;
+                String::from_utf8(r.take(n)?.to_vec())
+                    .map_err(|_| Malformed("a material name is not UTF-8".into()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let name = |k: u16| {
+            if usize::from(k) < names.len() {
+                Ok(k)
+            } else {
+                Err(Malformed(format!(
+                    "a subset names material {k}, of {}",
+                    names.len()
+                )))
+            }
+        };
+        let mut blocks = Vec::new();
+        for _ in 0..r.u32()? {
+            let t = [r.f32()?, r.f32()?, r.f32()?];
+            let mut bbox = [0f32; 6];
+            for v in &mut bbox {
+                *v = r.f32()?;
+            }
+            let (tritype, tri, pbase) = (r.array()?, r.array()?, r.array()?);
+            let depth = match r.take(1)?[0] {
+                0 => None,
+                _ => Some(r.array()?),
+            };
+            let subsets = (0..r.u32()?)
+                .map(|_| {
+                    Ok(SubsetToc {
+                        shader: name(r.u16()?)?,
+                        material: name(r.u16()?)?,
+                        base: r.array()?,
+                        tri: r.array()?,
+                    })
+                })
+                .collect::<Result<_, Malformed>>()?;
+            blocks.push(BlockInfo {
+                t,
+                bbox,
+                tritype,
+                tri,
+                pbase,
+                depth,
+                subsets,
+            });
+        }
+        if r.at != bytes.len() {
+            return Err(Malformed(format!(
+                "{} bytes follow the table of contents",
+                bytes.len() - r.at
+            )));
+        }
+        Ok(Surface5 {
+            blocks,
+            names,
+            data_base,
+            len,
+        })
+    }
+
     /// The union of the finest blocks' boxes: the map's extent.
     pub fn bounds(&self) -> Bounds {
         union(self.blocks.iter().map(BlockInfo::world_box))
@@ -543,6 +650,48 @@ impl Surface5 {
     }
 }
 
+/// A cursor over an encoded table of contents.
+struct Bytes<'a> {
+    b: &'a [u8],
+    at: usize,
+}
+
+impl Bytes<'_> {
+    fn take(&mut self, n: usize) -> Result<&[u8], Malformed> {
+        let s = self
+            .at
+            .checked_add(n)
+            .and_then(|end| self.b.get(self.at..end))
+            .ok_or_else(|| Malformed("the table of contents ends early".into()))?;
+        self.at += n;
+        Ok(s)
+    }
+
+    fn u16(&mut self) -> Result<u16, Malformed> {
+        Ok(u16::from_le_bytes(self.take(2)?.try_into().unwrap()))
+    }
+
+    fn u32(&mut self) -> Result<u32, Malformed> {
+        Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
+    }
+
+    fn u64(&mut self) -> Result<u64, Malformed> {
+        Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
+    }
+
+    fn f32(&mut self) -> Result<f32, Malformed> {
+        Ok(f32::from_le_bytes(self.take(4)?.try_into().unwrap()))
+    }
+
+    fn array(&mut self) -> Result<Array, Malformed> {
+        Ok(Array {
+            offset: self.u64()?,
+            size: self.u64()?,
+            stride: self.u16()?,
+        })
+    }
+}
+
 fn check_indices(what: &str, tri: &[[u32; 3]], n: usize) -> Result<(), Error> {
     match tri.iter().flatten().find(|&&v| v as usize >= n) {
         Some(v) => Err(malformed(format!("{what} names vertex {v}, of {n}"))),
@@ -618,6 +767,34 @@ mod tests {
         let b = s.read_block(r, 1, &[]).unwrap();
         assert_eq!(b.index, 1);
         assert_eq!(b.world(0), [1000.0, 10.0, 2100.0]);
+    }
+
+    #[test]
+    fn the_table_of_contents_reads_back_from_its_bytes() {
+        let mut east = two_triangles();
+        east.t = [1000.0, 0.0, 2100.0];
+        east.arrays.retain(|a| a.name != "depth");
+        let f = file(&[two_triangles(), east], 2);
+        let s = Surface5::open(&f[..], "t").unwrap();
+        let back = Surface5::decode(&s.encode()).unwrap();
+        assert_eq!(back, s);
+        let m = ["Lake", "Runway"];
+        assert_eq!(
+            back.read_all(&f[..], &m).unwrap(),
+            s.read_all(&f[..], &m).unwrap()
+        );
+    }
+
+    #[test]
+    fn refuses_a_table_of_contents_cut_short_or_with_bytes_after() {
+        let f = file(&[two_triangles()], 1);
+        let bytes = Surface5::open(&f[..], "t").unwrap().encode();
+        let e = Surface5::decode(&bytes[..bytes.len() - 1]).unwrap_err();
+        assert_eq!(e.0, "the table of contents ends early");
+        let mut long = bytes.clone();
+        long.push(0);
+        let e = Surface5::decode(&long).unwrap_err();
+        assert_eq!(e.0, "1 bytes follow the table of contents");
     }
 
     #[test]
