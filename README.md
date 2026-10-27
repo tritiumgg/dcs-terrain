@@ -15,8 +15,8 @@ place and never writes to it. It keeps a small, rebuildable cache beside it in
 your user cache directory.
 
 > **Not usable yet.** The project was redesigned to read the install directly,
-> and the query engine is being built. The commands below are the planned
-> interface, kept here so the shape is visible. Progress is in
+> and the query engine is being built. Apart from `dcsterrain schema`, the
+> commands below are the planned interface, kept here so the shape is visible. Progress is in
 > [docs/STATE.md](docs/STATE.md).
 
 ## Requirements
@@ -63,12 +63,14 @@ warm. Many questions can go in one call as JSON lines on stdin. To try it with
 no install, use the synthetic terrain: `--terrain synth` (planned).
 
 ```bash
-dcsterrain schema
 dcsterrain check --terrain Caucasus
 ```
 
-`schema` prints every operation's request and response; `check` reports what
-the tool can read from a terrain and the state of its cache (both planned).
+`check` reports what the tool can read from a terrain and the state of its
+cache (planned).
+
+`dcsterrain schema` works today: it prints every operation's request and
+response as JSON Schema.
 
 ## Documentation
 
