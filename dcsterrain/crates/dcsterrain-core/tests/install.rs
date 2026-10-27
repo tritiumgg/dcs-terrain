@@ -60,8 +60,17 @@ fn every_map_reads_with_a_decoder_for_each_file() {
     if nevada.is_none() {
         eprintln!("no Nevada map on this install: its scene version 8 is NOT checked");
     }
-    for dir in &maps {
-        let map = install::read_map(&root, dir).unwrap_or_else(|e| panic!("{dir}: {e}"));
+    let listed = install::terrains(&root).unwrap();
+    assert_eq!(
+        listed.iter().map(|t| t.dir.as_str()).collect::<Vec<_>>(),
+        maps.iter().map(String::as_str).collect::<Vec<_>>()
+    );
+    for (dir, t) in maps.iter().zip(&listed) {
+        let id =
+            t.id.as_deref()
+                .unwrap_or_else(|| panic!("{dir} declares no id"));
+        let map = install::open(&root, id).unwrap_or_else(|e| panic!("{dir}: {e}"));
+        assert_eq!(&map.dir, dir);
         let scene = map.files.iter().find(|f| f.role == "scene").unwrap();
         eprintln!(
             "{dir}: theatre {}, {} files, scene version {}",

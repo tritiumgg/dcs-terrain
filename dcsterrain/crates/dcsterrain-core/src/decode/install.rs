@@ -1,7 +1,7 @@
-//! What an install says about itself: the DCS build, a map's theatre id, and
-//! the map's files with the class and version each one states.
+//! What an install says about itself: the DCS build, the terrains it holds
+//! and the id each declares, and a terrain's files with the class and version
+//! each one states.
 
-use std::fmt;
 use std::fs;
 use std::path::Path;
 
@@ -14,15 +14,7 @@ use crate::extract::FileEntry;
 pub const BUILD_FILE: &str = "autoupdate.cfg";
 pub const ENTRY_FILE: &str = "entry.lua";
 
-/// Why the install cannot be read for this run. The message names the file.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Refusal(pub String);
-
-impl fmt::Display for Refusal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+pub use crate::source::Refusal;
 
 impl From<super::Unknown> for Refusal {
     fn from(u: super::Unknown) -> Self {
@@ -295,6 +287,137 @@ pub fn read_map(install: &Path, map: &str) -> Result<Map, Refusal> {
         build,
         files,
     })
+}
+
+/// A directory under `Mods/terrains` holding an `entry.lua`, and the id that
+/// declares, `None` when it declares none or cannot be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Listed {
+    pub dir: String,
+    pub id: Option<String>,
+}
+
+/// Every terrain the install holds, sorted by folder. A directory without an
+/// `entry.lua` is not a terrain and is passed over.
+pub fn terrains(install: &Path) -> Result<Vec<Listed>, Refusal> {
+    let root = install.join(TERRAINS_DIR);
+    let entries = fs::read_dir(&root).map_err(|e| {
+        Refusal(format!(
+            "{} has no {TERRAINS_DIR} to read: {e}",
+            install.display()
+        ))
+    })?;
+    let mut out = Vec::new();
+    for e in entries.flatten() {
+        let path = e.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(entry) = child(&path, ENTRY_FILE) else {
+            continue;
+        };
+        let id = fs::read(path.join(entry))
+            .ok()
+            .and_then(|b| entry_id(&String::from_utf8_lossy(&b)));
+        out.push(Listed {
+            dir: e.file_name().to_string_lossy().into_owned(),
+            id,
+        });
+    }
+    out.sort_by(|a, b| a.dir.cmp(&b.dir));
+    Ok(out)
+}
+
+/// The folder of the terrain whose `entry.lua` declares `id`, which is not
+/// the folder's own name: Germany's folder is `GermanyColdWar` and its id
+/// `GermanyCW`. An unknown id is refused with every id the install holds.
+pub fn find(install: &Path, id: &str) -> Result<String, Refusal> {
+    let all = terrains(install)?;
+    let dirs: Vec<&str> = all
+        .iter()
+        .filter(|t| t.id.as_deref() == Some(id))
+        .map(|t| t.dir.as_str())
+        .collect();
+    match dirs[..] {
+        [dir] => Ok(dir.to_string()),
+        [] => {
+            let ids: Vec<&str> = all.iter().filter_map(|t| t.id.as_deref()).collect();
+            let held = if ids.is_empty() {
+                "none".to_string()
+            } else {
+                ids.join(", ")
+            };
+            Err(Refusal(format!(
+                "no terrain {id} in this install; the ids it holds are {held}"
+            )))
+        }
+        _ => Err(Refusal(format!(
+            "{} each declare the id {id}; remove one",
+            dirs.join(" and ")
+        ))),
+    }
+}
+
+/// Opens the terrain whose `entry.lua` declares `id`.
+pub fn open(install: &Path, id: &str) -> Result<Map, Refusal> {
+    read_map(install, &find(install, id)?)
+}
+
+/// One of a terrain's files, and whether a decoder reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Surveyed {
+    pub role: String,
+    pub path: String,
+    pub class: Option<String>,
+    pub version: Option<u32>,
+    pub readable: bool,
+}
+
+/// A terrain as a listing shows it: every file a decoder would read, each
+/// marked readable or not, and why the terrain cannot be opened when it
+/// cannot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Survey {
+    pub dir: String,
+    pub id: Option<String>,
+    pub files: Vec<Surveyed>,
+    pub refusal: Option<String>,
+}
+
+/// Surveys one listed terrain. Reads only headers, and never refuses: what
+/// would refuse the terrain is its `refusal`.
+pub fn survey(install: &Path, listed: &Listed) -> Survey {
+    let root = install.join(TERRAINS_DIR).join(&listed.dir);
+    let rel_root = format!("{TERRAINS_DIR}/{}", listed.dir);
+    let mut files = Vec::new();
+    for (role, find, decoder) in ROLES {
+        // A missing or doubled file is the refusal's to report.
+        for rel in locate(&root, &rel_root, &find).unwrap_or_default() {
+            let mut s = Surveyed {
+                role: role.to_string(),
+                path: rel.clone(),
+                class: None,
+                version: None,
+                readable: decoder.is_none(),
+            };
+            if let (Some(want), Ok(Ok(h))) = (decoder, container::read(&install.join(&rel))) {
+                s.readable = dispatch(&rel, &h) == Ok(want);
+                s.class = Some(h.class);
+                s.version = Some(h.version);
+            }
+            files.push(s);
+        }
+    }
+    let refusal = match &listed.id {
+        None => Some(format!("{rel_root}/{ENTRY_FILE} declares no id")),
+        Some(_) => read_map(install, &listed.dir).err().map(|r| r.0),
+    };
+    Survey {
+        dir: listed.dir.clone(),
+        id: listed.id.clone(),
+        files,
+        refusal,
+    }
 }
 
 /// The paths, relative to the install, that `find` names under the map.
@@ -675,5 +798,122 @@ mod tests {
         put(&r, "Mods/terrains/Synth/Scenes/Synth.scn5", b"-- lua\n");
         let e = read_map(&r, "Synth").unwrap_err();
         assert!(e.0.contains("Synth.scn5 is not a map file"), "{e}");
+    }
+
+    /// A second terrain whose folder is not its id, as Germany's is not.
+    fn add_germany(r: &Path) {
+        let m = "Mods/terrains/GermanyColdWar";
+        put(r, &format!("{m}/entry.lua"), entry("GermanyCW").as_bytes());
+        put(
+            r,
+            &format!("{m}/Surface/GermanyCW.surface5"),
+            &head("landscape5::Surface5File", 5, 0, 0),
+        );
+        put(
+            r,
+            &format!("{m}/roads/GermanyCW.rn4"),
+            &head("landscape4::lRoadNetwork", 5, 0, 0),
+        );
+        put(
+            r,
+            &format!("{m}/Scenes/GermanyCW.scn5"),
+            &head("landscape5::Scene5File", 9, 0, 0),
+        );
+    }
+
+    #[test]
+    fn finds_a_terrain_by_the_id_its_entry_declares() {
+        let (_s, r) = install();
+        add_germany(&r);
+        // A directory with no entry.lua is not a terrain.
+        put(&r, "Mods/terrains/Shared/readme.txt", b"x");
+        let listed = terrains(&r).unwrap();
+        let rows: Vec<(&str, Option<&str>)> = listed
+            .iter()
+            .map(|t| (t.dir.as_str(), t.id.as_deref()))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("GermanyColdWar", Some("GermanyCW")),
+                ("Synth", Some("Synth"))
+            ]
+        );
+        assert_eq!(find(&r, "GermanyCW").unwrap(), "GermanyColdWar");
+        let map = open(&r, "GermanyCW").unwrap();
+        assert_eq!(
+            (map.dir.as_str(), map.theatre.as_str()),
+            ("GermanyColdWar", "GermanyCW")
+        );
+        // The folder's name is not an id.
+        let e = find(&r, "GermanyColdWar").unwrap_err();
+        assert_eq!(
+            e.0,
+            "no terrain GermanyColdWar in this install; the ids it holds are GermanyCW, Synth"
+        );
+    }
+
+    #[test]
+    fn refuses_an_id_two_terrains_declare() {
+        let (_s, r) = install();
+        add_germany(&r);
+        put(
+            &r,
+            "Mods/terrains/Synth/entry.lua",
+            entry("GermanyCW").as_bytes(),
+        );
+        let e = find(&r, "GermanyCW").unwrap_err();
+        assert!(
+            e.0.starts_with("GermanyColdWar and Synth each declare"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn surveys_each_file_and_marks_one_no_decoder_reads() {
+        let (_s, r) = install();
+        add_germany(&r);
+        put(
+            &r,
+            "Mods/terrains/GermanyColdWar/Scenes/GermanyCW.scn5",
+            &head("landscape5::Scene5File", 10, 0, 0),
+        );
+        let listed = terrains(&r).unwrap();
+        let germany = survey(&r, &listed[0]);
+        let rows: Vec<(&str, Option<u32>, bool)> = germany
+            .files
+            .iter()
+            .map(|f| (f.role.as_str(), f.version, f.readable))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("surface", Some(5), true),
+                ("roads", Some(5), true),
+                ("scene", Some(10), false)
+            ]
+        );
+        let why = germany.refusal.unwrap();
+        assert!(why.contains("Scene5File version 10"), "{why}");
+        let synth = survey(&r, &listed[1]);
+        assert_eq!(synth.refusal, None);
+        assert!(synth.files.iter().all(|f| f.readable));
+        assert_eq!(synth.files.len(), 9);
+    }
+
+    #[test]
+    fn surveys_a_terrain_that_declares_no_id_or_lacks_a_file() {
+        let (_s, r) = install();
+        put(&r, "Mods/terrains/Synth/entry.lua", b"theatre = {}\n");
+        let listed = terrains(&r).unwrap();
+        assert_eq!(listed[0].id, None);
+        let s = survey(&r, &listed[0]);
+        assert!(s.refusal.unwrap().ends_with("entry.lua declares no id"));
+
+        let (_s, r) = install();
+        fs::remove_file(r.join("Mods/terrains/Synth/roads/Synth.rn4")).unwrap();
+        let s = survey(&r, &terrains(&r).unwrap()[0]);
+        assert!(s.files.iter().all(|f| f.role != "roads"));
+        assert!(s.refusal.unwrap().contains("one .rn4 file"));
     }
 }
