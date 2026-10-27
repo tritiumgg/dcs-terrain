@@ -41,6 +41,23 @@ pub trait Source {
     /// columns fastest. A cell past the grid, or one no mesh triangle covers,
     /// is the layer's `nodata`.
     fn tile(&self, layer: Layer, tx: u32, tz: u32) -> Result<Vec<i32>, Refusal>;
+
+    /// The ground at DCS `(x, z)` itself, not at a cell centre: the winning
+    /// surface's own height, which is what the game reports. `None` where
+    /// nothing covers the point.
+    fn point(&self, x: f64, z: f64) -> Result<Option<Ground>, Refusal>;
+}
+
+/// The ground at one point.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Ground {
+    /// Metres: the water surface over water, the ground elsewhere.
+    pub height: f64,
+    /// As the `water` layer codes it.
+    pub water: u8,
+    /// As the `surface` layer codes it.
+    pub surface: u8,
+    pub cover: Cover,
 }
 
 /// Cells along each side of a tile.

@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::grid::Grid;
-use crate::source::{Identity, Layer, Refusal, Source, TILE_SIZE};
+use crate::source::{Ground, Identity, Layer, Refusal, Source, TILE_SIZE};
 
 /// The terrain `--terrain synth` names.
 pub const TERRAIN_ID: &str = "synth";
@@ -75,6 +75,17 @@ impl Source for Synth {
             .map(|i| self.cell(layer, r0 + i / ts, c0 + i % ts))
             .collect())
     }
+
+    fn point(&self, x: f64, z: f64) -> Result<Option<Ground>, Refusal> {
+        let t = &self.form;
+        let (n, e) = (x - f64::from(ORIGIN_X_M), z - f64::from(ORIGIN_Z_M));
+        Ok(t.covered(n, e).then(|| Ground {
+            height: t.height(n, e),
+            water: t.water(n, e),
+            surface: t.surface(n, e),
+            cover: t.cover(n, e),
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -144,6 +155,37 @@ mod tests {
             }
             assert_eq!(*t.last().unwrap(), layer.nodata());
         }
+    }
+
+    #[test]
+    fn a_point_is_the_closed_form_there_and_a_cell_its_centre() {
+        let s = synth();
+        let (x, z) = s.form().abs(LAKE_NORTH_M + 10.0, LAKE_EAST_M);
+        let p = s.point(x, z).unwrap().unwrap();
+        assert_eq!(p.height, LAKE_LEVEL_M);
+        assert_eq!((p.water, p.cover), (WATER_LAKE, Cover::Water));
+        // Off a cell centre the height is the hill's own, not the cell's.
+        let (n, e) = (HILL_A_NORTH_M + 333.0, HILL_A_EAST_M + 17.0);
+        let (x, z) = s.form().abs(n, e);
+        assert_eq!(
+            s.point(x, z).unwrap().unwrap().height,
+            s.form().ground(n, e)
+        );
+        let g = s.grid();
+        let (r, c) = g.cell_at(x, z).unwrap();
+        let (cx, cz) = g.centre(r, c);
+        let p = s.point(cx, cz).unwrap().unwrap();
+        assert_eq!(
+            (p.height + 0.5).floor() as i32,
+            s.cell(Layer::Height, r.into(), c.into())
+        );
+        assert_eq!(
+            i32::from(p.surface),
+            s.cell(Layer::Surface, r.into(), c.into())
+        );
+        // The margin is covered by nothing.
+        let (x, z) = s.form().abs(10.0, 30000.0);
+        assert_eq!(s.point(x, z).unwrap(), None);
     }
 
     #[test]

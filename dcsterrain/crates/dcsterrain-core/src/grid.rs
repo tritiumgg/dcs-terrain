@@ -197,7 +197,7 @@ pub fn sample(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::{Cover, Identity, TILE_SIZE};
+    use crate::source::{Cover, Ground, Identity, TILE_SIZE};
     use crate::synth::{self, Synth};
 
     fn synth() -> Synth {
@@ -406,6 +406,10 @@ mod tests {
                 })
                 .collect())
         }
+
+        fn point(&self, _: f64, _: f64) -> Result<Option<Ground>, Refusal> {
+            Ok(None)
+        }
     }
 
     fn small(height: u32, width: u32) -> Small {
@@ -473,6 +477,9 @@ mod tests {
             }
             fn tile(&self, _: Layer, _: u32, _: u32) -> Result<Vec<i32>, Refusal> {
                 Ok(vec![0; 3])
+            }
+            fn point(&self, x: f64, z: f64) -> Result<Option<Ground>, Refusal> {
+                self.0.point(x, z)
             }
         }
         let e = Window::read(&Short(small(2, 2)), Layer::Water, 0, 0, 2, 2).unwrap_err();
