@@ -28,16 +28,41 @@ Get-ChildItem (Join-Path $root 'Mods\terrains\Caucasus') -Recurse -Include *.sur
   }
 ```
 
-## Not yet measured
+## How DCS opens them
 
-The open test cannot see whether DCS holds these files open, or how.
+Process Monitor, filtered to `DCS.exe` and the terrain's `.surface5`, `.scn5`
+and `.rn4`, across a Caucasus load in the Mission Editor (about 3 s):
 
-- DCS's own `CreateFile` access, share mode and options on `.surface5`, and
-  whether it maps the file: Process Monitor, filtered to `DCS.exe` and the
-  terrain's files, across a terrain load. DCS appears to keep a terrain open
-  until the next one loads, so the capture loads another terrain first, then
-  Caucasus, and watches for a `CloseFile` when the other loads.
-- Whether DCS's pages of `.surface5` are resident in the OS cache before the
-  tool reads it: RAMMap's File Summary with the terrain loaded.
+| file | `CreateFile` | mapped | closed during the capture |
+|---|---|---|---|
+| `Caucasus.surface5` | Generic Read, ShareMode Read, Synchronous IO Non-Alert | `PAGE_READONLY` | no |
+| `Caucasus.scn5` | the same | `PAGE_READONLY` | no |
+| `Caucasus.rn4` and the 21 airfield `.rn4` | the same | no | yes, within about 1 s |
 
-These decide whether the tool's first reads are warm, not whether it runs.
+- No open asks for `No Buffering`, and no read is non-cached: DCS reads
+  through the OS file cache, so its pages are the tool's pages.
+- ShareMode Read admits a second reader and refuses a writer. The tool opens
+  for read only, so it fits.
+- DCS reads about 44 MB of the 6.29 GB `.surface5` with `ReadFile` at load,
+  mostly 16 KiB in sequence from offset 32; the rest it touches through the
+  mapping.
+- It keeps `.surface5` and `.scn5` open and mapped after the load. When it
+  lets go was not captured: no other terrain was loaded during the capture.
+
+## What is resident
+
+RAMMap's File Summary with Caucasus loaded, after the capture:
+
+| file | size | resident (all standby) | share |
+|---|---|---|---|
+| `Caucasus.surface5` | 6,146,144 K | 92,412 K | 1.5 % |
+| `Caucasus.scn5` | 1,113,349 K | 16,860 K | 1.5 % |
+| `Caucasus.rn4` | 198,699 K | 198,700 K | 100 % |
+| `Caucasus.routes` | 957,545 K | 956,416 K | 99.9 % |
+| `Caucasus.ng5` | 840,627 K | 272,640 K | 32 % |
+
+None of it is active: DCS's mappings hold no page in its working set, and
+every cached page sits in the standby list, where the tool reuses it until
+Windows reclaims the memory. So the tool's first reads of the mesh and the
+scene mostly come from disk, and its reads of the road network do not. This
+decides a benefit, not whether the tool runs.

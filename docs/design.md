@@ -446,7 +446,9 @@ Each names what settles it.
    with Caucasus loaded on 2.9.30.28738 every terrain file opens for read,
    even sharing read only (`data/live-gate.md`).
 2. **OS file-cache sharing with DCS.** Decides a benefit, not viability.
-   *Settles it:* N0's Process Monitor and RAMMap capture.
+   *Settled:* DCS reads through the cache and maps `.surface5` and `.scn5`
+   read-only, but keeps only 1.5 % of each resident, all standby; the road
+   network is fully resident (`data/live-gate.md`).
 3. **A new ED format version** stops that terrain's queries until a decoder
    ships; a silent layout change gives wrong answers live, with no last-good
    copy. *Mitigation:* the class-and-version refusal, the decoders' checks at
