@@ -281,7 +281,7 @@ fn caucasus_writes_its_scenery_and_counts() {
     let (spath, sfile) = surface(&root, "Caucasus");
     let grid = surface5::grid_for(&sfile.bounds());
     let started = Instant::now();
-    let tiles = surface5::write_tiles(&sfile, || surface5::reader(&spath), &grid, &out.0).unwrap();
+    let tiles = surface5::write_tiles(&sfile, &File::open(&spath).unwrap(), &grid, &out.0).unwrap();
     eprintln!("ground tiles in {:.1} s", started.elapsed().as_secs_f64());
 
     let path = scene_path(&root, "Caucasus");

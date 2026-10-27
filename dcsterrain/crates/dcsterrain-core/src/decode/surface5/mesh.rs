@@ -8,11 +8,12 @@
 //!
 //! A whole map's finest mesh runs to 177 M triangles, more than a machine
 //! should hold at once, so opening a file reads only its table of contents,
-//! and a block's arrays are read when it is asked for.
+//! and a block's arrays are read when it is asked for, each at its offset,
+//! so threads can share one open file.
 
 use std::fmt;
 use std::fs::File;
-use std::io::{self, BufReader, Read, Seek, SeekFrom};
+use std::io;
 use std::path::Path;
 
 use super::super::container::{self, MAX_HEAD};
@@ -56,6 +57,57 @@ impl From<Malformed> for Error {
 
 fn malformed(s: String) -> Error {
     Error::Malformed(Malformed(s))
+}
+
+/// Reads bytes at an offset without a cursor, so threads can share one
+/// handle to a file.
+pub trait ReadAt {
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> io::Result<()>;
+    fn size(&self) -> io::Result<u64>;
+}
+
+impl ReadAt for File {
+    #[cfg(unix)]
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> io::Result<()> {
+        std::os::unix::fs::FileExt::read_exact_at(self, buf, offset)
+    }
+
+    #[cfg(windows)]
+    fn read_exact_at(&self, mut buf: &mut [u8], mut offset: u64) -> io::Result<()> {
+        use std::os::windows::fs::FileExt;
+        while !buf.is_empty() {
+            match self.seek_read(buf, offset) {
+                Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+                Ok(n) => {
+                    buf = &mut buf[n..];
+                    offset += n as u64;
+                }
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    }
+
+    fn size(&self) -> io::Result<u64> {
+        Ok(self.metadata()?.len())
+    }
+}
+
+impl ReadAt for [u8] {
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> io::Result<()> {
+        let at = usize::try_from(offset).unwrap_or(usize::MAX);
+        let src = at
+            .checked_add(buf.len())
+            .and_then(|end| self.get(at..end))
+            .ok_or(io::ErrorKind::UnexpectedEof)?;
+        buf.copy_from_slice(src);
+        Ok(())
+    }
+
+    fn size(&self) -> io::Result<u64> {
+        Ok(self.len() as u64)
+    }
 }
 
 /// Where one array lies, from the data base.
@@ -301,11 +353,10 @@ pub struct Surface5 {
 impl Surface5 {
     /// Reads the header and table of contents of a file whose header names
     /// this decoder. `name` is how an error names the file.
-    pub fn open<R: Read + Seek>(r: &mut R, name: &str) -> Result<Surface5, Error> {
-        let len = r.seek(SeekFrom::End(0))?;
-        r.seek(SeekFrom::Start(0))?;
-        let mut first = Vec::with_capacity(MAX_HEAD);
-        r.take(MAX_HEAD as u64).read_to_end(&mut first)?;
+    pub fn open<R: ReadAt + ?Sized>(r: &R, name: &str) -> Result<Surface5, Error> {
+        let len = r.size()?;
+        let mut first = vec![0u8; len.min(MAX_HEAD as u64) as usize];
+        r.read_exact_at(&mut first, 0)?;
         let h = container::parse(&first).map_err(|e| malformed(format!("not a container: {e}")))?;
         match dispatch(name, &h) {
             Ok(Decoder::Surface5) => {}
@@ -323,9 +374,8 @@ impl Surface5 {
                 h.data_base
             )));
         }
-        r.seek(SeekFrom::Start(0))?;
         let mut head = vec![0u8; h.data_base as usize];
-        r.read_exact(&mut head)?;
+        r.read_exact_at(&mut head, 0)?;
         let Toc { blocks, finest } = scan(&head, h.body())?;
         let mut names = Vec::new();
         let blocks = blocks[..finest]
@@ -348,9 +398,9 @@ impl Surface5 {
 
     /// The bytes of an array, refused unless its stride is `stride` and it
     /// lies inside the file.
-    fn bytes<R: Read + Seek>(
+    fn bytes<R: ReadAt + ?Sized>(
         &self,
-        r: &mut R,
+        r: &R,
         what: impl Fn() -> String,
         a: Array,
         stride: u16,
@@ -376,15 +426,14 @@ impl Surface5 {
                 what()
             )));
         }
-        r.seek(SeekFrom::Start(start))?;
         let mut b = vec![0u8; a.size as usize];
-        r.read_exact(&mut b)?;
+        r.read_exact_at(&mut b, start)?;
         Ok(b)
     }
 
-    fn words<R: Read + Seek, T>(
+    fn words<R: ReadAt + ?Sized, T>(
         &self,
-        r: &mut R,
+        r: &R,
         what: impl Fn() -> String,
         a: Array,
         conv: fn([u8; 4]) -> T,
@@ -393,9 +442,9 @@ impl Surface5 {
         Ok(b.as_chunks::<4>().0.iter().map(|c| conv(*c)).collect())
     }
 
-    fn triples<R: Read + Seek, T>(
+    fn triples<R: ReadAt + ?Sized, T>(
         &self,
-        r: &mut R,
+        r: &R,
         what: impl Fn() -> String,
         a: Array,
         conv: fn([u8; 4]) -> T,
@@ -409,9 +458,9 @@ impl Surface5 {
     }
 
     /// Reads finest block `index`, with the subsets of `materials`.
-    pub fn read_block<R: Read + Seek>(
+    pub fn read_block<R: ReadAt + ?Sized>(
         &self,
-        r: &mut R,
+        r: &R,
         index: usize,
         materials: &[&str],
     ) -> Result<Block, Error> {
@@ -486,7 +535,7 @@ impl Surface5 {
     }
 
     /// Reads every finest block: for a test, or a map small enough to hold.
-    pub fn read_all<R: Read + Seek>(&self, r: &mut R, materials: &[&str]) -> Result<Mesh, Error> {
+    pub fn read_all<R: ReadAt + ?Sized>(&self, r: &R, materials: &[&str]) -> Result<Mesh, Error> {
         let blocks = (0..self.blocks.len())
             .map(|i| self.read_block(r, i, materials))
             .collect::<Result<_, _>>()?;
@@ -501,20 +550,13 @@ fn check_indices(what: &str, tri: &[[u32; 3]], n: usize) -> Result<(), Error> {
     }
 }
 
-/// A buffered reader of the file at `path`, for `Surface5`'s methods.
-pub fn reader(path: &Path) -> io::Result<BufReader<File>> {
-    Ok(BufReader::new(File::open(path)?))
-}
-
 /// Opens the surface5 file at `path`.
 pub fn open(path: &Path) -> Result<Surface5, Error> {
-    Surface5::open(&mut reader(path)?, &path.to_string_lossy())
+    Surface5::open(&File::open(path)?, &path.to_string_lossy())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
-
     use super::super::build::{self, f32s, file, tri, u32s, vec3};
     use super::*;
 
@@ -545,8 +587,8 @@ mod tests {
     }
 
     fn read_bytes(f: Vec<u8>, name: &str, m: &[&str]) -> Result<Mesh, Error> {
-        let mut r = Cursor::new(f);
-        Surface5::open(&mut r, name)?.read_all(&mut r, m)
+        let r = &f[..];
+        Surface5::open(r, name)?.read_all(r, m)
     }
 
     fn read_built(blocks: &[build::Block], n: u32, m: &[&str]) -> Result<Mesh, Error> {
@@ -569,10 +611,11 @@ mod tests {
     fn reads_one_block_on_demand() {
         let mut east = two_triangles();
         east.t = [1000.0, 0.0, 2100.0];
-        let mut r = Cursor::new(file(&[two_triangles(), east], 2));
-        let s = Surface5::open(&mut r, "t").unwrap();
+        let f = file(&[two_triangles(), east], 2);
+        let r = &f[..];
+        let s = Surface5::open(r, "t").unwrap();
         assert_eq!(s.blocks.len(), 2);
-        let b = s.read_block(&mut r, 1, &[]).unwrap();
+        let b = s.read_block(r, 1, &[]).unwrap();
         assert_eq!(b.index, 1);
         assert_eq!(b.world(0), [1000.0, 10.0, 2100.0]);
     }
@@ -622,8 +665,8 @@ mod tests {
     fn the_bounds_are_the_union_of_the_boxes() {
         let mut east = two_triangles();
         east.t = [1000.0, 0.0, 2100.0];
-        let mut r = Cursor::new(file(&[two_triangles(), east], 2));
-        let b = Surface5::open(&mut r, "t").unwrap().bounds();
+        let f = file(&[two_triangles(), east], 2);
+        let b = Surface5::open(&f[..], "t").unwrap().bounds();
         assert_eq!(
             (b.min_x, b.min_z, b.max_x, b.max_z),
             (1000.0, 2000.0, 1100.0, 2200.0)

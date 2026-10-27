@@ -24,7 +24,7 @@
 use std::fmt;
 
 mod mesh;
-pub use mesh::{Block, BlockInfo, Error, Mesh, Subset, Surface5, open, reader};
+pub use mesh::{Block, BlockInfo, Error, Mesh, ReadAt, Subset, Surface5, open};
 mod sample;
 pub use sample::{Hit, LAKE, RIVER, ROAD_STRIP, SEA, cover, water_class};
 mod raster;

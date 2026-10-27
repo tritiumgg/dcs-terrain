@@ -49,12 +49,12 @@ fn every_map_reads_its_finest_mesh() {
         let map = install::read_map(&root, &dir).unwrap();
         let path = surface_path(&root, &map);
         let file = surface5::open(&path).unwrap_or_else(|e| panic!("{dir}: {e}"));
-        let mut r = surface5::reader(&path).unwrap();
+        let r = fs::File::open(&path).unwrap();
         let (mut tris, mut verts, mut runway) = (0, 0, 0);
         // One block at a time: the largest map's mesh is gigabytes.
         for i in 0..file.blocks.len() {
             let b = file
-                .read_block(&mut r, i, &["Runway"])
+                .read_block(&r, i, &["Runway"])
                 .unwrap_or_else(|e| panic!("{dir}: {e}"));
             tris += b.tri.len();
             verts += b.p.len();
@@ -130,57 +130,52 @@ fn caucasus_matches_the_live_extract() {
     let (mut fill_covered, mut covered_fill, mut fill_not_flat) = (0u64, 0u64, 0u64);
     let mut unlisted_covered = 0u64;
     let started = Instant::now();
-    surface5::rasterize(
-        &file,
-        || surface5::reader(&path),
-        &grid,
-        |t| {
-            let n = t.water.len();
-            let Some(w) = live_tile(&live, "water", t.tx, t.tz) else {
-                unlisted_covered += t.water.iter().filter(|&&v| v != 255).count() as u64;
-                return Ok(());
-            };
-            let h: Vec<i16> = match live_tile(&live, "height", t.tx, t.tz) {
-                Some(b) => b
-                    .as_chunks::<2>()
-                    .0
-                    .iter()
-                    .map(|c| i16::from_le_bytes(*c))
-                    .collect(),
-                None => vec![0; n],
-            };
-            for i in 0..n {
-                match (w[i] == 255, t.water[i] == 255) {
-                    (true, false) => {
-                        fill_covered += 1;
-                        // The live fill test took flat 5 m land for no terrain, though it is ground.
-                        fill_not_flat += u64::from(t.height[i] != 5 || t.water[i] != 0);
-                    }
-                    (false, true) => covered_fill += 1,
-                    _ => {}
+    surface5::rasterize(&file, &fs::File::open(&path).unwrap(), &grid, |t| {
+        let n = t.water.len();
+        let Some(w) = live_tile(&live, "water", t.tx, t.tz) else {
+            unlisted_covered += t.water.iter().filter(|&&v| v != 255).count() as u64;
+            return Ok(());
+        };
+        let h: Vec<i16> = match live_tile(&live, "height", t.tx, t.tz) {
+            Some(b) => b
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| i16::from_le_bytes(*c))
+                .collect(),
+            None => vec![0; n],
+        };
+        for i in 0..n {
+            match (w[i] == 255, t.water[i] == 255) {
+                (true, false) => {
+                    fill_covered += 1;
+                    // The live fill test took flat 5 m land for no terrain, though it is ground.
+                    fill_not_flat += u64::from(t.height[i] != 5 || t.water[i] != 0);
                 }
-                if w[i] == 255 || h[i] == -32768 {
-                    continue;
-                }
-                water_cells += 1;
-                water_wrong += u64::from(w[i] != t.water[i]);
-                if t.water[i] == 255 {
-                    continue;
-                }
-                let e = (i32::from(t.height[i]) - i32::from(h[i])).abs();
-                cells += 1;
-                exact += u64::from(e == 0);
-                within_1 += u64::from(e <= 1);
-                over_2 += u64::from(e > 2);
-                worst = worst.max(e);
-                if w[i] == 0 {
-                    land += 1;
-                    land_exact += u64::from(e == 0);
-                }
+                (false, true) => covered_fill += 1,
+                _ => {}
             }
-            Ok(())
-        },
-    )
+            if w[i] == 255 || h[i] == -32768 {
+                continue;
+            }
+            water_cells += 1;
+            water_wrong += u64::from(w[i] != t.water[i]);
+            if t.water[i] == 255 {
+                continue;
+            }
+            let e = (i32::from(t.height[i]) - i32::from(h[i])).abs();
+            cells += 1;
+            exact += u64::from(e == 0);
+            within_1 += u64::from(e <= 1);
+            over_2 += u64::from(e > 2);
+            worst = worst.max(e);
+            if w[i] == 0 {
+                land += 1;
+                land_exact += u64::from(e == 0);
+            }
+        }
+        Ok(())
+    })
     .unwrap();
     let pct = |a: u64, b: u64| 100.0 * a as f64 / b as f64;
     eprintln!("rasterized in {:.1} s", started.elapsed().as_secs_f64());

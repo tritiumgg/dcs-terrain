@@ -8,13 +8,13 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{self, Read, Seek};
+use std::io;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use super::mesh::{Block, Error, Surface5};
+use super::mesh::{Block, Error, ReadAt, Surface5};
 use super::sample::{ROAD_STRIP, cover, rank, round_height, water_class};
 use crate::extract::{Bounds, CELL_SIZE_M, TILE_SIZE, TileEntry, layer};
 use crate::grid::Grid;
@@ -245,12 +245,11 @@ fn centres(origin: f64, cs: f64, ts: u32, k: u32, limit: u32) -> (f64, f64) {
 }
 
 /// Rasterizes every tile of `grid` from `file`, handing each to `sink` in
-/// order of `tx`, then `tz`. `open` gives a fresh reader of the file for each
-/// block read, so threads never share one.
-pub fn rasterize<R, O, S>(file: &Surface5, open: O, grid: &Grid, mut sink: S) -> Result<(), Error>
+/// order of `tx`, then `tz`. Threads share `r`, reading each block at its
+/// offset.
+pub fn rasterize<R, S>(file: &Surface5, r: &R, grid: &Grid, mut sink: S) -> Result<(), Error>
 where
-    R: Read + Seek,
-    O: Fn() -> io::Result<R> + Sync,
+    R: ReadAt + Sync + ?Sized,
     S: FnMut(Tile) -> Result<(), Error>,
 {
     let (ntx, ntz) = grid.tiles();
@@ -277,8 +276,7 @@ where
             .filter(|i| !held.contains_key(i))
             .collect();
         let read = parallel(missing.len(), |k| {
-            let mut r = open()?;
-            let b = file.read_block(&mut r, missing[k], &[RUNWAY_MATERIAL])?;
+            let b = file.read_block(r, missing[k], &[RUNWAY_MATERIAL])?;
             Ok(Arc::new(prepare(b, grid)))
         })?;
         for b in read {
@@ -329,18 +327,14 @@ pub(crate) fn entry(name: &str, tx: u32, tz: u32, values: impl Iterator<Item = i
 /// each as a `.tmp` renamed into place, and returns their manifest entries
 /// by layer, then tile. A tile wholly outside the mesh is written in no
 /// layer, and one wholly sea only in `water`.
-pub fn write_tiles<R, O>(
+pub fn write_tiles<R: ReadAt + Sync + ?Sized>(
     file: &Surface5,
-    open: O,
+    r: &R,
     grid: &Grid,
     dir: &Path,
-) -> Result<Vec<TileEntry>, Error>
-where
-    R: Read + Seek,
-    O: Fn() -> io::Result<R> + Sync,
-{
+) -> Result<Vec<TileEntry>, Error> {
     let mut entries = Vec::new();
-    rasterize(file, open, grid, |t| {
+    rasterize(file, r, grid, |t| {
         if t.water.iter().all(|&w| w == WATER_NODATA) {
             return Ok(());
         }
@@ -372,7 +366,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
 
     use super::super::build::{self, f32s, file, tri, u32s, vec3};
     use super::super::sample::{LAKE, SEA};
@@ -434,24 +427,19 @@ mod tests {
     }
 
     fn tiles(f: &[u8], grid: &Grid) -> Vec<Tile> {
-        let file = Surface5::open(&mut Cursor::new(f), "t").unwrap();
+        let file = Surface5::open(f, "t").unwrap();
         let mut out = Vec::new();
-        rasterize(
-            &file,
-            || Ok(Cursor::new(f)),
-            grid,
-            |t| {
-                out.push(t);
-                Ok(())
-            },
-        )
+        rasterize(&file, f, grid, |t| {
+            out.push(t);
+            Ok(())
+        })
         .unwrap();
         out
     }
 
     fn one(blocks: &[build::Block]) -> (Vec<u8>, Grid) {
         let f = file(blocks, blocks.len() as u32);
-        let file = Surface5::open(&mut Cursor::new(&f[..]), "t").unwrap();
+        let file = Surface5::open(&f[..], "t").unwrap();
         let grid = grid_for(&file.bounds());
         (f, grid)
     }
@@ -499,9 +487,9 @@ mod tests {
     fn every_cell_is_what_the_sampler_gives_at_its_centre() {
         let (f, grid) = one(&[square([0, LAKE])]);
         let t = &tiles(&f, &grid)[0];
-        let mesh: Mesh = Surface5::open(&mut Cursor::new(&f[..]), "t")
+        let mesh: Mesh = Surface5::open(&f[..], "t")
             .unwrap()
-            .read_all(&mut Cursor::new(&f[..]), &[])
+            .read_all(&f[..], &[])
             .unwrap();
         for r in 0..20 {
             for c in 0..20 {
@@ -564,9 +552,9 @@ mod tests {
         ];
         let (f, grid) = one(&blocks);
         assert_eq!((grid.height, grid.width, grid.tiles()), (600, 600, (3, 3)));
-        let mesh = Surface5::open(&mut Cursor::new(&f[..]), "t")
+        let mesh = Surface5::open(&f[..], "t")
             .unwrap()
-            .read_all(&mut Cursor::new(&f[..]), &[])
+            .read_all(&f[..], &[])
             .unwrap();
         let tiles = tiles(&f, &grid);
         assert_eq!(tiles.len(), 9);
@@ -614,8 +602,8 @@ mod tests {
         let (f, mut grid) = one(&[sea()]);
         // A second tile east of the mesh, wholly outside it.
         grid.width = 300;
-        let file = Surface5::open(&mut Cursor::new(&f[..]), "t").unwrap();
-        let entries = write_tiles(&file, || Ok(Cursor::new(&f[..])), &grid, &s.0).unwrap();
+        let file = Surface5::open(&f[..], "t").unwrap();
+        let entries = write_tiles(&file, &f[..], &grid, &s.0).unwrap();
         let paths: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
         assert_eq!(paths, ["tiles/water/0_0.bin"]);
         assert_eq!((entries[0].min, entries[0].max), (Some(2), Some(2)));
@@ -628,15 +616,15 @@ mod tests {
         let mut high = sea();
         high.arrays[3] = f32s("depth", &[41.0; 4]);
         let (f, grid) = one(&[high]);
-        let file = Surface5::open(&mut Cursor::new(&f[..]), "t").unwrap();
-        let entries = write_tiles(&file, || Ok(Cursor::new(&f[..])), &grid, &s.0).unwrap();
+        let file = Surface5::open(&f[..], "t").unwrap();
+        let entries = write_tiles(&file, &f[..], &grid, &s.0).unwrap();
         assert_eq!(entries.len(), 3);
         assert_eq!(entries[0].max, Some(1));
 
         let s = Scratch::new();
         let (f, grid) = one(&[square([0, LAKE])]);
-        let file = Surface5::open(&mut Cursor::new(&f[..]), "t").unwrap();
-        let entries = write_tiles(&file, || Ok(Cursor::new(&f[..])), &grid, &s.0).unwrap();
+        let file = Surface5::open(&f[..], "t").unwrap();
+        let entries = write_tiles(&file, &f[..], &grid, &s.0).unwrap();
         let layers: Vec<&str> = entries.iter().map(|e| e.layer.as_str()).collect();
         assert_eq!(layers, ["height", "water", "surface"]);
         let h = fs::read(s.0.join(&entries[0].path)).unwrap();
