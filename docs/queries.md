@@ -84,10 +84,10 @@ itself.
 ### `describe`
 
 Request: none. Response: the terrain id, build, fingerprint, extent, each terrain
-file with its size, the surface file's class and version and each other file's
-as the cache entry that read it recorded them, null until one has, the cache
-state of every entry, counts of airdromes, runways, stands, beacons, towns,
-nodes, road edges and scenery objects, and the validation figures if any.
+file with its size, the surface file's class and version (null for the
+others, whose headers opening does not read), the cache state of every
+entry, counts of airdromes, runways, stands, beacons, towns, nodes, road edges
+and scenery objects, and the validation figures if any.
 
 ### `sample`
 
