@@ -357,16 +357,17 @@ fn is_temporary(name: &str) -> bool {
 fn is_inside(dir: &Path, install: &Path, cwd: &Path) -> io::Result<bool> {
     let install = fs::canonicalize(install)?;
     let dir = resolve(&std::path::absolute(cwd.join(dir))?)?;
-    // The same directory by device and inode, which no spelling of a path
-    // can disguise: a case-folding volume, or a bind mount.
-    #[cfg(unix)]
+    // The same directory by its file system identity, which no spelling of
+    // a path can disguise: a share that loops back to the install's drive,
+    // a mapped drive, a case-folding volume, a bind mount of the install.
+    // A bind mount of a directory inside the install is not caught: nothing
+    // short of reading the mount table tells where its root came from.
+    let target = file_id(&install)?;
+    if dir
+        .ancestors()
+        .any(|a| file_id(a).is_ok_and(|i| i == target))
     {
-        use std::os::unix::fs::MetadataExt;
-        let id = |p: &Path| fs::metadata(p).map(|m| (m.dev(), m.ino()));
-        let target = id(&install)?;
-        if dir.ancestors().any(|a| id(a).is_ok_and(|i| i == target)) {
-            return Ok(true);
-        }
+        return Ok(true);
     }
     // Windows and macOS volumes ignore case unless set otherwise.
     let fold = |p: &Path| {
@@ -377,6 +378,42 @@ fn is_inside(dir: &Path, install: &Path, cwd: &Path) -> io::Result<bool> {
         }
     };
     Ok(fold(&dir).starts_with(fold(&install)))
+}
+
+/// The device and inode of an existing file or directory.
+#[cfg(unix)]
+fn file_id(path: &Path) -> io::Result<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    fs::metadata(path).map(|m| (m.dev(), m.ino()))
+}
+
+/// The volume serial number and file index of an existing file or
+/// directory, read through a handle that asks for no access.
+#[cfg(windows)]
+fn file_id(path: &Path) -> io::Result<(u64, u64)> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS, GetFileInformationByHandle,
+    };
+    // A directory opens only with backup semantics.
+    let f = File::options()
+        .access_mode(0)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)?;
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    // SAFETY: the handle is open for the call, and `info` is the structure
+    // the call fills.
+    if unsafe { GetFileInformationByHandle(f.as_raw_handle(), &mut info) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let index = (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow);
+    Ok((u64::from(info.dwVolumeSerialNumber), index))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn file_id(_: &Path) -> io::Result<(u64, u64)> {
+    Err(io::Error::other("no file identity on this platform"))
 }
 
 /// An absolute `path` with its longest existing part resolved through every
@@ -1126,6 +1163,25 @@ mod tests {
             return;
         }
         refused(&f, &short.join("cache"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn refuses_the_install_through_a_share_that_loops_back_to_it() {
+        let f = Fixture::new();
+        let local = f.install.0.to_string_lossy().into_owned();
+        let Some((drive, rest)) = local.split_once(":\\") else {
+            panic!("{local} has no drive letter");
+        };
+        let share = PathBuf::from(format!(r"\\localhost\{drive}$\{rest}"));
+        if !share.is_dir() {
+            eprintln!(
+                "the administrative share {} is not reachable; skipped",
+                share.display()
+            );
+            return;
+        }
+        refused(&f, &share.join("cache"));
     }
 
     #[test]
