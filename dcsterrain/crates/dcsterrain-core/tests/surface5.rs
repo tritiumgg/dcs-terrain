@@ -205,15 +205,9 @@ fn points_over_an_airfield_answer_as_fast_as_points_elsewhere() {
             .unwrap();
 
         let t = Install::open(&root, &id, &Cache::new(&cache.0)).unwrap();
-        let toc = fs::metadata(
-            cache
-                .0
-                .join(&map.theatre)
-                .join(&build.version)
-                .join("mesh.toc"),
-        )
-        .unwrap()
-        .len();
+        let toc = fs::metadata(cache.0.join(&map.theatre).join("mesh.toc"))
+            .unwrap()
+            .len();
         let g = t.grid();
         let over = lattice(file.blocks[busiest].world_box());
         let (all, on) = timed(&over, |x, z| {

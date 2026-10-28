@@ -229,12 +229,7 @@ fn opens_a_terrain_by_the_id_its_entry_declares() {
     let extent = json!({"min_x": 0.0, "min_z": 0.0, "max_x": 1000.0, "max_z": 1000.0});
     assert_eq!(v["extent"], extent);
     // Its table of contents was built into the cache on the way.
-    assert!(
-        c.0.join("GermanyCW")
-            .join("0.0.0.1")
-            .join("mesh.toc")
-            .is_file()
-    );
+    assert!(c.0.join("GermanyCW").join("mesh.toc").is_file());
 
     // A folder's name is not an id, and the refusal lists the ids.
     let out = run(&[
@@ -410,7 +405,7 @@ fn list_terrains_shows_a_cache_after_index_and_none_after_clear() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let dir = c.0.join("GermanyCW").join("0.0.0.1");
+    let dir = c.0.join("GermanyCW");
     assert!(dir.is_dir());
     let v = listed();
     assert_eq!(v["terrains"][0]["cache"], Value::Null, "Caucasus has none");
@@ -468,7 +463,7 @@ fn clear_asks_before_deleting_the_validation_figures() {
         assert!(out.status.success());
     };
     index();
-    let dir = c.0.join("Caucasus").join("0.0.0.1");
+    let dir = c.0.join("Caucasus");
     put(&dir, "validation.json", b"{}");
     put(&dir, "mesh.toc", b"rebuildable");
 
@@ -496,7 +491,7 @@ fn clear_asks_before_deleting_the_validation_figures() {
 }
 
 #[test]
-fn prune_keeps_only_the_installed_build() {
+fn cache_list_names_the_build_each_terrain_was_made_on() {
     let t = install(false);
     let root = t.0.to_str().unwrap();
     let c = scratch();
@@ -511,13 +506,28 @@ fn prune_keeps_only_the_installed_build() {
         cache,
     ]);
     assert!(out.status.success());
-    put(&c.0, "Caucasus/0.0.0.0/mesh.toc", b"old");
-    let out = run(&["cache", "prune", "--install", root, "--cache", cache]);
+    let out = run(&["cache", "list", "--install", root, "--cache", cache]);
     assert!(out.status.success());
     let said = String::from_utf8(out.stdout).unwrap();
-    assert!(said.contains("deleted Caucasus 0.0.0.0"), "{said}");
-    assert!(c.0.join("Caucasus/0.0.0.1").is_dir());
-    assert!(!c.0.join("Caucasus/0.0.0.0").exists());
+    assert!(
+        said.contains("Caucasus on 0.0.0.1 (the installed build):"),
+        "{said}"
+    );
+    let out = run(&[
+        "cache",
+        "list",
+        "--json",
+        "--install",
+        root,
+        "--cache",
+        cache,
+    ]);
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["stored"][0]["dcs_builds"], json!(["0.0.0.1"]));
+    assert_eq!(v["stored"][0]["installed"], true);
+    // Nothing is kept per build, so there is nothing to prune.
+    let out = run(&["cache", "prune", "--install", root, "--cache", cache]);
+    assert_eq!(out.status.code(), Some(2));
 
     // A directory this tool did not make is never deleted from.
     let other = scratch();
@@ -587,7 +597,7 @@ fn index_imports_a_hook_directory_and_refuses_one_from_another_build() {
         text.contains("0 airdromes, 1 it names that no taxiway file does"),
         "{text}"
     );
-    let entry = c.0.join("GermanyCW/0.0.0.1/tables.json");
+    let entry = c.0.join("GermanyCW/tables.json");
     let doc: Value = serde_json::from_slice(&fs::read(entry).unwrap()).unwrap();
     assert_eq!(doc["payload"]["hook"]["unmatched"], json!(["Ghost"]));
 

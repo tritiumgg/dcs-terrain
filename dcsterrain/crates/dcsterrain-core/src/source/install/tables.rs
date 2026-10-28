@@ -104,6 +104,13 @@ impl Entry for TablesJson {
     fn json(&self) -> bool {
         true
     }
+
+    /// The hook's fields are the build's own, and a hook directory of another
+    /// build is refused, so a new build rebuilds the tables, redoing the
+    /// merge only if the hook has written that build's.
+    fn survives_build(&self) -> bool {
+        false
+    }
 }
 
 /// One airdrome. `code`, `civilian`, `abandoned` and `class` come only from
@@ -691,7 +698,7 @@ mod tests {
         let built = Tables::open(&terrain).unwrap();
         assert!(!terrain.get(&TABLES_JSON).unwrap().built);
         assert_eq!(Tables::open(&terrain).unwrap(), built);
-        let path = c.0.join("Test/1.2.3.4/tables.json");
+        let path = c.0.join("Test/tables.json");
         let doc: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
         assert_eq!(doc["payload"]["airdromes"][0]["name_id"], "Anapa");
 

@@ -333,15 +333,9 @@ fn boxes_equal_a_full_walk(root: &Path, id: &str, n: usize) {
     let t = Install::open(root, id, &Cache::new(&cache.0)).unwrap();
     let started = Instant::now();
     let s = t.scenery().unwrap();
-    let size = fs::metadata(
-        cache
-            .0
-            .join(id)
-            .join(&t.map().build.version)
-            .join("scene.nodes"),
-    )
-    .unwrap()
-    .len();
+    let size = fs::metadata(cache.0.join(id).join("scene.nodes"))
+        .unwrap()
+        .len();
     eprintln!(
         "{id}: scene.nodes {:.2} MiB, built and read in {:.2} s",
         size as f64 / 1048576.0,
@@ -465,15 +459,9 @@ fn every_installed_scene_builds_its_index() {
         let started = Instant::now();
         let s = t.scenery().unwrap_or_else(|e| panic!("{dir}: {e}"));
         let built = started.elapsed().as_secs_f64();
-        let size = fs::metadata(
-            cache
-                .0
-                .join(&map.theatre)
-                .join(&map.build.version)
-                .join("scene.nodes"),
-        )
-        .unwrap()
-        .len();
+        let size = fs::metadata(cache.0.join(&map.theatre).join("scene.nodes"))
+            .unwrap()
+            .len();
         let g = t.grid();
         let (x, z) = g.centre(g.height / 2, g.width / 2);
         let started = Instant::now();

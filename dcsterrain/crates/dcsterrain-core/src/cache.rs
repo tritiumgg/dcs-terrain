@@ -25,7 +25,7 @@ use crate::source::Refusal;
 pub const VALIDATION_FILE: &str = "validation.json";
 
 /// Marks a directory as this tool's cache, so a mistyped `--cache` cannot
-/// have `clear` or `prune` delete somebody's files. Backup tools that honor
+/// have `clear` delete somebody's files. Backup tools that honor
 /// the convention skip the directory too.
 pub const TAG_FILE: &str = "CACHEDIR.TAG";
 const TAG: &str = "Signature: 8a477f597d28d172789f06886806bc55\n\
@@ -62,6 +62,11 @@ pub trait Entry: Sync {
     /// payload.
     fn json(&self) -> bool {
         false
+    }
+    /// Whether the entry is kept across a DCS update that leaves its files
+    /// alone, re-stamped with the new build rather than rebuilt (ADR 0002).
+    fn survives_build(&self) -> bool {
+        true
     }
 }
 
@@ -121,20 +126,39 @@ pub struct Cache {
     root: PathBuf,
 }
 
-/// One terrain and build's directory, and what is in it.
+/// One terrain's directory, and what is in it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stored {
     pub terrain: String,
-    pub build: String,
     pub path: PathBuf,
     /// Each entry, by name, and its size in bytes; a directory's is the sum
     /// of the files under it.
     pub entries: Vec<(String, u64)>,
+    /// The DCS builds the entries were made on, as their keys record them,
+    /// sorted: one, unless some are still to be checked since an update.
+    pub builds: Vec<String>,
 }
 
 impl Stored {
     pub fn size(&self) -> u64 {
         self.entries.iter().map(|(_, s)| s).sum()
+    }
+
+    fn at(terrain: String, path: PathBuf) -> Stored {
+        let entries = entries_in(&path);
+        let mut builds: Vec<String> = entries
+            .iter()
+            .filter_map(|(name, _)| read_head(&path.join(name)).ok())
+            .filter_map(|h| build_of(&h.key).map(str::to_string))
+            .collect();
+        builds.sort();
+        builds.dedup();
+        Stored {
+            terrain,
+            path,
+            entries,
+            builds,
+        }
     }
 }
 
@@ -147,65 +171,37 @@ impl Cache {
         &self.root
     }
 
-    /// The directory of `terrain` at `build`, whether or not it exists.
-    pub fn dir(&self, terrain: &str, build: &str) -> PathBuf {
-        self.root.join(dir_name(terrain)).join(dir_name(build))
+    /// The directory of `terrain`, whether or not it exists. It holds the
+    /// entries of whichever build each was last checked on (ADR 0002).
+    pub fn dir(&self, terrain: &str) -> PathBuf {
+        self.root.join(dir_name(terrain))
     }
 
     /// The entries of one opened terrain.
     pub fn terrain(&self, install: &Path, map: &Map) -> TerrainCache {
         TerrainCache {
             cache: self.clone(),
-            dir: self.dir(&map.theatre, &map.build.version),
+            dir: self.dir(&map.theatre),
             install: install.to_path_buf(),
             map: map.clone(),
         }
     }
 
-    /// What is stored for `terrain` at `build`, `None` when nothing is.
-    pub fn stored(&self, terrain: &str, build: &str) -> Option<Stored> {
-        let path = self.dir(terrain, build);
-        is_real_dir(&path).then(|| Stored {
-            terrain: dir_name(terrain),
-            build: dir_name(build),
-            entries: entries_in(&path),
-            path,
-        })
+    /// What is stored for `terrain`, `None` when nothing is.
+    pub fn stored(&self, terrain: &str) -> Option<Stored> {
+        let path = self.dir(terrain);
+        is_real_dir(&path).then(|| Stored::at(dir_name(terrain), path))
     }
 
-    /// Every terrain and build stored, sorted. No cache directory is an empty
-    /// list.
+    /// Every terrain stored, sorted. No cache directory is an empty list.
     pub fn list(&self) -> Result<Vec<Stored>, Refusal> {
-        let mut out = Vec::new();
-        for terrain in subdirs(&self.root)? {
-            for build in subdirs(&self.root.join(&terrain))? {
-                let path = self.root.join(&terrain).join(&build);
-                out.push(Stored {
-                    entries: entries_in(&path),
-                    terrain: terrain.clone(),
-                    build,
-                    path,
-                });
-            }
-        }
-        Ok(out)
-    }
-
-    /// Deletes every build but `keep`, of every terrain, and returns what it
-    /// deleted. An old build's `validation.json` goes with it: its figures
-    /// are for terrain files no longer installed.
-    pub fn prune(&self, keep: &str) -> Result<Vec<Stored>, Refusal> {
-        self.check_tag()?;
-        let keep = dir_name(keep);
-        let mut gone = Vec::new();
-        for s in self.list()? {
-            if s.build != keep {
-                fs::remove_dir_all(&s.path).map_err(|e| cannot("delete", &s.path, e))?;
-                gone.push(s);
-            }
-        }
-        self.drop_empty_terrains()?;
-        Ok(gone)
+        Ok(subdirs(&self.root)?
+            .into_iter()
+            .map(|t| {
+                let path = self.root.join(&t);
+                Stored::at(t, path)
+            })
+            .collect())
     }
 
     /// Each `validation.json` that clearing `terrain`, or every terrain, would
@@ -243,7 +239,6 @@ impl Cache {
             // Only an empty directory goes; one left holding its figures stays.
             let _ = fs::remove_dir(&s.path);
         }
-        self.drop_empty_terrains()?;
         Ok(chosen)
     }
 
@@ -256,14 +251,6 @@ impl Cache {
                 .filter(|s| s.terrain == dir_name(t))
                 .collect(),
         })
-    }
-
-    fn drop_empty_terrains(&self) -> Result<(), Refusal> {
-        for t in subdirs(&self.root)? {
-            // Fails, harmlessly, on one that still holds a build.
-            let _ = fs::remove_dir(self.root.join(t));
-        }
-        Ok(())
     }
 
     /// Refuses to delete under a directory this tool did not make. A root
@@ -595,12 +582,59 @@ impl TerrainCache {
     pub fn get(&self, entry: &dyn Entry) -> Result<Opened, Refusal> {
         let path = self.dir.join(entry.name());
         let (files, checked) = self.checked(entry)?;
-        if let Ok(head) = read_head(&path)
-            && judge(&head, entry.version(), &checked) == State::Current
-        {
-            return Ok(head.opened(path, false));
+        if let Ok(head) = read_head(&path) {
+            if judge(&head, entry.version(), &checked) == State::Current {
+                return Ok(head.opened(path, false));
+            }
+            if entry.survives_build() && judge_but_build(&head, entry.version(), &checked) {
+                return self.restamp(entry, head, &files, &checked);
+            }
         }
         self.build(entry, files, &checked, false)
+    }
+
+    /// An entry made on another build whose files' metadata still match:
+    /// their headers are read again, and when they match too the payload is
+    /// written under the installed build's key, else the entry is rebuilt.
+    /// An update is the one time a header changed under an unchanged size and
+    /// time is looked for (ADR 0001).
+    fn restamp(
+        &self,
+        entry: &dyn Entry,
+        head: Head,
+        files: &[Located],
+        checked: &str,
+    ) -> Result<Opened, Refusal> {
+        let path = self.dir.join(entry.name());
+        let (_, key) = self.built_key(files)?;
+        if but_build(&key) != but_build(&head.key) {
+            return self.build(entry, files.to_vec(), checked, false);
+        }
+        self.make_dir()?;
+        let json = entry.json();
+        let (open, close) = framing(entry.version(), &key, head.len, json);
+        let mut src = &head.file;
+        src.seek(SeekFrom::Start(head.offset))
+            .map_err(|e| cannot("read", &path, e))?;
+        self.write(
+            entry.name(),
+            |f| {
+                f.write_all(&open)?;
+                let n = io::copy(&mut src.take(head.len), f)?;
+                if n != head.len {
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "the entry ended inside its payload",
+                    ));
+                }
+                f.write_all(close)
+            },
+            |dest| {
+                read_head(dest).is_ok_and(|h| judge(&h, entry.version(), checked) == State::Current)
+            },
+        )?;
+        let head = read_head(&path).map_err(|e| cannot("read", &path, e))?;
+        Ok(head.opened(path, false))
     }
 
     /// The entry built now, whether or not the one there is current: for a
@@ -622,10 +656,15 @@ impl TerrainCache {
         self.make_dir()?;
         let (classified, key) = self.built_key(&files)?;
         let payload = entry.build(&self.install, &self.map, &classified, &self.dir)?;
-        let bytes = encode(entry.version(), &key, &payload, entry.json());
+        let (open, close) = framing(entry.version(), &key, payload.len() as u64, entry.json());
         // A forced build must not settle for the entry another builder put
         // there, which lacks what forced it.
-        self.write(entry.name(), &bytes, |dest| {
+        let fill = |f: &mut File| {
+            f.write_all(&open)?;
+            f.write_all(&payload)?;
+            f.write_all(close)
+        };
+        self.write(entry.name(), fill, |dest| {
             !forced
                 && read_head(dest)
                     .is_ok_and(|h| judge(&h, entry.version(), checked) == State::Current)
@@ -696,7 +735,7 @@ impl TerrainCache {
     fn write(
         &self,
         name: &str,
-        bytes: &[u8],
+        fill: impl FnOnce(&mut File) -> io::Result<()>,
         current: impl Fn(&Path) -> bool,
     ) -> Result<(), Refusal> {
         static N: AtomicU32 = AtomicU32::new(0);
@@ -707,7 +746,7 @@ impl TerrainCache {
             N.fetch_add(1, Ordering::Relaxed)
         ));
         let written = File::create(&tmp).and_then(|mut f| {
-            f.write_all(bytes)?;
+            fill(&mut f)?;
             f.sync_all()
         });
         if let Err(e) = written {
@@ -753,21 +792,27 @@ impl Head {
 /// How a JSON entry opens, before its version.
 const JSON_OPEN: &[u8] = b"{\"version\":";
 
-fn encode(version: u32, key: &str, payload: &[u8], json: bool) -> Vec<u8> {
+/// What an entry holds before its payload, and after it.
+fn framing(version: u32, key: &str, payload_len: u64, json: bool) -> (Vec<u8>, &'static [u8]) {
     if json {
         let key = serde_json::to_string(key).expect("a string serializes");
-        let mut b = format!("{{\"version\":{version},\"key\":{key},\"payload\":").into_bytes();
-        b.extend_from_slice(payload);
-        b.push(b'}');
-        return b;
+        let open = format!("{{\"version\":{version},\"key\":{key},\"payload\":").into_bytes();
+        return (open, b"}");
     }
-    let mut b = Vec::with_capacity(24 + key.len() + payload.len());
+    let mut b = Vec::with_capacity(24 + key.len());
     b.extend_from_slice(MAGIC);
     b.extend_from_slice(&version.to_le_bytes());
     b.extend_from_slice(&(key.len() as u32).to_le_bytes());
     b.extend_from_slice(key.as_bytes());
-    b.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+    b.extend_from_slice(&payload_len.to_le_bytes());
+    (b, b"")
+}
+
+#[cfg(test)]
+fn encode(version: u32, key: &str, payload: &[u8], json: bool) -> Vec<u8> {
+    let (mut b, close) = framing(version, key, payload.len() as u64, json);
     b.extend_from_slice(payload);
+    b.extend_from_slice(close);
     b
 }
 
@@ -922,6 +967,27 @@ fn checked_part(key: &str) -> String {
     out
 }
 
+/// The DCS version a key's first line names.
+fn build_of(key: &str) -> Option<&str> {
+    key.lines()
+        .next()?
+        .strip_prefix("build ")?
+        .split(' ')
+        .next()
+}
+
+/// A key without its first line, the build's.
+fn but_build(key: &str) -> &str {
+    key.split_once('\n').map_or("", |(_, rest)| rest)
+}
+
+/// Whether an entry would be current but for the build its key names.
+fn judge_but_build(head: &Head, version: u32, checked: &str) -> bool {
+    head.version == version
+        && head.offset.checked_add(head.len) == Some(head.file_len)
+        && but_build(&checked_part(&head.key)) == but_build(checked)
+}
+
 /// Whether an entry is current, given the checked part of the key an
 /// entry built now would carry.
 fn judge(head: &Head, version: u32, checked: &str) -> State {
@@ -951,6 +1017,7 @@ mod tests {
         roles: &'static [&'static str],
         builds: AtomicUsize,
         json: bool,
+        survives: bool,
     }
 
     impl Counted {
@@ -961,6 +1028,7 @@ mod tests {
                 roles,
                 builds: AtomicUsize::new(0),
                 json: false,
+                survives: true,
             }
         }
         /// The same as a JSON entry, whose payload records the directory
@@ -1001,6 +1069,9 @@ mod tests {
         }
         fn json(&self) -> bool {
             self.json
+        }
+        fn survives_build(&self) -> bool {
+            self.survives
         }
     }
 
@@ -1100,8 +1171,7 @@ mod tests {
         assert_eq!(both(&t), (2, 1));
 
         // The payload size alone, the file's size and time unchanged, is
-        // not seen: a check reads no header. The build change below
-        // rebuilds it.
+        // not seen: a check reads no header.
         let mut moved = container::build("landscape5::Surface5File", 5, 101);
         moved.push(0);
         put(&f.install.0, SURFACE, &moved);
@@ -1136,10 +1206,75 @@ mod tests {
             "version 1 is stale against version 2's entry"
         );
 
-        // The build, which every entry's key carries.
+        // The build, which every entry's key carries, re-stamps each entry
+        // whose files are unchanged rather than rebuilding it.
         build_file(&f.install.0, "20000202-000000");
         let t = f.terrain();
-        assert_eq!(both(&t), (5, 3));
+        assert_eq!(both(&t), (4, 2));
+        let stored = read_head(&t.dir().join("mesh.toc")).unwrap().key;
+        assert!(
+            stored.starts_with(
+                "build 2.9.0.1 20000202-000000
+"
+            ),
+            "{stored}"
+        );
+    }
+
+    #[test]
+    fn an_update_re_stamps_an_entry_whose_files_survive_it_and_rebuilds_the_rest() {
+        let f = Fixture::new();
+        let mesh = Counted::new("mesh.toc", &["surface"]);
+        let tables = Counted {
+            survives: false,
+            ..Counted::json("tables.json", &["surface"])
+        };
+        let doc = Counted::json("doc.json", &["roads"]);
+        f.touch(SURFACE, 1_000_000);
+        let t = f.terrain();
+        for e in [&mesh as &dyn Entry, &tables, &doc] {
+            t.get(e).unwrap();
+        }
+        let before = fs::read(t.dir().join("doc.json")).unwrap();
+
+        build_file(&f.install.0, "20000202-000000");
+        let t = f.terrain();
+        let got = t.get(&mesh).unwrap();
+        assert!(!got.built);
+        assert_eq!(got.payload().unwrap(), b"mesh.toc of Caucasus");
+        assert_eq!(t.state(&mesh).unwrap(), State::Current);
+        assert!(
+            t.get(&tables).unwrap().built,
+            "the hook's tables are a build's own"
+        );
+        let after = t.get(&doc).unwrap();
+        assert!(!after.built);
+        assert_eq!(t.state(&doc).unwrap(), State::Current);
+        let after = fs::read(&after.path).unwrap();
+        assert_ne!(after, before);
+        let payload = |b: &[u8]| -> serde_json::Value {
+            serde_json::from_slice::<serde_json::Value>(b).unwrap()["payload"].clone()
+        };
+        assert_eq!(payload(&after), payload(&before));
+        assert_eq!((mesh.builds(), tables.builds(), doc.builds()), (1, 2, 1));
+        let names: Vec<String> = entries_in(t.dir()).into_iter().map(|(n, _)| n).collect();
+        assert_eq!(names, ["doc.json", "mesh.toc", "tables.json"]);
+
+        // A header changed under an unchanged size and time is seen at an
+        // update, which reads the headers again.
+        let mut moved = container::build("landscape5::Surface5File", 5, 101);
+        moved.truncate(fs::metadata(f.install.0.join(SURFACE)).unwrap().len() as usize);
+        put(&f.install.0, SURFACE, &moved);
+        f.touch(SURFACE, 1_000_000);
+        let t = f.terrain();
+        assert!(
+            !t.get(&mesh).unwrap().built,
+            "within a build it goes unseen"
+        );
+        build_file(&f.install.0, "20000303-000000");
+        let t = f.terrain();
+        assert!(t.get(&mesh).unwrap().built);
+        assert_eq!(mesh.builds(), 2);
     }
 
     const TAXIWAYS: &str = "Mods/terrains/Caucasus/AirfieldsTaxiways";
@@ -1260,7 +1395,7 @@ mod tests {
     }
 
     #[test]
-    fn index_lays_out_terrain_and_build_and_tags_the_root() {
+    fn index_lays_out_a_directory_per_terrain_and_tags_the_root() {
         let f = Fixture::new();
         let mesh = Counted::new("mesh.toc", &["surface"]);
         let t = f.terrain();
@@ -1269,39 +1404,36 @@ mod tests {
             t.index(&[&mesh]).unwrap(),
             [("mesh.toc".to_string(), false)]
         );
-        assert_eq!(t.dir(), f.cache.0.join("Caucasus").join("2.9.0.1"));
+        assert_eq!(t.dir(), f.cache.0.join("Caucasus"));
         assert!(f.cache.0.join(TAG_FILE).is_file());
 
         let cache = Cache::new(&f.cache.0);
-        let stored = cache.stored("Caucasus", "2.9.0.1").unwrap();
+        let stored = cache.stored("Caucasus").unwrap();
         assert_eq!(stored.entries.len(), 1);
+        assert_eq!(stored.builds, ["2.9.0.1"]);
         assert_eq!(
             stored.size(),
             fs::metadata(t.dir().join("mesh.toc")).unwrap().len()
         );
-        assert!(cache.stored("Caucasus", "2.9.0.2").is_none());
+        assert!(cache.stored("Nevada").is_none());
     }
 
     #[test]
-    fn prune_keeps_the_installed_build_and_clear_can_keep_validation() {
+    fn clear_can_keep_validation() {
         let f = Fixture::new();
         let mesh = Counted::new("mesh.toc", &["surface"]);
         f.terrain().index(&[&mesh]).unwrap();
         let cache = Cache::new(&f.cache.0);
+        put(&f.cache.0, "Nevada/validation.json", b"{}");
+        put(&f.cache.0, "Caucasus/validation.json", b"{}");
+        put(&f.cache.0, "Caucasus/horizon/0_0", b"tile");
+        // A directory of the layout before ADR 0002, which `clear` removes.
         put(&f.cache.0, "Caucasus/2.8.0.1/mesh.toc", b"old");
-        put(&f.cache.0, "Nevada/2.8.0.1/validation.json", b"{}");
-        put(&f.cache.0, "Caucasus/2.9.0.1/validation.json", b"{}");
-        put(&f.cache.0, "Caucasus/2.9.0.1/horizon/0_0", b"tile");
+        assert_eq!(cache.list().unwrap().len(), 2);
 
-        let gone = cache.prune("2.9.0.1").unwrap();
-        let gone: Vec<(&str, &str)> = gone.iter().map(|s| (&*s.terrain, &*s.build)).collect();
-        assert_eq!(gone, [("Caucasus", "2.8.0.1"), ("Nevada", "2.8.0.1")]);
-        assert!(!f.cache.0.join("Nevada").exists());
-        assert_eq!(cache.list().unwrap().len(), 1);
-
-        assert_eq!(cache.validation_files(None).unwrap().len(), 1);
+        assert_eq!(cache.validation_files(None).unwrap().len(), 2);
         cache.clear(Some("Caucasus"), false).unwrap();
-        let left = cache.stored("Caucasus", "2.9.0.1").unwrap();
+        let left = cache.stored("Caucasus").unwrap();
         assert_eq!(left.entries, [(VALIDATION_FILE.to_string(), 2)]);
         cache.clear(None, true).unwrap();
         assert!(cache.list().unwrap().is_empty());
@@ -1365,7 +1497,7 @@ mod tests {
     #[test]
     fn refuses_a_relative_cache_from_the_install() {
         let f = Fixture::new();
-        let dir = Path::new("cache").join("Caucasus").join("2.9.0.1");
+        let dir = Path::new("cache").join("Caucasus");
         assert!(is_inside(&dir, &f.install.0, &f.install.0).unwrap());
         let elsewhere = Scratch::new();
         fs::create_dir_all(&elsewhere.0).unwrap();
@@ -1577,7 +1709,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn clear_and_prune_never_follow_a_link_out_of_the_cache() {
+    fn clear_never_follows_a_link_out_of_the_cache() {
         let f = Fixture::new();
         let mesh = Counted::new("mesh.toc", &["surface"]);
         f.terrain().index(&[&mesh]).unwrap();
@@ -1585,9 +1717,8 @@ mod tests {
         put(&outside.0, "2.8.0.1/keep", b"mine");
         put(&outside.0, "keep", b"mine");
         std::os::unix::fs::symlink(&outside.0, f.cache.0.join("Linked")).unwrap();
-        std::os::unix::fs::symlink(&outside.0, f.cache.0.join("Caucasus/2.9.0.1/horizon")).unwrap();
+        std::os::unix::fs::symlink(&outside.0, f.cache.0.join("Caucasus/horizon")).unwrap();
         let cache = Cache::new(&f.cache.0);
-        cache.prune("2.9.0.1").unwrap();
         cache.clear(None, true).unwrap();
         assert!(outside.0.join("2.8.0.1/keep").is_file());
         assert!(outside.0.join("keep").is_file());
@@ -1599,7 +1730,6 @@ mod tests {
         put(&s.0, "photos/2024/cat.jpg", b"meow");
         let cache = Cache::new(&s.0);
         assert!(cache.clear(None, true).unwrap_err().0.contains(TAG_FILE));
-        assert!(cache.prune("2.9.0.1").is_err());
         assert!(s.0.join("photos/2024/cat.jpg").is_file());
         // Nothing there is nothing to refuse.
         assert!(

@@ -36,7 +36,7 @@ The repository ships tools only. Users run them against their own install.
 ## 2. Architecture
 
 ```
-DCS install (read-only)                 cache/<terrain>/<build>/   (rebuildable)
+DCS install (read-only)                 cache/<terrain>/           (rebuildable)
   .surface5 ─┐                            mesh.toc        block offsets (0.05–1.5 MB)
   .scn5   ───┤                            scene.nodes     node offsets, models, pools (0.35–25 MiB)
   .rn4    ───┤   decoders                 tables.json     airdromes, runways, stands, beacons,
@@ -209,12 +209,15 @@ within 0.071 m on 2.9.30.28738.
 
 ### 4.1 Where and what
 
-`<cache>/<terrain>/<dcs_build>/`, where `<cache>` is `%LOCALAPPDATA%\dcs-terrain\cache`
+`<cache>/<terrain>/`, where `<cache>` is `%LOCALAPPDATA%\dcs-terrain\cache`
 on Windows, `$XDG_CACHE_HOME/dcs-terrain` (else `~/.cache/dcs-terrain`) on
 Linux, `~/Library/Caches/dcs-terrain` on macOS, or `--cache <dir>`. Never in
-the install, never in the repository. Whether an entry there is current is
-decided from metadata (§4.2), never by opening the install files it was
-derived from.
+the install, never in the repository. One directory per terrain holds the
+entries of whichever build was installed when each was last checked; each
+records its build in its key, and survives an update that leaves its files
+alone ([ADR 0002](decisions/0002-keep-one-cache-directory-per-terrain.md)).
+Whether an entry there is current is decided from metadata (§4.2), never by
+opening the install files it was derived from, except once after an update.
 
 | Entry | Why it cannot be per query | Size | Build |
 |---|---|---|---|
@@ -252,6 +255,13 @@ derived from.
   antivirus or backup tool's, and a FAT, exFAT or network volume still can. A
   rename that fails still succeeds when the file already there carries the
   same key.
+- **After an update.** An entry whose key names another build has the
+  headers of its install files read again, and when its key matches in
+  everything but the build it is re-stamped: the same payload is written
+  under the key with the installed build, as a build is written. Otherwise it
+  is rebuilt. `tables.json` is always rebuilt, because its hook import is
+  bound to one build. A switch to an older build and back re-stamps or
+  rebuilds each time.
 - A missing entry, or one whose key or format version does not match, is
   rebuilt before the operation that needs it, and only that entry: `describe`
   needs `mesh.toc` and `tables.json` and reports the other entries' counts as
@@ -268,12 +278,12 @@ derived from.
   on Caucasus, 13 ms vs 47 ms on Germany), the scenery pool carries its own
   loose quadtree, and nothing else is tabular enough to need a database.
 - `dcsterrain index` builds a terrain's entries ahead of time; it is optional.
-  `dcsterrain cache list`, `prune` and `clear` manage the directory. `prune`
-  removes builds other than the installed one, with their `validation.json`,
-  whose figures are for files no longer installed; `clear` asks before
-  deleting `validation.json`, and `--yes` deletes it without asking. Nothing
-  is deleted without a command, neither deletes under a directory with no
-  `CACHEDIR.TAG`, and neither follows a link. The cache tags its root only
+  `dcsterrain cache list` and `clear` manage the directory; `list` names the
+  build each terrain's entries were made on. `clear` asks before deleting
+  `validation.json`, which reports the build its figures were measured on,
+  and `--yes` deletes it without asking. Nothing is deleted without a
+  command, `clear` deletes nothing under a directory with no `CACHEDIR.TAG`,
+  and it follows no link. The cache tags its root only
   when the root is new or empty, and never makes one inside the install, so a
   mistyped `--cache` cannot empty somebody's folder. `query`, `list-terrains`,
   `index` and `cache` take `--cache`.
@@ -303,8 +313,9 @@ back to null and `check` says the import was dropped.
 - **The cache key** for an entry is the build, plus for each source file its
   path, size and modification time, which a check compares (§4.2), and the
   class, version and payload size (the u64 at bytes 8–15 of the header) read
-  when the entry was built. A repair that rewrites identical files costs a
-  rebuild of seconds.
+  when the entry was built. A build that differs while the rest matches
+  re-stamps the entry rather than rebuilding it (§4.2). A repair that
+  rewrites identical files costs a rebuild of seconds.
 - **A batch re-checks** the build and the keys before each request (a few
   `stat`s) and reopens a terrain whose files changed. Terrain files are opened with
   delete sharing so a patch can replace them under a long batch.
@@ -412,7 +423,7 @@ largest component, sampled from 2 000 sources on large graphs, normalized
   `--seed`, `--size-km` and `--cell`.
 - `dcsterrain list-terrains [--install <dir>] [--json]` lists every installed
   terrain: its id, its folder, whether a decoder reads each of its terrain
-  files, and whether it has a cache for the installed build. It reads only
+  files, and what its cache holds and for which build. It reads only
   each `entry.lua` and the file headers, needs no cache, and is how a user
   finds the id `--terrain` takes.
 - `dcsterrain schema` prints every operation's request and response schema.

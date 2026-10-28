@@ -129,7 +129,8 @@ impl CacheDir {
 
 #[derive(Subcommand)]
 enum CacheAction {
-    /// List every terrain and build the cache holds, with its entries.
+    /// List every terrain the cache holds, with its entries and the build
+    /// they were made on.
     List {
         /// The DCS install root, to mark the build it has. On Windows it
         /// defaults to the one the registry names; without one no build is
@@ -139,15 +140,6 @@ enum CacheAction {
         /// Print one JSON document rather than a table.
         #[arg(long)]
         json: bool,
-        #[command(flatten)]
-        cache: CacheDir,
-    },
-    /// Delete every build but the one the install has, for every terrain.
-    Prune {
-        /// The DCS install root. On Windows it defaults to the one the
-        /// registry names.
-        #[arg(long)]
-        install: Option<PathBuf>,
         #[command(flatten)]
         cache: CacheDir,
     },
@@ -215,7 +207,6 @@ fn main() -> ExitCode {
                 json,
                 cache,
             } => cache_list(install, json, cache),
-            CacheAction::Prune { install, cache } => cache_prune(install, cache),
             CacheAction::Clear {
                 terrain,
                 yes,
@@ -348,8 +339,8 @@ fn list_terrains(install: Option<PathBuf>, as_json: bool, cache: CacheDir) -> Ex
     let surveys: Vec<install::Survey> = listed.iter().map(|t| install::survey(&root, t)).collect();
     let stored: Vec<Option<Stored>> = surveys
         .iter()
-        .map(|s| match (&cache, &s.id, &build) {
-            (Some(c), Some(id), Some(b)) => c.stored(id, &b.version),
+        .map(|s| match (&cache, &s.id) {
+            (Some(c), Some(id)) => c.stored(id),
             _ => None,
         })
         .collect();
@@ -369,7 +360,7 @@ fn list_terrains(install: Option<PathBuf>, as_json: bool, cache: CacheDir) -> Ex
 }
 
 /// What `list-terrains` reports: each terrain surveyed, and beside it what
-/// the cache holds for it at the installed build.
+/// the cache holds for it.
 struct Listing<'a> {
     root: &'a Path,
     build: Option<&'a install::Build>,
@@ -386,6 +377,7 @@ fn stored_json(s: &Stored) -> Value {
         .collect();
     json!({
         "path": s.path.display().to_string(), "size": s.size(), "entries": entries,
+        "dcs_builds": s.builds,
     })
 }
 
@@ -575,16 +567,16 @@ fn cache_list(install: Option<PathBuf>, as_json: bool, cache: CacheDir) -> ExitC
     // still answers.
     let installed = install_root(install)
         .and_then(|r| install::read_build(&r).map_err(|e| e.0))
-        .map(|b| cache::dir_name(&b.version))
+        .map(|b| b.version)
         .ok();
-    let is_installed = |s: &Stored| installed.as_deref().map(|b| b == s.build);
+    // Entries made on another build are re-stamped or rebuilt when next used.
+    let is_installed = |s: &Stored| installed.as_ref().map(|b| s.builds == [b.clone()]);
     if as_json {
         let rows: Vec<Value> = all
             .iter()
             .map(|s| {
                 let mut v = stored_json(s);
                 v["terrain"] = s.terrain.clone().into();
-                v["dcs_build"] = s.build.clone().into();
                 v["installed"] = is_installed(s).into();
                 v
             })
@@ -599,42 +591,21 @@ fn cache_list(install: Option<PathBuf>, as_json: bool, cache: CacheDir) -> ExitC
     }
     for s in &all {
         let mark = match is_installed(s) {
-            Some(true) => " (installed)",
-            Some(false) => " (not installed: prune deletes it)",
+            Some(true) => " (the installed build)",
+            Some(false) => " (checked again when next used)",
             None => "",
         };
-        println!("{} {}{mark}: {}", s.terrain, s.build, cache_cell(Some(s)));
+        let builds = if s.builds.is_empty() {
+            String::new()
+        } else {
+            format!(" on {}", s.builds.join(", "))
+        };
+        println!("{}{builds}{mark}: {}", s.terrain, cache_cell(Some(s)));
         for (name, size) in &s.entries {
             println!("    {name}  {}", bytes(*size));
         }
     }
     ExitCode::SUCCESS
-}
-
-fn cache_prune(install: Option<PathBuf>, cache: CacheDir) -> ExitCode {
-    report((|| {
-        let cache = cache.open()?;
-        let build = install::read_build(&install_root(install)?).map_err(|e| e.0)?;
-        let gone = cache.prune(&build.version).map_err(|e| e.0)?;
-        if gone.is_empty() {
-            println!("nothing to prune");
-        }
-        for s in gone {
-            let figures = s.entries.iter().any(|(n, _)| n == cache::VALIDATION_FILE);
-            let with = if figures {
-                ", with its validation figures"
-            } else {
-                ""
-            };
-            println!(
-                "deleted {} {} ({}{with})",
-                s.terrain,
-                s.build,
-                bytes(s.size())
-            );
-        }
-        Ok(())
-    })())
 }
 
 fn cache_clear(terrain: Option<&str>, yes: bool, cache: CacheDir) -> ExitCode {
@@ -649,7 +620,7 @@ fn cache_clear(terrain: Option<&str>, yes: bool, cache: CacheDir) -> ExitCode {
             println!("nothing to clear");
         }
         for s in cleared {
-            println!("cleared {} {}", s.terrain, s.build);
+            println!("cleared {}", s.terrain);
         }
         if !validation {
             println!("kept {} {}", figures.len(), cache::VALIDATION_FILE);

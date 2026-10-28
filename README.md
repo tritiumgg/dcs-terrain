@@ -62,9 +62,10 @@ builds its cache, in about a second; later ones read it:
 dcsterrain query --terrain Caucasus describe
 ```
 
-`dcsterrain cache list` shows the cache (`--cache <dir>` names another),
-`cache prune` deletes builds other than the installed one, and `cache clear`
-deletes all of it, asking before the live validation figures.
+`dcsterrain cache list` shows the cache (`--cache <dir>` names another) and
+the DCS build each terrain's entries were made on; after a DCS update, an
+entry whose terrain files did not change is kept. `cache clear` deletes all
+of it, asking before the live validation figures.
 `dcsterrain index --terrain Caucasus` builds a cache ahead of time. `query`,
 `index` and `list-terrains` take `--cache <dir>` too. `index --hook <dir>`
 merges the airdrome fields only a running DCS knows, such as the ICAO code,

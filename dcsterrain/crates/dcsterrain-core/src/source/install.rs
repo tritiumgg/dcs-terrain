@@ -489,7 +489,7 @@ mod tests {
         let c = Scratch::new();
         let cache = Cache::new(&c.0);
         let t = Install::open(&root.0, "Test", &cache).unwrap();
-        let toc = c.0.join("Test").join("1.2.3.4").join("mesh.toc");
+        let toc = c.0.join("Test").join("mesh.toc");
         assert!(toc.is_file());
         assert_eq!(t.identity().terrain, "Test");
         let g = t.grid();
@@ -680,7 +680,7 @@ mod tests {
             let c = Scratch::new();
             let cache = Cache::new(&c.0);
             let t = Install::open(&root.0, "Test", &cache).unwrap();
-            let nodes = c.0.join("Test").join("1.2.3.4").join("scene.nodes");
+            let nodes = c.0.join("Test").join("scene.nodes");
             assert!(!nodes.exists(), "built before scenery was asked for");
 
             let near = |x: f64, z: f64| [x - 10.0, z - 10.0, x + 10.0, z + 10.0];
