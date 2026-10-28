@@ -24,6 +24,8 @@ pub const COLLINEAR_DEG: f64 = 1.0;
 /// Shortest-path trees betweenness grows, at most, per network: a sample of
 /// the sources on a large graph, every node on a small one.
 pub const SOURCES: usize = 2000;
+/// The shortest an edge is taken to be by betweenness.
+const MIN_LENGTH_M: f64 = 1e-3;
 
 /// One stretch of road or rail as the road file holds it, between the
 /// junctions its ends name.
@@ -408,6 +410,12 @@ impl Graph {
             if a as usize >= nodes.len() || b_ as usize >= nodes.len() {
                 return Err(Refusal("a road graph edge names no node".into()));
             }
+            if !(kind == KIND_ROAD || kind == KIND_RAIL) || usize::from(class) >= classes.len() {
+                return Err(Refusal(format!(
+                    "a road graph edge has kind {kind} and class {class} of {}",
+                    classes.len()
+                )));
+            }
             edges.push(Edge {
                 kind,
                 class,
@@ -511,7 +519,9 @@ impl Network {
         for (i, e) in mine() {
             for (from, other) in [(e.a, e.b), (e.b, e.a)] {
                 let k = fill[from as usize] as usize;
-                (to[k], via[k], len[k]) = (other, i as u32, e.length);
+                // A millimeter at least: an edge of no length would make each
+                // end a predecessor of the other on a shortest path.
+                (to[k], via[k], len[k]) = (other, i as u32, e.length.max(MIN_LENGTH_M));
                 fill[from as usize] += 1;
             }
         }
@@ -778,6 +788,11 @@ mod tests {
         let mut long = b.clone();
         long.push(0);
         assert!(Graph::decode(&long).is_err());
+        // The second edge's class byte, past the three classes.
+        let mut bad = b.clone();
+        let at = b.len() - (4 + 4 + 4 + 8 + 4 + 2 * 8) + 1;
+        bad[at] = 3;
+        assert!(Graph::decode(&bad).unwrap_err().0.contains("class 3 of 3"));
     }
 
     /// A square with a tail: the tail's edge carries every path to its end.

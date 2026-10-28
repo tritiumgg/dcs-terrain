@@ -119,6 +119,7 @@ impl Reach {
         }
     }
 
+    #[inline(always)]
     fn holds(&self, [x, y, z]: [f64; 3]) -> bool {
         x.abs() > MIN_ABS_X_M
             && (self.min_x..=self.max_x).contains(&x)
@@ -191,6 +192,9 @@ pub(super) fn classes(b: &[u8], mut at: usize) -> Result<(Vec<String>, usize), E
 }
 
 /// The points of the run whose count is at `q`, if one is there.
+// Inlined into the scan whatever closure it is given: called at every byte,
+// a call left out of line doubles the scan.
+#[inline(always)]
 fn run(b: &[u8], q: usize, reach: &Reach) -> Option<Vec<[f64; 3]>> {
     let n = u32_at(b, q)?;
     if !(MIN_POINTS..=MAX_POINTS).contains(&n) {

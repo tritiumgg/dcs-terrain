@@ -8,9 +8,9 @@ use std::path::Path;
 use super::{BOX_PAD_M, MESH_TOC, refusal, tile_span};
 use crate::cache::{Entry, TerrainCache};
 use crate::decode::rn4::{self, KIND_RAIL, KIND_ROAD, Reach};
-use crate::decode::surface5::Surface5;
 use crate::decode::surface5::grid_for;
 use crate::decode::surface5::ground::{Prepared, grid_units};
+use crate::decode::surface5::{ROAD_STRIP, Surface5, water_class};
 use crate::extract::FileEntry;
 use crate::grid::Grid;
 use crate::roads::{self, Graph, Stretch, Water};
@@ -141,7 +141,14 @@ impl Water for Blocks<'_> {
                 .toc
                 .read_block(self.file, i, &[])
                 .map_err(|e| refusal(self.path, e))?;
-            let b = Prepared::new(b, &grid);
+            if !b
+                .tritype
+                .iter()
+                .any(|&t| water_class(t) != 0 && t & ROAD_STRIP == 0)
+            {
+                continue;
+            }
+            let b = Prepared::water(b, &grid);
             for &s in &here {
                 let [x, z] = points[s as usize].map(f64::from);
                 wet[s as usize] |= b.water_under(grid_units(&grid, x, z));

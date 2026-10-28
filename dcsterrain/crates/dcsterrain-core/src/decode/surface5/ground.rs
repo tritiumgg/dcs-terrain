@@ -275,6 +275,22 @@ impl Prepared {
         }
     }
 
+    /// Only the water triangles of a block that are not road strips, for
+    /// `water_under`: a sample then tests the few near it, not the land.
+    pub fn water(mut b: Block, g: &Grid) -> Prepared {
+        let keep: Vec<bool> = b
+            .tritype
+            .iter()
+            .map(|&t| water_class(t) != 0 && t & ROAD_STRIP == 0)
+            .collect();
+        let mut k = keep.iter();
+        b.tri.retain(|_| *k.next().unwrap());
+        b.tritype
+            .retain(|&t| water_class(t) != 0 && t & ROAD_STRIP == 0);
+        b.subsets.clear();
+        Prepared::new(b, g)
+    }
+
     /// Roughly the bytes it holds, for a cache's budget.
     pub fn bytes(&self) -> usize {
         self.rc.len() * 24
