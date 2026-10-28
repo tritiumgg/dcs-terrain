@@ -1,6 +1,7 @@
 //! Opening a terrain by its id, and listing an install's terrains, on an
 //! install tree the test builds: headers only, but for a surface file of
-//! one block of two triangles.
+//! one block of two triangles, a road across it, and on one terrain a scene
+//! over it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,6 +10,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde_json::{Value, json};
 
+use dcsterrain_core::decode::rn4::build as rn4;
 use dcsterrain_core::decode::scn5::build as scene;
 use dcsterrain_core::decode::surface5::build::{Block, file, tri, u32s, vec3};
 
@@ -69,10 +71,23 @@ fn terrain(root: &Path, folder: &str, id: &str, scene_version: u32) {
         let bytes = match ext {
             "surface5" => surface(),
             "scn5" if version == 9 => scenery(),
+            "rn4" => roads(),
             _ => header(class, version),
         };
         put(root, &format!("{m}/{dir}/{folder}.{ext}"), &bytes);
     }
+}
+
+/// A road network of one road across the mesh.
+fn roads() -> Vec<u8> {
+    let road = rn4::Edge {
+        kind: dcsterrain_core::decode::rn4::KIND_ROAD,
+        class: 0,
+        a: 1,
+        b: 2,
+        points: vec![[100.0, 10.0, 500.0], [900.0, 10.0, 500.0]],
+    };
+    rn4::file(&["road"], &[road])
 }
 
 /// A scene of one house over the mesh, in the objects pool, and nothing in
@@ -218,13 +233,7 @@ fn opens_a_terrain_by_the_id_its_entry_declares() {
     assert_eq!(v["dcs_build_timestamp"], "20000101-000000");
     let path = v["files"][0]["path"].as_str().unwrap();
     assert!(path.starts_with("Mods/terrains/GermanyColdWar/"), "{path}");
-    let size = |class: &str| header(class, 0).len();
-    let want = format!(
-        "{}-{}-{}",
-        surface().len(),
-        size("landscape4::lRoadNetwork"),
-        scenery().len()
-    );
+    let want = format!("{}-{}-{}", surface().len(), roads().len(), scenery().len());
     assert_eq!(v["terrain_fingerprint"], want);
     let extent = json!({"min_x": 0.0, "min_z": 0.0, "max_x": 1000.0, "max_z": 1000.0});
     assert_eq!(v["extent"], extent);
@@ -416,13 +425,22 @@ fn list_terrains_shows_a_cache_after_index_and_none_after_clear() {
         .iter()
         .map(|e| e["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, ["mesh.toc", "scene.nodes", "tables.json"]);
+    assert_eq!(
+        names,
+        [
+            "mesh.toc",
+            "roads.betweenness",
+            "roads.graph",
+            "scene.nodes",
+            "tables.json"
+        ]
+    );
     assert!(entries.iter().all(|e| e["size"].as_u64().unwrap() > 0));
 
     let out = run(&["list-terrains", "--install", root, "--cache", cache]);
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(
-        text.contains("GermanyCW  GermanyColdWar  3 entries, "),
+        text.contains("GermanyCW  GermanyColdWar  5 entries, "),
         "{text}"
     );
 

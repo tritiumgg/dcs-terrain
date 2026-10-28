@@ -301,6 +301,17 @@ impl Prepared {
         })
     }
 
+    /// Whether a water triangle of this block covers `p`, in grid units,
+    /// whatever wins there: a bridge's road strip covers the river it
+    /// crosses. A road strip is not water, whatever its other bits say.
+    pub fn water_under(&self, p: [f64; 2]) -> bool {
+        self.bins.at(p).iter().any(|&t| {
+            let ty = self.tritype[t as usize];
+            let [a, b, c] = self.corners(self.tri[t as usize]);
+            water_class(ty) != 0 && ty & ROAD_STRIP == 0 && cover(a, b, c, p).is_some()
+        })
+    }
+
     /// The winning triangle of this block at `p`, in grid units. Its
     /// `runway` is false: a runway subset of any block marks the point, as
     /// it marks a tile's cell, so the caller asks every block `on_runway`.

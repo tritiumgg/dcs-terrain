@@ -26,14 +26,16 @@ pub const BLOCK_BUDGET: usize = 32 << 20;
 /// Rasterized tiles kept between requests, of every layer: about 20 KiB each.
 pub const TILE_COUNT: usize = 256;
 
+mod roads;
 mod scenery;
 mod tables;
+pub use roads::{ROADS_BETWEENNESS, ROADS_GRAPH, RoadsBetweenness, RoadsGraph};
 pub use scenery::{SCENE_NODES, SceneNodes, Scenery};
 pub use tables::{AirdromeRow, HookImport, MAX_CRS_RESIDUAL_M, TABLES_JSON, Tables, TablesJson};
 
 /// How far past its stated box a block is read for a point or tile. Its
 /// vertices lie inside the box to within a centimeter.
-const BOX_PAD_M: f64 = 1.0;
+pub(super) const BOX_PAD_M: f64 = 1.0;
 
 /// The `.surface5` table of contents.
 pub struct MeshToc;
@@ -124,7 +126,7 @@ impl<K: Eq + Hash + Copy, V: Clone> Lru<K, V> {
 
 /// The tiles of `g` a world rectangle `[x0, z0, x1, z1]` reaches into, as
 /// row and column ranges clipped to the grid; `None` when it lies off it.
-fn tile_span(
+pub(super) fn tile_span(
     g: &Grid,
     [x0, z0, x1, z1]: [f64; 4],
 ) -> Option<(
@@ -206,6 +208,9 @@ pub struct Install {
     scenery: OnceLock<Scenery>,
     /// Read the first time a table is asked for, likewise.
     tables: OnceLock<Tables>,
+    /// Read the first time a route or a road distance asks, likewise.
+    roads: OnceLock<crate::roads::Graph>,
+    betweenness: OnceLock<Vec<f32>>,
 }
 
 /// The sizes of the surface, road and scene files, joined by `-`.
@@ -271,6 +276,8 @@ impl Install {
             cache: terrain,
             scenery: OnceLock::new(),
             tables: OnceLock::new(),
+            roads: OnceLock::new(),
+            betweenness: OnceLock::new(),
         })
     }
 
@@ -303,6 +310,27 @@ impl Install {
         }
         let t = Tables::open(&self.cache)?;
         Ok(self.tables.get_or_init(|| t))
+    }
+
+    /// The terrain's road and rail graph, read from the cache, built there
+    /// first if missing or stale.
+    pub fn roads(&self) -> Result<&crate::roads::Graph, Refusal> {
+        if let Some(g) = self.roads.get() {
+            return Ok(g);
+        }
+        let g = roads::graph(&self.cache)?;
+        Ok(self.roads.get_or_init(|| g))
+    }
+
+    /// Each road and rail edge's betweenness, in the graph's edge order,
+    /// read from the cache, built there first if missing or stale: minutes
+    /// on the largest terrains.
+    pub fn betweenness(&self) -> Result<&[f32], Refusal> {
+        if let Some(b) = self.betweenness.get() {
+            return Ok(b);
+        }
+        let b = roads::betweenness(&self.cache, self.roads()?)?;
+        Ok(self.betweenness.get_or_init(|| b))
     }
 
     pub fn map(&self) -> &Map {
@@ -412,10 +440,10 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use crate::decode::container;
     use crate::decode::scn5::{self, Pool};
     use crate::decode::surface5::build::{self, f32s, file, tri, u32s, vec3};
     use crate::decode::surface5::{LAKE, ROAD_STRIP};
+    use crate::decode::{container, rn4};
     use crate::grid::Window;
     use crate::scratch::Scratch;
     use crate::source::Cover;
@@ -723,6 +751,57 @@ mod tests {
         let c = Scratch::new();
         let t = Install::open(&root.0, "Test", &Cache::new(&c.0)).unwrap();
         assert_eq!(t.point(1100.0, 2100.0).unwrap().unwrap().surface, 5);
+    }
+
+    /// A road from `(x0, z0)` to `(x1, z1)` at 150 m, its ends junctions `a`
+    /// and `b`.
+    fn road(a: u32, b: u32, [x0, z0]: [f64; 2], [x1, z1]: [f64; 2]) -> rn4::build::Edge {
+        rn4::build::Edge {
+            kind: rn4::KIND_ROAD,
+            class: 0,
+            a,
+            b,
+            points: vec![[x0, 150.0, z0], [x1, 150.0, z1]],
+        }
+    }
+
+    #[test]
+    fn a_road_crosses_the_water_under_it_even_where_a_road_strip_wins() {
+        // A road strip over the whole square, in a second block over the
+        // first, wins every point there; the lake is still under it.
+        let blocks = [square([1024, LAKE]), square([ROAD_STRIP, ROAD_STRIP])];
+        let root = install(&file(&blocks, 2));
+        let roads = rn4::build::file(
+            &["road"],
+            &[
+                // Out of the forest half into the lake.
+                road(1, 2, [1100.0, 2100.0], [1900.0, 2900.0]),
+                // In the forest half only.
+                road(3, 4, [1100.0, 2100.0], [1400.0, 2100.0]),
+            ],
+        );
+        put(&root.0, "Mods/terrains/Test/roads/Test.rn4", &roads);
+        let c = Scratch::new();
+        let t = Install::open(&root.0, "Test", &Cache::new(&c.0)).unwrap();
+        assert_eq!(t.point(1900.0, 2900.0).unwrap().unwrap().water, 0);
+        let g = t.roads().unwrap();
+        let wet: Vec<bool> = g.edges.iter().map(|e| e.crosses_water).collect();
+        assert_eq!(wet, [true, false]);
+        assert_eq!(g.class(&g.edges[0]), "road");
+        assert_eq!(t.betweenness().unwrap(), [1.0, 0.0]);
+        for name in ["roads.graph", "roads.betweenness"] {
+            assert!(c.0.join("Test").join(name).is_file(), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_road_file_no_decoder_reads_refuses_roads_not_heights() {
+        let root = install(&file(&[square([0, 0])], 1));
+        let c = Scratch::new();
+        let t = Install::open(&root.0, "Test", &Cache::new(&c.0)).unwrap();
+        let e = t.roads().unwrap_err();
+        assert!(e.0.contains("Test.rn4"), "{e}");
+        assert!(t.point(1100.0, 2100.0).unwrap().is_some());
     }
 
     #[test]
