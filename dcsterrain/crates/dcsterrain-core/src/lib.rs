@@ -10,6 +10,7 @@ pub mod crs;
 pub mod decode;
 pub mod extract;
 pub mod grid;
+pub mod layers;
 pub mod query;
 pub mod roads;
 pub mod source;
