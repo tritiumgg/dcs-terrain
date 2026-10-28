@@ -25,7 +25,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::fs::{self, File};
-use std::io::{self, BufWriter, Write};
+use std::io::{self, BufWriter, Read, Write};
 use std::path::Path;
 
 use serde_json::json;
@@ -229,54 +229,104 @@ pub(super) fn header(b: &[u8], name: &str, want: Decoder) -> Result<container::H
 
 /// Decodes a whole road network file. `name` is how an error names it.
 pub fn parse(b: &[u8], name: &str, reach: &Reach) -> Result<Network, Error> {
-    let h = header(b, name, Decoder::RoadNetwork)?;
-    let (classes, mut i) = classes(b, h.body())?;
+    collect(b, name, reach)
+}
+
+fn collect(r: impl Read, name: &str, reach: &Reach) -> Result<Network, Error> {
     let mut edges = Vec::new();
-    // Greedy from the left: a candidate that starts inside an accepted run
-    // is that run's own bytes.
-    while i + 4 <= b.len() {
-        let Some(points) = run(b, i, reach) else {
-            i += 1;
-            continue;
-        };
-        let q = i;
-        i = q + 4 + 24 * points.len();
-        if q < 14 || u32_at(b, q - 4) != Some(0) {
-            continue;
-        }
-        let (kind, class) = (b[q - 14], b[q - 13]);
-        let id = edges.len() as u32;
-        if kind > KIND_ROAD {
-            return Err(malformed(format!(
-                "edge {id} at byte {q} has kind {kind}, where 0, 1 and 2 are read"
-            )));
-        }
-        if usize::from(class) >= classes.len() {
-            return Err(malformed(format!(
-                "edge {id} at byte {q} has class {class}, past the {} the table holds",
-                classes.len()
-            )));
-        }
-        edges.push(Edge {
-            id,
-            kind,
-            class,
-            a: node(u32_at(b, q - 12).unwrap()),
-            b: node(u32_at(b, q - 8).unwrap()),
-            points,
-        });
-    }
-    // An empty mesh, or a file of another layout, leaves every run out of
-    // reach: no map has no roads, so that is an error, not an empty table.
-    if !edges.iter().any(|e| e.kind != KIND_AIRFIELD) {
-        return Err(malformed("no road or rail edge was found".into()));
-    }
+    let classes = scan(r, name, reach, |e| edges.push(e))?;
     let catch_all = unjoin_catch_alls(&mut edges);
     Ok(Network {
         classes,
         edges,
         catch_all,
     })
+}
+
+/// Bytes of the file held at a time while it is scanned.
+const WINDOW: usize = 16 << 20;
+/// What the scan needs past a candidate count: the longest run's points.
+const AHEAD: usize = 4 + 24 * MAX_POINTS as usize;
+/// What it needs before one: the kind, class and ids.
+const BEHIND: usize = 14;
+
+/// Scans the road network `r` holds from its start, a window at a time,
+/// handing each edge to `edge` in file order with its ends as the file names
+/// them, and returns the class table. Holds `WINDOW` bytes, not the file,
+/// which is 2.6 GiB on GermanyColdWar. `name` is how an error names it.
+pub fn scan(
+    mut r: impl Read,
+    name: &str,
+    reach: &Reach,
+    mut edge: impl FnMut(Edge),
+) -> Result<Vec<String>, Error> {
+    let mut b: Vec<u8> = Vec::with_capacity(WINDOW);
+    let mut eof = fill(&mut r, &mut b)?;
+    let h = header(&b, name, Decoder::RoadNetwork)?;
+    let (classes, mut i) = classes(&b, h.body())?;
+    // The file offset of `b[0]`.
+    let mut base = 0usize;
+    let (mut count, mut any) = (0u32, false);
+    // Greedy from the left: a candidate that starts inside an accepted run
+    // is that run's own bytes.
+    loop {
+        if !eof && b.len() - i < AHEAD {
+            let keep = i.saturating_sub(BEHIND);
+            b.drain(..keep);
+            base += keep;
+            i -= keep;
+            eof = fill(&mut r, &mut b)?;
+        }
+        if i + 4 > b.len() {
+            break;
+        }
+        let Some(points) = run(&b, i, reach) else {
+            i += 1;
+            continue;
+        };
+        let q = i;
+        i = q + 4 + 24 * points.len();
+        if base + q < BEHIND || u32_at(&b, q - 4) != Some(0) {
+            continue;
+        }
+        let (kind, class) = (b[q - 14], b[q - 13]);
+        let (id, at) = (count, base + q);
+        if kind > KIND_ROAD {
+            return Err(malformed(format!(
+                "edge {id} at byte {at} has kind {kind}, where 0, 1 and 2 are read"
+            )));
+        }
+        if usize::from(class) >= classes.len() {
+            return Err(malformed(format!(
+                "edge {id} at byte {at} has class {class}, past the {} the table holds",
+                classes.len()
+            )));
+        }
+        count += 1;
+        any |= kind != KIND_AIRFIELD;
+        edge(Edge {
+            id,
+            kind,
+            class,
+            a: node(u32_at(&b, q - 12).unwrap()),
+            b: node(u32_at(&b, q - 8).unwrap()),
+            points,
+        });
+    }
+    // An empty mesh, or a file of another layout, leaves every run out of
+    // reach: no map has no roads, so that is an error, not an empty table.
+    if !any {
+        return Err(malformed("no road or rail edge was found".into()));
+    }
+    Ok(classes)
+}
+
+/// Reads from `r` until `b` holds `WINDOW` bytes or the file ends, and says
+/// whether it ended.
+fn fill(r: &mut impl Read, b: &mut Vec<u8>) -> io::Result<bool> {
+    let want = WINDOW.saturating_sub(b.len()) as u64;
+    let got = r.by_ref().take(want).read_to_end(b)? as u64;
+    Ok(got < want)
 }
 
 fn node(id: u32) -> Option<u32> {
@@ -324,9 +374,9 @@ pub fn spread(points: &[[f64; 2]]) -> f64 {
         .fold(0.0, f64::max)
 }
 
-/// Reads and decodes the road network at `path`.
+/// Reads and decodes the road network at `path`, a window at a time.
 pub fn read(path: &Path, reach: &Reach) -> Result<Network, Error> {
-    parse(&fs::read(path)?, &path.to_string_lossy(), reach)
+    collect(File::open(path)?, &path.to_string_lossy(), reach)
 }
 
 /// Writes the road and rail edges under `dir`, one JSON object a line, each
@@ -383,6 +433,21 @@ pub mod build {
         }
     }
 
+    /// One edge as the file holds it, its unit tangents after it.
+    pub fn edge(e: &Edge) -> Vec<u8> {
+        // Bytes before the kind that the decoder does not read.
+        let mut b = vec![0xEE; 5];
+        b.push(e.kind);
+        b.push(e.class);
+        b.extend_from_slice(&e.a.to_le_bytes());
+        b.extend_from_slice(&e.b.to_le_bytes());
+        b.extend_from_slice(&0u32.to_le_bytes());
+        run(&mut b, &e.points);
+        let tangents: Vec<[f64; 3]> = e.points.iter().map(|_| [1.0, 0.0, 0.0]).collect();
+        run(&mut b, &tangents);
+        b
+    }
+
     /// A file of `classes`, a node-table connector, then each edge with its
     /// unit tangents after it, then filler.
     pub fn file(classes: &[&str], edges: &[Edge]) -> Vec<u8> {
@@ -396,16 +461,7 @@ pub mod build {
         b.extend_from_slice(&[3, 0, 0, 0, 7, 0, 0, 0, 8, 0, 0, 0]);
         run(&mut b, &[[5000.0, 10.0, 5000.0], [5010.0, 10.0, 5000.0]]);
         for e in edges {
-            // Bytes before the kind that the decoder does not read.
-            b.extend_from_slice(&[0xEE; 5]);
-            b.push(e.kind);
-            b.push(e.class);
-            b.extend_from_slice(&e.a.to_le_bytes());
-            b.extend_from_slice(&e.b.to_le_bytes());
-            b.extend_from_slice(&0u32.to_le_bytes());
-            run(&mut b, &e.points);
-            let tangents: Vec<[f64; 3]> = e.points.iter().map(|_| [1.0, 0.0, 0.0]).collect();
-            run(&mut b, &tangents);
+            b.extend_from_slice(&edge(e));
         }
         b.extend_from_slice(&[0; 64]);
         b
@@ -548,6 +604,30 @@ mod tests {
         let b = container::build("landscape4::lRoadNetwork", 6, 0);
         let e = parse(&b, "X.rn4", &REACH).unwrap_err().to_string();
         assert!(e.contains("version 6 has no decoder"), "{e}");
+    }
+
+    #[test]
+    fn finds_edges_on_both_sides_of_a_window_and_across_its_end() {
+        let mut b = file(&["road"], &[edge(KIND_ROAD, 0, 1, 2, 1000.0)]);
+        // The second edge's points straddle the end of the first window.
+        let at = WINDOW - b.len() - 30;
+        b.resize(b.len() + at, 0);
+        b.extend_from_slice(&build::edge(&edge(KIND_ROAD, 0, 2, 3, 2000.0)));
+        b.resize(b.len() + WINDOW, 0);
+        b.extend_from_slice(&build::edge(&edge(KIND_RAIL, 0, 3, 4, 3000.0)));
+        let mut got = Vec::new();
+        scan(&b[..], "X.rn4", &REACH, |e| {
+            got.push((e.id, e.a, e.points[0][0]))
+        })
+        .unwrap();
+        assert_eq!(
+            got,
+            [
+                (0, Some(1), 1000.0),
+                (1, Some(2), 2000.0),
+                (2, Some(3), 3000.0)
+            ]
+        );
     }
 
     #[test]
