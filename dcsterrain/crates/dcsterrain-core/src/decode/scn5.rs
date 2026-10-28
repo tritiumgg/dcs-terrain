@@ -40,6 +40,8 @@ use std::path::Path;
 use super::container::{self, MAX_HEAD};
 use super::{Decoder, dispatch};
 
+mod index;
+pub use index::{Index, Placed};
 mod walk;
 pub use walk::Instance;
 mod write;
@@ -256,6 +258,23 @@ pub(crate) fn heading(x: f64, z: f64) -> f64 {
     let h = z.atan2(x).rem_euclid(std::f64::consts::TAU);
     // A tiny negative angle rounds up to 2π itself.
     if h >= std::f64::consts::TAU { 0.0 } else { h }
+}
+
+/// An instance's model from its model word: version 9 keeps options in the
+/// high half.
+fn model_of(version: u32, word: u32) -> u32 {
+    if version == 8 { word } else { word & 0xffff }
+}
+
+/// An instance's heading from its axis element, the bytes this version
+/// stores for it.
+fn heading_of(version: u32, ax: &[u8]) -> f64 {
+    if version == 8 {
+        heading(f64::from(f32_at(ax, 0)), f64::from(f32_at(ax, 4)))
+    } else {
+        let c = |j: usize| (f64::from(u16_at(ax, 2 * j)) - 32768.0) / 32767.0;
+        heading(c(0), c(2))
+    }
 }
 
 /// Reads the model names and boxes at `at`, returning them and where they

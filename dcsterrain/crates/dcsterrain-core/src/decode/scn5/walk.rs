@@ -7,7 +7,7 @@
 
 use std::io::{self, Read, Seek, SeekFrom};
 
-use super::{Error, Pool, Scene, heading, malformed};
+use super::{Error, Pool, Scene, heading_of, malformed, model_of};
 
 /// How many of a pool's ids are checked against their own boxes.
 const SAMPLE: u64 = 1000;
@@ -109,7 +109,7 @@ impl Scene {
 
     /// Checks that a sample of each pool's ids land in their own boxes: an id
     /// split at the wrong shift names another instance, far from the box.
-    fn check_ids<R: Read + Seek>(&self, r: &mut R) -> Result<(), Error> {
+    pub(super) fn check_ids<R: Read + Seek>(&self, r: &mut R) -> Result<(), Error> {
         for (pool, toc) in Pool::ALL.iter().zip(&self.pools) {
             let step = (toc.count / SAMPLE).max(1);
             let (mut seen, mut inside) = (0u64, 0u64);
@@ -117,7 +117,13 @@ impl Scene {
                 let id = read_at(r, self.data_base + toc.ids + 8 * i, 8)?;
                 let id = u64::from_le_bytes(id.try_into().unwrap());
                 let b = read_at(r, self.data_base + toc.aabbs + 24 * i, 24)?;
-                let (node, index) = self.locate(id).expect("checked by tags");
+                // The walk has checked every id by now; an index build has not.
+                let Some((node, index)) = self.locate(id) else {
+                    return Err(malformed(format!(
+                        "id {id}, entry {i} of the {} pool, names an instance the nodes do not hold",
+                        pool.name()
+                    )));
+                };
                 let p = self.nodes[node].attr("P").unwrap();
                 let p = read_at(r, self.data_base + p.offset + 12 * index, 12)?;
                 let [x, _, z] = self.world(node, &p, 0);
@@ -170,28 +176,15 @@ impl Scene {
             let ty = read(r, l.model)?;
             let ax = read(r, l.axis)?;
             for (i, &tag) in here.iter().enumerate().filter(|(_, t)| **t != 0) {
-                let word = u32_at(&ty, 4 * i);
-                // Version 9 keeps options in the high half of the word.
-                let model = if self.version == 8 {
-                    word
-                } else {
-                    word & 0xffff
-                };
+                let model = model_of(self.version, u32_at(&ty, 4 * i));
                 let id = (k as u64) << self.shift() | i as u64;
                 if model >= models {
                     return Err(malformed(format!(
                         "instance {id} names model {model}, past the {models} the table holds"
                     )));
                 }
-                let rotation = if self.version == 8 {
-                    heading(f32_at(&ax, 8 * i), f32_at(&ax, 8 * i + 4))
-                } else {
-                    let c = |j: usize| {
-                        let u = u16::from_le_bytes([ax[12 * i + 2 * j], ax[12 * i + 2 * j + 1]]);
-                        (f64::from(u) - 32768.0) / 32767.0
-                    };
-                    heading(c(0), c(2))
-                };
+                let stride = usize::from(l.axis_stride);
+                let rotation = heading_of(self.version, &ax[stride * i..stride * (i + 1)]);
                 let pos = self.world(k, &p, i);
                 if !(rotation.is_finite() && pos.iter().all(|v| v.is_finite())) {
                     return Err(malformed(format!(
