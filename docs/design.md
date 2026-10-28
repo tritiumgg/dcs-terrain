@@ -182,7 +182,14 @@ strings and tables, at most 1 000 000 of them, nested at most 64 deep.
 `Radio.lua`'s labels are read from the comment on the line before each
 `radioId`.
 
-An airdrome is keyed by its `name_id` across every source that names it.
+An airdrome is keyed by its `name_id`, the basename of its `.rn4`, across
+every source that names it. Its id is the one `Radio.lua`'s comment labels
+it with, and its beacons, radio and display name follow from that id; the
+display name is its first beacon's, which on Caucasus is the game's for 18 of
+21 airdromes. Its reference point is the mean of its runway ends, within
+3 mm of the game's on Caucasus, whose airdromes have one runway each.
+`tables.json` does not carry the game's names by language or the scene
+objects it ties to an airdrome: towers, warehouses, fuel depots, shelters.
 
 ### 3.5 The projection
 
@@ -194,8 +201,9 @@ offsets are the means of the rest, rounded to the millimeter. There is no fit
 with fewer than 3 distinct pairs before or after that cut, or with longitudes
 spanning more than 30°; the terrain then takes its parameters from the built-in
 table (`crs.rs`), and a terrain in neither is refused. Fitted when `tables.json`
-is built. A fitted residual over 2 m refuses the terrain unless
-`--allow-crs-residual` is given; that check is new in N5.
+is built. A fit that misses a beacon it kept by more than 2 m refuses the
+terrain unless `--allow-crs-residual` is given; every installed terrain fits
+within 0.071 m on 2.9.30.28738.
 
 ## 4. The cache
 
@@ -212,7 +220,7 @@ derived from.
 |---|---|---|---|
 | `mesh.toc` | The `.surface5` table of contents can only be pattern-scanned: 21 ms (MarianasWWII) to 0.7 s (GermanyCW) per open | 0.05–1.5 MB, every block's arrays and its runway subsets, the one material read | < 1 s |
 | `scene.nodes` | Parsing the `.scn5` head costs 2 s and 559 MiB on Germany | 0.35 MiB (MarianaIslands) to 24.5 MiB (GermanyCW): each node's array offsets, the model table, the group and the pools | 0.05–1.8 s |
-| `tables.json` | Airfields, stands, Lua tables, the fitted projection, scenery classes and any imported hook tables each cost a full decode; together they are small | < 1 MiB | < 2 s |
+| `tables.json` | Airfields, stands, Lua tables, the fitted projection, scenery classes and any imported hook tables each cost a full decode; together they are small | 0.1 MB (MarianaIslands) to 2.4 MB (GermanyCW), read back in 1–10 ms | 54–560 ms |
 | `roads.graph` | The `.rn4` has no spatial order: 5.5 s and 3.3 GB to scan on Germany. Betweenness is global | 9.3 MiB (Caucasus) to 200 MiB (Germany) | 7 ms–5 s; betweenness 1 s (Caucasus) to ~250 s CPU (Germany) |
 | `places` | Settlements need every building on the terrain (§6.3) | 6–24 k rows, < 2 MiB | a whole objects-pool walk, 3.8 s (Caucasus) to 53 s (GermanyCW), plus 0.2–8 s grouping |
 | `horizon/` | 0.1–0.2 ms per site, 0.9–4 s per 20 × 20 km region on one core | up to 282 MiB (Caucasus) / ~720 MiB (Afghanistan) if every tile were touched | per tile, the first time a query touches it |
@@ -226,6 +234,9 @@ derived from.
   covers only the install files of the roles the entry reads (§5), so a
   changed road file leaves `mesh.toc` alone. It is memory-mapped read-only;
   mapping a 200 MiB entry costs about 0.4 MiB of commit.
+- `tables.json` cannot open with that header and stay JSON, so it is one
+  object whose first three members are the version, the key and the payload,
+  and a check reads it only as far as the payload.
 - A key is checked from metadata alone: a stat of each file of a single-file
   role, one directory listing with size and mtime for a directory role, so a
   file added to `AirfieldsTaxiways` is seen, and the build. The class, version
@@ -270,15 +281,18 @@ derived from.
 ### 4.3 The hook's tables
 
 Only the running sim knows some airdrome fields: `code`, `civilian`,
-`abandoned`, `class`, and the `id` where `Radio.lua` gives none (about half of
-Nevada's airdromes). The optional GameGUI hook in `extractor/` writes them to
-an `airdromes.json`. `dcsterrain index --install <dir> --terrain <Terrain> --hook <dir>`
+`abandoned`, `class`, the game's `display_name`, and the `id` where
+`Radio.lua` labels none (every airdrome of Nevada and PersianGulf, and about
+half of GermanyCW's and Syria's, on 2.9.30.28738). The optional GameGUI hook
+in `extractor/` writes them to an `airdromes.json` beside its
+`manifest.json`. `dcsterrain index --install <dir> --terrain <Terrain> --hook <dir>`
 merges that file into `tables.json`, joining on `name_id` and filling exactly
-those fields. A hook directory from another terrain, `dcs_build` or build timestamp
-is refused, naming the difference. The merged file records the hook directory;
-when `tables.json` is rebuilt the merge is redone from it if it still exists
-and still matches, and otherwise the fields go back to null and `check` says
-the import was dropped.
+those fields; an id other than `Radio.lua`'s is refused. A hook directory
+whose manifest names another terrain, `dcs_build` or build timestamp is
+refused, naming each difference, before anything is built. The merged file
+records the hook directory; when `tables.json` is rebuilt the merge is redone
+from it if it still exists and still matches, and otherwise the fields go
+back to null and `check` says the import was dropped.
 
 ## 5. Versions and the response stamp
 

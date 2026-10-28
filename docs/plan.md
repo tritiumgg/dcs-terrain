@@ -68,7 +68,7 @@ a valid RFC 7946 `FeatureCollection` whose features match its JSON response.
 
 | Id | Deliverable | Done | Depends on | Verified by |
 |---|---|---|---|---|
-| Q1 | `describe`, `sample`, `geo`, `nearest` (all kinds but `place`), `scenery_in`; `sample` over scattered points answers block by block: each block prepared once, results merged by rank | Synthetic tests; `sample` over its cap errors rather than truncates; 10k scattered points at the 32 MiB block budget answer in under 3 s on GermanyCW (measured 25.9 s naive, 13.5 s Z-sorted, 2.9 s block by block on 2.9.30.28738) | N3, N3b, N4, N5 | agent |
+| Q1 | `describe`, `sample`, `geo`, `nearest` (all kinds but `place`), `scenery_in`; `sample` over scattered points answers block by block: each block prepared once, results merged by rank; `query --allow-crs-residual`, without which a terrain whose fit misses a beacon by over 2 m is refused, as `index` refuses it | Synthetic tests; `sample` over its cap errors rather than truncates; 10k scattered points at the 32 MiB block budget answer in under 3 s on GermanyCW (measured 25.9 s naive, 13.5 s Z-sorted, 2.9 s block by block on 2.9.30.28738) | N3, N3b, N4, N5 | agent |
 | Q2 | `visible`, `viewshed`; the shared GeoJSON writer | Hill tests; viewshed fraction against brute force; the GeoJSON is a valid RFC 7946 `FeatureCollection` whose area, projected back, matches the visible cells within one cell along the edge | N1 | agent |
 | Q3 | Criteria, the closed set including `cover_in`, `cover_fraction_min`, `dist_cover_band`; tile skipping; LOS criteria last | Each criterion has a positive and negative synthetic test | N8, N9, Q2 | agent |
 | Q4 | `score_site`, `find_sites` | Plane accepted, lake and hill rejected; suppression spacing respected | Q3 | agent |

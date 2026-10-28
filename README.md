@@ -66,7 +66,10 @@ dcsterrain query --terrain Caucasus describe
 `cache prune` deletes builds other than the installed one, and `cache clear`
 deletes all of it, asking before the live validation figures.
 `dcsterrain index --terrain Caucasus` builds a cache ahead of time. `query`,
-`index` and `list-terrains` take `--cache <dir>` too.
+`index` and `list-terrains` take `--cache <dir>` too. `index --hook <dir>`
+merges the airdrome fields only a running DCS knows, such as the ICAO code,
+from the optional hook in `extractor/`; `--allow-crs-residual` accepts a
+terrain whose projection fits its beacons more than 2 m off.
 
 Ask a siting question the same way, `find_sites` with its JSON (planned, not
 usable yet). The first question on a terrain will build its cache in seconds,
