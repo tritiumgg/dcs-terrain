@@ -1,11 +1,11 @@
-# classes/Caucasus.toml — hand overrides for the scenery classifier
-# (spec-dcsterrain-core.md, "Scenery classification"). Model → class, with
-# the reason. Drafted from the live catalogue of 2026-09-02
-# (caucasus-scenery-catalogue.tsv: 888 859 objects, 263 models).
+# Caucasus: hand overrides for the scenery classes. Each key is a model as
+# the live catalogue spells it, matched without regard to case; each value
+# names its class (building, industrial, wall, misc or effect), an optional
+# settlement family, and the reason. Drafted from the live catalogue of
+# 2026-09-02: 888 859 objects over 263 models.
 #
-# Classes: building | industrial | wall | misc. `misc` objects still veto a
-# footprint through `scenery_in_footprint_max`; they are kept out of the
-# built-up density only.
+# A `misc` object still vetoes a footprint; it is kept out of the built-up
+# density only.
 
 # --- Bridges, tunnels and crossings: long footprints over rivers and roads,
 # not built-up area. Density from them would mark a river as a town.
