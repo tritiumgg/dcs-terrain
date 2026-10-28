@@ -19,7 +19,11 @@
 //! the group, after    u32 h, u32 count, count × 140-byte record:
 //! the last node       u32 0, u32 model, f64[16] matrix, f32
 //! a pool, in the      three entries of u64 count, u48 offset: the ids,
-//! section table       the instances' world boxes, a hierarchy not read
+//! section table       the instances' world boxes, and the pool's tree
+//! a tree node         f32[6] box, world min x,y,z, max x,y,z; u32 first,
+//!                     u32 count: it owns pool entries first..first+count;
+//!                     u32[4] children, 0xffffffff for none. Node 0 is the
+//!                     root, and the pool is stored in the tree's order
 //! ```
 //!
 //! An instance id is `node << S | index`, S being 15 in a file with a node
@@ -63,6 +67,7 @@ const UNIT: f64 = 1.0001;
 /// The bytes of a pool's three entries.
 const POOL_ENTRIES: usize = 3 * 14;
 const AABB_BYTES: u64 = 24;
+const TREE_NODE: u64 = 48;
 
 /// What makes a scene file unreadable, in words that name the part.
 #[derive(Debug)]
@@ -200,6 +205,9 @@ pub struct PoolToc {
     /// 8 for the instancer pools, 4 for the group's.
     pub id_width: u8,
     pub aabbs: u64,
+    /// From the data base: the pool's tree, `tree_nodes` of 48 bytes.
+    pub tree: u64,
+    pub tree_nodes: u64,
 }
 
 /// An opened scene file: everything before the data base.
@@ -456,6 +464,8 @@ fn pools(b: &[u8], from: usize, data: u64) -> Vec<PoolToc> {
             ids: o1,
             id_width,
             aabbs: o2,
+            tree: u48_at(b, i + 36),
+            tree_nodes: u64_at(b, i + 28),
         });
         i += POOL_ENTRIES;
     }
@@ -531,6 +541,23 @@ impl Scene {
                 group.len(),
                 g.count
             )));
+        }
+        // Only the instancer pools' trees are read; the group is scanned.
+        let data = len - h.data_base;
+        for (pool, p) in Pool::ALL.iter().zip(&pools) {
+            let fits = p.tree_nodes > 0
+                && p.tree_nodes
+                    .checked_mul(TREE_NODE)
+                    .and_then(|n| n.checked_add(p.tree))
+                    .is_some_and(|e| e <= data);
+            if !fits {
+                return Err(malformed(format!(
+                    "the {} pool's tree of {} nodes at {} does not lie within the file",
+                    pool.name(),
+                    p.tree_nodes,
+                    p.tree
+                )));
+            }
         }
         let (k, largest) = nodes
             .iter()
@@ -623,7 +650,7 @@ pub fn open(path: &Path) -> Result<Scene, Error> {
 
 /// Builds scene files for tests: the parts a decoder finds, with framing
 /// between them that it must step over.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub mod build {
     use super::super::container;
 
@@ -697,6 +724,45 @@ pub mod build {
 
     fn matrix(out: &mut Vec<u8>, m: [f64; 16]) {
         put(out, &m, f64::to_le_bytes);
+    }
+
+    pub struct TreeNode {
+        pub bbox: [f32; 6],
+        pub first: u32,
+        pub count: u32,
+        pub children: [u32; 4],
+    }
+
+    /// A tree over pool entries in their stored order: each node owns its
+    /// first entry and splits the rest among up to four children, its box
+    /// the union of its subtree's. The root, empty pool or not, is node 0.
+    pub fn tree(boxes: &[[f32; 6]]) -> Vec<TreeNode> {
+        fn node(boxes: &[[f32; 6]], first: usize, end: usize, out: &mut Vec<TreeNode>) -> u32 {
+            let k = out.len();
+            let mut bbox = [f32::INFINITY; 6];
+            for b in &boxes[first..end] {
+                for i in 0..3 {
+                    bbox[i] = bbox[i].min(b[i]);
+                    bbox[i + 3] = bbox[i + 3].max(b[i + 3]);
+                }
+            }
+            out.push(TreeNode {
+                bbox,
+                first: first as u32,
+                count: u32::from(end > first),
+                children: [u32::MAX; 4],
+            });
+            let rest = (first + 1).min(end);
+            let step = (end - rest).div_ceil(4).max(1);
+            for (c, lo) in (rest..end).step_by(step).enumerate() {
+                let child = node(boxes, lo, (lo + step).min(end), out);
+                out[k].children[c] = child;
+            }
+            k as u32
+        }
+        let mut out = Vec::new();
+        node(boxes, 0, boxes.len(), &mut out);
+        out
     }
 
     impl Scene {
@@ -853,16 +919,24 @@ pub mod build {
                     u64::to_le_bytes,
                 );
                 let boxes = data.len() as u64;
-                for &k in pool {
-                    put(
-                        &mut data,
-                        &aabb(self.world(k)).map(|v| v as f32),
-                        f32::to_le_bytes,
-                    );
+                let aabbs: Vec<[f32; 6]> = pool
+                    .iter()
+                    .map(|&k| aabb(self.world(k)).map(|v| v as f32))
+                    .collect();
+                for b in &aabbs {
+                    put(&mut data, b, f32::to_le_bytes);
+                }
+                let nodes = tree(&aabbs);
+                let at = data.len() as u64;
+                for n in &nodes {
+                    put(&mut data, &n.bbox, f32::to_le_bytes);
+                    data.extend_from_slice(&n.first.to_le_bytes());
+                    data.extend_from_slice(&n.count.to_le_bytes());
+                    put(&mut data, &n.children, u32::to_le_bytes);
                 }
                 entry(&mut toc, pool.len() as u64, ids);
                 entry(&mut toc, pool.len() as u64, boxes);
-                entry(&mut toc, 1, 0);
+                entry(&mut toc, nodes.len() as u64, at);
             }
             // The destroyed-model map.
             put(&mut toc, &vec![-1i32; self.models.len()], i32::to_le_bytes);
@@ -953,6 +1027,37 @@ mod tests {
             assert_eq!(s.group[0].pos, [-130_000.25, 40.5, 470_000.75]);
             assert!((s.group[0].rotation - 1.0).abs() < 1e-12);
         }
+    }
+
+    #[test]
+    fn reads_each_pools_tree_after_its_boxes() {
+        for version in [8, 9] {
+            let s = open_bytes(&scene(version).file()).unwrap();
+            for p in &s.pools {
+                // One node owns each entry in the built trees.
+                assert_eq!(p.tree_nodes, p.count, "v{version}");
+                assert_eq!(p.tree, p.aabbs + 24 * p.count);
+            }
+        }
+    }
+
+    #[test]
+    fn refuses_a_tree_past_the_end_of_the_file() {
+        let built = scene(9);
+        let mut b = built.file();
+        let s = open_bytes(&b).unwrap();
+        // The trees pool's tree count, in its third section-table entry.
+        let count = s.pools[2].tree_nodes.to_le_bytes();
+        let off = s.pools[2].tree.to_le_bytes();
+        let mut entry = count.to_vec();
+        entry.extend_from_slice(&off[..6]);
+        let at = b.windows(14).position(|w| w == entry.as_slice()).unwrap();
+        b[at..at + 8].copy_from_slice(&1_000_000u64.to_le_bytes());
+        let e = open_bytes(&b).unwrap_err().to_string();
+        assert!(
+            e.starts_with("the trees pool's tree of 1000000 nodes at"),
+            "{e}"
+        );
     }
 
     #[test]
