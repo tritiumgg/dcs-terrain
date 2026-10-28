@@ -4,9 +4,9 @@
 //! reading anything, which is what CI does. Run them optimized,
 //! `cargo test --release --test scn5`. The install is only read.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -15,7 +15,7 @@ use serde_json::Value;
 use dcsterrain_core::cache::Cache;
 use dcsterrain_core::decode::airfield;
 use dcsterrain_core::decode::install::{self, TERRAINS_DIR};
-use dcsterrain_core::decode::scn5::{self, Pool, Scene};
+use dcsterrain_core::decode::scn5::{self, Index, Instance, Pool, Scene};
 use dcsterrain_core::extract::TileEntry;
 use dcsterrain_core::grid::{Grid, Window};
 use dcsterrain_core::source::install::Install;
@@ -375,6 +375,247 @@ fn caucasus_writes_its_scenery_and_counts() {
         );
         assert!(share > 0.999, "{name}");
     }
+}
+
+/// Every entry of every pool whose box meets one of `boxes`, as (pool, id)
+/// per box, from a scan of each pool's whole id and box arrays.
+fn scanned(path: &Path, idx: &Index, boxes: &[[f64; 4]]) -> Vec<HashSet<(usize, u64)>> {
+    // Each box is listed under every 2 km cell it reaches.
+    const CELL: f64 = 2000.0;
+    let cell = |v: f64| (v / CELL).floor() as i64;
+    let mut grid: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
+    for (k, b) in boxes.iter().enumerate() {
+        for cx in cell(b[0])..=cell(b[2]) {
+            for cz in cell(b[1])..=cell(b[3]) {
+                grid.entry((cx, cz)).or_default().push(k);
+            }
+        }
+    }
+    let mut out = vec![HashSet::new(); boxes.len()];
+    let mut r = scn5::reader(path).unwrap();
+    let mut read = |at: u64, n: usize| {
+        r.seek(SeekFrom::Start(at)).unwrap();
+        let mut b = vec![0u8; n];
+        r.read_exact(&mut b).unwrap();
+        b
+    };
+    for (k, p) in idx.pools.iter().enumerate() {
+        let mut i = 0;
+        while i < p.count {
+            let n = (1 << 20).min(p.count - i);
+            let ids = read(idx.data_base + p.ids + 8 * i, 8 * n as usize);
+            let aabbs = read(idx.data_base + p.aabbs + 24 * i, 24 * n as usize);
+            for j in 0..n as usize {
+                let f = |c: usize| {
+                    f64::from(f32::from_le_bytes(
+                        aabbs[24 * j + 4 * c..][..4].try_into().unwrap(),
+                    ))
+                };
+                let a = [f(0), f(2), f(3), f(5)];
+                let id = u64::from_le_bytes(ids[8 * j..8 * j + 8].try_into().unwrap());
+                let mut seen = HashSet::new();
+                for cx in cell(a[0])..=cell(a[2]) {
+                    for cz in cell(a[1])..=cell(a[3]) {
+                        for &q in grid.get(&(cx, cz)).into_iter().flatten() {
+                            let b = boxes[q];
+                            if seen.insert(q)
+                                && a[0] <= b[2]
+                                && b[0] <= a[2]
+                                && a[1] <= b[3]
+                                && b[1] <= a[3]
+                            {
+                                out[q].insert((k, id));
+                            }
+                        }
+                    }
+                }
+            }
+            i += n;
+        }
+    }
+    out
+}
+
+/// `n` 2 km boxes over `id`, half centred on objects and half anywhere in
+/// the terrain, each answered through the install's scenery and checked
+/// against a scan of every pool box, and each instance against the walk.
+fn boxes_equal_a_full_walk(root: &Path, id: &str, n: usize) {
+    let cache = TempDir::new(&format!("boxes-{id}"));
+    let t = Install::open(root, id, &Cache::new(&cache.0)).unwrap();
+    let started = Instant::now();
+    let s = t.scenery().unwrap();
+    let size = fs::metadata(
+        cache
+            .0
+            .join(id)
+            .join(&t.map().build.version)
+            .join("scene.nodes"),
+    )
+    .unwrap()
+    .len();
+    eprintln!(
+        "{id}: scene.nodes {:.2} MiB, built and read in {:.2} s",
+        size as f64 / 1048576.0,
+        started.elapsed().as_secs_f64()
+    );
+    let idx = s.index();
+    let path = root.join(
+        &t.map()
+            .files
+            .iter()
+            .find(|f| f.role == "scene")
+            .unwrap()
+            .path,
+    );
+
+    let mut seed = 11u64;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    let g = t.grid();
+    let (x0, z0) = (g.origin_x, g.origin_z);
+    let (dx, dz) = (
+        f64::from(g.height * g.cell_size),
+        f64::from(g.width * g.cell_size),
+    );
+    let mut objects = Vec::new();
+    s.each_in(Pool::Objects, [x0, z0, x0 + dx, z0 + dz], |i| {
+        objects.push((i.pos[0], i.pos[2]))
+    })
+    .unwrap();
+    let boxes: Vec<[f64; 4]> = (0..n)
+        .map(|k| {
+            let (x, z) = if k < n / 2 {
+                objects[(next() % objects.len() as u64) as usize]
+            } else {
+                let f = |v: u64| (v >> 11) as f64 / (1u64 << 53) as f64;
+                (x0 + f(next()) * dx, z0 + f(next()) * dz)
+            };
+            [x - 1000.0, z - 1000.0, x + 1000.0, z + 1000.0]
+        })
+        .collect();
+
+    let mut lat = Vec::new();
+    let mut got: Vec<HashMap<(usize, u64), Instance>> = Vec::new();
+    for &b in &boxes {
+        let mut here = HashMap::new();
+        let started = Instant::now();
+        for (k, pool) in Pool::ALL.into_iter().enumerate() {
+            s.each_in(pool, b, |i| {
+                assert!(
+                    here.insert((k, i.id), i.clone()).is_none(),
+                    "{id}: {} twice",
+                    i.id
+                );
+            })
+            .unwrap();
+        }
+        lat.push(started.elapsed().as_secs_f64() * 1e3);
+        got.push(here);
+    }
+    lat.sort_by(f64::total_cmp);
+    let hits: usize = got.iter().map(HashMap::len).sum();
+    eprintln!(
+        "{id}: {n} boxes, {hits} instances, all three pools per box in p50 {:.2} p95 {:.2} max {:.2} ms",
+        lat[n / 2],
+        lat[n * 95 / 100],
+        lat[n - 1]
+    );
+
+    let mut want = scanned(&path, idx, &boxes);
+    let first_group = (idx.nodes.len() as u64) << idx.shift;
+    let needed: HashSet<(usize, u64)> = got.iter().flat_map(|h| h.keys().copied()).collect();
+    let mut walked: HashMap<(usize, u64), Instance> = HashMap::new();
+    let mut r = scn5::reader(&path).unwrap();
+    let scene = Scene::open(&mut r, id).unwrap();
+    scene
+        .walk(&mut r, |i| {
+            let k = Pool::ALL.iter().position(|&p| p == i.pool).unwrap();
+            if i.id >= first_group {
+                let bbox = &scene.models[i.model as usize].bbox;
+                let f = scn5::footprint(bbox, i.pos, i.rotation);
+                for (q, b) in boxes.iter().enumerate() {
+                    if f[0] <= b[2] && b[0] <= f[2] && f[1] <= b[3] && b[1] <= f[3] {
+                        want[q].insert((k, i.id));
+                    }
+                }
+            }
+            if needed.contains(&(k, i.id)) {
+                walked.insert((k, i.id), i.clone());
+            }
+            Ok(())
+        })
+        .unwrap();
+    for (q, (g, w)) in got.iter().zip(&want).enumerate() {
+        let ids: HashSet<(usize, u64)> = g.keys().copied().collect();
+        assert_eq!(ids.len(), w.len(), "{id}: box {q} {:?}", boxes[q]);
+        assert!(
+            ids == *w,
+            "{id}: box {q} {:?} differs from the scan",
+            boxes[q]
+        );
+        for (key, i) in g {
+            assert_eq!(Some(i), walked.get(key), "{id}: box {q}");
+        }
+    }
+    eprintln!("{id}: every box equals the scan and every instance the walk");
+}
+
+/// Every installed terrain builds its index, within the 10 s a cache entry
+/// is given, and answers a box at its center.
+#[test]
+fn every_installed_scene_builds_its_index() {
+    let Some(root) = install_root() else { return };
+    for dir in maps(&root) {
+        let map = install::read_map(&root, &dir).unwrap();
+        let cache = TempDir::new(&format!("index-{dir}"));
+        let t = Install::open(&root, &map.theatre, &Cache::new(&cache.0)).unwrap();
+        let started = Instant::now();
+        let s = t.scenery().unwrap_or_else(|e| panic!("{dir}: {e}"));
+        let built = started.elapsed().as_secs_f64();
+        let size = fs::metadata(
+            cache
+                .0
+                .join(&map.theatre)
+                .join(&map.build.version)
+                .join("scene.nodes"),
+        )
+        .unwrap()
+        .len();
+        let g = t.grid();
+        let (x, z) = g.centre(g.height / 2, g.width / 2);
+        let started = Instant::now();
+        let mut n = 0;
+        for pool in Pool::ALL {
+            s.each_in(
+                pool,
+                [x - 1000.0, z - 1000.0, x + 1000.0, z + 1000.0],
+                |_| n += 1,
+            )
+            .unwrap();
+        }
+        eprintln!(
+            "{dir}: scene.nodes {:.2} MiB in {built:.2} s; {n} instances in 2 km at the center in {:.2} ms",
+            size as f64 / 1048576.0,
+            started.elapsed().as_secs_f64() * 1e3
+        );
+        assert!(built < 10.0, "{dir}");
+    }
+}
+
+#[test]
+fn caucasus_boxes_equal_a_full_walk() {
+    let Some(root) = install_root() else { return };
+    boxes_equal_a_full_walk(&root, "Caucasus", 400);
+}
+
+#[test]
+fn nevada_boxes_equal_a_full_walk() {
+    let Some(root) = install_root() else { return };
+    boxes_equal_a_full_walk(&root, "Nevada", 400);
 }
 
 /// Folds an angle in degrees to its distance from the nearest multiple of
