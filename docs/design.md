@@ -133,9 +133,11 @@ A failed check refuses the terrain the same way.
 - **Ground cover** comes from the higher `TRITYPE` bits, first match wins:
   water; `runway` (32); `town` (64); `forest` (1024); `field` (128); `beach`
   (256); else `plain`. Road and rail strips keep the bit of the ground under
-  them. Measured on Caucasus, 2.9.30.28738 (new-queries research): each bit
-  matches its material subset on 94–99 % of the subset's triangles. The order
-  settles the few mixed triangles by the subset they fall in. Forest
+  them. Measured on all eight terrains, 2.9.30.28738: every triangle of each
+  material subset carries its bit. Many carry a second, which the order
+  settles: about half of a `Beach` subset is shoreline that also carries a
+  water bit, and a sixth of GermanyCW's `Field` subset and a third of the
+  Marianas' also carry the forest bit, so read as forest. Forest
   concealment reads bit 1024, never the trees pool: only 9.8 % of instance
   trees stand on forest ground, because DCS draws its forests at runtime from
   the ground type. Cover reads no material subset.
@@ -331,18 +333,27 @@ back to null and `check` says the import was dropped.
 
 ### 6.1 Per query
 
-Computed from a window padded by the layer's reach, never stored:
+Computed over a rectangle of 50 m cells from one window padded by the
+layer's reach, never stored. A radius takes the cells whose centers lie
+within it of the cell's center, and an object or instance counts in the
+cell that holds it. The times are for a 20 × 20 km region around an
+airfield on each of the eight terrains, one thread, on 2.9.30.28738, with
+the region's tiles held and the scenery index and road graph built:
 
-| Layer | Definition | Per 20 × 20 km region, one thread |
+| Layer | Definition | Per 20 × 20 km region |
 |---|---|---|
-| `valid` | 1 where height is not `nodata` and the cell is not sea | — |
-| `slope`, `aspect`, `roughness` | Horn 3 × 3 gradient in degrees; downslope azimuth from north, clockwise, undefined under 0.5°; max − min height in 3 × 3 | 2.4–7.4 ms |
-| `tpi_300`, `tpi_2000` | height − mean height within 300 m, 2 km | 1.6–9.5 ms; 1.8–3.3 ms |
-| `dist_road`, `dist_rail`, `dist_water`, `dist_builtup` | Euclidean distance (Felzenszwalb–Huttenlocher) to road or rail edges, any water, or any 100 m cell holding 3 or more buildings within 100 m | 0.8–3.2 ms each |
-| building and industrial counts | objects of the class within a radius, from a bucketed point list | 0.2–0.5 ms |
-| tree and line density | instances per area from the trees and lines pools | as counts |
-| `cover` fractions and distances | share of a class within a radius; distance to a class | 1–3 ms |
+| `valid` | 1 where height is not `nodata` and the cell is not sea | 0.3 ms |
+| `slope`, `aspect`, `roughness` | Horn 3 × 3 gradient in degrees; downslope azimuth from north, clockwise, undefined under 0.5°; max − min height in 3 × 3; undefined where any of the nine has no height | 1.9–4.8 ms |
+| `tpi_300`, `tpi_2000` | height − mean of the known heights within 300 m, 2 km, at 50 m | 4.0–4.4 ms; 17–19 ms |
+| `dist_road`, `dist_rail`, `dist_water`, `dist_builtup`, distance to a `cover` class | Euclidean distance (Felzenszwalb–Huttenlocher) between cell centers to a cell a road or rail edge crosses, any water, a built-up cell (3 or more buildings within 100 m), or a cell of the class | 1.6–57 ms; road and rail scan every edge of the graph, built-up reads the buildings within 5.1 km |
+| building and industrial counts | objects of the class within a radius | 5.6–28 ms at 1 km |
+| tree and line density | instances of the trees or lines pool per hectare within a radius | 2.7–224 ms at 300 m, the most on the Marianas' forests |
+| `cover` fractions | share of the covered cells within a radius that are of a class | 3.9–4.0 ms at 300 m |
 | radar floor, exposure | one viewshed sweep per site (`queries.md`) | 89–111 ms per 20 km site cold |
+
+The first read of a region's scenery costs more: up to 0.56 s for
+Afghanistan's buildings within 5 km of Herat and 0.91 s for the trees
+around Agana.
 
 A distance layer searches out to a cap: the criterion's own maximum where it
 has one, else 5 km. A cell with nothing within the cap reads as the cap, and a
