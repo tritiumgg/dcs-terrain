@@ -32,6 +32,7 @@ Kept from before the reset, tested, and not tasks here:
 | V | Live validation | Windows with DCS |
 | X | The optional hook | Windows with DCS |
 | R | Release and the user guide | any |
+| C | Scenery catalog review, a terrain at a time | an install, or its files copied |
 
 ## Tasks
 
@@ -94,13 +95,47 @@ a valid RFC 7946 `FeatureCollection` whose features match its JSON response.
 | R1 | Release builds: static `dcsterrain` binaries for the three platforms on their own CI runners, attached to tags | The tagged Windows binary answers `query --terrain synth describe` on a machine without a toolchain, and so does the macOS one | Q7 | CI, live |
 | R2 | `docs/guide.md`: point the tool at an install, optionally import the hook's tables, ask a siting question, read the answer, and the failure modes. Written against real output | A newcomer answers one siting question following only the guide | Q7, S1 | live |
 
+### C: catalog review
+
+| Id | Deliverable | Done | Depends on | Verified by |
+|---|---|---|---|---|
+| C1 | Review the scenery catalog of every terrain with no override file — Afghanistan, GermanyCW, MarianaIslands, MarianaIslandsWWII, Nevada, PersianGulf and Syria after N7 — each into its own classes file, each terrain its own pull request, following the review below | Every terrain has an override file whose keys all apply; no top-100 model is classed building unless it is one | N7 | agent for the clear cases; live for the ambiguous models |
+
+How to review one terrain:
+
+1. Print the catalog with `dcsterrain check --install --terrain <id>` once
+   N10 lands. Until then, set `DCSTERRAIN_INSTALL` to the registry value
+   `HKCU\Software\Eagle Dynamics\DCS World\Path` and run
+   `mise exec -- cargo test --manifest-path dcsterrain/Cargo.toml --release -p dcsterrain-core --test classes -- --nocapture --test-threads 1 every_terrain`.
+   It prints the 25 models placed most and the 10 tallest, each with its
+   count, class, family, box and the source that decided it.
+2. Read the models placed most first: the top 50 to 100 hold most objects.
+   Look for four faults:
+   - a large box that is not a building — a bridge, pier, pitch or parked
+     vehicle — which should be `misc`;
+   - an industrial structure the name rule misses — a tank, cooling tower or
+     substation — which should be `industrial`;
+   - a wrong family, or `unknown` where it should be house, apartment or
+     shop (PersianGulf's top houses are `unknown` after N7);
+   - terrain totals that look off: Afghanistan has 67 `misc` and 0 `wall`
+     after N7, which suggests oversized boxes, so check a few of its models
+     by hand.
+3. Write `dcsterrain/crates/dcsterrain-core/classes/<terrain id>.toml`, one
+   line per model: `"model" = { class = "...", family = "...", reason = "..." }`.
+   Keys match in any case. Never name a `smoke#` model; a test refuses it.
+   Register the file in `OVERRIDES` in `classes.rs`.
+4. Run the test again. It fails on a key that names no model on the
+   terrain. Check that the class counts moved as expected.
+5. List the ambiguous models, such as Caucasus's `korpus_*` blocks, for the
+   user to judge in the Mission Editor. Do not guess them.
+
 ## Milestones
 
 | Milestone | Contains | Proof |
 |---|---|---|
 | MS1 Engine on the install | A1, N0–N7, N10, X1 | `query --terrain Caucasus describe` and `sample` answer from the install with no step before; every decoder passes its opt-in checks; `Synth` passes every grid test |
 | MS2 Queries | N8, N9, N11, Q1–Q15 | Every operation tested on `Synth`; opt-in benchmarks within the targets on Caucasus |
-| MS3 Assistant and release | S1, V1, R1, R2 | An assistant with the skill answers the FARP example; live validation within target; release binaries; a guide a newcomer follows |
+| MS3 Assistant and release | S1, V1, R1, R2, C1 | An assistant with the skill answers the FARP example; live validation within target; release binaries; a guide a newcomer follows |
 
 N0 goes first among the N tasks because it could stop the design: if DCS holds
 its terrain files with a share mode that denies readers, the tool cannot run
