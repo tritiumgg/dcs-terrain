@@ -3,15 +3,21 @@
 
 use super::*;
 use crate::grid::Grid;
+use std::sync::OnceLock;
+
+use crate::classes::{Class, Classes};
+use crate::decode::scn5::{Model, Pool};
+use crate::roads::Graph;
 use crate::source::{Ground, Identity, Layer, Refusal, Source, TILE_SIZE};
 
 /// The terrain `--terrain synth` names.
 pub const TERRAIN_ID: &str = "synth";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Synth {
     form: Theatre,
     identity: Identity,
+    roads: OnceLock<Graph>,
 }
 
 impl Synth {
@@ -26,6 +32,7 @@ impl Synth {
                 // stand in for their sizes.
                 fingerprint: format!("synth-{seed}-{size_km}-{cell_size}"),
             },
+            roads: OnceLock::new(),
         })
     }
 
@@ -86,6 +93,121 @@ impl Source for Synth {
             cover: t.cover(n, e),
         }))
     }
+
+    fn road_graph(&self) -> Result<&Graph, Refusal> {
+        Ok(self.roads.get_or_init(|| self.form.road_graph()))
+    }
+
+    fn structures_in(
+        &self,
+        b: [f64; 4],
+        f: &mut dyn FnMut(f64, f64, Class),
+    ) -> Result<(), Refusal> {
+        let (names, models) = models();
+        let classes = Classes::new(TERRAIN_ID, &models);
+        for o in self.form.scenery() {
+            if inside(b, o.x, o.z) {
+                let i = names.iter().position(|n| *n == o.model).unwrap();
+                f(o.x, o.z, classes.of(i as u32).class);
+            }
+        }
+        Ok(())
+    }
+
+    fn instances_in(
+        &self,
+        pool: Pool,
+        b: [f64; 4],
+        f: &mut dyn FnMut(f64, f64),
+    ) -> Result<(), Refusal> {
+        let t = &self.form;
+        match pool {
+            Pool::Objects => {
+                return Err(Refusal(
+                    "objects are read through `structures_in`".to_string(),
+                ));
+            }
+            Pool::Lines => {
+                for n in t.pole_norths() {
+                    let (x, z) = t.abs(n, LINE_EAST_M);
+                    if inside(b, x, z) {
+                        f(x, z);
+                    }
+                }
+            }
+            // Each forest cell's trees stand at its centre.
+            Pool::Trees => {
+                let g = self.grid();
+                let c = f64::from(g.cell_size);
+                // The cells whose centres lie in `lo..=hi`.
+                let span = |lo: f64, hi: f64, origin: f64| {
+                    let first = ((lo - origin) / c - 0.5).ceil().max(0.0);
+                    let last = ((hi - origin) / c - 0.5)
+                        .floor()
+                        .min(f64::from(t.cells()) - 1.0);
+                    first as u32..(last + 1.0).max(first) as u32
+                };
+                for row in span(b[0], b[2], g.origin_x) {
+                    for col in span(b[1], b[3], g.origin_z) {
+                        let (n, e) = t.centre(row, col);
+                        let (x, z) = t.abs(n, e);
+                        for _ in 0..t.trees(n, e) {
+                            f(x, z);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn inside(b: [f64; 4], x: f64, z: f64) -> bool {
+    (b[0]..=b[2]).contains(&x) && (b[1]..=b[3]).contains(&z)
+}
+
+/// The synthetic scenery's models, as the constants spell them and as a
+/// model table would hold them, so the same rules class them.
+fn models() -> (Vec<&'static str>, Vec<Model>) {
+    let boxed = [
+        (
+            SCENERY_TOWN_MODEL,
+            SCENERY_TOWN_OBB_W_M,
+            SCENERY_TOWN_OBB_D_M,
+            SCENERY_TOWN_HEIGHT_M,
+        ),
+        (
+            SCENERY_INDUSTRIAL_MODEL_A,
+            SCENERY_INDUSTRIAL_A_OBB_W_M,
+            SCENERY_INDUSTRIAL_A_OBB_D_M,
+            SCENERY_INDUSTRIAL_A_HEIGHT_M,
+        ),
+        (
+            SCENERY_INDUSTRIAL_MODEL_B,
+            SCENERY_INDUSTRIAL_B_OBB_W_M,
+            SCENERY_INDUSTRIAL_B_OBB_D_M,
+            SCENERY_INDUSTRIAL_B_HEIGHT_M,
+        ),
+        (
+            SCENERY_POLE_MODEL,
+            SCENERY_POLE_OBB_W_M,
+            SCENERY_POLE_OBB_D_M,
+            SCENERY_POLE_HEIGHT_M,
+        ),
+        (SCENERY_NOBOX_MODEL, 0.0, 0.0, 0.0),
+    ];
+    let names = boxed.iter().map(|m| m.0).collect();
+    let models = boxed
+        .iter()
+        .map(|&(name, w, d, h)| {
+            let (w, d, h) = ((w / 2.0) as f32, (d / 2.0) as f32, h as f32);
+            Model {
+                name: name.to_lowercase(),
+                bbox: [-w, 0.0, -d, w, h, d],
+            }
+        })
+        .collect();
+    (names, models)
 }
 
 #[cfg(test)]
@@ -186,6 +308,37 @@ mod tests {
         // The margin is covered by nothing.
         let (x, z) = s.form().abs(10.0, 30000.0);
         assert_eq!(s.point(x, z).unwrap(), None);
+    }
+
+    #[test]
+    fn scenery_and_roads_are_the_closed_forms() {
+        let s = synth();
+        let all = [-1e9, -1e9, 1e9, 1e9];
+        let mut by_class = std::collections::BTreeMap::new();
+        s.structures_in(all, &mut |_, _, c| *by_class.entry(c).or_insert(0) += 1)
+            .unwrap();
+        let want = [
+            (Class::Building, SCENERY_TOWN_COUNT),
+            (Class::Industrial, SCENERY_INDUSTRIAL_COUNT),
+            (Class::Misc, SCENERY_POLE_COUNT + SCENERY_NOBOX_COUNT),
+        ];
+        assert_eq!(by_class, want.into_iter().collect());
+        let count = |pool, b| {
+            let mut n = 0;
+            s.instances_in(pool, b, &mut |_, _| n += 1).unwrap();
+            n
+        };
+        assert_eq!(count(Pool::Trees, all), s.form().tree_count());
+        assert_eq!(count(Pool::Lines, all), s.form().pole_count());
+        // One forest cell, its centre on the box's edge.
+        let (x, z) = s.form().abs(FOREST_SOUTH_M + 25.0, FOREST_WEST_M + 25.0);
+        assert_eq!(
+            count(Pool::Trees, [x, z, x + 10.0, z + 10.0]),
+            TREES_PER_CELL
+        );
+        assert_eq!(count(Pool::Trees, [x + 1.0, z, x + 10.0, z + 10.0]), 0);
+        assert!(s.instances_in(Pool::Objects, all, &mut |_, _| ()).is_err());
+        assert_eq!(*s.road_graph().unwrap(), s.form().road_graph());
     }
 
     #[test]

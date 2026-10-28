@@ -265,7 +265,7 @@ impl Theatre {
             .count() as u16
     }
 
-    fn pole_norths(&self) -> impl Iterator<Item = f64> {
+    pub(crate) fn pole_norths(&self) -> impl Iterator<Item = f64> {
         let count = ((LINE_NORTH_M - LINE_SOUTH_M) / LINE_POLE_SPACING_M).floor() as u32 + 1;
         (0..count).map(|k| LINE_SOUTH_M + f64::from(k) * LINE_POLE_SPACING_M)
     }

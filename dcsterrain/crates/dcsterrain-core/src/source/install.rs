@@ -15,7 +15,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use super::{CELL_SIZE, Ground, Identity, Layer, Refusal, Source, TILE_SIZE};
 use crate::cache::{Cache, Entry, TerrainCache};
+use crate::classes::Class;
 use crate::decode::install::{self, Map};
+use crate::decode::scn5::Pool;
 use crate::decode::surface5::ground::{self, Prepared, Tile, cover_of, grid_units, surface_of};
 use crate::decode::surface5::{RUNWAY_MATERIAL, Surface5, grid_for, water_class};
 use crate::extract::FileEntry;
@@ -432,6 +434,28 @@ impl Source for Install {
             surface: surface_of(g.tritype, g.runway),
             cover: cover_of(g.tritype),
         }))
+    }
+
+    fn road_graph(&self) -> Result<&crate::roads::Graph, Refusal> {
+        self.roads()
+    }
+
+    fn structures_in(
+        &self,
+        b: [f64; 4],
+        f: &mut dyn FnMut(f64, f64, Class),
+    ) -> Result<(), Refusal> {
+        self.scenery()?
+            .each_structure_in(Pool::Objects, b, |i, a| f(i.pos[0], i.pos[2], a.class))
+    }
+
+    fn instances_in(
+        &self,
+        pool: Pool,
+        b: [f64; 4],
+        f: &mut dyn FnMut(f64, f64),
+    ) -> Result<(), Refusal> {
+        self.scenery()?.each_in(pool, b, |i| f(i.pos[0], i.pos[2]))
     }
 }
 

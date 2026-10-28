@@ -6,7 +6,10 @@
 
 use std::fmt;
 
+use crate::classes::Class;
+use crate::decode::scn5::Pool;
 use crate::grid::Grid;
+use crate::roads::Graph;
 
 pub mod install;
 
@@ -48,6 +51,40 @@ pub trait Source {
     /// surface's own height, which is what the game reports. `None` where
     /// nothing covers the point.
     fn point(&self, x: f64, z: f64) -> Result<Option<Ground>, Refusal>;
+
+    /// The road and rail graph.
+    fn road_graph(&self) -> Result<&Graph, Refusal> {
+        Err(lacks(self, "roads"))
+    }
+
+    /// Calls `f` with the `x`, `z` and class of every scenery object that
+    /// stands on the ground within `b`, min x, min z, max x, max z in DCS
+    /// meters. It may also call `f` with objects just outside `b`.
+    fn structures_in(
+        &self,
+        b: [f64; 4],
+        f: &mut dyn FnMut(f64, f64, Class),
+    ) -> Result<(), Refusal> {
+        let _ = (b, f);
+        Err(lacks(self, "scenery"))
+    }
+
+    /// Calls `f` with the `x` and `z` of every instance of the trees or
+    /// lines pool within `b`, and perhaps a few just outside it.
+    fn instances_in(
+        &self,
+        pool: Pool,
+        b: [f64; 4],
+        f: &mut dyn FnMut(f64, f64),
+    ) -> Result<(), Refusal> {
+        let _ = (pool, b, f);
+        Err(lacks(self, "scenery"))
+    }
+}
+
+/// Why a terrain without `what` cannot answer.
+fn lacks<S: Source + ?Sized>(s: &S, what: &str) -> Refusal {
+    Refusal(format!("{} has no {what}", s.identity().terrain))
 }
 
 /// The ground at one point.
