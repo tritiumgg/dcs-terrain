@@ -478,8 +478,10 @@ Accuracy:
   to the north; two Gaussian hills (600 m and 250 m, sigma 1.5 km); a circular
   lake of 2 km radius, flat at 100 m; a straight river 60 m wide; sea beyond a
   straight coastline in the south-west; one road west to east crossing the
-  river on a 200 m bridge, a second over the col between the hills, a railway
-  3 km south of the first; a 2.5 km runway; a town cluster and an industrial
+  river on a 200 m bridge, a second over the col between the hills and a
+  third east of the river, both crossing the first, so the bridge lies on
+  the one edge between two junctions and carries the most betweenness; a
+  railway 3 km south of the first; a 2.5 km runway; a town cluster and an industrial
   pair of scenery objects and a line of poles; a patch of each cover class; a
   2 km margin of `nodata`. Every derived quantity has a closed-form
   expectation. Its constants live in one place.

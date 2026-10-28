@@ -169,16 +169,17 @@ M.RIVER_WIDTH_M = 60.0
 M.COAST_M = 52000.0
 M.SEA_LEVEL_M = 0.0
 
--- Roads, railway and runway. The two roads cross at
--- (ROAD_EW_NORTH_M, ROAD_NS_EAST_M); only the east-west one meets the river,
--- on the bridge. The north-south road runs over the col between the two
--- hills. The railway is not in the road graph and crosses the river without
--- a bridge.
+-- Roads, railway and runway. The east-west road crosses the north-south
+-- road at (ROAD_EW_NORTH_M, ROAD_NS_EAST_M), west of the river, and the east
+-- road at (ROAD_EW_NORTH_M, ROAD_EAST_EAST_M), east of it; only the east-west
+-- road meets the river, on the bridge. The north-south road runs over the col
+-- between the two hills. The railway is not in the road graph and crosses the
+-- river without a bridge.
 --
--- The road network is a tree, so every edge is a cut edge and the bridge
--- does not carry the most betweenness on its own: the edge from the junction
--- to the bridge carries more, and once nodes of degree two are contracted the
--- four arms from the junction tie.
+-- The road network is a tree. Once nodes of degree two are contracted, the
+-- bridge lies on the one edge between the two junctions, with four nodes on
+-- each side of it: it joins 16 pairs of nodes, and every other edge 7, so it
+-- carries the most betweenness.
 --
 -- Every road, the railway and the runway's centre line run along cell
 -- centres, which sit a half cell off every multiple of CELL_SIZE_M. A strip
@@ -187,11 +188,11 @@ M.SEA_LEVEL_M = 0.0
 -- surface layer rather than none.
 --
 -- Each network is cut into edges where it meets another or changes, as the
--- map's road file is: the east-west road at the junction and at both ends of
--- the bridge, which is its own edge, the north-south road at the junction,
--- and the railway not at all. Node ids count up from ROAD_FIRST_NODE_ID and
--- each edge carries a vertex every ROAD_VERTEX_SPACING_M. The classes are
--- Caucasus's spellings.
+-- map's road file is: the east-west road at both junctions and at both ends
+-- of the bridge, which is its own edge, each north-south road at its
+-- junction, and the railway not at all. Node ids count up from
+-- ROAD_FIRST_NODE_ID and each edge carries a vertex every
+-- ROAD_VERTEX_SPACING_M. The classes are Caucasus's spellings.
 
 M.ROAD_EW_NORTH_M = 55025.0
 M.ROAD_NS_EAST_M = 32525.0
@@ -204,6 +205,9 @@ M.ROAD_EW_WEST_EAST_M = 5000.0
 M.ROAD_EW_EAST_EAST_M = 65000.0
 M.ROAD_NS_SOUTH_NORTH_M = 40000.0
 M.ROAD_NS_NORTH_NORTH_M = 65000.0
+M.ROAD_EAST_EAST_M = 55025.0
+M.ROAD_EAST_SOUTH_NORTH_M = 50000.0
+M.ROAD_EAST_NORTH_NORTH_M = 60000.0
 M.ROAD_EW_CLASS = "road"
 M.ROAD_NS_CLASS = "rdb"
 M.RAIL_CLASS = "rw"

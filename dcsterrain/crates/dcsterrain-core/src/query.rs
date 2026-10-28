@@ -180,7 +180,7 @@ mod tests {
             v["extent"],
             json!({"min_x": -30000.0, "min_z": -45000.0, "max_x": 40000.0, "max_z": 25000.0})
         );
-        assert_eq!(v["counts"]["road_edges"], 6);
+        assert_eq!(v["counts"]["road_edges"], 9);
         assert_eq!(v["counts"]["scenery_objects"], synth::SCENERY_COUNT);
         assert_eq!(v["validation"], Value::Null);
         let back: DescribeResponse = serde_json::from_value(v).unwrap();
