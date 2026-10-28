@@ -9,10 +9,11 @@
 use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use super::{Lru, refusal};
 use crate::cache::{Entry, TerrainCache};
+use crate::classes::{Assignment, Catalog, Classes};
 use crate::decode::scn5::{Index, Instance, Pool, Scene};
 use crate::decode::surface5::ReadAt;
 use crate::extract::FileEntry;
@@ -107,11 +108,14 @@ impl ReadAt for Chunks {
     }
 }
 
-/// The scenery of one terrain: its index, and the scene file it reads.
+/// The scenery of one terrain: its index, the scene file it reads, and its
+/// models' classes, made the first time they are asked for.
 pub struct Scenery {
+    terrain: String,
     index: Index,
     path: String,
     file: Chunks,
+    classes: OnceLock<Classes>,
 }
 
 impl Scenery {
@@ -145,6 +149,7 @@ impl Scenery {
             )));
         }
         Ok(Scenery {
+            terrain: cache.map().theatre.clone(),
             index,
             path,
             file: Chunks {
@@ -152,6 +157,7 @@ impl Scenery {
                 len,
                 kept: Mutex::new(Lru::new(CHUNKS)),
             },
+            classes: OnceLock::new(),
         })
     }
 
@@ -172,6 +178,41 @@ impl Scenery {
         self.index
             .each_in(&self.file, pool, b, f)
             .map_err(|e| refusal(&self.path, e))
+    }
+
+    /// Every model's class and family.
+    pub fn classes(&self) -> &Classes {
+        self.classes
+            .get_or_init(|| Classes::new(&self.terrain, &self.index.models))
+    }
+
+    /// As `each_in`, with each instance's class, and never an `effect`:
+    /// what every height, clearing, placement, count and place answer
+    /// reads, so a smoke column reaches none of them.
+    pub fn each_structure_in(
+        &self,
+        pool: Pool,
+        b: [f64; 4],
+        mut f: impl FnMut(&Instance, &Assignment),
+    ) -> Result<(), Refusal> {
+        let classes = self.classes();
+        self.each_in(pool, b, |i| {
+            let a = classes.of(i.model);
+            if a.class.is_structure() {
+                f(i, a);
+            }
+        })
+    }
+
+    /// Every model with its class and how many objects place it. Reads
+    /// the objects pool's ids and the model word of each: 4 bytes an
+    /// object, not a walk.
+    pub fn catalog(&self) -> Result<Catalog, Refusal> {
+        let counts = self
+            .index
+            .counts(&self.file, Pool::Objects)
+            .map_err(|e| refusal(&self.path, e))?;
+        Ok(Catalog::new(self.classes(), &self.index.models, &counts))
     }
 }
 

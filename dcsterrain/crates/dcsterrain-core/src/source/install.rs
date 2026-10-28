@@ -440,6 +440,7 @@ mod tests {
     use std::fs;
 
     use super::*;
+    use crate::classes::Class;
     use crate::decode::scn5::{self, Pool};
     use crate::decode::surface5::build::{self, f32s, file, tri, u32s, vec3};
     use crate::decode::surface5::{LAKE, ROAD_STRIP};
@@ -721,6 +722,66 @@ mod tests {
             let again = cache.terrain(&root.0, &map).get(&SCENE_NODES).unwrap();
             assert!(!again.built);
         }
+    }
+
+    #[test]
+    fn a_smoke_volume_is_scenery_but_never_a_structure() {
+        let built = scn5::build::Scene {
+            version: 9,
+            models: vec![
+                ("home1_a_new", [-4.0, 0.0, -7.5, 4.0, 8.0, 7.5]),
+                ("smoke#big", [-30.0, 0.0, -30.0, 30.0, 300.0, 30.0]),
+            ],
+            nodes: vec![scn5::build::Node {
+                t: [1500.0, 0.0, 2500.0],
+                p: vec![[0.0, 100.0, 0.0], [40.0, 100.0, 0.0], [80.0, 100.0, 0.0]],
+                model: vec![0, 1, 0],
+                axis: vec![[1.0, 0.0]; 3],
+            }],
+            group: vec![scn5::build::Record {
+                model: 1,
+                pos: [1520.0, 100.0, 2500.0],
+                heading: 0.0,
+            }],
+            // The builder writes no empty pool; the catalog counts objects alone.
+            pools: [vec![(0, 0), (0, 1), (0, 2)], vec![(0, 2)], vec![(0, 1)]],
+            shift: None,
+        };
+        let root = install(&file(&[square([0, 0])], 1));
+        put(
+            &root.0,
+            "Mods/terrains/Test/Scenes/Test.scn5",
+            &built.file(),
+        );
+        let c = Scratch::new();
+        let t = Install::open(&root.0, "Test", &Cache::new(&c.0)).unwrap();
+        let s = t.scenery().unwrap();
+        let b = [1400.0, 2400.0, 1700.0, 2600.0];
+        let mut all = Vec::new();
+        s.each_in(Pool::Objects, b, |i| all.push(i.model)).unwrap();
+        all.sort();
+        assert_eq!(all, [0, 0, 1, 1]);
+        let mut standing = Vec::new();
+        s.each_structure_in(Pool::Objects, b, |i, a| {
+            standing.push((i.model, a.class));
+        })
+        .unwrap();
+        assert_eq!(standing, [(0, Class::Building), (0, Class::Building)]);
+
+        let cat = s.catalog().unwrap();
+        let rows: Vec<_> = cat
+            .rows
+            .iter()
+            .map(|r| (r.model.as_str(), r.count, r.assignment.class))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("home1_a_new", 2, Class::Building),
+                ("smoke#big", 2, Class::Effect)
+            ]
+        );
+        assert_eq!(cat.terrain, "Test");
     }
 
     #[test]
