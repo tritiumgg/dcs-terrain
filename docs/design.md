@@ -400,14 +400,16 @@ objects 200–600 m tall on Caucasus, smoke columns not structures; `wall` when
 name pattern list; else `building`. An override names a class and, when it
 wants one, a family.
 
-A `building` or `industrial` model also has the settlement family of §6.3:
+A `building` or `industrial` model also has the settlement family of §6.3 (a
+model of another class has one only when its override names one):
 house, apartment, shop, civic or industrial, which make places, and
 outbuilding, farm or military, which do not; a model whose name says it is a
 vehicle, bridge, mast, light, sign or the like has none, and a building no
 rule names is `unknown`. The family rules are names, first match wins, from
 the settlements research. A family of house-like models whose names do not
 say which (`german_town_*`, `syria_house*` and the like) is split by its box:
-under 30 m² an outbuilding, 14 m or taller (or over 400 m² and over 10 m) an
+under 30 m² an outbuilding, a narrow box under 100 m² and 14 m or taller a
+house, 14 m or taller (or over 400 m² and over 10 m) an
 apartment block, else a house, an urban name tipping a mid-size box to
 apartments. A wreck (`…crash`) takes the family of what it was.
 
