@@ -46,8 +46,6 @@ mod tree;
 pub use tree::footprint;
 mod walk;
 pub use walk::Instance;
-mod write;
-pub use write::{MODELS_FILE, SCENERY_FILE, Written, write};
 
 /// The version 9 model index is 16 bits wide.
 const MAX_MODELS: u32 = 1 << 16;

@@ -5,21 +5,17 @@
 //! `cargo test --release --test scn5`. The install is only read.
 
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::fs;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-
-use serde_json::Value;
 
 use dcsterrain_core::cache::Cache;
 use dcsterrain_core::decode::airfield;
 use dcsterrain_core::decode::install::{self, TERRAINS_DIR};
 use dcsterrain_core::decode::scn5::{self, Index, Instance, Pool, Scene};
-use dcsterrain_core::extract::TileEntry;
-use dcsterrain_core::grid::{Grid, Window};
+use dcsterrain_core::source::Source;
 use dcsterrain_core::source::install::Install;
-use dcsterrain_core::source::{Layer, Source};
 
 fn install_root() -> Option<PathBuf> {
     match std::env::var_os("DCSTERRAIN_INSTALL") {
@@ -267,113 +263,6 @@ impl TempDir {
 impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-/// Writes the `water` tiles of `id` on a grid of `tile_size` tiles under
-/// `out`, as the scenery writer reads them to tell where the mesh covers,
-/// and returns that grid and their entries. A tile wholly outside the mesh
-/// is not written.
-fn water_tiles(root: &Path, id: &str, tile_size: u32, out: &Path) -> (Grid, Vec<TileEntry>) {
-    let cache = TempDir::new("cache");
-    let t = Install::open(root, id, &Cache::new(&cache.0))
-        .unwrap()
-        .with_block_budget(4 << 30);
-    let grid = Grid {
-        tile_size,
-        ..t.grid()
-    };
-    let mut entries = Vec::new();
-    let (ntx, ntz) = grid.tiles();
-    let ts = i64::from(tile_size);
-    for tx in 0..ntx {
-        for tz in 0..ntz {
-            let (r, c) = (i64::from(tx) * ts, i64::from(tz) * ts);
-            let w = Window::read(&t, Layer::Water, r, c, tile_size, tile_size).unwrap();
-            if w.data.iter().all(|&v| v == Layer::Water.nodata()) {
-                continue;
-            }
-            let path = format!("tiles/water/{tx}_{tz}.bin");
-            let bytes: Vec<u8> = w.data.iter().map(|&v| v as u8).collect();
-            fs::create_dir_all(out.join("tiles/water")).unwrap();
-            fs::write(out.join(&path), bytes).unwrap();
-            entries.push(TileEntry {
-                layer: "water".into(),
-                tx,
-                tz,
-                path,
-                min: None,
-                max: None,
-            });
-        }
-    }
-    (grid, entries)
-}
-
-/// Writes Caucasus's water tiles, then its scenery, and checks what landed.
-#[test]
-fn caucasus_writes_its_scenery_and_counts() {
-    let Some(root) = install_root() else { return };
-    let out = TempDir::new("caucasus");
-    let started = Instant::now();
-    let (grid, tiles) = water_tiles(&root, "Caucasus", 256, &out.0);
-    eprintln!("ground tiles in {:.1} s", started.elapsed().as_secs_f64());
-
-    let path = scene_path(&root, "Caucasus");
-    let mut r = scn5::reader(&path).unwrap();
-    let s = Scene::open(&mut r, "Caucasus").unwrap();
-    let started = Instant::now();
-    let w = scn5::write(&s, &mut r, &grid, &tiles, &out.0).unwrap();
-    eprintln!(
-        "scenery in {:.1} s: {} objects, {} lines, {} trees, {} models, {} count tiles",
-        started.elapsed().as_secs_f64(),
-        w.objects,
-        w.lines,
-        w.trees,
-        w.models,
-        w.tiles.len()
-    );
-    assert_eq!(w.objects, 917_847 + 18_976);
-    assert_eq!((w.lines, w.trees), (1_069_315, 12_967_324));
-
-    let rows = BufReader::new(File::open(out.0.join(scn5::SCENERY_FILE)).unwrap())
-        .lines()
-        .count() as u64;
-    assert_eq!(rows, w.objects);
-    let models: Value =
-        serde_json::from_str(&fs::read_to_string(out.0.join(scn5::MODELS_FILE)).unwrap()).unwrap();
-    let models = models.as_array().unwrap();
-    assert_eq!(models.len(), w.models);
-    let sum = |k: &str| {
-        models
-            .iter()
-            .map(|m| m["counts"][k].as_u64().unwrap())
-            .sum::<u64>()
-    };
-    assert_eq!(
-        (sum("objects"), sum("lines"), sum("trees")),
-        (w.objects, w.lines, w.trees)
-    );
-
-    for (name, total) in [("trees", w.trees), ("lines", w.lines)] {
-        let mut counted = 0u64;
-        for t in w.tiles.iter().filter(|t| t.layer == name) {
-            let b = fs::read(out.0.join(&t.path)).unwrap();
-            counted += b
-                .as_chunks::<2>()
-                .0
-                .iter()
-                .map(|c| u16::from_le_bytes(*c))
-                .filter(|&c| c != 65535)
-                .map(u64::from)
-                .sum::<u64>();
-        }
-        let share = counted as f64 / total as f64;
-        eprintln!(
-            "{name}: {counted} of {total} counted into covered cells, {:.4} %",
-            100.0 * share
-        );
-        assert!(share > 0.999, "{name}");
     }
 }
 
