@@ -8,7 +8,8 @@
 //! The few fields only a running sim knows are null here until the hook's
 //! tables are imported.
 
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -29,10 +30,24 @@ pub const MAX_CRS_RESIDUAL_M: f64 = 2.0;
 /// The roles `tables.json` is derived from.
 const ROLES: [&str; 4] = ["airfield_rn4", "airfield_rn5", "assets", "lua"];
 
-/// The terrain's tables, as `tables.json` stores them.
-pub struct TablesJson;
+/// The terrain's tables, as `tables.json` stores them, with the hook's
+/// tables from `hook` merged in, or failing that from the directory the
+/// entry being replaced recorded.
+pub struct TablesJson {
+    hook: Option<PathBuf>,
+}
 
-pub static TABLES_JSON: TablesJson = TablesJson;
+pub static TABLES_JSON: TablesJson = TablesJson { hook: None };
+
+impl TablesJson {
+    /// The entry built with the hook's tables in `dir` merged in. A
+    /// directory from another terrain or build refuses it.
+    pub fn with_hook(dir: &Path) -> TablesJson {
+        TablesJson {
+            hook: Some(std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf())),
+        }
+    }
+}
 
 impl Entry for TablesJson {
     fn name(&self) -> &str {
@@ -52,9 +67,19 @@ impl Entry for TablesJson {
         root: &Path,
         map: &Map,
         files: &[FileEntry],
-        _: &Path,
+        dir: &Path,
     ) -> Result<Vec<u8>, Refusal> {
-        let t = Tables::decode(root, map, files)?;
+        let mut t = Tables::decode(root, map, files)?;
+        match &self.hook {
+            Some(h) => t.import(h, map)?,
+            None => {
+                if let Some(h) = recorded_hook(&dir.join(self.name()))
+                    && let Err(e) = t.import(&h, map)
+                {
+                    t.hook = Some(HookImport::dropped(&h, e));
+                }
+            }
+        }
         Ok(serde_json::to_vec(&t).expect("the tables serialize"))
     }
 
@@ -64,7 +89,8 @@ impl Entry for TablesJson {
 }
 
 /// One airdrome. `code`, `civilian`, `abandoned` and `class` come only from
-/// the hook, and `id` from it where `Radio.lua` labels none.
+/// the hook, `id` from it where `Radio.lua` labels none, and the game's
+/// `display_name` from it over the name of the airdrome's first beacon.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AirdromeRow {
     pub id: Option<i64>,
@@ -74,8 +100,9 @@ pub struct AirdromeRow {
     pub civilian: Option<bool>,
     pub abandoned: Option<bool>,
     pub class: Option<String>,
-    /// The mean of its runway ends, which is the game's reference point;
-    /// null with no runway.
+    /// The mean of its runway ends: within 3 mm of the game's reference
+    /// point on Caucasus, whose airdromes have one runway each. Null with
+    /// no runway.
     pub x: Option<f64>,
     pub z: Option<f64>,
     pub lat: Option<f64>,
@@ -105,6 +132,8 @@ pub struct Tables {
     pub lua_included: Vec<String>,
     /// Each name a Lua file read that nothing assigned, as `<path>: <name>`.
     pub lua_unresolved: Vec<String>,
+    /// The hook's tables merged in, if any were.
+    pub hook: Option<HookImport>,
 }
 
 /// The basename of a path relative to the install, without its extension.
@@ -193,6 +222,7 @@ impl Tables {
             crs: lua.crs,
             lua_included: lua.included.into_iter().map(|f| f.path).collect(),
             lua_unresolved: lua.unresolved,
+            hook: None,
         };
         t.follow_ids();
         t
@@ -251,6 +281,162 @@ impl Tables {
             ))),
             _ => Ok(()),
         }
+    }
+}
+
+/// The hook's tables as `tables.json` records them: where they were read,
+/// and for which build.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HookImport {
+    pub dir: String,
+    pub dcs_build: Option<String>,
+    pub dcs_build_timestamp: Option<String>,
+    /// How many airdromes it filled.
+    pub airdromes: usize,
+    /// The airdromes it names that no taxiway file does.
+    pub unmatched: Vec<String>,
+    /// Why the import recorded before the last rebuild was not redone; its
+    /// fields are then null again.
+    pub dropped: Option<String>,
+}
+
+impl HookImport {
+    fn dropped(dir: &Path, why: Refusal) -> HookImport {
+        HookImport {
+            dir: dir.display().to_string(),
+            dcs_build: None,
+            dcs_build_timestamp: None,
+            airdromes: 0,
+            unmatched: Vec::new(),
+            dropped: Some(why.0),
+        }
+    }
+}
+
+/// The hook's `manifest.json`, as far as it says what the tables are of.
+#[derive(Deserialize)]
+struct HookManifest {
+    theatre: String,
+    dcs_build: String,
+    dcs_build_timestamp: String,
+}
+
+/// An airdrome as the hook's `airdromes.json` gives it.
+#[derive(Deserialize)]
+struct HookAirdrome {
+    id: Option<i64>,
+    name_id: Option<String>,
+    display_name: Option<String>,
+    code: Option<String>,
+    civilian: Option<bool>,
+    abandoned: Option<bool>,
+    class: Option<String>,
+}
+
+/// The hook directory the entry at `path` recorded, if it can be read.
+fn recorded_hook(path: &Path) -> Option<PathBuf> {
+    let doc: serde_json::Value = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
+    Some(PathBuf::from(doc["payload"]["hook"]["dir"].as_str()?))
+}
+
+/// The hook's airdromes in `dir`, refused unless its manifest names the
+/// terrain, build and build timestamp of `map`, naming each difference.
+fn read_hook(dir: &Path, map: &Map) -> Result<(HookManifest, Vec<HookAirdrome>), Refusal> {
+    fn json<T: for<'de> Deserialize<'de>>(dir: &Path, name: &str) -> Result<T, Refusal> {
+        let path = dir.join(name);
+        let bytes = fs::read(&path)
+            .map_err(|e| Refusal(format!("the hook's {} cannot be read: {e}", path.display())))?;
+        serde_json::from_slice(&bytes).map_err(|e| {
+            Refusal(format!(
+                "the hook's {} is not its tables: {e}",
+                path.display()
+            ))
+        })
+    }
+    let m: HookManifest = json(dir, "manifest.json")?;
+    let b = &map.build;
+    let differs: Vec<String> = [
+        ("terrain", &m.theatre, &map.theatre),
+        ("dcs_build", &m.dcs_build, &b.version),
+        ("build timestamp", &m.dcs_build_timestamp, &b.timestamp),
+    ]
+    .iter()
+    .filter(|(_, theirs, ours)| theirs != ours)
+    .map(|(what, theirs, ours)| format!("{what} {theirs}, not {ours}"))
+    .collect();
+    if !differs.is_empty() {
+        return Err(Refusal(format!(
+            "the hook directory {} is from another terrain or build: {}",
+            dir.display(),
+            differs.join("; ")
+        )));
+    }
+    Ok((m, json(dir, "airdromes.json")?))
+}
+
+impl Tables {
+    /// Merges the hook's tables in `dir`: for each airdrome they name by
+    /// `name_id`, its id where `Radio.lua` gives none, then `code`,
+    /// `civilian`, `abandoned`, `class` and the game's `display_name`.
+    /// Refused, changing nothing, when they are from another terrain or
+    /// build, or give an airdrome another id than `Radio.lua` does.
+    fn import(&mut self, dir: &Path, map: &Map) -> Result<(), Refusal> {
+        let (m, rows) = read_hook(dir, map)?;
+        let mut matched = Vec::new();
+        let mut unmatched = Vec::new();
+        for h in &rows {
+            let Some(name_id) = h.name_id.as_deref() else {
+                continue;
+            };
+            match self.airdromes.iter().position(|a| a.name_id == name_id) {
+                Some(i) => {
+                    let a = &self.airdromes[i];
+                    if let (Some(ours), Some(theirs)) = (a.id, h.id)
+                        && ours != theirs
+                    {
+                        return Err(Refusal(format!(
+                            "the hook directory {} gives airdrome {name_id} id {theirs}, \
+                             where Radio.lua gives {ours}",
+                            dir.display()
+                        )));
+                    }
+                    matched.push((i, h));
+                }
+                None => unmatched.push(name_id.to_string()),
+            }
+        }
+        for &(i, h) in &matched {
+            let a = &mut self.airdromes[i];
+            a.id = a.id.or(h.id);
+        }
+        // Sorting by id moves the rows, so they are found again by name.
+        let names: Vec<String> = matched
+            .iter()
+            .map(|(i, _)| self.airdromes[*i].name_id.clone())
+            .collect();
+        self.follow_ids();
+        for (name_id, (_, h)) in names.iter().zip(&matched) {
+            let a = (self.airdromes.iter_mut())
+                .find(|a| &a.name_id == name_id)
+                .expect("an airdrome keeps its name");
+            a.code = h.code.clone();
+            a.civilian = h.civilian;
+            a.abandoned = h.abandoned;
+            a.class = h.class.clone();
+            if h.display_name.is_some() {
+                a.display_name = h.display_name.clone();
+            }
+        }
+        unmatched.sort();
+        self.hook = Some(HookImport {
+            dir: dir.display().to_string(),
+            dcs_build: Some(m.dcs_build),
+            dcs_build_timestamp: Some(m.dcs_build_timestamp),
+            airdromes: matched.len(),
+            unmatched,
+            dropped: None,
+        });
+        Ok(())
     }
 }
 
@@ -473,6 +659,134 @@ mod tests {
         let c = Scratch::new();
         let e = Tables::open(&terrain(&root.0, &c.0)).unwrap_err();
         assert!(e.0.contains("X.rn5") && e.0.contains("version 99"), "{e}");
+    }
+
+    /// A hook directory for `terrain` at `build`, naming Anapa, Nowhere as
+    /// airdrome `nowhere`, and an airdrome no taxiway file names.
+    fn hook(terrain: &str, build: &str, nowhere: i64) -> Scratch {
+        let s = Scratch::new();
+        let manifest = serde_json::json!({
+            "theatre": terrain, "dcs_build": build,
+            "dcs_build_timestamp": "20000101-000000", "format_version": 1,
+        });
+        put(&s.0, "manifest.json", manifest.to_string().as_bytes());
+        let airdromes = serde_json::json!([
+            {"id": 12, "name_id": "Anapa", "code": "URKA", "civilian": true,
+             "abandoned": false, "class": "1", "display_name": "Anapa-Vityazevo",
+             "names": {"en": "Anapa-Vityazevo"}, "towers": ["externalId:1"]},
+            {"id": nowhere, "name_id": "Nowhere", "code": null, "civilian": false,
+             "abandoned": true, "class": "3", "display_name": "Nowhere Field"},
+            {"id": 40, "name_id": "Ghost", "code": "XXXX"},
+        ]);
+        put(&s.0, "airdromes.json", airdromes.to_string().as_bytes());
+        s
+    }
+
+    #[test]
+    fn imports_the_hooks_fields_by_name_and_redoes_them_on_a_rebuild() {
+        let root = install();
+        let c = Scratch::new();
+        let terrain = terrain(&root.0, &c.0);
+        let h = hook("Test", "1.2.3.4", 30);
+        terrain.rebuild(&TablesJson::with_hook(&h.0)).unwrap();
+        let check = |t: &Tables| {
+            let a = &t.airdromes[0];
+            assert_eq!(
+                (
+                    a.id,
+                    a.code.as_deref(),
+                    a.civilian,
+                    a.abandoned,
+                    a.class.as_deref()
+                ),
+                (Some(12), Some("URKA"), Some(true), Some(false), Some("1"))
+            );
+            let n = &t.airdromes[1];
+            assert_eq!(
+                (n.id, n.display_name.as_deref(), n.abandoned),
+                (Some(30), Some("Nowhere Field"), Some(true))
+            );
+            // The id the hook gives reaches the airdrome's runways and stands.
+            assert!(
+                t.runways
+                    .iter()
+                    .filter(|r| r.airdrome_name_id == "Nowhere")
+                    .all(|r| r.airdrome_id == Some(30))
+            );
+            let i = t.hook.as_ref().unwrap();
+            assert_eq!(
+                (i.airdromes, &i.unmatched[..], &i.dropped),
+                (2, &["Ghost".to_string()][..], &None)
+            );
+        };
+        let t = Tables::open(&terrain).unwrap();
+        check(&t);
+
+        // A rebuild redoes the import from the directory it recorded.
+        put(
+            &root.0,
+            &format!("{MAP}/AirfieldsTaxiways/Batumi.rn4"),
+            &airfield([0.0, 0.0], [0.0, 2000.0]),
+        );
+        let t = Tables::open(&terrain).unwrap();
+        assert_eq!(t.airdromes.len(), 3);
+        check(&t);
+
+        // Once the directory no longer matches, the fields go back to null
+        // and the import says why it was dropped.
+        let other = hook("Test", "1.2.3.5", 30);
+        fs::copy(other.0.join("manifest.json"), h.0.join("manifest.json")).unwrap();
+        fs::remove_file(root.0.join(format!("{MAP}/AirfieldsTaxiways/Batumi.rn4"))).unwrap();
+        let t = Tables::open(&terrain).unwrap();
+        assert_eq!(
+            (t.airdromes[0].code.as_deref(), t.airdromes[1].id),
+            (None, None)
+        );
+        let i = t.hook.unwrap();
+        assert!(
+            i.dropped
+                .unwrap()
+                .contains("dcs_build 1.2.3.5, not 1.2.3.4")
+        );
+        assert_eq!(
+            i.dir,
+            std::path::absolute(&h.0).unwrap().display().to_string()
+        );
+    }
+
+    #[test]
+    fn refuses_a_hook_directory_from_another_terrain_or_build_by_name() {
+        let root = install();
+        let c = Scratch::new();
+        let terrain = terrain(&root.0, &c.0);
+        let built = Tables::open(&terrain).unwrap();
+        let h = hook("Caucasus", "2.9.29.27468", 30);
+        let e = terrain.rebuild(&TablesJson::with_hook(&h.0)).unwrap_err();
+        assert!(
+            e.0.contains("terrain Caucasus, not Test")
+                && e.0.contains("dcs_build 2.9.29.27468, not 1.2.3.4")
+                && !e.0.contains("timestamp"),
+            "{e}"
+        );
+        assert_eq!(Tables::open(&terrain).unwrap(), built, "the entry changed");
+
+        // An id other than Radio.lua's is refused too.
+        let h = hook("Test", "1.2.3.4", 30);
+        let rows = fs::read_to_string(h.0.join("airdromes.json")).unwrap();
+        put(
+            &h.0,
+            "airdromes.json",
+            rows.replace("\"id\":12", "\"id\":13").as_bytes(),
+        );
+        let e = terrain.rebuild(&TablesJson::with_hook(&h.0)).unwrap_err();
+        assert!(
+            e.0.contains("airdrome Anapa id 13, where Radio.lua gives 12"),
+            "{e}"
+        );
+        let e = terrain
+            .rebuild(&TablesJson::with_hook(&c.0.join("none")))
+            .unwrap_err();
+        assert!(e.0.contains("manifest.json cannot be read"), "{e}");
     }
 
     #[test]

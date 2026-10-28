@@ -29,7 +29,7 @@ pub const TILE_COUNT: usize = 256;
 mod scenery;
 mod tables;
 pub use scenery::{SCENE_NODES, SceneNodes, Scenery};
-pub use tables::{AirdromeRow, MAX_CRS_RESIDUAL_M, TABLES_JSON, Tables, TablesJson};
+pub use tables::{AirdromeRow, HookImport, MAX_CRS_RESIDUAL_M, TABLES_JSON, Tables, TablesJson};
 
 /// How far past its stated box a block is read for a point or tile. Its
 /// vertices lie inside the box to within a centimeter.
