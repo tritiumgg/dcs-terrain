@@ -433,29 +433,31 @@ fn resolve(path: &Path) -> io::Result<PathBuf> {
     let parts: Vec<Component> = path.components().collect();
     for n in (1..=parts.len()).rev() {
         let head: PathBuf = parts[..n].iter().collect();
-        match fs::canonicalize(&head) {
-            Ok(mut base) => {
-                let rest = &parts[n..];
-                if !rest.contains(&Component::ParentDir) {
-                    base.extend(rest);
-                    return Ok(base);
-                }
-                for c in rest {
-                    match c {
-                        Component::ParentDir => {
-                            base.pop();
-                        }
-                        c => base.push(c),
-                    }
-                }
-                return resolve(&base);
-            }
+        let mut base = match fs::canonicalize(&head) {
+            Ok(base) => base,
             // Something is there that does not resolve, such as a dangling
             // link; creating a directory through it fails too, but where it
-            // points is unknown.
-            Err(e) if fs::symlink_metadata(&head).is_ok() => return Err(e),
-            Err(_) => {}
+            // points is unknown. A second try tells it from a directory
+            // another builder created between the two calls.
+            Err(e) if fs::symlink_metadata(&head).is_ok() => {
+                fs::canonicalize(&head).map_err(|_| e)?
+            }
+            Err(_) => continue,
+        };
+        let rest = &parts[n..];
+        if !rest.contains(&Component::ParentDir) {
+            base.extend(rest);
+            return Ok(base);
         }
+        for c in rest {
+            match c {
+                Component::ParentDir => {
+                    base.pop();
+                }
+                c => base.push(c),
+            }
+        }
+        return resolve(&base);
     }
     Err(io::Error::new(
         io::ErrorKind::NotFound,
