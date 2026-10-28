@@ -89,7 +89,16 @@ impl Entry for TablesJson {
                 }
             }
         }
-        Ok(serde_json::to_vec(&t).expect("the tables serialize"))
+        let bytes = serde_json::to_vec(&t).expect("the tables serialize");
+        // JSON has no NaN or infinity, which it writes as null: a file that
+        // gave one is refused now rather than read back as something else.
+        if serde_json::from_slice::<Tables>(&bytes).ok().as_ref() != Some(&t) {
+            return Err(Refusal(format!(
+                "{}'s airfield or Lua files hold a number that is not finite",
+                map.theatre
+            )));
+        }
+        Ok(bytes)
     }
 
     fn json(&self) -> bool {
@@ -344,6 +353,11 @@ struct HookAirdrome {
 
 /// The hook directory the entry at `path` recorded, if it can be read.
 fn recorded_hook(path: &Path) -> Option<PathBuf> {
+    // The largest terrain's is a few megabytes; a far larger file is not
+    // one this tool wrote, and is not read whole.
+    if fs::metadata(path).ok()?.len() > 64 << 20 {
+        return None;
+    }
     let doc: serde_json::Value = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
     Some(PathBuf::from(doc["payload"]["hook"]["dir"].as_str()?))
 }
@@ -397,17 +411,47 @@ impl Tables {
             let Some(name_id) = h.name_id.as_deref() else {
                 continue;
             };
-            match self.airdromes.iter().position(|a| a.name_id == name_id) {
+            let refuse =
+                |why: String| Refusal(format!("the hook directory {} {why}", dir.display()));
+            // Spelled as the file is, or failing that the one name that
+            // differs only in case, as `Radio.lua`'s labels are matched.
+            let exact = self.airdromes.iter().position(|a| a.name_id == name_id);
+            let mut like = (0..self.airdromes.len())
+                .filter(|&i| self.airdromes[i].name_id.eq_ignore_ascii_case(name_id));
+            let found = exact.or(match (like.next(), like.next()) {
+                (Some(i), None) => Some(i),
+                _ => None,
+            });
+            match found {
                 Some(i) => {
                     let a = &self.airdromes[i];
+                    if matched.iter().any(|(j, _)| *j == i) {
+                        return Err(refuse(format!("names airdrome {} twice", a.name_id)));
+                    }
                     if let (Some(ours), Some(theirs)) = (a.id, h.id)
                         && ours != theirs
                     {
-                        return Err(Refusal(format!(
-                            "the hook directory {} gives airdrome {name_id} id {theirs}, \
-                             where Radio.lua gives {ours}",
-                            dir.display()
+                        return Err(refuse(format!(
+                            "gives airdrome {name_id} id {theirs}, where Radio.lua gives {ours}"
                         )));
+                    }
+                    // An id already another airdrome's would join their
+                    // runways and beacons.
+                    if let Some(theirs) = h.id {
+                        let holder = (self.airdromes.iter().enumerate())
+                            .find(|(j, b)| *j != i && b.id == Some(theirs))
+                            .map(|(j, _)| j)
+                            .or_else(|| {
+                                (matched.iter())
+                                    .find(|(_, g): &&(usize, &HookAirdrome)| g.id == Some(theirs))
+                                    .map(|(j, _)| *j)
+                            });
+                        if let Some(j) = holder {
+                            return Err(refuse(format!(
+                                "gives airdrome {name_id} id {theirs}, which is {}'s",
+                                self.airdromes[j].name_id
+                            )));
+                        }
                     }
                     matched.push((i, h));
                 }
@@ -792,10 +836,46 @@ mod tests {
             e.0.contains("airdrome Anapa id 13, where Radio.lua gives 12"),
             "{e}"
         );
+        // So is an id another airdrome holds, and one name given twice.
+        for (from, to, why) in [
+            (
+                "\"id\":30",
+                "\"id\":12",
+                "airdrome Nowhere id 12, which is Anapa's",
+            ),
+            ("\"Ghost\"", "\"Nowhere\"", "names airdrome Nowhere twice"),
+        ] {
+            put(&h.0, "airdromes.json", rows.replace(from, to).as_bytes());
+            let e = terrain.rebuild(&TablesJson::with_hook(&h.0)).unwrap_err();
+            assert!(e.0.contains(why), "{e}");
+        }
+        // A name that differs only in case is the airdrome's.
+        put(
+            &h.0,
+            "airdromes.json",
+            rows.replace("\"Nowhere\"", "\"NOWHERE\"").as_bytes(),
+        );
+        terrain.rebuild(&TablesJson::with_hook(&h.0)).unwrap();
+        assert_eq!(Tables::open(&terrain).unwrap().airdromes[1].id, Some(30));
         let e = terrain
             .rebuild(&TablesJson::with_hook(&c.0.join("none")))
             .unwrap_err();
         assert!(e.0.contains("manifest.json cannot be read"), "{e}");
+    }
+
+    #[test]
+    fn refuses_a_number_json_cannot_hold() {
+        let root = install();
+        let path = root.0.join(format!("{MAP}/Beacons.lua"));
+        let text = fs::read_to_string(&path).unwrap();
+        fs::write(
+            &path,
+            text.replacen("type = 8;", "type = 8; direction = 0/0;", 1),
+        )
+        .unwrap();
+        let c = Scratch::new();
+        let e = Tables::open(&terrain(&root.0, &c.0)).unwrap_err();
+        assert!(e.0.contains("not finite"), "{e}");
     }
 
     #[test]

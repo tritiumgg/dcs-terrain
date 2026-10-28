@@ -524,12 +524,16 @@ fn index(
             map.build.version,
             terrain.dir().display()
         );
-        for entry in cache::entries() {
-            let opened = match &hooked {
-                Some(t) if t.name() == entry.name() => terrain.rebuild(t),
-                _ => terrain.get(entry),
-            };
-            let fresh = opened.map_err(|e| e.0)?.built;
+        // The hook's tables go first, so an airdrome they give another id
+        // than `Radio.lua` does refuses before the slow entries are built.
+        let mut entries = cache::entries();
+        if let Some(t) = &hooked {
+            terrain.rebuild(t).map_err(|e| e.0)?;
+            println!("{}: built", t.name());
+            entries.retain(|e| e.name() != t.name());
+        }
+        for entry in entries {
+            let fresh = terrain.get(entry).map_err(|e| e.0)?.built;
             println!(
                 "{}: {}",
                 entry.name(),
