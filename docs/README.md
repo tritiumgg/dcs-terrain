@@ -12,7 +12,6 @@ it.
 | [decisions/](decisions/README.md) | ADRs: decisions that change the design, with their reasoning |
 | [data/file-formats.md](data/file-formats.md) | Byte layouts of the ED files the decoders read, with what is confirmed and what is guessed |
 | [data/live-gate.md](data/live-gate.md) | Reading terrain files beside a running DCS: the open test, how DCS opens them, and what it keeps resident |
-| [data/classes-Caucasus.toml](data/classes-Caucasus.toml) | Draft scenery class overrides for Caucasus |
 | [data/caucasus-scenery-catalogue.tsv](data/caucasus-scenery-catalogue.tsv) | The Caucasus scenery model census |
 
 The project was reset on 2026-10-27. The documents before it — nine frozen

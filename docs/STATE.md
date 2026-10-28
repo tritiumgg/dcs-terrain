@@ -4,13 +4,21 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `design.md` and `queries.md` hold the design.
 
-**Last updated:** 2026-10-28T17:30Z
+**Last updated:** 2026-10-28T18:10Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **N6: the road graph, and one cache directory per terrain
+1. **N7: scenery classes.** Every model has a class and, if a building, a
+   settlement family, each with its source; made in memory from the model
+   table, not cached. `Scenery::each_structure_in` drops `effect`; the
+   catalog counts each model's objects from the pool's ids. The Caucasus
+   overrides moved into the crate. *Verified by:* an agent, through
+   `mise run check`, and opt-in on 2.9.30.28738: all 87 Caucasus overrides
+   apply, its 17 143 smoke objects are `effect`; all eight terrains classify
+   in ≤ 27 ms and count every object.
+2. **N6: the road graph, and one cache directory per terrain
    (ADR 0002).** `roads.graph` holds the junction graph of roads and rails,
    contracted, with each edge's length and the water under it;
    `roads.betweenness` is built from it on two low-priority threads. The
@@ -20,7 +28,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    most. *Verified by:* an agent, through `mise run check`, and opt-in on
    2.9.30.28738: Caucasus's graph in 0.5 s, GermanyCW's in 9.8 s and its
    betweenness in 29 s; a build change re-stamps both in 29 ms.
-2. **N5: `tables.json` and the hook import.** One JSON cache entry, keyed
+3. **N5: `tables.json` and the hook import.** One JSON cache entry, keyed
    inside the JSON, holds the airdromes, runways, stands, beacons, radio,
    towns, nodes and the fit; `index --hook` merges the airdrome fields only
    the sim knows, refusing another build's directory by name, and `index`
@@ -28,46 +36,39 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    agent, through `mise run check`, and opt-in on 2.9.30.28738: every
    Caucasus table, and with the hook every airdrome field, equals the live
    extract; all eight terrains build in 54–560 ms, up to 2.4 MB.
-3. **N4: scenery in place.** `scene.nodes` keeps each node's array
+4. **N4: scenery in place.** `scene.nodes` keeps each node's array
    offsets, the models, the group and the pools; a box descends each
    pool's own quadtree and reads its hits by position through 4 MiB of
    chunks, not a map (the user's choice). The JSONL writer is gone.
    *Verified by:* an agent, through `mise run check`, and opt-in on
    2.9.30.28738: 400 boxes each on Caucasus and Nevada equal a scan of
    every pool box and the walk; the index builds on all eight terrains.
-4. **N3b: runway bins and a runway-only `mesh.toc`.** A prepared block
+5. **N3b: runway bins and a runway-only `mesh.toc`.** A prepared block
    bins its runway triangles like its triangle list, so a point tests
    the few near it; `mesh.toc` keeps only the runway subsets, version 2.
    *Verified by:* an agent, through `mise run check`, and opt-in on
    2.9.30.28738: 10 k points over GermanyCW's busiest airfield block
    978 → 13 ms, its runway test 1.1 ms; `mesh.toc` 8.25 → 0.75 MB;
    GermanyCW opens in 4.2 ms.
-5. **N2b: per-role classification and metadata keys (ADR 0001).** Opening
-   reads the surface header alone; other roles are classified when an entry
-   reading them is built, so an unknown pair refuses only its role. Keys are
-   checked from a stat or a directory listing and the build. `list-terrains`
-   surveys in one pass. *Verified by:* an agent, through `mise run check`,
-   and opt-in on 2.9.30.28738: GermanyCW opens in 14.8 ms, Syria 9.8 ms,
-   `list-terrains` 78 ms.
 
 ## Next
 
 One task. The thing to pick up immediately.
 
-**N7** — scenery classes over the model table: per-terrain overrides, the
-`effect` class, the settlement families, the catalog in `check`.
-*Verified by:* an agent.
+**N8** — per-query layers: `valid`, slope, aspect, roughness, both TPIs,
+`dist_*` with the cap, counts, tree density, `cover` fractions and distances.
+*Verified by:* an agent, opt-in against the install.
 
 ## Then
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-2. **N7** — scenery classes over the model table.
-3. **N8** — per-query layers: slope, TPIs, distances, cover.
-4. **N9** — horizon tiles, and `enclosure` from them.
-5. **N10** — `dcsterrain check --install --terrain`.
-5. **Q1** — `describe`, `sample`, `geo`, `nearest`, `scenery_in`; `query
+1. **N9** — horizon tiles, and `enclosure` from them.
+2. **N10** — `dcsterrain check --install --terrain`.
+3. **Q1** — `describe`, `sample`, `geo`, `nearest`, `scenery_in`; `query
    --allow-crs-residual`.
+4. **Q2** — `visible`, `viewshed`; the shared GeoJSON writer.
+5. **Q11** — `airfield_info`.
 
 Milestone in view: **MS1 Engine on the install**.
 

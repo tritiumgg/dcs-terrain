@@ -40,7 +40,7 @@ DCS install (read-only)                 cache/<terrain>/           (rebuildable)
   .surface5 ─┐                            mesh.toc        block offsets (0.05–1.5 MB)
   .scn5   ───┤                            scene.nodes     node offsets, models, pools (0.35–25 MiB)
   .rn4    ───┤   decoders                 tables.json     airdromes, runways, stands, beacons,
-  airfield ──┤ ─────────────────────▶                     radio, towns, nodes, CRS, classes
+  airfield ──┤ ─────────────────────▶                     radio, towns, nodes, CRS
   Lua files ─┘        │                   roads.graph     graph, geometry, water (9–137 MiB)
                       │                   roads.betweenness per edge (< 2 MiB)
                       │                   places          settlements (< 2 MiB)
@@ -224,7 +224,7 @@ opening the install files it was derived from, except once after an update.
 |---|---|---|---|
 | `mesh.toc` | The `.surface5` table of contents can only be pattern-scanned: 21 ms (MarianasWWII) to 0.7 s (GermanyCW) per open | 0.05–1.5 MB, every block's arrays and its runway subsets, the one material read | < 1 s |
 | `scene.nodes` | Parsing the `.scn5` head costs 2 s and 559 MiB on Germany | 0.35 MiB (MarianaIslands) to 24.5 MiB (GermanyCW): each node's array offsets, the model table, the group and the pools | 0.05–1.8 s |
-| `tables.json` | Airfields, stands, Lua tables, the fitted projection, scenery classes and any imported hook tables each cost a full decode; together they are small | 0.1 MB (MarianaIslands) to 2.4 MB (GermanyCW), read back in 1–10 ms | 54–560 ms |
+| `tables.json` | Airfields, stands, Lua tables, the fitted projection and any imported hook tables each cost a full decode; together they are small | 0.1 MB (MarianaIslands) to 2.4 MB (GermanyCW), read back in 1–10 ms | 54–560 ms |
 | `roads.graph` | The `.rn4` has no spatial order: a 3.1 s scan on GermanyCW, and the water under 23 M samples | 8.6 MiB (Caucasus) to 137 MiB (GermanyCW) | 0.5 s (Caucasus) to 9.8 s (GermanyCW) |
 | `roads.betweenness` | Betweenness is global | 0.04 MiB (Caucasus) to 1.9 MiB (GermanyCW) | 0.4 s (Caucasus) to 29 s (GermanyCW) on two threads |
 | `places` | Settlements need every building on the terrain (§6.3) | 6–24 k rows, < 2 MiB | a whole objects-pool walk, 3.8 s (Caucasus) to 53 s (GermanyCW), plus 0.2–8 s grouping |
@@ -391,14 +391,39 @@ classes are in the terrain's own units, which is how a place looks in the sim.
 ### 6.4 Scenery classes
 
 Rules over the `.scn5` model table, per terrain, each assignment recording its
-source. In order: a per-terrain override (`classes/<terrain id>.toml`, or
-`classes/common.toml`); `effect` for a model named `smoke#…` — 17 143 boxes
-100–300 m tall on Caucasus, smoke columns not structures; `wall` when
+source: the override file and its reason, or what the rule says of the model.
+The class, in order: a per-terrain override (`classes/<terrain id>.toml` in
+the core crate, built into the binary, else `classes/common.toml`; a key
+matches a model in any case); `effect` for a model named `smoke#…` — 17 143
+objects 200–600 m tall on Caucasus, smoke columns not structures; `wall` when
 `min(w, d) < 1 m` and `max(w, d) ≥ 4 m`; `misc` under 4 m²; `industrial` by a
-name pattern list; else `building`. The settlement families of §6.3 refine
-`building`. No height, clearing, placement, count or place answer includes an
-`effect` object. `dcsterrain check` prints the catalog sorted by count, with
-the tallest models, so a new terrain's top models can be reviewed in minutes.
+name pattern list; else `building`. An override names a class and, when it
+wants one, a family.
+
+A `building` or `industrial` model also has the settlement family of §6.3:
+house, apartment, shop, civic or industrial, which make places, and
+outbuilding, farm or military, which do not; a model whose name says it is a
+vehicle, bridge, mast, light, sign or the like has none, and a building no
+rule names is `unknown`. The family rules are names, first match wins, from
+the settlements research. A family of house-like models whose names do not
+say which (`german_town_*`, `syria_house*` and the like) is split by its box:
+under 30 m² an outbuilding, 14 m or taller (or over 400 m² and over 10 m) an
+apartment block, else a house, an urban name tipping a mid-size box to
+apartments. A wreck (`…crash`) takes the family of what it was.
+
+The classes are made in memory the first time a terrain's scenery is asked
+for, never cached: 0.8 ms (MarianaIslandsWWII, 304 models) to 27 ms (Syria,
+15 289) on 2.9.30.28738. Every height, clearing, placement, count and place
+answer reads scenery through the one path that drops `effect` objects. The
+catalog lists every model with its class, family, source, box and how many
+objects place it, most placed first, the tallest beside it, and the override
+keys that name no model; counting reads the objects pool's ids and one model
+word per object, 54 ms (Caucasus) to 3.4 s (GermanyCW) with the files in the
+OS cache, 0.6 s on Caucasus without. `dcsterrain check` prints it, so a new
+terrain's top models can be reviewed in minutes.
+Only Caucasus has overrides; on the other terrains a bridge or a parked
+vehicle large enough is a `building` until its terrain's file is written,
+though its name already keeps it out of every place.
 
 ### 6.5 Road graph
 
@@ -554,7 +579,8 @@ Each names what settles it.
     a forest edge follows coarse triangles (13 per km² p50). The size classes
     were fitted on 47 Caucasus towns; some building families (`korpus_*`,
     `airfields_building_*`) are uncertain. *Settles it:* the opt-in checks per
-    terrain in N8 and Q15, and the per-terrain class review in N7.
+    terrain in N8 and Q15, and each terrain's catalog reviewed into its
+    override file; only Caucasus has one.
 12. **Low-level routes ignore obstacles.** Wires, pylons and masts are not
     modeled, so `low_level_route` clears terrain only and says so. *Settles
     it:* a user asking for obstacles.
