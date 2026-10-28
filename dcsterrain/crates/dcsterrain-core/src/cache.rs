@@ -4,7 +4,8 @@
 //!
 //! An entry is a raw file that opens with a header: magic, the entry's
 //! format version, and its key, the build and a stat of each install file it
-//! was derived from. A missing entry, or one whose key or version does not
+//! was derived from; a JSON entry carries the same as its first members. A
+//! missing entry, or one whose key or version does not
 //! match, is rebuilt, and only that entry. An entry is written under a
 //! temporary name and renamed into place, so two builders at once leave one
 //! valid copy.
@@ -44,8 +45,24 @@ pub trait Entry: Sync {
     /// files name them; its key covers these files only.
     fn roles(&self) -> &[&str];
     /// Builds the payload from `files`, the install files of its roles with
-    /// the class and version each header states, read for this build.
-    fn build(&self, install: &Path, map: &Map, files: &[FileEntry]) -> Result<Vec<u8>, Refusal>;
+    /// the class and version each header states, read for this build. `dir`
+    /// is the build's cache directory, where the entry being replaced may
+    /// still be.
+    fn build(
+        &self,
+        install: &Path,
+        map: &Map,
+        files: &[FileEntry],
+        dir: &Path,
+    ) -> Result<Vec<u8>, Refusal>;
+    /// Whether the entry is a JSON document, whose payload is a JSON value.
+    /// A JSON entry cannot open with the binary header and stay JSON, so it
+    /// is one object carrying the version, the key and the payload as its
+    /// first three members, in that order, and a check reads only up to the
+    /// payload.
+    fn json(&self) -> bool {
+        false
+    }
 }
 
 /// Every kind of entry `index` builds.
@@ -583,13 +600,35 @@ impl TerrainCache {
         {
             return Ok(head.opened(path, false));
         }
+        self.build(entry, files, &checked, false)
+    }
+
+    /// The entry built now, whether or not the one there is current: for a
+    /// build whose inputs the key does not cover, such as the hook's tables.
+    pub fn rebuild(&self, entry: &dyn Entry) -> Result<Opened, Refusal> {
+        let (files, checked) = self.checked(entry)?;
+        self.build(entry, files, &checked, true)
+    }
+
+    fn build(
+        &self,
+        entry: &dyn Entry,
+        files: Vec<Located>,
+        checked: &str,
+        forced: bool,
+    ) -> Result<Opened, Refusal> {
+        let path = self.dir.join(entry.name());
         // Refused before the build, which can take minutes, not after it.
         self.make_dir()?;
         let (classified, key) = self.built_key(&files)?;
-        let payload = entry.build(&self.install, &self.map, &classified)?;
-        let bytes = encode(entry.version(), &key, &payload);
+        let payload = entry.build(&self.install, &self.map, &classified, &self.dir)?;
+        let bytes = encode(entry.version(), &key, &payload, entry.json());
+        // A forced build must not settle for the entry another builder put
+        // there, which lacks what forced it.
         self.write(entry.name(), &bytes, |dest| {
-            read_head(dest).is_ok_and(|h| judge(&h, entry.version(), &checked) == State::Current)
+            !forced
+                && read_head(dest)
+                    .is_ok_and(|h| judge(&h, entry.version(), checked) == State::Current)
         })?;
         let head = read_head(&path).map_err(|e| cannot("read", &path, e))?;
         Ok(head.opened(path, true))
@@ -711,7 +750,17 @@ impl Head {
     }
 }
 
-fn encode(version: u32, key: &str, payload: &[u8]) -> Vec<u8> {
+/// How a JSON entry opens, before its version.
+const JSON_OPEN: &[u8] = b"{\"version\":";
+
+fn encode(version: u32, key: &str, payload: &[u8], json: bool) -> Vec<u8> {
+    if json {
+        let key = serde_json::to_string(key).expect("a string serializes");
+        let mut b = format!("{{\"version\":{version},\"key\":{key},\"payload\":").into_bytes();
+        b.extend_from_slice(payload);
+        b.push(b'}');
+        return b;
+    }
     let mut b = Vec::with_capacity(24 + key.len() + payload.len());
     b.extend_from_slice(MAGIC);
     b.extend_from_slice(&version.to_le_bytes());
@@ -722,19 +771,120 @@ fn encode(version: u32, key: &str, payload: &[u8]) -> Vec<u8> {
     b
 }
 
+/// A JSON entry's head: `{"version":N,"key":"...","payload":`, read only as
+/// far as the payload, which may be a megabyte. Its payload ends one byte
+/// before the file does, at the closing brace.
+fn read_json_head(mut f: File, file_len: u64) -> io::Result<Head> {
+    let bad = |why: &str| io::Error::new(io::ErrorKind::InvalidData, why.to_string());
+    let mut b: Vec<u8> = Vec::new();
+    let mut chunk = vec![0u8; 16 << 10];
+    let (version, key, offset) = loop {
+        if let Some(head) = json_head(&b).map_err(bad)? {
+            break head;
+        }
+        // Each byte of a key escapes to at most six.
+        if b.len() as u64 > 64 + 6 * MAX_KEY {
+            return Err(bad("its key is too long"));
+        }
+        let n = f.read(&mut chunk)?;
+        if n == 0 {
+            return Err(bad("its key runs past the end"));
+        }
+        b.extend_from_slice(&chunk[..n]);
+    };
+    if key.len() as u64 > MAX_KEY {
+        return Err(bad("its key is too long"));
+    }
+    let offset = offset as u64;
+    // A payload is one JSON value, so never empty; one cut short inside it
+    // is seen only when it is parsed, as a raw entry's would be.
+    if offset + 1 >= file_len {
+        return Err(bad("it has no payload after its key"));
+    }
+    let mut last = [0u8; 1];
+    f.seek(SeekFrom::Start(file_len - 1))?;
+    f.read_exact(&mut last)?;
+    if last != *b"}" {
+        return Err(bad("it does not end where its payload does"));
+    }
+    Ok(Head {
+        file: f,
+        version,
+        key,
+        offset,
+        len: file_len - 1 - offset,
+        // The closing brace is not the payload's, so judge the rest.
+        file_len: file_len - 1,
+    })
+}
+
+/// The version, key and payload offset of a JSON entry whose first bytes
+/// are `b`; `None` while `b` stops short of the payload.
+fn json_head(b: &[u8]) -> Result<Option<(u32, String, usize)>, &'static str> {
+    // The position after `lit` at `at`, `None` when `b` ends inside it.
+    let lit = |at: usize, lit: &[u8]| -> Result<Option<usize>, &'static str> {
+        let have = &b[at.min(b.len())..];
+        if have.len() < lit.len() {
+            return if lit.starts_with(have) {
+                Ok(None)
+            } else {
+                Err("not a cache entry")
+            };
+        }
+        if have.starts_with(lit) {
+            Ok(Some(at + lit.len()))
+        } else {
+            Err("not a cache entry")
+        }
+    };
+    let Some(at) = lit(0, JSON_OPEN)? else {
+        return Ok(None);
+    };
+    let digits = b[at..].iter().take_while(|c| c.is_ascii_digit()).count();
+    if at + digits == b.len() {
+        return Ok(None);
+    }
+    let version = std::str::from_utf8(&b[at..at + digits])
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .ok_or("its version is not a number")?;
+    let Some(q) = lit(at + digits, b",\"key\":\"")? else {
+        return Ok(None);
+    };
+    // The key's closing quote is the first no backslash escapes.
+    let mut i = q;
+    let end = loop {
+        match b.get(i) {
+            None => return Ok(None),
+            Some(b'\\') => i += 2,
+            Some(b'"') => break i,
+            Some(_) => i += 1,
+        }
+    };
+    let key = serde_json::from_slice(&b[q - 1..=end]).map_err(|_| "its key is not a string")?;
+    let Some(offset) = lit(end + 1, b",\"payload\":")? else {
+        return Ok(None);
+    };
+    Ok(Some((version, key, offset)))
+}
+
 fn read_head(path: &Path) -> io::Result<Head> {
     let bad = |why: &str| io::Error::new(io::ErrorKind::InvalidData, why.to_string());
     let mut f = File::open(path)?;
     let file_len = f.metadata()?.len();
-    let mut fixed = [0u8; 16];
-    f.read_exact(&mut fixed)?;
-    if &fixed[..8] != MAGIC {
+    let mut magic = [0u8; 8];
+    f.read_exact(&mut magic)?;
+    if magic.starts_with(&JSON_OPEN[..8]) {
+        f.seek(SeekFrom::Start(0))?;
+        return read_json_head(f, file_len);
+    }
+    if &magic != MAGIC {
         return Err(bad("not a cache entry"));
     }
-    let version = u32::from_le_bytes(fixed[8..12].try_into().expect("4 bytes"));
-    let key_len = u64::from(u32::from_le_bytes(
-        fixed[12..16].try_into().expect("4 bytes"),
-    ));
+    let mut fixed = [0u8; 8];
+    f.read_exact(&mut fixed)?;
+    let version = u32::from_le_bytes(fixed[..4].try_into().expect("4 bytes"));
+    let key_len = u64::from(u32::from_le_bytes(fixed[4..8].try_into().expect("4 bytes")));
     // A key is a few lines per install file; a longer one is not ours, and
     // must not size an allocation.
     if key_len > MAX_KEY {
@@ -800,6 +950,7 @@ mod tests {
         version: u32,
         roles: &'static [&'static str],
         builds: AtomicUsize,
+        json: bool,
     }
 
     impl Counted {
@@ -809,7 +960,15 @@ mod tests {
                 version: 1,
                 roles,
                 builds: AtomicUsize::new(0),
+                json: false,
             }
+        }
+        /// The same as a JSON entry, whose payload records the directory
+        /// it was built for.
+        const fn json(name: &'static str, roles: &'static [&'static str]) -> Counted {
+            let mut c = Counted::new(name, roles);
+            c.json = true;
+            c
         }
         fn builds(&self) -> usize {
             self.builds.load(Ordering::SeqCst)
@@ -826,9 +985,22 @@ mod tests {
         fn roles(&self) -> &[&str] {
             self.roles
         }
-        fn build(&self, _: &Path, map: &Map, _: &[FileEntry]) -> Result<Vec<u8>, Refusal> {
+        fn build(
+            &self,
+            _: &Path,
+            map: &Map,
+            _: &[FileEntry],
+            dir: &Path,
+        ) -> Result<Vec<u8>, Refusal> {
             self.builds.fetch_add(1, Ordering::SeqCst);
+            if self.json {
+                let v = serde_json::json!({"of": map.theatre, "dir": dir});
+                return Ok(v.to_string().into_bytes());
+            }
             Ok(format!("{} of {}", self.name, map.theatre).into_bytes())
+        }
+        fn json(&self) -> bool {
+            self.json
         }
     }
 
@@ -1317,7 +1489,7 @@ mod tests {
         fs::write(&path, &long_key).unwrap();
         assert!(matches!(t.state(&mesh).unwrap(), State::Stale(_)));
 
-        let mut huge = encode(1, &t.key(&mesh).unwrap(), b"");
+        let mut huge = encode(1, &t.key(&mesh).unwrap(), b"", false);
         let at = huge.len() - 8;
         huge[at..].copy_from_slice(&u64::MAX.to_le_bytes());
         fs::write(&path, &huge).unwrap();
@@ -1329,6 +1501,66 @@ mod tests {
     }
 
     #[test]
+    fn a_json_entry_is_json_carrying_its_key_and_is_checked_like_any_other() {
+        let f = Fixture::new();
+        let tables = Counted::json("tables.json", &["roads"]);
+        let t = f.terrain();
+        let got = t.get(&tables).unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&fs::read(&got.path).unwrap()).unwrap();
+        assert_eq!(doc["version"], 1);
+        assert_eq!(doc["key"], t.key(&tables).unwrap());
+        assert!(t.matches(&tables, doc["key"].as_str().unwrap()).unwrap());
+        assert_eq!(doc["payload"]["of"], "Caucasus");
+        assert_eq!(doc["payload"]["dir"], t.dir().to_str().unwrap());
+        let payload: serde_json::Value = serde_json::from_slice(&got.payload().unwrap()).unwrap();
+        assert_eq!(payload, doc["payload"]);
+
+        assert_eq!(t.state(&tables).unwrap(), State::Current);
+        assert!(!t.get(&tables).unwrap().built);
+        f.touch(ROADS, 7);
+        assert!(matches!(t.state(&tables).unwrap(), State::Stale(_)));
+        assert!(t.get(&tables).unwrap().built);
+        assert_eq!(tables.builds(), 2);
+        // A rebuild builds whether or not the entry is current.
+        assert!(t.rebuild(&tables).unwrap().built);
+        assert_eq!(tables.builds(), 3);
+    }
+
+    #[test]
+    fn a_hostile_json_head_is_stale_and_sizes_nothing() {
+        let f = Fixture::new();
+        let tables = Counted::json("tables.json", &["roads"]);
+        let t = f.terrain();
+        let path = t.get(&tables).unwrap().path;
+        let key = serde_json::to_string(&t.key(&tables).unwrap()).unwrap();
+        let bad = [
+            r#"{"version":1,"key":"#.to_string(),
+            r#"{"version":x,"key":"","payload":{}}"#.into(),
+            format!(r#"{{"version":1,"key":{key},"data":{{}}}}"#),
+            format!(r#"{{"version":1,"key":{key},"payload":}}"#),
+            format!(
+                r#"{{"version":1,"key":"{}","payload":{{}}}}"#,
+                "\\\"".repeat(1 << 20)
+            ),
+            format!(r#"{{"key":{key},"version":1,"payload":{{}}}}"#),
+        ];
+        for b in &bad {
+            fs::write(&path, b).unwrap();
+            assert!(
+                matches!(t.state(&tables).unwrap(), State::Stale(_)),
+                "{}",
+                &b[..b.len().min(60)]
+            );
+        }
+        // An escaped quote inside the key does not end it.
+        let quoted = encode(1, "a\"b", b"{}", true);
+        fs::write(&path, &quoted).unwrap();
+        let head = read_head(&path).unwrap();
+        assert_eq!((head.key.as_str(), head.len), ("a\"b", 2));
+        assert!(t.get(&tables).unwrap().built);
+    }
+
+    #[test]
     fn an_opened_entry_reads_the_file_its_header_came_from() {
         let f = Fixture::new();
         let mesh = Counted::new("mesh.toc", &["surface"]);
@@ -1336,7 +1568,7 @@ mod tests {
         let held = t.get(&mesh).unwrap();
         // Another builder replaces it, with a longer key and so a later
         // payload.
-        let other = encode(1, &format!("{}x\n", t.key(&mesh).unwrap()), b"other");
+        let other = encode(1, &format!("{}x\n", t.key(&mesh).unwrap()), b"other", false);
         let tmp = t.dir().join(".mesh.toc.test.tmp");
         fs::write(&tmp, other).unwrap();
         fs::rename(&tmp, &held.path).unwrap();

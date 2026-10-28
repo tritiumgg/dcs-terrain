@@ -42,7 +42,13 @@ impl Entry for SceneNodes {
         &["scene"]
     }
 
-    fn build(&self, root: &Path, map: &Map, files: &[FileEntry]) -> Result<Vec<u8>, Refusal> {
+    fn build(
+        &self,
+        root: &Path,
+        map: &Map,
+        files: &[FileEntry],
+        _: &Path,
+    ) -> Result<Vec<u8>, Refusal> {
         let f = files
             .iter()
             .find(|f| f.role == "scene")
