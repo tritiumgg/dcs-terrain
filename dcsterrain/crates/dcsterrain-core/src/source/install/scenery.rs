@@ -56,7 +56,10 @@ impl Entry for SceneNodes {
 }
 
 /// A file read in chunks, the last few kept: a query's reads cluster in a
-/// pool's tree and boxes, and many land in one chunk.
+/// pool's tree and boxes, and many land in one chunk. Its length is checked
+/// once, when opened; a file rewritten at the same length after that reads
+/// as the old one's offsets would, which the cache key catches at the next
+/// open.
 struct Chunks {
     file: File,
     len: u64,

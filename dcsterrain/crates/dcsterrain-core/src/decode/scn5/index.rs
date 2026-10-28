@@ -15,7 +15,7 @@
 
 use std::io::{Read, Seek};
 
-use super::{Error, GroupRecord, MAX_MODELS, Model, PoolToc, Scene, malformed};
+use super::{Error, GroupRecord, MAX_MODELS, Model, Pool, PoolToc, Scene, layout, malformed};
 
 /// One instancer node: its instance count, translation, and where its
 /// position, model and axis arrays start, from the data base.
@@ -235,6 +235,53 @@ impl Index {
                 b.len() - r.at
             )));
         }
+        // Every offset a query reads from must lie in the file, so a corrupt
+        // index is refused here rather than overflowing, allocating a pool's
+        // worth of nothing, or reading past the end later.
+        let Some(data) = len.checked_sub(data_base) else {
+            return Err(malformed(format!(
+                "puts the data base {data_base} past the file's {len} bytes"
+            )));
+        };
+        let within = |at: u64, n: u64, size: u64| {
+            n.checked_mul(size)
+                .and_then(|b| b.checked_add(at))
+                .is_some_and(|e| e <= data)
+        };
+        for (pool, p) in Pool::ALL.iter().zip(&pools) {
+            if p.tree_nodes == 0
+                || !within(p.ids, p.count, 8)
+                || !within(p.aabbs, p.count, 24)
+                || !within(p.tree, p.tree_nodes, 48)
+            {
+                return Err(malformed(format!(
+                    "puts the {} pool's arrays past the file",
+                    pool.name()
+                )));
+            }
+        }
+        let stride = u64::from(layout(version).axis_stride);
+        for (k, n) in nodes.iter().enumerate() {
+            let c = u64::from(n.n);
+            if !(within(n.p, c, 12) && within(n.model, c, 4) && within(n.axis, c, stride))
+                || !n.t.iter().all(|v| v.is_finite())
+            {
+                return Err(malformed(format!(
+                    "puts node {k}'s arrays past the file or its translation off the map"
+                )));
+            }
+        }
+        for (i, g) in group.iter().enumerate() {
+            let finite = g.pos.iter().all(|v| v.is_finite()) && g.rotation.is_finite();
+            if g.model as usize >= models.len() || !finite {
+                return Err(malformed(format!(
+                    "group record {i} names model {} of {}, or a position or heading that is not \
+                     a number",
+                    g.model,
+                    models.len()
+                )));
+            }
+        }
         Ok(Index {
             version,
             shift,
@@ -285,6 +332,37 @@ mod tests {
         long.push(0);
         let e = Index::decode(&long).unwrap_err().to_string();
         assert_eq!(e, "holds 1 bytes past its group");
+    }
+
+    /// The index of a version 9 scene with `edit` applied, encoded and
+    /// decoded again.
+    fn edited(edit: impl Fn(&mut Index)) -> String {
+        let mut i = index(9);
+        edit(&mut i);
+        Index::decode(&i.encode()).unwrap_err().to_string()
+    }
+
+    #[test]
+    fn refuses_an_index_that_reads_past_the_file_or_past_its_tables() {
+        let e = edited(|i| i.pools[1].count = 1 << 40);
+        assert_eq!(e, "puts the lines pool's arrays past the file");
+        let e = edited(|i| i.pools[0].tree = u64::MAX);
+        assert_eq!(e, "puts the objects pool's arrays past the file");
+        let e = edited(|i| i.pools[2].tree_nodes = 0);
+        assert_eq!(e, "puts the trees pool's arrays past the file");
+        let e = edited(|i| i.nodes[1].axis = u64::MAX - 3);
+        assert!(e.starts_with("puts node 1's arrays past the file"), "{e}");
+        let e = edited(|i| i.nodes[0].t[2] = f64::NAN);
+        assert!(e.starts_with("puts node 0's arrays"), "{e}");
+        let e = edited(|i| i.data_base = i.len + 1);
+        assert!(e.starts_with("puts the data base"), "{e}");
+        let e = edited(|i| i.group[1].model = 70_000);
+        assert!(
+            e.starts_with("group record 1 names model 70000 of 3"),
+            "{e}"
+        );
+        let e = edited(|i| i.group[0].rotation = f64::INFINITY);
+        assert!(e.starts_with("group record 0"), "{e}");
     }
 
     #[test]

@@ -752,8 +752,12 @@ pub mod build {
         pub children: [u32; 4],
     }
 
-    /// A tree over pool entries in their stored order: each node owns its
-    /// first entry and splits the rest among up to four children, its box
+    /// Entries a built tree node owns, so a node with several, some in a
+    /// box and some not, is read.
+    const OWN: usize = 3;
+
+    /// A tree over pool entries in their stored order: each node owns up to
+    /// its first three entries and splits the rest among up to four children, its box
     /// the union of its subtree's. The root, empty pool or not, is node 0.
     pub fn tree(boxes: &[[f32; 6]]) -> Vec<TreeNode> {
         fn node(boxes: &[[f32; 6]], first: usize, end: usize, out: &mut Vec<TreeNode>) -> u32 {
@@ -768,10 +772,10 @@ pub mod build {
             out.push(TreeNode {
                 bbox,
                 first: first as u32,
-                count: u32::from(end > first),
+                count: (end - first).min(OWN) as u32,
                 children: [u32::MAX; 4],
             });
-            let rest = (first + 1).min(end);
+            let rest = (first + OWN).min(end);
             let step = (end - rest).div_ceil(4).max(1);
             for (c, lo) in (rest..end).step_by(step).enumerate() {
                 let child = node(boxes, lo, (lo + step).min(end), out);
@@ -1053,8 +1057,8 @@ mod tests {
         for version in [8, 9] {
             let s = open_bytes(&scene(version).file()).unwrap();
             for p in &s.pools {
-                // One node owns each entry in the built trees.
-                assert_eq!(p.tree_nodes, p.count, "v{version}");
+                // These pools hold three entries at most, which one node owns.
+                assert_eq!(p.tree_nodes, 1, "v{version}");
                 assert_eq!(p.tree, p.aabbs + 24 * p.count);
             }
         }

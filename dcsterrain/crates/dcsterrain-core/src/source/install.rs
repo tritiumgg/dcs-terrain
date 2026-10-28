@@ -198,8 +198,9 @@ pub struct Install {
     tiles: Mutex<Lru<(u32, u32), Arc<Tile>>>,
     cache: TerrainCache,
     /// Opened the first time scenery is asked for, so a scene file no
-    /// decoder reads refuses scenery and nothing else.
-    scenery: OnceLock<Result<Scenery, Refusal>>,
+    /// decoder reads refuses scenery and nothing else. A failure is not
+    /// kept: the next request tries again.
+    scenery: OnceLock<Scenery>,
 }
 
 /// The sizes of the surface, road and scene files, joined by `-`.
@@ -280,10 +281,12 @@ impl Install {
     /// The terrain's scenery, its index read from the cache, built there
     /// first if missing or stale.
     pub fn scenery(&self) -> Result<&Scenery, Refusal> {
-        self.scenery
-            .get_or_init(|| Scenery::open(&self.root, &self.cache))
-            .as_ref()
-            .map_err(Refusal::clone)
+        if let Some(s) = self.scenery.get() {
+            return Ok(s);
+        }
+        // Two threads may both open it; the first to finish is kept.
+        let s = Scenery::open(&self.root, &self.cache)?;
+        Ok(self.scenery.get_or_init(|| s))
     }
 
     pub fn map(&self) -> &Map {
@@ -691,6 +694,9 @@ mod tests {
             "{e}"
         );
         assert_eq!(t.point(1100.0, 2100.0).unwrap().unwrap().surface, 5);
+        // A refusal is not kept: once the file reads, so does scenery.
+        put(&root.0, "Mods/terrains/Test/Scenes/Test.scn5", &scene(9));
+        assert_eq!(ids(&t, Pool::Trees, [1590.0, 2490.0, 1610.0, 2510.0]), [1]);
     }
 
     #[test]
