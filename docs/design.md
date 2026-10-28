@@ -359,6 +359,15 @@ A distance layer searches out to a cap: the criterion's own maximum where it
 has one, else 5 km. A cell with nothing within the cap reads as the cap, and a
 response that used a capped distance says so.
 
+A radius or cap may be any length. Past the farthest a cell of the region lies
+from a tile of the grid it takes in nothing more, so the window is padded only
+that far; a density still divides by the area asked for. This assumes no road
+or scenery lies off the grid's tiles. What is bounded is the work: the padded
+window at 25 million cells, about 250 km square and 1 GB while derived, and a
+radius layer at 2 × 10⁹ disk rows summed, one per row of each cell's disk, a
+few seconds. A layer over either is refused, naming the size, so the asker
+shrinks the region or the radius.
+
 ### 6.2 Horizon
 
 Per 200 m cell, the maximum elevation angle to the terrain in each of 32

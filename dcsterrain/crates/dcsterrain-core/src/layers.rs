@@ -20,8 +20,13 @@ pub const FLAT_DEG: f64 = 0.5;
 /// `BUILTUP_RADIUS_M` of it.
 pub const BUILTUP_MIN: u32 = 3;
 pub const BUILTUP_RADIUS_M: f64 = 100.0;
-/// The longest radius or cap a layer takes: its window grows with the square.
-pub const MAX_REACH_M: f64 = 50_000.0;
+/// The most cells a layer's padded window may hold, about 250 km square at
+/// 50 m and about 1 GB while it is derived: the window, not the radius, is
+/// what costs memory.
+pub const WINDOW_CELLS_MAX: f64 = 25_000_000.0;
+/// The most disk rows a radius layer may sum, a cell of the region costing
+/// one per row of its disk: a few seconds on one core.
+pub const DISK_ROWS_MAX: f64 = 2_000_000_000.0;
 
 pub const TPI_300: Derived = Derived::Tpi { radius: 300.0 };
 pub const TPI_2000: Derived = Derived::Tpi { radius: 2000.0 };
@@ -163,10 +168,40 @@ pub fn derive(src: &(impl Source + ?Sized), d: Derived, at: Cells) -> Result<Ras
         Derived::Distance { cap, .. } => cap,
         _ => 0.0,
     };
-    if !(0.0..=MAX_REACH_M).contains(&reach) {
+    if !(reach >= 0.0 && reach.is_finite()) {
         return Err(Refusal(format!(
-            "a radius or cap must be between 0 and {MAX_REACH_M} m, not {reach}"
+            "a radius or cap must be a length in meters, not {reach}"
         )));
+    }
+    // Past the span of the region and the grid together, a larger radius or
+    // cap takes in nothing more, so it is searched only that far. This holds
+    // while no road or scenery lies off the grid's tiles, which is where a
+    // terrain's ground ends.
+    let within = reach.min(span(&g, at));
+    let cs = f64::from(g.cell_size);
+    let builtup = match d {
+        Derived::Distance {
+            to: Target::Builtup,
+            ..
+        } => (BUILTUP_RADIUS_M / cs).floor(),
+        _ => 0.0,
+    };
+    let pad = (within / cs).ceil() + builtup + 1.0;
+    let window = (f64::from(at.rows) + 2.0 * pad) * (f64::from(at.cols) + 2.0 * pad);
+    if window > WINDOW_CELLS_MAX {
+        return Err(Refusal(format!(
+            "this layer needs a window of {window:.0} cells, over the {WINDOW_CELLS_MAX:.0} \
+             it may read; shrink the region or the radius"
+        )));
+    }
+    if !matches!(d, Derived::Distance { .. }) {
+        let rows = at.len() as f64 * (2.0 * (within / cs).floor() + 1.0);
+        if rows > DISK_ROWS_MAX {
+            return Err(Refusal(format!(
+                "this layer sums {rows:.0} disk rows, over the {DISK_ROWS_MAX:.0} it may; \
+                 shrink the region or the radius"
+            )));
+        }
     }
     if let Derived::Density {
         pool: Pool::Objects,
@@ -185,23 +220,29 @@ pub fn derive(src: &(impl Source + ?Sized), d: Derived, at: Cells) -> Result<Ras
     Ok(match d {
         Derived::Valid => raster(valid(src, at)?),
         Derived::Slope | Derived::Aspect | Derived::Roughness => raster(horn(src, d, at)?),
-        Derived::Tpi { radius } => raster(tpi(src, &Disk::new(radius, &g), at)?),
-        Derived::Count { class, radius } => {
-            let disk = Disk::new(radius, &g);
+        Derived::Tpi { .. } => raster(tpi(src, &Disk::new(within, &g), at)?),
+        Derived::Count { class, .. } => {
+            let disk = Disk::new(within, &g);
             let n = structures(src, class, at.pad(disk.reach))?;
             let (sum, _) = disk.sums(&n, None, at.pad(disk.reach), disk.reach);
             raster(sum.into_iter().map(|s| s as f32).collect())
         }
         Derived::Density { pool, radius } => {
-            let disk = Disk::new(radius, &g);
+            let disk = Disk::new(within, &g);
             let n = instances(src, pool, at.pad(disk.reach))?;
             let (sum, _) = disk.sums(&n, None, at.pad(disk.reach), disk.reach);
             let c = f64::from(g.cell_size);
-            let hectares = disk.cells() as f64 * c * c / 10_000.0;
+            // A disk cut short still divides by the area asked for, whose
+            // cells number πr² to within a part in r.
+            let hectares = if within < radius {
+                std::f64::consts::PI * radius * radius / 10_000.0
+            } else {
+                disk.cells() as f64 * c * c / 10_000.0
+            };
             raster(sum.into_iter().map(|s| (s / hectares) as f32).collect())
         }
-        Derived::CoverFraction { cover, radius } => {
-            let disk = Disk::new(radius, &g);
+        Derived::CoverFraction { cover, .. } => {
+            let disk = Disk::new(within, &g);
             let w = at.pad(disk.reach).read(src, Layer::Cover)?;
             let is: Vec<f64> = w
                 .data
@@ -216,8 +257,23 @@ pub fn derive(src: &(impl Source + ?Sized), d: Derived, at: Cells) -> Result<Ras
             });
             raster(share.collect())
         }
-        Derived::Distance { to, cap } => distance(src, to, cap, at)?,
+        Derived::Distance { to, cap } => distance(src, to, within, cap, at)?,
     })
+}
+
+/// Meters from the farthest corner of `at` to the farthest corner of the
+/// grid's tiles, so no cell of the one lies farther from a cell of the other.
+fn span(g: &Grid, at: Cells) -> f64 {
+    let (tr, tc) = g.tiles();
+    // Along one axis, from `[lo, lo + n)` to `[0, end)`; in floats, so a
+    // region at the ends of i64 cannot overflow.
+    let apart = |lo: i64, n: u32, end: u32| {
+        let lo = lo as f64;
+        (lo + f64::from(n)).max(f64::from(end) - lo)
+    };
+    let r = apart(at.row0, at.rows, tr * g.tile_size);
+    let c = apart(at.col0, at.cols, tc * g.tile_size);
+    r.hypot(c) * f64::from(g.cell_size)
 }
 
 fn valid(src: &(impl Source + ?Sized), at: Cells) -> Result<Vec<f32>, Refusal> {
@@ -410,15 +466,18 @@ fn instances(src: &(impl Source + ?Sized), pool: Pool, win: Cells) -> Result<Vec
     Ok(n)
 }
 
+/// Distances searched out to `within`, which reaches every cell holding a
+/// target when it falls short of `cap`; nothing found reads as `cap`.
 fn distance(
     src: &(impl Source + ?Sized),
     to: Target,
+    within: f64,
     cap: f64,
     at: Cells,
 ) -> Result<Raster, Refusal> {
     let g = src.grid();
     let cs = f64::from(g.cell_size);
-    let pad = (cap / cs).ceil() as u32;
+    let pad = (within / cs).ceil() as u32;
     let win = at.pad(pad);
     let seeds: Vec<bool> = match to {
         Target::Water => {
@@ -1260,7 +1319,7 @@ mod tests {
     fn refuses_a_radius_that_is_not_a_length() {
         let s = synth();
         let cells = around(19000.0, 62000.0, 2);
-        for radius in [f64::NAN, -1.0, f64::INFINITY, MAX_REACH_M + 1.0] {
+        for radius in [f64::NAN, -1.0, f64::INFINITY] {
             assert!(derive(&s, Derived::Tpi { radius }, cells).is_err());
         }
         let objects = Derived::Density {
@@ -1268,6 +1327,105 @@ mod tests {
             radius: 100.0,
         };
         assert!(derive(&s, objects, cells).is_err());
+    }
+
+    #[test]
+    fn refuses_a_window_over_the_budget_whatever_the_radius() {
+        let s = synth();
+        let big = Cells {
+            rows: 5000,
+            ..around(19000.0, 62000.0, 5000)
+        };
+        let e = derive(&s, Derived::Valid, big).unwrap_err();
+        assert!(e.0.contains("shrink the region"), "{}", e.0);
+        let wide = Derived::Tpi { radius: 50_000.0 };
+        let e = derive(&s, wide, around(19000.0, 62000.0, 1000)).unwrap_err();
+        assert!(e.0.contains("disk rows"), "{}", e.0);
+        let nowhere = Cells {
+            row0: i64::MAX - 1,
+            col0: i64::MIN,
+            rows: 1,
+            cols: 1,
+        };
+        assert!(derive(&s, Derived::Tpi { radius: 1e12 }, nowhere).is_err());
+    }
+
+    #[test]
+    fn a_count_past_the_whole_grid_counts_every_building() {
+        let s = synth();
+        let mut total = 0;
+        s.structures_in([-1e9, -1e9, 1e9, 1e9], &mut |_, _, c| {
+            total += u32::from(c == Class::Building);
+        })
+        .unwrap();
+        assert!(total > 0);
+        // Partly off the grid's south-west corner.
+        let cells = Cells {
+            row0: -3,
+            col0: -2,
+            rows: 5,
+            cols: 4,
+        };
+        let d = Derived::Count {
+            class: Class::Building,
+            radius: 1e9,
+        };
+        let got = derive(&s, d, cells).unwrap();
+        assert!(got.values.iter().all(|&v| v == total as f32), "{total}");
+    }
+
+    #[test]
+    fn a_radius_past_the_whole_grid_takes_in_the_whole_grid() {
+        let s = synth();
+        let g = s.grid();
+        let cells = around(19000.0, 62000.0, 1);
+        let (r, c) = (cells.row0, cells.col0);
+        let all = Window::read(&s, Layer::Height, 0, 0, g.height, g.width).unwrap();
+        let known: Vec<f64> = all
+            .data
+            .iter()
+            .filter(|&&h| h != Layer::Height.nodata())
+            .map(|&h| f64::from(h))
+            .collect();
+        let mean = known.iter().sum::<f64>() / known.len() as f64;
+        let here = f64::from(all.get(r, c).unwrap());
+        let tpi = derive(&s, Derived::Tpi { radius: 1e12 }, cells).unwrap();
+        close(
+            tpi.get(r, c).unwrap(),
+            here - mean,
+            1e-2,
+            "tpi over everything",
+        );
+        // No water lies within the default cap; a cap past the grid finds the
+        // nearest, and the lake's edge is no farther.
+        let near = derive(&s, dist(Target::Water), cells).unwrap();
+        let far = Derived::Distance {
+            to: Target::Water,
+            cap: 1e12,
+        };
+        let far = derive(&s, far, cells).unwrap();
+        assert!(near.capped && !far.capped);
+        let (n, e) = s.form().centre(r as u32, c as u32);
+        let lake = (n - LAKE_NORTH_M).hypot(e - LAKE_EAST_M) - LAKE_RADIUS_M;
+        let got = f64::from(far.get(r, c).unwrap());
+        assert!(
+            got >= DISTANCE_CAP_M && got <= lake + C,
+            "{got} to water, {lake} to the lake"
+        );
+        // A density still divides by the area asked for.
+        let lines = |radius| Derived::Density {
+            pool: Pool::Lines,
+            radius,
+        };
+        let total = f64::from(s.form().pole_count());
+        let d = derive(&s, lines(1e7), cells).unwrap();
+        let want = total / (std::f64::consts::PI * 1e14 / 10_000.0);
+        close(
+            d.get(r, c).unwrap(),
+            want,
+            want * 1e-3,
+            "lines over everything",
+        );
     }
 
     #[test]
