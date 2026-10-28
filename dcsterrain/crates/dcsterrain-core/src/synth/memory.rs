@@ -135,11 +135,11 @@ impl Source for Synth {
                     }
                 }
             }
-            // Each forest cell's trees stand at its centre.
+            // Each forest cell's trees stand at its center.
             Pool::Trees => {
                 let g = self.grid();
                 let c = f64::from(g.cell_size);
-                // The cells whose centres lie in `lo..=hi`.
+                // The cells whose centers lie in `lo..=hi`.
                 let span = |lo: f64, hi: f64, origin: f64| {
                     let first = ((lo - origin) / c - 0.5).ceil().max(0.0);
                     let last = ((hi - origin) / c - 0.5)
@@ -330,7 +330,7 @@ mod tests {
         };
         assert_eq!(count(Pool::Trees, all), s.form().tree_count());
         assert_eq!(count(Pool::Lines, all), s.form().pole_count());
-        // One forest cell, its centre on the box's edge.
+        // One forest cell, its center on the box's edge.
         let (x, z) = s.form().abs(FOREST_SOUTH_M + 25.0, FOREST_WEST_M + 25.0);
         assert_eq!(
             count(Pool::Trees, [x, z, x + 10.0, z + 10.0]),

@@ -36,10 +36,10 @@ pub enum Derived {
     Aspect,
     /// Meters between the highest and lowest cell of the 3 × 3.
     Roughness,
-    /// The cell's height less the mean height of the cells whose centres
+    /// The cell's height less the mean height of the cells whose centers
     /// lie within `radius` meters of its own.
     Tpi { radius: f64 },
-    /// Meters to the nearest cell of the target, centre to centre, and
+    /// Meters to the nearest cell of the target, center to center, and
     /// `cap` where none lies within `cap`.
     Distance { to: Target, cap: f64 },
     /// Objects of the class in the cells within `radius`.
@@ -294,10 +294,10 @@ fn tpi(src: &(impl Source + ?Sized), disk: &Disk, at: Cells) -> Result<Vec<f32>,
     Ok(out)
 }
 
-/// The cells whose centres lie within a radius of a cell's centre, as one
+/// The cells whose centers lie within a radius of a cell's center, as one
 /// run of columns on each row.
 struct Disk {
-    /// Cells from the centre to the farthest row.
+    /// Cells from the center to the farthest row.
     reach: u32,
     /// Per row offset from `-reach` to `reach`, the columns either side.
     half: Vec<i64>,
@@ -573,7 +573,7 @@ mod tests {
         (v / C).floor() as i64
     }
 
-    /// `n` cells a side, the cell holding `(north, east)` at its centre.
+    /// `n` cells a side, the cell holding `(north, east)` at its center.
     fn around(north: f64, east: f64, n: u32) -> Cells {
         let h = i64::from(n / 2);
         Cells {
@@ -589,7 +589,7 @@ mod tests {
             .flat_map(move |r| (0..i64::from(c.cols)).map(move |k| (c.row0 + r, c.col0 + k)))
     }
 
-    /// The offsets of the cells whose centres lie within `radius` of a
+    /// The offsets of the cells whose centers lie within `radius` of a
     /// cell's, tested one by one.
     fn disk(radius: f64) -> Vec<(i64, i64)> {
         let reach = (radius / C) as i64 + 1;
@@ -723,7 +723,7 @@ mod tests {
         let s = synth();
         let t = s.form();
         for (d, radius) in [(TPI_300, 300.0), (TPI_2000, 2000.0)] {
-            // On the plane alone the disk's mean is its centre's height.
+            // On the plane alone the disk's mean is its center's height.
             close(one(&s, d, 19000.0, 62000.0), 0.0, 0.5, "tpi on the plane");
             let (row, col) = (at(HILL_A_NORTH_M), at(HILL_A_EAST_M));
             let (n, e) = t.centre(row as u32, col as u32);
@@ -761,7 +761,7 @@ mod tests {
     #[test]
     fn distances_to_roads_rail_and_cover_count_whole_cells() {
         let s = synth();
-        // The roads and rail run along rows of cell centres.
+        // The roads and rail run along rows of cell centers.
         let cases = [
             (Target::Road, ROAD_EW_NORTH_M, 1.0, 10025.0),
             (
@@ -783,7 +783,7 @@ mod tests {
                 assert_eq!(v, (f64::from(k) * C) as f32, "{to:?} {k}");
             }
         }
-        // The forest's hole is 1 km square; its centre is 500 m from trees.
+        // The forest's hole is 1 km square; its center is 500 m from trees.
         let hole = one(&s, dist(Target::Cover(Cover::Forest)), 42025.0, 57025.0);
         assert_eq!(hole, 500.0);
     }
