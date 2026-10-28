@@ -247,7 +247,8 @@ fn horn(src: &(impl Source + ?Sized), d: Derived, at: Cells) -> Result<Vec<f32>,
             let v = match d {
                 Derived::Slope => slope,
                 Derived::Aspect if slope < FLAT_DEG => f64::NAN,
-                Derived::Aspect => (-east).atan2(-north).to_degrees().rem_euclid(360.0),
+                // Adding zero turns a -0 into 0.
+                Derived::Aspect => (-east).atan2(-north).to_degrees().rem_euclid(360.0) + 0.0,
                 _ => {
                     let (lo, hi) = z
                         .iter()
