@@ -345,7 +345,7 @@ the region's tiles held and the scenery index and road graph built:
 | `valid` | 1 where height is not `nodata` and the cell is not sea | 0.3 ms |
 | `slope`, `aspect`, `roughness` | Horn 3 × 3 gradient in degrees; downslope azimuth from north, clockwise, undefined under 0.5°; max − min height in 3 × 3; undefined where any of the nine has no height | 1.9–4.8 ms |
 | `tpi_300`, `tpi_2000` | height − mean of the known heights within 300 m, 2 km, at 50 m | 4.0–4.4 ms; 17–19 ms |
-| `dist_road`, `dist_rail`, `dist_water`, `dist_builtup`, distance to a `cover` class | Euclidean distance (Felzenszwalb–Huttenlocher) between cell centers to a cell a road or rail edge crosses, any water, a built-up cell (3 or more buildings within 100 m), or a cell of the class | 1.6–57 ms; road and rail scan every edge of the graph, built-up reads the buildings within 5.1 km |
+| `dist_road`, `dist_rail`, `dist_water`, `dist_builtup`, distance to a `cover` class | Euclidean distance (Felzenszwalb–Huttenlocher) between cell centers to a cell a road or rail edge passes through, any water, a built-up cell (3 or more buildings within 100 m), or a cell of the class | 1.6–57 ms; road and rail scan every edge of the graph, built-up reads the buildings within 5.1 km |
 | building and industrial counts | objects of the class within a radius | 5.6–28 ms at 1 km |
 | tree and line density | instances of the trees or lines pool per hectare within a radius | 2.7–224 ms at 300 m, the most on the Marianas' forests |
 | `cover` fractions | share of the covered cells within a radius that are of a class | 3.9–4.0 ms at 300 m |
