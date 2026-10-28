@@ -4,16 +4,17 @@
 //! built from the `.surface5` file the first time. A tile or point then reads
 //! only the blocks under it, each at its offset, and keeps the prepared
 //! blocks and the rasterized tiles in small caches, so a batch of requests
-//! over one area reads its blocks once. Nothing maps the whole file.
+//! over one area reads its blocks once. Its scenery is read the same way, the
+//! first time it is asked for. Nothing maps a whole file.
 
 use std::collections::HashMap;
 use std::fs::File;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use super::{CELL_SIZE, Ground, Identity, Layer, Refusal, Source, TILE_SIZE};
-use crate::cache::{Cache, Entry};
+use crate::cache::{Cache, Entry, TerrainCache};
 use crate::decode::install::{self, Map};
 use crate::decode::surface5::ground::{self, Prepared, Tile, cover_of, grid_units, surface_of};
 use crate::decode::surface5::{RUNWAY_MATERIAL, Surface5, grid_for, water_class};
@@ -24,6 +25,9 @@ use crate::grid::Grid;
 pub const BLOCK_BUDGET: usize = 32 << 20;
 /// Rasterized tiles kept between requests, of every layer: about 20 KiB each.
 pub const TILE_COUNT: usize = 256;
+
+mod scenery;
+pub use scenery::{SCENE_NODES, SceneNodes, Scenery};
 
 /// How far past its stated box a block is read for a point or tile. Its
 /// vertices lie inside the box to within a centimeter.
@@ -192,6 +196,10 @@ pub struct Install {
     tile_blocks: Vec<u32>,
     blocks: Mutex<Lru<usize, Arc<Prepared>>>,
     tiles: Mutex<Lru<(u32, u32), Arc<Tile>>>,
+    cache: TerrainCache,
+    /// Opened the first time scenery is asked for, so a scene file no
+    /// decoder reads refuses scenery and nothing else.
+    scenery: OnceLock<Result<Scenery, Refusal>>,
 }
 
 /// The sizes of the surface, road and scene files, joined by `-`.
@@ -210,7 +218,8 @@ impl Install {
     /// read from `cache`, built there first if missing or stale.
     pub fn open(root: &Path, id: &str, cache: &Cache) -> Result<Install, Refusal> {
         let map = install::open(root, id)?;
-        let opened = cache.terrain(root, &map).get(&MESH_TOC)?;
+        let terrain = cache.terrain(root, &map);
+        let opened = terrain.get(&MESH_TOC)?;
         let unreadable = |e: &dyn std::fmt::Display| {
             Refusal(format!(
                 "{} cannot be read ({e}); `dcsterrain cache clear --terrain {}` rebuilds it",
@@ -253,6 +262,8 @@ impl Install {
             tile_blocks,
             blocks: Mutex::new(Lru::new(BLOCK_BUDGET)),
             tiles: Mutex::new(Lru::new(TILE_COUNT)),
+            cache: terrain,
+            scenery: OnceLock::new(),
         })
     }
 
@@ -264,6 +275,15 @@ impl Install {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// The terrain's scenery, its index read from the cache, built there
+    /// first if missing or stale.
+    pub fn scenery(&self) -> Result<&Scenery, Refusal> {
+        self.scenery
+            .get_or_init(|| Scenery::open(&self.root, &self.cache))
+            .as_ref()
+            .map_err(Refusal::clone)
     }
 
     pub fn map(&self) -> &Map {
@@ -374,6 +394,7 @@ mod tests {
 
     use super::*;
     use crate::decode::container;
+    use crate::decode::scn5::{self, Pool};
     use crate::decode::surface5::build::{self, f32s, file, tri, u32s, vec3};
     use crate::decode::surface5::{LAKE, ROAD_STRIP};
     use crate::grid::Window;
@@ -585,6 +606,91 @@ mod tests {
             panic!("opened");
         };
         assert!(e.0.contains("version 6"), "{e}");
+    }
+
+    /// A scene over the square: a house, a tree and a pole, each in its own
+    /// pool, and a house placed as a group record.
+    fn scene(version: u32) -> Vec<u8> {
+        scn5::build::Scene {
+            version,
+            models: vec![
+                ("house", [-5.0, 0.0, -5.0, 5.0, 8.0, 5.0]),
+                ("oak", [0.0; 6]),
+                ("pole", [-0.5, 0.0, -0.5, 0.5, 9.0, 0.5]),
+            ],
+            nodes: vec![scn5::build::Node {
+                t: [1500.0, 0.0, 2500.0],
+                p: vec![[0.0, 100.0, 0.0], [100.0, 100.0, 0.0], [0.0, 100.0, 100.0]],
+                model: vec![0, 1, 2],
+                axis: vec![[1.0, 0.0]; 3],
+            }],
+            group: vec![scn5::build::Record {
+                model: 0,
+                pos: [1800.0, 100.0, 2800.0],
+                heading: 0.0,
+            }],
+            pools: [vec![(0, 0)], vec![(0, 2)], vec![(0, 1)]],
+            shift: None,
+        }
+        .file()
+    }
+
+    fn ids(t: &Install, pool: Pool, b: [f64; 4]) -> Vec<u64> {
+        let mut out = Vec::new();
+        t.scenery()
+            .unwrap()
+            .each_in(pool, b, |i| out.push(i.id))
+            .unwrap();
+        out
+    }
+
+    #[test]
+    fn scenery_answers_a_box_through_the_cache() {
+        for version in [8, 9] {
+            let root = install(&file(&[square([0, 0])], 1));
+            put(
+                &root.0,
+                "Mods/terrains/Test/Scenes/Test.scn5",
+                &scene(version),
+            );
+            let c = Scratch::new();
+            let cache = Cache::new(&c.0);
+            let t = Install::open(&root.0, "Test", &cache).unwrap();
+            let nodes = c.0.join("Test").join("1.2.3.4").join("scene.nodes");
+            assert!(!nodes.exists(), "built before scenery was asked for");
+
+            let near = |x: f64, z: f64| [x - 10.0, z - 10.0, x + 10.0, z + 10.0];
+            assert_eq!(ids(&t, Pool::Objects, near(1500.0, 2500.0)), [0]);
+            assert_eq!(ids(&t, Pool::Trees, near(1600.0, 2500.0)), [1]);
+            assert_eq!(ids(&t, Pool::Lines, near(1500.0, 2600.0)), [2]);
+            assert_eq!(ids(&t, Pool::Objects, near(1800.0, 2800.0)), [1 << 13]);
+            assert!(ids(&t, Pool::Trees, near(1500.0, 2500.0)).is_empty());
+            assert!(nodes.is_file());
+            let s = t.scenery().unwrap();
+            assert_eq!(s.index().version, version);
+            assert_eq!(s.index().models[1].name, "oak");
+
+            let map = install::open(&root.0, "Test").unwrap();
+            let again = cache.terrain(&root.0, &map).get(&SCENE_NODES).unwrap();
+            assert!(!again.built);
+        }
+    }
+
+    #[test]
+    fn a_scene_file_no_decoder_reads_refuses_scenery_not_heights() {
+        let root = install(&file(&[square([0, 0])], 1));
+        let bad = container::build("landscape5::Scene5File", 10, 0);
+        put(&root.0, "Mods/terrains/Test/Scenes/Test.scn5", &bad);
+        let c = Scratch::new();
+        let t = Install::open(&root.0, "Test", &Cache::new(&c.0)).unwrap();
+        let Err(e) = t.scenery() else {
+            panic!("scenery opened");
+        };
+        assert!(
+            e.0.contains("Test.scn5") && e.0.contains("version 10"),
+            "{e}"
+        );
+        assert_eq!(t.point(1100.0, 2100.0).unwrap().unwrap().surface, 5);
     }
 
     #[test]

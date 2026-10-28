@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde_json::{Value, json};
 
+use dcsterrain_core::decode::scn5::build as scene;
 use dcsterrain_core::decode::surface5::build::{Block, file, tri, u32s, vec3};
 
 fn run(args: &[&str]) -> Output {
@@ -67,10 +68,33 @@ fn terrain(root: &Path, folder: &str, id: &str, scene_version: u32) {
     for (dir, ext, class, version) in files {
         let bytes = match ext {
             "surface5" => surface(),
+            "scn5" if version == 9 => scenery(),
             _ => header(class, version),
         };
         put(root, &format!("{m}/{dir}/{folder}.{ext}"), &bytes);
     }
+}
+
+/// A scene of one house over the mesh, in the objects pool, and nothing in
+/// the others but a tree and a pole beside it.
+fn scenery() -> Vec<u8> {
+    scene::Scene {
+        version: 9,
+        models: vec![
+            ("house", [-5.0, 0.0, -5.0, 5.0, 8.0, 5.0]),
+            ("oak", [0.0; 6]),
+        ],
+        nodes: vec![scene::Node {
+            t: [500.0, 0.0, 500.0],
+            p: vec![[0.0, 10.0, 0.0], [20.0, 10.0, 0.0], [0.0, 10.0, 20.0]],
+            model: vec![0, 1, 1],
+            axis: vec![[1.0, 0.0]; 3],
+        }],
+        group: Vec::new(),
+        pools: [vec![(0, 0)], vec![(0, 2)], vec![(0, 1)]],
+        shift: None,
+    }
+    .file()
 }
 
 /// A mesh of one block: two triangles over a kilometre square at the
@@ -199,7 +223,7 @@ fn opens_a_terrain_by_the_id_its_entry_declares() {
         "{}-{}-{}",
         surface().len(),
         size("landscape4::lRoadNetwork"),
-        size("landscape5::Scene5File")
+        scenery().len()
     );
     assert_eq!(v["terrain_fingerprint"], want);
     let extent = json!({"min_x": 0.0, "min_z": 0.0, "max_x": 1000.0, "max_z": 1000.0});
@@ -394,11 +418,13 @@ fn list_terrains_shows_a_cache_after_index_and_none_after_clear() {
     assert_eq!(germany["path"], dir.to_str().unwrap());
     assert_eq!(germany["entries"][0]["name"], "mesh.toc");
     let size = germany["entries"][0]["size"].as_u64().unwrap();
-    assert_eq!(germany["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(germany["entries"][1]["name"], "scene.nodes");
+    let size = size + germany["entries"][1]["size"].as_u64().unwrap();
+    assert_eq!(germany["entries"].as_array().unwrap().len(), 2);
 
     let out = run(&["list-terrains", "--install", root, "--cache", cache]);
     let text = String::from_utf8(out.stdout).unwrap();
-    assert!(text.contains(&format!("1 entry, {size} B")), "{text}");
+    assert!(text.contains(&format!("2 entries, {size} B")), "{text}");
 
     let out = run(&[
         "cache",

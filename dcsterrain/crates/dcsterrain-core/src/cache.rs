@@ -50,7 +50,8 @@ pub trait Entry: Sync {
 
 /// Every kind of entry `index` builds.
 pub fn entries() -> Vec<&'static dyn Entry> {
-    vec![&crate::source::install::MESH_TOC]
+    use crate::source::install::{MESH_TOC, SCENE_NODES};
+    vec![&MESH_TOC, &SCENE_NODES]
 }
 
 /// Where the cache lives when `--cache` does not say.
@@ -504,6 +505,11 @@ impl Opened {
 impl TerrainCache {
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    /// The terrain whose entries these are.
+    pub fn map(&self) -> &Map {
+        &self.map
     }
 
     /// The part of a key a check compares: the build, then for each install
