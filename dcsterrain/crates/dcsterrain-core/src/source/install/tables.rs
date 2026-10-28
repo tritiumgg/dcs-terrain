@@ -47,6 +47,15 @@ impl TablesJson {
             hook: Some(std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf())),
         }
     }
+
+    /// Refuses the hook's tables when they are from another terrain or build
+    /// than `map`, so a caller can refuse before building anything else.
+    pub fn check_hook(&self, map: &Map) -> Result<(), Refusal> {
+        match &self.hook {
+            Some(dir) => read_hook(dir, map).map(|_| ()),
+            None => Ok(()),
+        }
+    }
 }
 
 impl Entry for TablesJson {

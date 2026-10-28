@@ -532,3 +532,112 @@ fn prune_keeps_only_the_installed_build() {
     assert_eq!(out.status.code(), Some(1));
     assert!(other.0.join("Caucasus/0.0.0.0/keep").is_file());
 }
+
+/// A hook directory for GermanyCW at `build`, naming one airdrome the
+/// terrain has no taxiway file for.
+fn hook(build: &str) -> Tree {
+    let t = scratch();
+    let manifest = json!({
+        "theatre": "GermanyCW", "dcs_build": build,
+        "dcs_build_timestamp": "20000101-000000",
+    });
+    put(&t.0, "manifest.json", manifest.to_string().as_bytes());
+    let airdromes = json!([{"id": 1, "name_id": "Ghost", "code": "EDXX"}]);
+    put(&t.0, "airdromes.json", airdromes.to_string().as_bytes());
+    t
+}
+
+#[test]
+fn index_imports_a_hook_directory_and_refuses_one_from_another_build() {
+    let t = install(false);
+    let root = t.0.to_str().unwrap();
+    let c = scratch();
+    let cache = c.0.to_str().unwrap();
+    let index = |hook: &Path| {
+        run(&[
+            "index",
+            "--install",
+            root,
+            "--terrain",
+            "GermanyCW",
+            "--cache",
+            cache,
+            "--hook",
+            hook.to_str().unwrap(),
+        ])
+    };
+
+    let other = hook("2.9.29.27468");
+    let out = index(&other.0);
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("dcs_build 2.9.29.27468, not 0.0.0.1"), "{err}");
+    assert!(!c.0.join("GermanyCW").exists(), "built before refusing");
+
+    let same = hook("0.0.0.1");
+    let out = index(&same.0);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(text.contains("tables.json: built"), "{text}");
+    assert!(
+        text.contains("0 airdromes, 1 it names that no taxiway file does"),
+        "{text}"
+    );
+    let entry = c.0.join("GermanyCW/0.0.0.1/tables.json");
+    let doc: Value = serde_json::from_slice(&fs::read(entry).unwrap()).unwrap();
+    assert_eq!(doc["payload"]["hook"]["unmatched"], json!(["Ghost"]));
+
+    // Asked again, it imports again rather than finding the entry current.
+    let out = index(&same.0);
+    assert!(String::from_utf8_lossy(&out.stdout).contains("tables.json: built"));
+}
+
+#[test]
+fn index_refuses_a_projection_fitted_over_two_meters_off_unless_allowed() {
+    let t = install(false);
+    // Three beacons, one 4 m from where its degrees put it: the fit keeps
+    // it, and misses it by more than 2 m.
+    let tm = dcsterrain_core::crs::table("GermanyCW").unwrap();
+    let mut lua = String::from("beacons = {\n");
+    for (k, (x, z)) in [(0.0, 0.0), (50_000.0, 10_000.0), (-20_000.0, 60_000.0)]
+        .into_iter()
+        .enumerate()
+    {
+        let (lat, lon) = tm.to_latlon(x, z);
+        let x = if k == 0 { x + 4.0 } else { x };
+        lua += &format!(
+            "{{ beaconId = 'b{k}'; position = {{ {x}, 0, {z} }}; \
+             positionGeo = {{ latitude = {lat}, longitude = {lon} }} }},\n"
+        );
+    }
+    lua += "}\n";
+    put(
+        &t.0,
+        "Mods/terrains/GermanyColdWar/Beacons.lua",
+        lua.as_bytes(),
+    );
+    let root = t.0.to_str().unwrap();
+    let c = scratch();
+    let cache = c.0.to_str().unwrap();
+    let index = |extra: &[&str]| {
+        let mut args = vec!["index", "--install", root, "--terrain", "GermanyCW"];
+        args.extend(["--cache", cache]);
+        args.extend(extra);
+        run(&args)
+    };
+    let out = index(&[]);
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("misses one by 2.67 m"), "{err}");
+    assert!(err.contains("--allow-crs-residual"), "{err}");
+    let out = index(&["--allow-crs-residual"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

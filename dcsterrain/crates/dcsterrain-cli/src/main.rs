@@ -9,9 +9,10 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use dcsterrain_core::cache::{self, Cache, Stored};
+use dcsterrain_core::cache::{self, Cache, Entry, Stored};
 use dcsterrain_core::decode::install;
 use dcsterrain_core::query::{self, Terrain};
+use dcsterrain_core::source::install::{Tables, TablesJson};
 use dcsterrain_core::synth::{self, Synth};
 use dcsterrain_core::types::Issue;
 use serde_json::{Value, json};
@@ -83,6 +84,14 @@ enum Command {
         /// The terrain's id, as `list-terrains` shows it.
         #[arg(long)]
         terrain: String,
+        /// A directory of the optional hook's tables, from the same terrain and
+        /// build, whose airdrome fields only a running DCS knows are merged in.
+        #[arg(long, value_name = "DIR")]
+        hook: Option<PathBuf>,
+        /// Accept a projection fitted to the terrain's beacons that misses one
+        /// by more than 2 m.
+        #[arg(long)]
+        allow_crs_residual: bool,
         #[command(flatten)]
         cache: CacheDir,
     },
@@ -196,8 +205,10 @@ fn main() -> ExitCode {
         Command::Index {
             install,
             terrain,
+            hook,
+            allow_crs_residual,
             cache,
-        } => index(install, &terrain, cache),
+        } => index(install, &terrain, hook, allow_crs_residual, cache),
         Command::Cache { action } => match action {
             CacheAction::List {
                 install,
@@ -488,26 +499,58 @@ fn report(done: Result<(), String>) -> ExitCode {
     }
 }
 
-fn index(install: Option<PathBuf>, id: &str, cache: CacheDir) -> ExitCode {
+fn index(
+    install: Option<PathBuf>,
+    id: &str,
+    hook: Option<PathBuf>,
+    allow_crs_residual: bool,
+    cache: CacheDir,
+) -> ExitCode {
     report((|| {
         let cache = cache.open()?;
         let root = install_root(install)?;
         let map = install::open(&root, id).map_err(|e| e.0)?;
         let terrain = cache.terrain(&root, &map);
-        let built = terrain.index(&cache::entries()).map_err(|e| e.0)?;
+        // The hook's tables are no input the key covers, so importing them
+        // rebuilds the tables whether or not they are current; a directory
+        // from another build is refused before anything is built.
+        let hooked = hook.as_deref().map(TablesJson::with_hook);
+        if let Some(t) = &hooked {
+            t.check_hook(&map).map_err(|e| e.0)?;
+        }
         println!(
             "{} {} at {}",
             map.theatre,
             map.build.version,
             terrain.dir().display()
         );
-        if built.is_empty() {
-            println!("no entry kinds exist yet: nothing to build");
+        for entry in cache::entries() {
+            let opened = match &hooked {
+                Some(t) if t.name() == entry.name() => terrain.rebuild(t),
+                _ => terrain.get(entry),
+            };
+            let fresh = opened.map_err(|e| e.0)?.built;
+            println!(
+                "{}: {}",
+                entry.name(),
+                if fresh { "built" } else { "current" }
+            );
         }
-        for (name, fresh) in built {
-            println!("{name}: {}", if fresh { "built" } else { "current" });
+        let tables = Tables::open(&terrain).map_err(|e| e.0)?;
+        if let Some(h) = &tables.hook {
+            match &h.dropped {
+                None => println!(
+                    "the hook's tables from {}: {} airdromes, {} it names that no taxiway file does",
+                    h.dir,
+                    h.airdromes,
+                    h.unmatched.len()
+                ),
+                Some(why) => println!("the hook's tables from {} were dropped: {why}", h.dir),
+            }
         }
-        Ok(())
+        tables
+            .check_crs(&map.theatre, allow_crs_residual)
+            .map_err(|e| e.0)
     })())
 }
 
