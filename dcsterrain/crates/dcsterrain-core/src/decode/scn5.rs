@@ -42,6 +42,8 @@ use super::{Decoder, dispatch};
 
 mod index;
 pub use index::{Index, Placed};
+mod tree;
+pub use tree::footprint;
 mod walk;
 pub use walk::Instance;
 mod write;
