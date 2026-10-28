@@ -45,16 +45,10 @@ pub trait Entry: Sync {
     /// files name them; its key covers these files only.
     fn roles(&self) -> &[&str];
     /// Builds the payload from `files`, the install files of its roles with
-    /// the class and version each header states, read for this build. `dir`
-    /// is the build's cache directory, where the entry being replaced may
-    /// still be.
-    fn build(
-        &self,
-        install: &Path,
-        map: &Map,
-        files: &[FileEntry],
-        dir: &Path,
-    ) -> Result<Vec<u8>, Refusal>;
+    /// the class and version each header states, read for this build.
+    /// `cache` is the terrain's, whose directory may still hold the entry
+    /// being replaced, and through which an entry built from another gets it.
+    fn build(&self, cache: &TerrainCache, files: &[FileEntry]) -> Result<Vec<u8>, Refusal>;
     /// Whether the entry is a JSON document, whose payload is a JSON value.
     /// A JSON entry cannot open with the binary header and stay JSON, so it
     /// is one object carrying the version, the key and the payload as its
@@ -511,6 +505,11 @@ impl TerrainCache {
         &self.dir
     }
 
+    /// The install the terrain is read from.
+    pub fn install(&self) -> &Path {
+        &self.install
+    }
+
     /// The terrain whose entries these are.
     pub fn map(&self) -> &Map {
         &self.map
@@ -655,7 +654,7 @@ impl TerrainCache {
         // Refused before the build, which can take minutes, not after it.
         self.make_dir()?;
         let (classified, key) = self.built_key(&files)?;
-        let payload = entry.build(&self.install, &self.map, &classified, &self.dir)?;
+        let payload = entry.build(self, &classified)?;
         let (open, close) = framing(entry.version(), &key, payload.len() as u64, entry.json());
         // A forced build must not settle for the entry another builder put
         // there, which lacks what forced it.
@@ -1053,13 +1052,8 @@ mod tests {
         fn roles(&self) -> &[&str] {
             self.roles
         }
-        fn build(
-            &self,
-            _: &Path,
-            map: &Map,
-            _: &[FileEntry],
-            dir: &Path,
-        ) -> Result<Vec<u8>, Refusal> {
+        fn build(&self, cache: &TerrainCache, _: &[FileEntry]) -> Result<Vec<u8>, Refusal> {
+            let (map, dir) = (cache.map(), cache.dir());
             self.builds.fetch_add(1, Ordering::SeqCst);
             if self.json {
                 let v = serde_json::json!({"of": map.theatre, "dir": dir});

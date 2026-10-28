@@ -65,13 +65,8 @@ impl Entry for MeshToc {
         &["surface"]
     }
 
-    fn build(
-        &self,
-        root: &Path,
-        map: &Map,
-        files: &[FileEntry],
-        _: &Path,
-    ) -> Result<Vec<u8>, Refusal> {
+    fn build(&self, cache: &TerrainCache, files: &[FileEntry]) -> Result<Vec<u8>, Refusal> {
+        let (root, map) = (cache.install(), cache.map());
         let f = files
             .iter()
             .find(|f| f.role == "surface")

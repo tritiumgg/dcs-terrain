@@ -13,7 +13,6 @@ use std::sync::{Arc, Mutex};
 
 use super::{Lru, refusal};
 use crate::cache::{Entry, TerrainCache};
-use crate::decode::install::Map;
 use crate::decode::scn5::{Index, Instance, Pool, Scene};
 use crate::decode::surface5::ReadAt;
 use crate::extract::FileEntry;
@@ -42,13 +41,8 @@ impl Entry for SceneNodes {
         &["scene"]
     }
 
-    fn build(
-        &self,
-        root: &Path,
-        map: &Map,
-        files: &[FileEntry],
-        _: &Path,
-    ) -> Result<Vec<u8>, Refusal> {
+    fn build(&self, cache: &TerrainCache, files: &[FileEntry]) -> Result<Vec<u8>, Refusal> {
+        let (root, map) = (cache.install(), cache.map());
         let f = files
             .iter()
             .find(|f| f.role == "scene")

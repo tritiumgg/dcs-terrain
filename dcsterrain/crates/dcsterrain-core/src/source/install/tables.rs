@@ -71,13 +71,8 @@ impl Entry for TablesJson {
         &ROLES
     }
 
-    fn build(
-        &self,
-        root: &Path,
-        map: &Map,
-        files: &[FileEntry],
-        dir: &Path,
-    ) -> Result<Vec<u8>, Refusal> {
+    fn build(&self, cache: &TerrainCache, files: &[FileEntry]) -> Result<Vec<u8>, Refusal> {
+        let (root, map, dir) = (cache.install(), cache.map(), cache.dir());
         let mut t = Tables::decode(root, map, files)?;
         match &self.hook {
             Some(h) => t.import(h, map)?,
