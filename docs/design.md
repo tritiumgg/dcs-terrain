@@ -38,7 +38,7 @@ The repository ships tools only. Users run them against their own install.
 ```
 DCS install (read-only)                 cache/<terrain>/<build>/   (rebuildable)
   .surface5 ─┐                            mesh.toc        block offsets (0.05–1.5 MB)
-  .scn5   ───┤                            scene.nodes     pool-tree offsets (2.5–22 MiB)
+  .scn5   ───┤                            scene.nodes     node offsets, models, pools (0.35–25 MiB)
   .rn4    ───┤   decoders                 tables.json     airdromes, runways, stands, beacons,
   airfield ──┤ ─────────────────────▶                     radio, towns, nodes, CRS, classes
   Lua files ─┘        │                   roads.graph     graph, geometry, betweenness (9–200 MiB)
@@ -111,7 +111,7 @@ A failed check refuses the terrain the same way.
 |---|---|---|
 | `.surface5` (`landscape5::Surface5File`) | Finest-mesh triangles: height, water, ground type | §3.3 |
 | `.rn4` | Road and rail polylines with class names and node ids | A node id names a **junction**, not a point: an edge end's id joins it to other ends with the same id. An id of `0xFFFFFFFF`, or one whose ends over the terrain's roads and rails do not all lie within 10 km of their mean, joins nothing. The router's own points lie within 2 m of a decoded road edge and 3 m of a rail edge at p90 |
-| `.scn5` | Scenery: objects, trees and lines pools, the model table, removals | An instance id splits at bit 13 when every node holds at most 8 192 instances, at bit 15 when the largest holds at most 32 768; a larger node refuses the file. At least 99 % of 1 000 sampled ids per pool, split that way, must land within 0.5 m of the pool's own box for that id |
+| `.scn5` | Scenery: objects, trees and lines pools, each over its own quadtree, and the model table | §3.3. An instance id splits at bit 13 when every node holds at most 8 192 instances, at bit 15 when the largest holds at most 32 768; a larger node refuses the file. At least 99 % of 1 000 sampled ids per pool, split that way, must land within 0.5 m of the pool's own box for that id |
 | `.rn5`, `assets.assets` | Airfields: runways, taxiways, stands | A named node that is not a runway end is a stand only when its class has a stand record in `assets.assets`. A node with no class at all is a stand with null class fields; no installed terrain has one |
 | `Beacons.lua`, `Radio.lua`, `Map/towns.lua`, `MissionGenerator/nodes.lua` | Beacons, radio, towns, mission nodes | §3.4 |
 
@@ -151,6 +151,15 @@ A failed check refuses the terrain the same way.
   runway triangles binned, so a point over an airfield tests a few) into a
   small LRU, and never memory-maps a whole terrain file: on Windows that costs
   about 2 MiB of commit per GiB mapped (123 MiB for Germany's `.surface5`).
+- **Scenery is read the same way.** `scene.nodes` keeps where each
+  instancer node's arrays lie. A box descends each pool's own tree, tests
+  the boxes each meeting node owns, and reads each hit's position, model
+  and axis at its offset, through 4 MiB of 16 KiB chunks. Objects also take
+  each group record whose model box, turned by its heading, meets the box.
+  Measured on 2.9.30.28738, 2 km boxes over all three pools: a whole-file
+  map of GermanyCW's `.scn5` added 15.5 MiB of commit, the chunks 4.6 MiB;
+  warm p50 0.056 ms mapped against 0.38 ms read, cold p50 4.5 ms against
+  7.8 ms. On Caucasus, cold p50 1.6 ms, p95 8.3 ms.
 
 Measured against the live Caucasus extract (2.9.29.27468), whole terrain: heights
 exact on 99.9485 % of 141.19 M cells and within 1 m on 99.99859 %, worst 29 m
@@ -202,7 +211,7 @@ derived from.
 | Entry | Why it cannot be per query | Size | Build |
 |---|---|---|---|
 | `mesh.toc` | The `.surface5` table of contents can only be pattern-scanned: 21 ms (MarianasWWII) to 0.7 s (GermanyCW) per open | 0.05–1.5 MB, every block's arrays and its runway subsets, the one material read | < 1 s |
-| `scene.nodes` | Parsing the `.scn5` head costs 2 s and 559 MiB on Germany | 2.5–22 MiB | < 2 s |
+| `scene.nodes` | Parsing the `.scn5` head costs 2 s and 559 MiB on Germany | 0.35 MiB (MarianaIslands) to 24.5 MiB (GermanyCW): each node's array offsets, the model table, the group and the pools | 0.05–1.8 s |
 | `tables.json` | Airfields, stands, Lua tables, the fitted projection, scenery classes and any imported hook tables each cost a full decode; together they are small | < 1 MiB | < 2 s |
 | `roads.graph` | The `.rn4` has no spatial order: 5.5 s and 3.3 GB to scan on Germany. Betweenness is global | 9.3 MiB (Caucasus) to 200 MiB (Germany) | 7 ms–5 s; betweenness 1 s (Caucasus) to ~250 s CPU (Germany) |
 | `places` | Settlements need every building on the terrain (§6.3) | 6–24 k rows, < 2 MiB | a whole objects-pool walk, 3.8 s (Caucasus) to 53 s (GermanyCW), plus 0.2–8 s grouping |

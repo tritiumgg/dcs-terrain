@@ -427,10 +427,17 @@ u48 offset`, three to a pool:
 |---|---|
 | 1 | `count` ids at B + offset: u64, or u32 for the non-instanced group's pool |
 | 2 | same `count`; `count × f32[6]` AABBs (world min x,y,z, max x,y,z) at B + offset |
-| 3 | BVH nodes (48 B each, not decoded) |
+| 3 | `count` tree nodes of 48 B at B + offset: the pool's loose quadtree (below) |
 
 Find a pool by its structure: equal counts, `0 < count < 2^32`, and `offset2 - offset1` equal to `count × 8`
 (u64 ids), `count × 4`, or `count × 4` rounded up to 8 (u32 ids). The AABBs must end within the data region.
+
+Each tree node is `f32[6]` box (world min x,y,z, max x,y,z), `u32 first`, `u32 count`, `u32[4]` children
+(`0xFFFFFFFF` for none). Node 0 is the root. A node owns pool entries `first..first + count`, and the pool's ids
+and AABBs are stored in the tree's order. A box query descends the nodes whose box meets it and tests the AABBs
+each owns: on 2.9.30.28738, 400 two-kilometer boxes on Caucasus and 400 on Nevada, over all three pools, return
+exactly the entries a scan of every AABB finds (scenery-bench research found the tree; the N4 opt-in tests
+checked it against the scan).
 
 | pool, in file order | Caucasus | Nevada | Syria | contents |
 |---|---|---|---|---|
@@ -477,7 +484,7 @@ light headings match the runway course within 2° (Caucasus 91.4 %, Nevada 87.8 
 swapped, 1-2 %). Bridge X axes are perpendicular to the road beneath them in 87 % of cases. The 208 Kutaisi
 runway lights fit a line at 74.0°, y 45.7 m.
 **Guessed:** that the live scenery id equals `node << S | index`. It is structural only and not checked
-against a live `getName()`. Also guessed: `SEED_SCALE`/`SEED`, the f32 at p-32, BVH nodes, the packed u32 stream
+against a live `getName()`. Also guessed: `SEED_SCALE`/`SEED`, the f32 at p-32, the packed u32 stream
 and the destroyed-model map. Pool t2 holds about 3 % more objects than the live catalogue (917 847 vs 888 854),
 which is unexplained.
 

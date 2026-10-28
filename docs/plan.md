@@ -51,7 +51,7 @@ Kept from before the reset, tested, and not tasks here:
 | N2b | Per-role classification and metadata keys (ADR 0001) | GermanyCW opens in under 20 ms from the cache; a cache check on GermanyCW reads no airfield header; an unknown taxiway pair refuses `tables.json` but not `sample`; `list-terrains` reads each header once | N2 | agent, opt-in |
 | N3 | The mesh in place: `mesh.toc`, positional block reads, block LRU, 50 m tiles on demand with height, water and cover, point mode with a triangle index; the opt-in tests compare tiles in memory and the extract tile writer is removed | Offline: a built two-triangle block through the full path. Opt-in: Caucasus tiles match the live extract on 99.9 % of cells; open under 20 ms cold on Caucasus | N2 | agent, opt-in |
 | N3b | Runway bins and a runway-only `mesh.toc`: bin each prepared block's runway triangles like its full triangle list, so `on_runway` stops scanning every runway triangle; store only the Runway material subsets in `mesh.toc` and bump its entry version | 10k points over an airfield block on GermanyCW answer within 2× of points elsewhere (now 279–978 ms against 1.4–6.6 ms); GermanyCW `mesh.toc` about 11× smaller (8.25 MB → ~0.75 MB); the cross-block runway case still answers correctly | N2b, N3 | agent, opt-in |
-| N4 | Scenery in place: the pool-tree reader, `scene.nodes`, the trees and lines pools, the removed-object areas; the opt-in tests compare in memory and the scenery JSONL writer is removed | Offline: built files for versions 8 and 9. Opt-in: 400 Caucasus boxes equal a full walk | N2 | agent, opt-in |
+| N4 | Scenery in place: the pool-tree reader, `scene.nodes`, the trees and lines pools; the opt-in tests compare in memory and the scenery JSONL writer is removed | Offline: built files for versions 8 and 9. Opt-in: 400 Caucasus boxes equal a full walk | N2 | agent, opt-in |
 | N5 | `tables.json`: airfields, stands, runways, beacons, radio, towns, nodes, the projection fit and residual check with `--allow-crs-residual`; `index --hook` | Opt-in: field for field equal to the live extract; a hook directory from another build is refused by name | N2b | agent, opt-in |
 | N6 | The road graph: junction-id graph, contraction, `crosses_water`, sampled betweenness at low priority, raw entry; reuse an entry from the terrain's previous build directory when every file key but the build matches, rewriting the key | Synthetic: the bridge is one edge, betweenness peaks there; opt-in: the Caucasus graph builds under 10 s and Germany's betweenness completes; a build change with unchanged road files reuses `roads.graph` without a rebuild | N2 | agent, opt-in |
 | N7 | Scenery classes over the model table: per-terrain overrides keyed on the terrain id, the `effect` class, the settlement families; the catalog in `check` | Each rule has a positive and negative catalog test; the Caucasus overrides all apply; no `smoke#` model reaches a height, clearing or place answer | N4 | agent |
@@ -106,3 +106,8 @@ N0 goes first among the N tasks because it could stop the design: if DCS holds
 its terrain files with a share mode that denies readers, the tool cannot run
 beside a live server. It needs DCS; N1 onward do not, and can proceed beside
 it. Each milestone gets a README pass.
+
+Q13's removed-objects check has no known source. No install file records an
+area where a terrain removes scenery: `NotInstances.lua` lists exactly the
+`.scn5` group records, and a heliport clears the scenery around it when a
+mission spawns it. Q13 finds a source or drops the check.
