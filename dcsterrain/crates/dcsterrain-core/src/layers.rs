@@ -2,14 +2,24 @@
 //! over a rectangle of cells from a window padded by each layer's reach,
 //! and never stored.
 //!
-//! Each reads every tile of its window once, so a layer over a region costs
-//! one pass however many cells it holds.
+//! Each reads every tile of its window once, and the scenery and roads of
+//! the window's box once, so a layer over a region costs one pass however
+//! many cells it holds.
 
+use crate::classes::Class;
+use crate::decode::rn4::{KIND_RAIL, KIND_ROAD};
+use crate::decode::scn5::Pool;
 use crate::grid::{Grid, Window};
 use crate::source::{Cover, Layer, Refusal, Source};
 
+/// How far a distance searches when the asker names no maximum.
+pub const DISTANCE_CAP_M: f64 = 5000.0;
 /// Under this slope a cell has no aspect.
 pub const FLAT_DEG: f64 = 0.5;
+/// A cell is built up when this many buildings stand within
+/// `BUILTUP_RADIUS_M` of it.
+pub const BUILTUP_MIN: u32 = 3;
+pub const BUILTUP_RADIUS_M: f64 = 100.0;
 
 pub const TPI_300: Derived = Derived::Tpi { radius: 300.0 };
 pub const TPI_2000: Derived = Derived::Tpi { radius: 2000.0 };
@@ -29,8 +39,30 @@ pub enum Derived {
     /// The cell's height less the mean height of the cells whose centres
     /// lie within `radius` meters of its own.
     Tpi { radius: f64 },
+    /// Meters to the nearest cell of the target, centre to centre, and
+    /// `cap` where none lies within `cap`.
+    Distance { to: Target, cap: f64 },
+    /// Objects of the class in the cells within `radius`.
+    Count { class: Class, radius: f64 },
+    /// Instances of the trees or lines pool per hectare of the cells within
+    /// `radius`.
+    Density { pool: Pool, radius: f64 },
     /// The share of the covered cells within `radius` that are of `cover`.
     CoverFraction { cover: Cover, radius: f64 },
+}
+
+/// What a distance is measured to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    /// Any cell a road edge crosses.
+    Road,
+    /// Any cell a railway edge crosses.
+    Rail,
+    /// Any lake, sea or river cell.
+    Water,
+    /// Any built-up cell: `BUILTUP_MIN` buildings within `BUILTUP_RADIUS_M`.
+    Builtup,
+    Cover(Cover),
 }
 
 /// A rectangle of grid cells; it may reach past the grid.
@@ -75,6 +107,27 @@ impl Cells {
     fn read(self, src: &(impl Source + ?Sized), layer: Layer) -> Result<Window, Refusal> {
         Window::read(src, layer, self.row0, self.col0, self.rows, self.cols)
     }
+
+    /// The box the cells cover, in DCS meters.
+    fn bounds(self, g: &Grid) -> [f64; 4] {
+        let c = f64::from(g.cell_size);
+        [
+            g.origin_x + self.row0 as f64 * c,
+            g.origin_z + self.col0 as f64 * c,
+            g.origin_x + (self.row0 + i64::from(self.rows)) as f64 * c,
+            g.origin_z + (self.col0 + i64::from(self.cols)) as f64 * c,
+        ]
+    }
+
+    /// The index of the cell holding `(x, z)`, or `None` outside.
+    fn index(self, g: &Grid, x: f64, z: f64) -> Option<usize> {
+        let c = f64::from(g.cell_size);
+        let r = ((x - g.origin_x) / c).floor() - self.row0 as f64;
+        let k = ((z - g.origin_z) / c).floor() - self.col0 as f64;
+        let inside = |v: f64, n: u32| v >= 0.0 && v < f64::from(n);
+        (inside(r, self.rows) && inside(k, self.cols))
+            .then(|| r as usize * self.cols as usize + k as usize)
+    }
 }
 
 /// A derived layer over a rectangle of cells, row-major with columns
@@ -83,6 +136,8 @@ impl Cells {
 pub struct Raster {
     pub cells: Cells,
     pub values: Vec<f32>,
+    /// Whether any distance read as its cap.
+    pub capped: bool,
 }
 
 impl Raster {
@@ -99,19 +154,41 @@ impl Raster {
 pub fn derive(src: &(impl Source + ?Sized), d: Derived, at: Cells) -> Result<Raster, Refusal> {
     let g = src.grid();
     let reach = match d {
-        Derived::Tpi { radius } | Derived::CoverFraction { radius, .. } => radius,
+        Derived::Tpi { radius }
+        | Derived::Count { radius, .. }
+        | Derived::Density { radius, .. }
+        | Derived::CoverFraction { radius, .. } => radius,
+        Derived::Distance { cap, .. } => cap,
         _ => 0.0,
     };
     if !(reach.is_finite() && reach >= 0.0) {
         return Err(Refusal(format!(
-            "a radius must be a finite number of meters, not {reach}"
+            "a radius or cap must be a finite number of meters, not {reach}"
         )));
     }
-    let raster = |values| Raster { cells: at, values };
+    let raster = |values| Raster {
+        cells: at,
+        values,
+        capped: false,
+    };
     Ok(match d {
         Derived::Valid => raster(valid(src, at)?),
         Derived::Slope | Derived::Aspect | Derived::Roughness => raster(horn(src, d, at)?),
         Derived::Tpi { radius } => raster(tpi(src, &Disk::new(radius, &g), at)?),
+        Derived::Count { class, radius } => {
+            let disk = Disk::new(radius, &g);
+            let n = structures(src, class, at.pad(disk.reach))?;
+            let (sum, _) = disk.sums(&n, None, at.pad(disk.reach), disk.reach);
+            raster(sum.into_iter().map(|s| s as f32).collect())
+        }
+        Derived::Density { pool, radius } => {
+            let disk = Disk::new(radius, &g);
+            let n = instances(src, pool, at.pad(disk.reach))?;
+            let (sum, _) = disk.sums(&n, None, at.pad(disk.reach), disk.reach);
+            let c = f64::from(g.cell_size);
+            let hectares = disk.cells() as f64 * c * c / 10_000.0;
+            raster(sum.into_iter().map(|s| (s / hectares) as f32).collect())
+        }
         Derived::CoverFraction { cover, radius } => {
             let disk = Disk::new(radius, &g);
             let w = at.pad(disk.reach).read(src, Layer::Cover)?;
@@ -128,6 +205,7 @@ pub fn derive(src: &(impl Source + ?Sized), d: Derived, at: Cells) -> Result<Ras
             });
             raster(share.collect())
         }
+        Derived::Distance { to, cap } => distance(src, to, cap, at)?,
     })
 }
 
@@ -245,6 +323,10 @@ impl Disk {
         }
     }
 
+    fn cells(&self) -> i64 {
+        self.half.iter().map(|h| 2 * h + 1).sum()
+    }
+
     /// For each cell of the window `win` lying `pad` cells inside it, the sum
     /// of `v` over the disk around it and, given `known`, how many of those
     /// cells are known; `v` is laid out over `win`. Row prefix sums, so a
@@ -292,9 +374,191 @@ impl Disk {
     }
 }
 
+/// Objects of `class` in each cell of `win`.
+fn structures(src: &(impl Source + ?Sized), class: Class, win: Cells) -> Result<Vec<f64>, Refusal> {
+    let g = src.grid();
+    let mut n = vec![0.0; win.len()];
+    src.structures_in(win.bounds(&g), &mut |x, z, c| {
+        if let (true, Some(i)) = (c == class, win.index(&g, x, z)) {
+            n[i] += 1.0;
+        }
+    })?;
+    Ok(n)
+}
+
+/// Instances of `pool` in each cell of `win`.
+fn instances(src: &(impl Source + ?Sized), pool: Pool, win: Cells) -> Result<Vec<f64>, Refusal> {
+    let g = src.grid();
+    let mut n = vec![0.0; win.len()];
+    src.instances_in(pool, win.bounds(&g), &mut |x, z| {
+        if let Some(i) = win.index(&g, x, z) {
+            n[i] += 1.0;
+        }
+    })?;
+    Ok(n)
+}
+
+fn distance(
+    src: &(impl Source + ?Sized),
+    to: Target,
+    cap: f64,
+    at: Cells,
+) -> Result<Raster, Refusal> {
+    let g = src.grid();
+    let cs = f64::from(g.cell_size);
+    let pad = (cap / cs).ceil() as u32;
+    let win = at.pad(pad);
+    let seeds: Vec<bool> = match to {
+        Target::Water => {
+            let w = win.read(src, Layer::Water)?;
+            w.data.iter().map(|&v| (1..=3).contains(&v)).collect()
+        }
+        Target::Cover(c) => {
+            let w = win.read(src, Layer::Cover)?;
+            w.data.iter().map(|&v| v == c.code()).collect()
+        }
+        Target::Road | Target::Rail => {
+            let kind = if to == Target::Road {
+                KIND_ROAD
+            } else {
+                KIND_RAIL
+            };
+            crossed(src, kind, win)?
+        }
+        Target::Builtup => {
+            let disk = Disk::new(BUILTUP_RADIUS_M, &g);
+            let n = structures(src, Class::Building, win.pad(disk.reach))?;
+            let (sum, _) = disk.sums(&n, None, win.pad(disk.reach), disk.reach);
+            sum.iter().map(|&s| s >= f64::from(BUILTUP_MIN)).collect()
+        }
+    };
+    let d2 = edt(&seeds, win.rows as usize, win.cols as usize);
+    let (wc, p) = (win.cols as usize, pad as usize);
+    let mut capped = false;
+    let mut values = Vec::with_capacity(at.len());
+    for r in 0..at.rows as usize {
+        for c in 0..at.cols as usize {
+            let d = d2[(r + p) * wc + c + p].sqrt() * cs;
+            capped |= d > cap;
+            values.push(d.min(cap) as f32);
+        }
+    }
+    Ok(Raster {
+        cells: at,
+        values,
+        capped,
+    })
+}
+
+/// The cells of `win` that an edge of `kind` crosses, sampled along each
+/// segment at a quarter cell.
+fn crossed(src: &(impl Source + ?Sized), kind: u8, win: Cells) -> Result<Vec<bool>, Refusal> {
+    let g = src.grid();
+    let [x0, z0, x1, z1] = win.bounds(&g);
+    let step = f64::from(g.cell_size) / 4.0;
+    let mut seeds = vec![false; win.len()];
+    for e in src.road_graph()?.edges.iter().filter(|e| e.kind == kind) {
+        let meets = e
+            .points
+            .iter()
+            .fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| {
+                let (x, z) = (f64::from(p[0]), f64::from(p[1]));
+                [b[0].min(x), b[1].min(z), b[2].max(x), b[3].max(z)]
+            });
+        if meets[0] > x1 || meets[2] < x0 || meets[1] > z1 || meets[3] < z0 {
+            continue;
+        }
+        for s in e.points.windows(2) {
+            let (a, b) = (s[0].map(f64::from), s[1].map(f64::from));
+            let n = ((b[0] - a[0]).hypot(b[1] - a[1]) / step).ceil().max(1.0) as u32;
+            for k in 0..=n {
+                let t = f64::from(k) / f64::from(n);
+                let (x, z) = (a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]));
+                if let Some(i) = win.index(&g, x, z) {
+                    seeds[i] = true;
+                }
+            }
+        }
+    }
+    Ok(seeds)
+}
+
+/// Squared distance in cells from each cell to the nearest seed, by
+/// Felzenszwalb and Huttenlocher's two passes of lower parabola envelopes;
+/// infinite where there is no seed.
+fn edt(seeds: &[bool], rows: usize, cols: usize) -> Vec<f64> {
+    let mut f: Vec<f64> = seeds
+        .iter()
+        .map(|&s| if s { 0.0 } else { f64::INFINITY })
+        .collect();
+    let n = rows.max(cols);
+    let (mut line, mut out) = (vec![0.0; n], vec![0.0; n]);
+    let (mut v, mut z) = (vec![0usize; n], vec![0.0; n + 1]);
+    for c in 0..cols {
+        for r in 0..rows {
+            line[r] = f[r * cols + c];
+        }
+        edt_1d(&line[..rows], &mut out[..rows], &mut v, &mut z);
+        for r in 0..rows {
+            f[r * cols + c] = out[r];
+        }
+    }
+    for r in 0..rows {
+        line[..cols].copy_from_slice(&f[r * cols..(r + 1) * cols]);
+        edt_1d(&line[..cols], &mut out[..cols], &mut v, &mut z);
+        f[r * cols..(r + 1) * cols].copy_from_slice(&out[..cols]);
+    }
+    f
+}
+
+fn edt_1d(f: &[f64], d: &mut [f64], v: &mut [usize], z: &mut [f64]) {
+    // Only finite samples carry parabolas; with none, nothing is near.
+    let mut k: Option<usize> = None;
+    for q in 0..f.len() {
+        if f[q].is_infinite() {
+            continue;
+        }
+        let qf = q as f64;
+        loop {
+            let Some(j) = k else {
+                k = Some(0);
+                v[0] = q;
+                z[0] = f64::NEG_INFINITY;
+                z[1] = f64::INFINITY;
+                break;
+            };
+            let p = v[j] as f64;
+            let s = ((f[q] + qf * qf) - (f[v[j]] + p * p)) / (2.0 * qf - 2.0 * p);
+            if s <= z[j] {
+                k = j.checked_sub(1);
+                continue;
+            }
+            v[j + 1] = q;
+            z[j + 1] = s;
+            z[j + 2] = f64::INFINITY;
+            k = Some(j + 1);
+            break;
+        }
+    }
+    let Some(_) = k else {
+        d.fill(f64::INFINITY);
+        return;
+    };
+    let mut j = 0;
+    for (q, out) in d.iter_mut().enumerate() {
+        let qf = q as f64;
+        while z[j + 1] < qf {
+            j += 1;
+        }
+        let p = v[j] as f64;
+        *out = (qf - p) * (qf - p) + f[v[j]];
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::source::{Ground, Identity};
     use crate::synth::*;
 
     fn synth() -> Synth {
@@ -484,6 +748,257 @@ mod tests {
         ] {
             assert_eq!(one(&s, Derived::Valid, n, e), want, "({n}, {e})");
         }
+    }
+
+    fn dist(to: Target) -> Derived {
+        Derived::Distance {
+            to,
+            cap: DISTANCE_CAP_M,
+        }
+    }
+
+    #[test]
+    fn distances_to_roads_rail_and_cover_count_whole_cells() {
+        let s = synth();
+        // The roads and rail run along rows of cell centres.
+        let cases = [
+            (Target::Road, ROAD_EW_NORTH_M, 1.0, 10025.0),
+            (
+                Target::Rail,
+                ROAD_EW_NORTH_M - RAIL_SOUTH_OFFSET_M,
+                -1.0,
+                10025.0,
+            ),
+            (
+                Target::Cover(Cover::Forest),
+                FOREST_SOUTH_M + 25.0,
+                -1.0,
+                57025.0,
+            ),
+        ];
+        for (to, from, way, east) in cases {
+            for k in 0..30 {
+                let v = one(&s, dist(to), from + way * f64::from(k) * C, east);
+                assert_eq!(v, (f64::from(k) * C) as f32, "{to:?} {k}");
+            }
+        }
+        // The forest's hole is 1 km square; its centre is 500 m from trees.
+        let hole = one(&s, dist(Target::Cover(Cover::Forest)), 42025.0, 57025.0);
+        assert_eq!(hole, 500.0);
+    }
+
+    #[test]
+    fn distance_to_the_lake_is_its_radius_off_within_a_cell_and_stops_at_the_cap() {
+        let s = synth();
+        let cells = Cells {
+            rows: 1,
+            ..around(LAKE_NORTH_M, LAKE_EAST_M + LAKE_RADIUS_M + 1000.0, 41)
+        };
+        let got = derive(&s, dist(Target::Water), cells).unwrap();
+        assert!(!got.capped);
+        for (r, c) in each(cells) {
+            let (n, e) = s.form().centre(r as u32, c as u32);
+            let want = ((n - LAKE_NORTH_M).hypot(e - LAKE_EAST_M) - LAKE_RADIUS_M).max(0.0);
+            close(got.get(r, c).unwrap(), want, C, "to the lake");
+        }
+        let cap = Derived::Distance {
+            to: Target::Water,
+            cap: 1000.0,
+        };
+        let got = derive(&s, cap, around(LAKE_NORTH_M, LAKE_EAST_M + 5000.0, 3)).unwrap();
+        assert!(got.capped);
+        assert!(got.values.iter().all(|&v| v == 1000.0));
+    }
+
+    /// The synthetic ground with buildings of a test's own.
+    struct Placed {
+        synth: Synth,
+        buildings: Vec<(f64, f64)>,
+    }
+
+    impl Source for Placed {
+        fn identity(&self) -> &Identity {
+            self.synth.identity()
+        }
+        fn grid(&self) -> Grid {
+            self.synth.grid()
+        }
+        fn tile(&self, layer: Layer, tx: u32, tz: u32) -> Result<Vec<i32>, Refusal> {
+            self.synth.tile(layer, tx, tz)
+        }
+        fn point(&self, x: f64, z: f64) -> Result<Option<Ground>, Refusal> {
+            self.synth.point(x, z)
+        }
+        fn structures_in(
+            &self,
+            _: [f64; 4],
+            f: &mut dyn FnMut(f64, f64, Class),
+        ) -> Result<(), Refusal> {
+            for &(x, z) in &self.buildings {
+                f(x, z, Class::Building);
+            }
+            Ok(())
+        }
+    }
+
+    /// A tight cluster of five, a looser one of three, and two alone.
+    fn placed() -> Placed {
+        let synth = synth();
+        let offsets = [
+            (30010.0, 60010.0),
+            (30030.0, 60040.0),
+            (30060.0, 60020.0),
+            (30080.0, 60090.0),
+            (29990.0, 59980.0),
+            (31000.0, 61000.0),
+            (31060.0, 61000.0),
+            (31000.0, 61070.0),
+            (32000.0, 60000.0),
+            (29000.0, 62000.0),
+        ];
+        let buildings = offsets
+            .iter()
+            .map(|&(n, e)| synth.form().abs(n, e))
+            .collect();
+        Placed { synth, buildings }
+    }
+
+    /// The buildings in each cell, by grid row and column.
+    fn per_cell(p: &Placed) -> std::collections::HashMap<(i64, i64), u32> {
+        let g = p.grid();
+        let mut m = std::collections::HashMap::new();
+        for &(x, z) in &p.buildings {
+            let k = (
+                ((x - g.origin_x) / C).floor() as i64,
+                ((z - g.origin_z) / C).floor() as i64,
+            );
+            *m.entry(k).or_insert(0) += 1;
+        }
+        m
+    }
+
+    #[test]
+    fn counts_match_brute_force() {
+        let p = placed();
+        let cells = around(30500.0, 60500.0, 50);
+        let m = per_cell(&p);
+        for radius in [50.0, 150.0, 400.0] {
+            let d = Derived::Count {
+                class: Class::Building,
+                radius,
+            };
+            let got = derive(&p, d, cells).unwrap();
+            for (r, c) in each(cells) {
+                let want: u32 = disk(radius)
+                    .into_iter()
+                    .map(|(dr, dc)| m.get(&(r + dr, c + dc)).copied().unwrap_or(0))
+                    .sum();
+                assert_eq!(
+                    got.get(r, c).unwrap(),
+                    want as f32,
+                    "{radius} at ({r}, {c})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn distance_to_builtup_matches_brute_force() {
+        let p = placed();
+        let m = per_cell(&p);
+        let builtup = |r: i64, c: i64| {
+            disk(BUILTUP_RADIUS_M)
+                .into_iter()
+                .map(|(dr, dc)| m.get(&(r + dr, c + dc)).copied().unwrap_or(0))
+                .sum::<u32>()
+                >= BUILTUP_MIN
+        };
+        let cells = around(30500.0, 60500.0, 60);
+        let seeds: Vec<(i64, i64)> = each(cells.pad(60))
+            .filter(|&(r, c)| builtup(r, c))
+            .collect();
+        // Both clusters, and neither building alone.
+        assert!(seeds.contains(&(at(30030.0), at(60030.0))));
+        assert!(seeds.contains(&(at(31030.0), at(61030.0))));
+        assert!(!seeds.contains(&(at(32000.0), at(60000.0))));
+        assert!(!seeds.contains(&(at(29000.0), at(62000.0))));
+        let got = derive(&p, dist(Target::Builtup), cells).unwrap();
+        for (r, c) in each(cells) {
+            let want = seeds
+                .iter()
+                .map(|&(sr, sc)| (((sr - r).pow(2) + (sc - c).pow(2)) as f64).sqrt() * C)
+                .fold(f64::MAX, f64::min);
+            close(got.get(r, c).unwrap(), want, 1e-3, "to built up");
+        }
+    }
+
+    #[test]
+    fn the_transform_matches_brute_force() {
+        let (rows, cols) = (37, 53);
+        let mut state = 7u64;
+        let seeds: Vec<bool> = (0..rows * cols)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                state >> 59 == 0
+            })
+            .collect();
+        let got = edt(&seeds, rows, cols);
+        for r in 0..rows {
+            for c in 0..cols {
+                let want = (0..rows * cols)
+                    .filter(|&i| seeds[i])
+                    .map(|i| ((i / cols).abs_diff(r).pow(2) + (i % cols).abs_diff(c).pow(2)) as f64)
+                    .fold(f64::INFINITY, f64::min);
+                assert_eq!(got[r * cols + c], want, "({r}, {c})");
+            }
+        }
+        assert!(edt(&[false; 6], 2, 3).iter().all(|d| d.is_infinite()));
+    }
+
+    #[test]
+    fn counts_and_densities_are_the_generators() {
+        let s = synth();
+        let count = |radius| Derived::Count {
+            class: Class::Industrial,
+            radius,
+        };
+        let (n, e) = (SCENERY_INDUSTRIAL_NORTH_M, SCENERY_INDUSTRIAL_EAST_M);
+        // The pair stand two cells apart.
+        assert_eq!(one(&s, count(150.0), n, e), 2.0);
+        assert_eq!(one(&s, count(50.0), n, e), 1.0);
+        let town = Derived::Count {
+            class: Class::Building,
+            radius: 2000.0,
+        };
+        let all = one(&s, town, SCENERY_TOWN_NORTH_M, SCENERY_TOWN_EAST_M);
+        assert_eq!(all, SCENERY_TOWN_COUNT as f32);
+        let trees = Derived::Density {
+            pool: Pool::Trees,
+            radius: 150.0,
+        };
+        // Three trees a cell, a quarter hectare each.
+        let per_ha = f64::from(TREES_PER_CELL) / (C * C / 10_000.0);
+        close(
+            one(&s, trees, 40500.0, 55500.0),
+            per_ha,
+            1e-4,
+            "in the forest",
+        );
+        close(one(&s, trees, 19000.0, 62000.0), 0.0, 0.0, "on the plane");
+        let poles = Derived::Density {
+            pool: Pool::Lines,
+            radius: 100.0,
+        };
+        // One pole in the thirteen cells within 100 m.
+        let one_in = 1.0 / (13.0 * C * C / 10_000.0);
+        close(
+            one(&s, poles, LINE_SOUTH_M + 1000.0, LINE_EAST_M),
+            one_in,
+            1e-4,
+            "poles",
+        );
     }
 
     #[test]
