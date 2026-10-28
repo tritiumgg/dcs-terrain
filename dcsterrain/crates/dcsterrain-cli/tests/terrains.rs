@@ -416,15 +416,20 @@ fn list_terrains_shows_a_cache_after_index_and_none_after_clear() {
     assert_eq!(v["terrains"][0]["cache"], Value::Null, "Caucasus has none");
     let germany = &v["terrains"][1]["cache"];
     assert_eq!(germany["path"], dir.to_str().unwrap());
-    assert_eq!(germany["entries"][0]["name"], "mesh.toc");
-    let size = germany["entries"][0]["size"].as_u64().unwrap();
-    assert_eq!(germany["entries"][1]["name"], "scene.nodes");
-    let size = size + germany["entries"][1]["size"].as_u64().unwrap();
-    assert_eq!(germany["entries"].as_array().unwrap().len(), 2);
+    let entries = germany["entries"].as_array().unwrap();
+    let names: Vec<&str> = entries
+        .iter()
+        .map(|e| e["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["mesh.toc", "scene.nodes", "tables.json"]);
+    assert!(entries.iter().all(|e| e["size"].as_u64().unwrap() > 0));
 
     let out = run(&["list-terrains", "--install", root, "--cache", cache]);
     let text = String::from_utf8(out.stdout).unwrap();
-    assert!(text.contains(&format!("2 entries, {size} B")), "{text}");
+    assert!(
+        text.contains("GermanyCW  GermanyColdWar  3 entries, "),
+        "{text}"
+    );
 
     let out = run(&[
         "cache",

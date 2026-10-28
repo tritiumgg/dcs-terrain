@@ -9,7 +9,7 @@ use std::fs::{self, File};
 use std::io::{self, BufWriter, Write};
 use std::path::Path;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::Airfield;
 use crate::decode::assets::{self, StandParams};
@@ -24,7 +24,7 @@ pub const STANDS_FILE: &str = "stands.json";
 const FLAG_HELICOPTERS: u32 = 64;
 const FLAG_AIRPLANES_ONLY: u32 = 32;
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunwayRow {
     pub airdrome_id: Option<i64>,
     pub airdrome_name_id: String,
@@ -40,7 +40,7 @@ pub struct RunwayRow {
 
 /// A stand class's parameters under the names the game gives them. Every
 /// value is null for a stand the files give no class.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[allow(non_snake_case)]
 pub struct Params {
     /// No file says whether a stand is a shelter.
@@ -52,7 +52,7 @@ pub struct Params {
     pub HEIGHT: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StandRow {
     pub airdrome_id: Option<i64>,
     pub airdrome_name_id: String,

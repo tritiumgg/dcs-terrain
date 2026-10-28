@@ -67,8 +67,8 @@ pub trait Entry: Sync {
 
 /// Every kind of entry `index` builds.
 pub fn entries() -> Vec<&'static dyn Entry> {
-    use crate::source::install::{MESH_TOC, SCENE_NODES};
-    vec![&MESH_TOC, &SCENE_NODES]
+    use crate::source::install::{MESH_TOC, SCENE_NODES, TABLES_JSON};
+    vec![&MESH_TOC, &SCENE_NODES, &TABLES_JSON]
 }
 
 /// Where the cache lives when `--cache` does not say.

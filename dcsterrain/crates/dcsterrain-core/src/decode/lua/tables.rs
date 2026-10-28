@@ -7,7 +7,7 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{Chunk, Table, Value};
 use crate::crs::{self, Pair, Tmerc};
@@ -20,7 +20,7 @@ pub const RADIO_FILE: &str = "radio.json";
 pub const TOWNS_FILE: &str = "towns.json";
 pub const NODES_FILE: &str = "nodes.json";
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BeaconRow {
     pub beacon_id: Option<String>,
     pub callsign: Option<String>,
@@ -41,7 +41,7 @@ pub struct BeaconRow {
 
 /// A radio's frequency in each band, by the bands' order in the game:
 /// HF, the low VHF band (FM), the high VHF band and UHF.
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Frequencies {
     pub hf: Option<f64>,
     pub fm: Option<f64>,
@@ -49,7 +49,7 @@ pub struct Frequencies {
     pub uhf: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RadioRow {
     pub radio_id: Option<String>,
     /// Each language's first name for the station.
@@ -59,7 +59,7 @@ pub struct RadioRow {
     pub scene_objects: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TownRow {
     pub name: String,
     pub display_name: Option<String>,
@@ -69,13 +69,13 @@ pub struct TownRow {
     pub z: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Xz {
     pub x: f64,
     pub z: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeRow {
     pub id: Option<i64>,
     pub name: Option<String>,
@@ -85,7 +85,7 @@ pub struct NodeRow {
 
 /// The extract's `crs`: the projection, and how well the beacons fit it.
 /// `n`, `rms_m` and `max_m` are null when it comes from the table.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Crs {
     pub proj4: String,
     pub lon_0: i32,
@@ -95,7 +95,8 @@ pub struct Crs {
     pub n: Option<usize>,
     pub rms_m: Option<f64>,
     pub max_m: Option<f64>,
-    pub source: &'static str,
+    /// `beacons` when fitted, `table` when taken from the table.
+    pub source: String,
 }
 
 impl Crs {
@@ -108,7 +109,7 @@ impl Crs {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Sample {
     pub x: f64,
     pub z: f64,
@@ -181,7 +182,7 @@ impl LuaTables {
 }
 
 /// The airdrome an id of the form `airfield<ID>_<n>` belongs to.
-fn airdrome_of(id: &str) -> Option<i64> {
+pub fn airdrome_of(id: &str) -> Option<i64> {
     let (n, k) = id.strip_prefix("airfield")?.split_once('_')?;
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit());
     (digits(n) && digits(k)).then(|| n.parse().ok()).flatten()
@@ -546,7 +547,7 @@ fn projection(theatre: &str, beacons: &[BeaconRow]) -> Result<(Crs, Vec<Sample>)
         lat: p.lat,
         lon: p.lon,
     };
-    let crs = |t: Tmerc, n, rms_m, max_m, source| Crs {
+    let crs = |t: Tmerc, n, rms_m, max_m, source: &str| Crs {
         proj4: t.proj4(),
         lon_0: t.lon_0,
         easting: t.easting,
@@ -555,7 +556,7 @@ fn projection(theatre: &str, beacons: &[BeaconRow]) -> Result<(Crs, Vec<Sample>)
         n,
         rms_m,
         max_m,
-        source,
+        source: source.to_string(),
     };
     if let Some(f) = crs::fit(&pairs) {
         let c = crs(
@@ -791,7 +792,7 @@ mod tests {
         let (s, files) = install(4);
         let t = decode(&s.0, "Nowhere", &files).unwrap();
         let c = &t.crs;
-        assert_eq!((c.source, c.lon_0, c.n), ("beacons", 33, Some(4)));
+        assert_eq!((c.source.as_str(), c.lon_0, c.n), ("beacons", 33, Some(4)));
         assert!((c.easting - CAUCASUS.easting).abs() < 0.05, "{c:?}");
         assert!((c.northing - CAUCASUS.northing).abs() < 0.05, "{c:?}");
         assert!(c.max_m.unwrap() < 0.1);
@@ -815,7 +816,7 @@ mod tests {
         let t = decode(&s.0, "Caucasus", &files).unwrap();
         let c = &t.crs;
         assert_eq!(
-            (c.source, c.n, c.rms_m, c.max_m),
+            (c.source.as_str(), c.n, c.rms_m, c.max_m),
             ("table", None, None, None)
         );
         assert_eq!(c.tmerc(), CAUCASUS);

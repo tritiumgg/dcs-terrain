@@ -27,7 +27,9 @@ pub const BLOCK_BUDGET: usize = 32 << 20;
 pub const TILE_COUNT: usize = 256;
 
 mod scenery;
+mod tables;
 pub use scenery::{SCENE_NODES, SceneNodes, Scenery};
+pub use tables::{AirdromeRow, MAX_CRS_RESIDUAL_M, TABLES_JSON, Tables, TablesJson};
 
 /// How far past its stated box a block is read for a point or tile. Its
 /// vertices lie inside the box to within a centimeter.
@@ -207,6 +209,8 @@ pub struct Install {
     /// decoder reads refuses scenery and nothing else. A failure is not
     /// kept: the next request tries again.
     scenery: OnceLock<Scenery>,
+    /// Read the first time a table is asked for, likewise.
+    tables: OnceLock<Tables>,
 }
 
 /// The sizes of the surface, road and scene files, joined by `-`.
@@ -271,6 +275,7 @@ impl Install {
             tiles: Mutex::new(Lru::new(TILE_COUNT)),
             cache: terrain,
             scenery: OnceLock::new(),
+            tables: OnceLock::new(),
         })
     }
 
@@ -293,6 +298,16 @@ impl Install {
         // Two threads may both open it; the first to finish is kept.
         let s = Scenery::open(&self.root, &self.cache)?;
         Ok(self.scenery.get_or_init(|| s))
+    }
+
+    /// The terrain's tables, read from the cache, built there first if
+    /// missing or stale.
+    pub fn tables(&self) -> Result<&Tables, Refusal> {
+        if let Some(t) = self.tables.get() {
+            return Ok(t);
+        }
+        let t = Tables::open(&self.cache)?;
+        Ok(self.tables.get_or_init(|| t))
     }
 
     pub fn map(&self) -> &Map {
