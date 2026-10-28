@@ -16,10 +16,10 @@ use serde_json::Value;
 use dcsterrain_core::cache::Cache;
 use dcsterrain_core::decode::install::{self, TERRAINS_DIR};
 use dcsterrain_core::decode::surface5;
-use dcsterrain_core::decode::surface5::ground::{Prepared, grid_units};
+use dcsterrain_core::decode::surface5::ground::{Prepared, cover_of, grid_units};
 use dcsterrain_core::grid::Grid;
-use dcsterrain_core::source::Source;
 use dcsterrain_core::source::install::Install;
+use dcsterrain_core::source::{Cover, Source};
 
 fn install_root() -> Option<PathBuf> {
     match std::env::var_os("DCSTERRAIN_INSTALL") {
@@ -233,6 +233,116 @@ fn points_over_an_airfield_answer_as_fast_as_points_elsewhere() {
             strip < ground.max(0.5),
             "{id}: the runway test takes {strip:.1} ms, the winning triangle {ground:.1} ms"
         );
+    }
+}
+
+/// The material subsets the cover bits stand for, and each one's bit.
+const COVER_SUBSETS: [(&str, u32, Cover); 5] = [
+    ("Runway", 32, Cover::Runway),
+    ("Town", 64, Cover::Town),
+    ("Field", 128, Cover::Field),
+    ("Beach", 256, Cover::Beach),
+    ("Forest", 1024, Cover::Forest),
+];
+
+/// Cover reads the triangle-type bits, never the material subsets, so each
+/// bit must agree with its subset: on every terrain, at least 90 % of a
+/// subset's triangles carry its bit. A subset triangle is found in the
+/// block's full list by its three vertices. Reports too the cover the
+/// first-match order gives them, which a second bit can take.
+#[test]
+fn each_cover_bit_matches_its_material_subset() {
+    let Some(root) = install_root() else { return };
+    let build = install::read_build(&root).unwrap();
+    eprintln!("DCS {} ({})", build.version, build.timestamp);
+    let materials: Vec<&str> = COVER_SUBSETS.iter().map(|m| m.0).collect();
+    for listed in install::terrains(&root).unwrap() {
+        let Some(id) = listed.id else { continue };
+        let map = install::open(&root, &id).unwrap();
+        let path = root.join(&map.surface.path);
+        let file = surface5::open(&path).unwrap();
+        let started = Instant::now();
+        // Per subset: its triangles, those found in the full list, those of
+        // them carrying the bit, then those of each cover code.
+        let tally = Mutex::new([[0u64; 11]; COVER_SUBSETS.len()]);
+        let next = AtomicUsize::new(0);
+        thread::scope(|s| {
+            for _ in 0..thread::available_parallelism().map_or(4, |n| n.get()) {
+                s.spawn(|| {
+                    let r = fs::File::open(&path).unwrap();
+                    let mut mine = [[0u64; 11]; COVER_SUBSETS.len()];
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        if i >= file.blocks.len() {
+                            break;
+                        }
+                        let b = file.read_block(&r, i, &materials).unwrap();
+                        if b.subsets.is_empty() {
+                            continue;
+                        }
+                        let key = |t: &[u32; 3]| {
+                            let mut k = *t;
+                            k.sort_unstable();
+                            k
+                        };
+                        let types: std::collections::HashMap<[u32; 3], u32> = b
+                            .tri
+                            .iter()
+                            .map(key)
+                            .zip(b.tritype.iter().copied())
+                            .collect();
+                        for sub in &b.subsets {
+                            let m = materials.iter().position(|m| *m == sub.material).unwrap();
+                            let bit = COVER_SUBSETS[m].1;
+                            for t in &sub.tri {
+                                mine[m][0] += 1;
+                                if let Some(ty) = types.get(&key(t)) {
+                                    mine[m][1] += 1;
+                                    mine[m][2] += u64::from(ty & bit != 0);
+                                    mine[m][3 + cover_of(*ty).code() as usize] += 1;
+                                }
+                            }
+                        }
+                    }
+                    let mut all = tally.lock().unwrap();
+                    for (a, m) in all.iter_mut().zip(mine) {
+                        for k in 0..a.len() {
+                            a[k] += m[k];
+                        }
+                    }
+                });
+            }
+        });
+        let tally = tally.into_inner().unwrap();
+        eprintln!("{id}: {:.1} s", started.elapsed().as_secs_f64());
+        for ((name, bit, _), t) in COVER_SUBSETS.iter().zip(tally) {
+            let [n, found, with] = [t[0], t[1], t[2]];
+            if n == 0 {
+                eprintln!("  {name:<7} no subset");
+                continue;
+            }
+            let share = with as f64 / found.max(1) as f64;
+            eprintln!(
+                "  {name:<7} bit {bit:>4}: {n} triangles, {found} in the full list, {:.1} % \
+                 carrying the bit; cover {}",
+                100.0 * share,
+                Cover::ALL
+                    .iter()
+                    .filter(|c| t[3 + c.code() as usize] > 0)
+                    .map(|c| format!(
+                        "{} {:.1} %",
+                        c.name(),
+                        100.0 * t[3 + c.code() as usize] as f64 / found as f64
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            assert!(
+                share >= 0.9,
+                "{id}: {name} bit {bit} on {:.1} %",
+                100.0 * share
+            );
+        }
     }
 }
 
