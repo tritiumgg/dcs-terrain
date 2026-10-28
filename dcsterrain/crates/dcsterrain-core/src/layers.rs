@@ -20,6 +20,8 @@ pub const FLAT_DEG: f64 = 0.5;
 /// `BUILTUP_RADIUS_M` of it.
 pub const BUILTUP_MIN: u32 = 3;
 pub const BUILTUP_RADIUS_M: f64 = 100.0;
+/// The longest radius or cap a layer takes: its window grows with the square.
+pub const MAX_REACH_M: f64 = 50_000.0;
 
 pub const TPI_300: Derived = Derived::Tpi { radius: 300.0 };
 pub const TPI_2000: Derived = Derived::Tpi { radius: 2000.0 };
@@ -45,7 +47,7 @@ pub enum Derived {
     /// Objects of the class in the cells within `radius`.
     Count { class: Class, radius: f64 },
     /// Instances of the trees or lines pool per hectare of the cells within
-    /// `radius`.
+    /// `radius`, every one of them counted in the area, on the grid or not.
     Density { pool: Pool, radius: f64 },
     /// The share of the covered cells within `radius` that are of `cover`.
     CoverFraction { cover: Cover, radius: f64 },
@@ -54,9 +56,9 @@ pub enum Derived {
 /// What a distance is measured to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
-    /// Any cell a road edge crosses.
+    /// Any cell a road edge passes through.
     Road,
-    /// Any cell a railway edge crosses.
+    /// Any cell a railway edge passes through.
     Rail,
     /// Any lake, sea or river cell.
     Water,
@@ -161,10 +163,19 @@ pub fn derive(src: &(impl Source + ?Sized), d: Derived, at: Cells) -> Result<Ras
         Derived::Distance { cap, .. } => cap,
         _ => 0.0,
     };
-    if !(reach.is_finite() && reach >= 0.0) {
+    if !(0.0..=MAX_REACH_M).contains(&reach) {
         return Err(Refusal(format!(
-            "a radius or cap must be a finite number of meters, not {reach}"
+            "a radius or cap must be between 0 and {MAX_REACH_M} m, not {reach}"
         )));
+    }
+    if let Derived::Density {
+        pool: Pool::Objects,
+        ..
+    } = d
+    {
+        return Err(Refusal(
+            "a density is of the trees or lines pool; objects are counted by class".to_string(),
+        ));
     }
     let raster = |values| Raster {
         cells: at,
@@ -451,12 +462,10 @@ fn distance(
     })
 }
 
-/// The cells of `win` that an edge of `kind` crosses, sampled along each
-/// segment at a quarter cell.
+/// The cells of `win` that an edge of `kind` passes through.
 fn crossed(src: &(impl Source + ?Sized), kind: u8, win: Cells) -> Result<Vec<bool>, Refusal> {
     let g = src.grid();
     let [x0, z0, x1, z1] = win.bounds(&g);
-    let step = f64::from(g.cell_size) / 4.0;
     let mut seeds = vec![false; win.len()];
     for e in src.road_graph()?.edges.iter().filter(|e| e.kind == kind) {
         let meets = e
@@ -469,19 +478,74 @@ fn crossed(src: &(impl Source + ?Sized), kind: u8, win: Cells) -> Result<Vec<boo
         if meets[0] > x1 || meets[2] < x0 || meets[1] > z1 || meets[3] < z0 {
             continue;
         }
-        for s in e.points.windows(2) {
-            let (a, b) = (s[0].map(f64::from), s[1].map(f64::from));
-            let n = ((b[0] - a[0]).hypot(b[1] - a[1]) / step).ceil().max(1.0) as u32;
-            for k in 0..=n {
-                let t = f64::from(k) / f64::from(n);
-                let (x, z) = (a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]));
-                if let Some(i) = win.index(&g, x, z) {
-                    seeds[i] = true;
-                }
+        // In cells from the window's corner.
+        let c = f64::from(g.cell_size);
+        let at = |p: &[f32; 2]| {
+            [
+                (f64::from(p[0]) - g.origin_x) / c - win.row0 as f64,
+                (f64::from(p[1]) - g.origin_z) / c - win.col0 as f64,
+            ]
+        };
+        let mut mark = |r: i64, k: i64| {
+            if (0..i64::from(win.rows)).contains(&r) && (0..i64::from(win.cols)).contains(&k) {
+                seeds[r as usize * win.cols as usize + k as usize] = true;
             }
+        };
+        if let [p] = e.points.as_slice() {
+            let [r, k] = at(p);
+            mark(r.floor() as i64, k.floor() as i64);
+        }
+        for s in e.points.windows(2) {
+            walk(at(&s[0]), at(&s[1]), &mut mark);
         }
     }
     Ok(seeds)
+}
+
+/// Calls `f` with every cell the segment from `a` to `b` passes through,
+/// both in cells, in order: Amanatides and Woo's walk, stepping across
+/// whichever cell boundary the segment meets first. A segment through a
+/// corner touches the two cells beside it only at a point, and takes
+/// neither.
+fn walk(a: [f64; 2], b: [f64; 2], f: &mut impl FnMut(i64, i64)) {
+    let cell = |v: f64| v.floor() as i64;
+    let (mut i, mut j) = (cell(a[0]), cell(a[1]));
+    let (end_i, end_j) = (cell(b[0]), cell(b[1]));
+    // Per axis: the step, the segment's fraction to the first boundary,
+    // and its fraction between boundaries.
+    let axis = |from: f64, d: f64, at: i64| {
+        if d > 0.0 {
+            (1, (at as f64 + 1.0 - from) / d, 1.0 / d)
+        } else if d < 0.0 {
+            (-1, (from - at as f64) / -d, -1.0 / d)
+        } else {
+            (0, f64::INFINITY, f64::INFINITY)
+        }
+    };
+    let (si, mut ti, di) = axis(a[0], b[0] - a[0], i);
+    let (sj, mut tj, dj) = axis(a[1], b[1] - a[1], j);
+    f(i, j);
+    // The walk ends in `b`'s cell; the count only stops rounding from
+    // carrying it past.
+    let steps = (end_i - i).abs() + (end_j - j).abs();
+    for _ in 0..steps {
+        if (i, j) == (end_i, end_j) {
+            break;
+        }
+        if ti < tj {
+            i += si;
+            ti += di;
+        } else if tj < ti {
+            j += sj;
+            tj += dj;
+        } else {
+            i += si;
+            j += sj;
+            ti += di;
+            tj += dj;
+        }
+        f(i, j);
+    }
 }
 
 /// Squared distance in cells from each cell to the nearest seed, by
@@ -559,6 +623,7 @@ fn edt_1d(f: &[f64], d: &mut [f64], v: &mut [usize], z: &mut [f64]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::roads::{Edge, Graph};
     use crate::source::{Ground, Identity};
     use crate::synth::*;
 
@@ -815,6 +880,7 @@ mod tests {
     struct Placed {
         synth: Synth,
         buildings: Vec<(f64, f64)>,
+        roads: Graph,
     }
 
     impl Source for Placed {
@@ -829,6 +895,9 @@ mod tests {
         }
         fn point(&self, x: f64, z: f64) -> Result<Option<Ground>, Refusal> {
             self.synth.point(x, z)
+        }
+        fn road_graph(&self) -> Result<&Graph, Refusal> {
+            Ok(&self.roads)
         }
         fn structures_in(
             &self,
@@ -861,7 +930,16 @@ mod tests {
             .iter()
             .map(|&(n, e)| synth.form().abs(n, e))
             .collect();
-        Placed { synth, buildings }
+        let roads = Graph {
+            classes: Vec::new(),
+            nodes: Vec::new(),
+            edges: Vec::new(),
+        };
+        Placed {
+            synth,
+            buildings,
+            roads,
+        }
     }
 
     /// The buildings in each cell, by grid row and column.
@@ -915,7 +993,7 @@ mod tests {
                 >= BUILTUP_MIN
         };
         let cells = around(30500.0, 60500.0, 60);
-        let seeds: Vec<(i64, i64)> = each(cells.pad(60))
+        let seeds: Vec<(i64, i64)> = each(cells.pad(100))
             .filter(|&(r, c)| builtup(r, c))
             .collect();
         // Both clusters, and neither building alone.
@@ -923,13 +1001,18 @@ mod tests {
         assert!(seeds.contains(&(at(31030.0), at(61030.0))));
         assert!(!seeds.contains(&(at(32000.0), at(60000.0))));
         assert!(!seeds.contains(&(at(29000.0), at(62000.0))));
-        let got = derive(&p, dist(Target::Builtup), cells).unwrap();
-        for (r, c) in each(cells) {
-            let want = seeds
-                .iter()
-                .map(|&(sr, sc)| (((sr - r).pow(2) + (sc - c).pow(2)) as f64).sqrt() * C)
-                .fold(f64::MAX, f64::min);
-            close(got.get(r, c).unwrap(), want, 1e-3, "to built up");
+        // Over both clusters, and over ground 2.5 km north of them, whose
+        // nearest seeds lie only in the window's pad.
+        for cells in [cells, around(33500.0, 60500.0, 20)] {
+            let got = derive(&p, dist(Target::Builtup), cells).unwrap();
+            assert!(!got.capped);
+            for (r, c) in each(cells) {
+                let want = seeds
+                    .iter()
+                    .map(|&(sr, sc)| (((sr - r).pow(2) + (sc - c).pow(2)) as f64).sqrt() * C)
+                    .fold(f64::MAX, f64::min);
+                close(got.get(r, c).unwrap(), want, 1e-3, "to built up");
+            }
         }
     }
 
@@ -1042,13 +1125,149 @@ mod tests {
         }
     }
 
+    /// The cells the segment crosses for a positive length, each square
+    /// tested by clipping the segment to it.
+    fn crossed_cells(a: [f64; 2], b: [f64; 2]) -> std::collections::BTreeSet<(i64, i64)> {
+        let d = [b[0] - a[0], b[1] - a[1]];
+        let lo = |k: usize| a[k].min(b[k]).floor() as i64;
+        let hi = |k: usize| a[k].max(b[k]).floor() as i64;
+        let mut out = std::collections::BTreeSet::new();
+        for i in lo(0)..=hi(0) {
+            for j in lo(1)..=hi(1) {
+                let (mut t0, mut t1) = (0.0f64, 1.0f64);
+                for (k, c) in [(0, i), (1, j)] {
+                    let (s, e) = (c as f64, c as f64 + 1.0);
+                    if d[k] == 0.0 {
+                        if !(s..e).contains(&a[k]) {
+                            t1 = -1.0;
+                        }
+                        continue;
+                    }
+                    let (u, v) = ((s - a[k]) / d[k], (e - a[k]) / d[k]);
+                    t0 = t0.max(u.min(v));
+                    t1 = t1.min(u.max(v));
+                }
+                // A single point counts only where the segment is one.
+                if t1 > t0 + 1e-12 || (d == [0.0, 0.0] && t1 >= t0) {
+                    out.insert((i, j));
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_walk_takes_every_cell_a_segment_passes_through() {
+        let mut state = 11u64;
+        let mut unit = || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for _ in 0..500 {
+            let mut p = || [unit() * 40.0 - 20.0, unit() * 40.0 - 20.0];
+            let (a, b) = (p(), p());
+            let mut got = std::collections::BTreeSet::new();
+            walk(a, b, &mut |i, j| {
+                got.insert((i, j));
+            });
+            assert_eq!(got, crossed_cells(a, b), "{a:?} to {b:?}");
+        }
+        // Along a row, and from a cell into itself.
+        let mut got = Vec::new();
+        walk([2.5, 0.5], [2.5, 3.5], &mut |i, j| got.push((i, j)));
+        walk([7.2, 7.2], [7.9, 7.1], &mut |i, j| got.push((i, j)));
+        assert_eq!(got, [(2, 0), (2, 1), (2, 2), (2, 3), (7, 7)]);
+    }
+
+    #[test]
+    fn a_slanting_road_marks_every_cell_it_passes_through() {
+        let mut p = placed();
+        let t = *p.synth.form();
+        let (a, b) = (t.abs(20_000.3, 30_000.7), t.abs(21_234.5, 31_777.1));
+        let points = vec![[a.0 as f32, a.1 as f32], [b.0 as f32, b.1 as f32]];
+        p.roads.edges.push(Edge {
+            kind: KIND_ROAD,
+            class: 0,
+            a: 0,
+            b: 1,
+            length: 0.0,
+            crosses_water: false,
+            points: points.clone(),
+        });
+        let g = p.grid();
+        let units = |q: [f32; 2]| {
+            [
+                (f64::from(q[0]) - g.origin_x) / C,
+                (f64::from(q[1]) - g.origin_z) / C,
+            ]
+        };
+        let want = crossed_cells(units(points[0]), units(points[1]));
+        // Starting inside the road's span, so a window edge cuts it.
+        let cells = around(20_800.0, 31_000.0, 30);
+        let d = Derived::Distance {
+            to: Target::Road,
+            cap: C,
+        };
+        let got = derive(&p, d, cells).unwrap();
+        let mut on = 0;
+        for (r, c) in each(cells) {
+            let v = got.get(r, c).unwrap();
+            assert_eq!(v == 0.0, want.contains(&(r, c)), "({r}, {c}) reads {v}");
+            on += usize::from(v == 0.0);
+        }
+        assert!(on > 20);
+    }
+
+    #[test]
+    fn cells_past_the_grid_have_no_ground() {
+        let s = synth();
+        let n = i64::from(s.form().cells());
+        for cells in [
+            Cells {
+                row0: n - 3,
+                col0: -3,
+                rows: 6,
+                cols: 6,
+            },
+            Cells {
+                row0: -10,
+                col0: n + 5,
+                rows: 2,
+                cols: 3,
+            },
+        ] {
+            let valid = derive(&s, Derived::Valid, cells).unwrap();
+            assert!(valid.values.iter().all(|&v| v == 0.0));
+            for d in [
+                Derived::Slope,
+                TPI_300,
+                Derived::CoverFraction {
+                    cover: Cover::Plain,
+                    radius: 100.0,
+                },
+            ] {
+                let r = derive(&s, d, cells).unwrap();
+                assert!(r.values.iter().all(|v| v.is_nan()), "{d:?}");
+            }
+            let r = derive(&s, dist(Target::Water), cells).unwrap();
+            assert!(r.capped && r.values.iter().all(|&v| v == DISTANCE_CAP_M as f32));
+        }
+    }
+
     #[test]
     fn refuses_a_radius_that_is_not_a_length() {
         let s = synth();
         let cells = around(19000.0, 62000.0, 2);
-        for radius in [f64::NAN, -1.0, f64::INFINITY] {
+        for radius in [f64::NAN, -1.0, f64::INFINITY, MAX_REACH_M + 1.0] {
             assert!(derive(&s, Derived::Tpi { radius }, cells).is_err());
         }
+        let objects = Derived::Density {
+            pool: Pool::Objects,
+            radius: 100.0,
+        };
+        assert!(derive(&s, objects, cells).is_err());
     }
 
     #[test]
