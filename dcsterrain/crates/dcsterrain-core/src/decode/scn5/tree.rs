@@ -90,6 +90,67 @@ impl Index {
         })
     }
 
+    /// How many instances of each model `pool` lists, by model index, the
+    /// group records counted as objects. Reads the pool's ids, then the
+    /// model words of each node they name, a node at a time.
+    pub fn counts<R: ReadAt + ?Sized>(&self, r: &R, pool: Pool) -> Result<Vec<u64>, Error> {
+        const IDS: u64 = 1 << 16;
+        let toc = &self.pools[Pool::ALL.iter().position(|&p| p == pool).unwrap()];
+        let mut by_node: Vec<Vec<u32>> = vec![Vec::new(); self.nodes.len()];
+        let mut ids = Vec::new();
+        let mut i = 0;
+        while i < toc.count {
+            let n = IDS.min(toc.count - i);
+            ids.resize(8 * n as usize, 0);
+            self.read(r, toc.ids + 8 * i, &mut ids)?;
+            for (j, id) in ids.as_chunks::<8>().0.iter().enumerate() {
+                let id = u64::from_le_bytes(*id);
+                let index = id & ((1 << self.shift) - 1);
+                match usize::try_from(id >> self.shift)
+                    .ok()
+                    .filter(|&k| k < self.nodes.len() && index < u64::from(self.nodes[k].n))
+                {
+                    Some(k) => by_node[k].push(index as u32),
+                    None => {
+                        return Err(malformed(format!(
+                            "id {id}, entry {} of the {} pool, names an instance the nodes do not hold",
+                            i + j as u64,
+                            pool.name()
+                        )));
+                    }
+                }
+            }
+            i += n;
+        }
+        let mut counts = vec![0u64; self.models.len()];
+        let mut words = Vec::new();
+        for (node, here) in self.nodes.iter().zip(&by_node) {
+            if here.is_empty() {
+                continue;
+            }
+            words.resize(4 * node.n as usize, 0);
+            self.read(r, node.model, &mut words)?;
+            for &index in here {
+                let at = 4 * index as usize;
+                let word = u32::from_le_bytes(words[at..at + 4].try_into().unwrap());
+                let model = model_of(self.version, word);
+                let Some(c) = counts.get_mut(model as usize) else {
+                    return Err(malformed(format!(
+                        "an instance names model {model}, past the {} the table holds",
+                        self.models.len()
+                    )));
+                };
+                *c += 1;
+            }
+        }
+        if pool == Pool::Objects {
+            for g in &self.group {
+                counts[g.model as usize] += 1;
+            }
+        }
+        Ok(counts)
+    }
+
     /// Calls `f` with every instance of `pool` whose box in that pool meets
     /// `b`, min x, min z, max x, max z in DCS meters, edges included, in the
     /// tree's order. For objects, then every group record whose footprint
@@ -242,6 +303,23 @@ mod tests {
                 .collect()
         });
         s
+    }
+
+    #[test]
+    fn counts_each_model_as_the_walk_does() {
+        for version in [8, 9] {
+            let built = scattered(version);
+            let (b, s, idx) = open(&built);
+            for pool in Pool::ALL {
+                let mut want = vec![0u64; s.models.len()];
+                for ((p, _), i) in walked(&b, &s) {
+                    if p == pool as u8 {
+                        want[i.model as usize] += 1;
+                    }
+                }
+                assert_eq!(idx.counts(&b[..], pool).unwrap(), want, "{pool:?}");
+            }
+        }
     }
 
     #[test]
