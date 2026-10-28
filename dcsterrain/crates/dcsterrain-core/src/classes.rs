@@ -2,7 +2,7 @@
 //! and a building its settlement family, each with what decided it.
 //!
 //! The class, in order: a hand override for the terrain, else one for every
-//! terrain; `effect` for a `smoke#` model, a smoke column 100–300 m tall that
+//! terrain; `effect` for a `smoke#` model, a smoke column 200–600 m tall that
 //! is not a structure; `wall` for a box under 1 m thin and 4 m or more long;
 //! `misc` under 4 m²; `industrial` by name; else `building`.
 //!
@@ -179,7 +179,8 @@ static INDUSTRIAL_NAME: LazyLock<Regex> = LazyLock::new(|| {
         "power_trans_station|silo|industrial|elevator|zavod|factory|refinery|oilgas|tuapse|",
         "tank|nasos|pump|fuel_storage|liq_tank|concreet_can|korpus_atom|cement|coalmine|",
         "mining_factory|car_plant|bucket_wheel|warehouse|stock$|train_depot|bakery|hangar|",
-        "hungar|stancija|tech_new|^f_sklad|safshungar|safsconcreet|dagon|coolingtowers",
+        "hungar|stancija|tech_new|^f_sklad|safshungar|safsconcreet|dagon|coolingtowers|",
+        "akkuyu|aleppo_electrostation|lafarge|limasol_kean",
     ))
     .unwrap()
 });
@@ -463,7 +464,7 @@ fn split(name: &str, fp: f64, h: f64) -> (Family, &'static str) {
     } else if h >= 14.0 || (fp > 400.0 && h > 10.0) {
         (Apartment, "a tall or large box in a house-like family")
     } else if urban && h >= 8.5 && fp >= 150.0 {
-        (Apartment, "three storeys or more in an urban family")
+        (Apartment, "three stories or more in an urban family")
     } else if h <= 9.5 && fp <= 400.0 {
         (House, "a low, small box in a house-like family")
     } else if urban {
@@ -490,7 +491,7 @@ fn family_by_name(name: &str, fp: f64, h: f64) -> Option<(Option<Family>, &'stat
 
 /// A building's family, from its name, else from the name of what it is a
 /// wreck of, else from its size.
-pub fn family(name: &str, bbox: &[f32; 6]) -> (Option<Family>, &'static str) {
+pub(crate) fn family(name: &str, bbox: &[f32; 6]) -> (Option<Family>, &'static str) {
     let (w, d, h) = dims(bbox);
     let fp = w * d;
     if let Some(f) = family_by_name(name, fp, h) {
@@ -510,7 +511,7 @@ pub fn family(name: &str, bbox: &[f32; 6]) -> (Option<Family>, &'static str) {
 }
 
 /// The class the rules give a model no override names.
-pub fn class(name: &str, bbox: &[f32; 6]) -> (Class, &'static str) {
+pub(crate) fn class(name: &str, bbox: &[f32; 6]) -> (Class, &'static str) {
     let (w, d, _) = dims(bbox);
     if name.starts_with("smoke#") {
         (Class::Effect, EFFECT)
@@ -531,7 +532,8 @@ pub struct Classes {
     pub terrain: String,
     /// By model index.
     pub models: Vec<Assignment>,
-    /// Override keys naming no model in the table, with the file of each.
+    /// The terrain's own override keys naming no model in the table, with
+    /// the file of each; a `common` key may name a model only some have.
     pub unmatched: Vec<(String, String)>,
 }
 
@@ -557,7 +559,9 @@ impl Classes {
         let names: HashSet<String> = models.iter().map(|m| m.name.to_ascii_lowercase()).collect();
         let mut unmatched: Vec<(String, String)> = by_name
             .iter()
-            .filter(|(k, _)| !names.contains(*k))
+            // A common key names a model some terrains lack, so only a
+            // terrain's own keys must each name one of its models.
+            .filter(|(k, (file, _))| *file != "common" && !names.contains(*k))
             .map(|(k, (file, _))| (file.to_string(), k.clone()))
             .collect();
         unmatched.sort();
@@ -632,7 +636,8 @@ pub struct Catalog {
     pub rows: Vec<Row>,
     /// Objects of each class.
     pub counts_by_class: BTreeMap<Class, u64>,
-    /// Override keys naming no model: a model renamed or removed.
+    /// The terrain's own override keys naming no model: a model renamed or
+    /// removed.
     pub unmatched: Vec<(String, String)>,
 }
 
@@ -783,6 +788,7 @@ mod tests {
                 r#"
                 "Hut" = { class = "misc", reason = "everywhere" }
                 "Shed" = { class = "misc", reason = "everywhere" }
+                "Barn" = { class = "misc", reason = "not on every terrain" }
                 "#,
             ),
             (
@@ -868,16 +874,24 @@ mod tests {
         ];
         assert_eq!(names.len(), FAMILY_RULES.len());
         let bbox = model("", 10.0, 10.0, 6.0).bbox;
+        // The size split names the branch of the split, not the rule.
+        let low = "a low, small box in a house-like family";
         for ((yes, no), rule) in names.iter().zip(FAMILY_RULES) {
             let (f, says) = family(yes, &bbox);
-            match rule.family {
-                Some(want) => assert_eq!((f, says), (want, rule.says), "{yes}"),
-                // The size split: a low, small box is a house.
-                None => assert_eq!(f, Some(Family::House), "{yes}: {says}"),
-            }
+            let decided = match rule.family {
+                Some(want) => {
+                    assert_eq!((f, says), (want, rule.says), "{yes}");
+                    rule.says
+                }
+                None => {
+                    assert_eq!((f, says), (Some(Family::House), low), "{yes}");
+                    low
+                }
+            };
             let (_, says) = family(no, &bbox);
-            assert_ne!(says, rule.says, "{no}");
+            assert_ne!(says, decided, "{no}");
         }
+        assert_eq!(family("german_cake", &bbox).1, "no name tells");
     }
 
     #[test]

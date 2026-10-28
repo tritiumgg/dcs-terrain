@@ -1,7 +1,7 @@
 # Caucasus: hand overrides for the scenery classes. Each key is a model as
-# the live catalogue spells it, matched without regard to case; each value
+# the live catalog spells it, matched without regard to case; each value
 # names its class (building, industrial, wall, misc or effect), an optional
-# settlement family, and the reason. Drafted from the live catalogue of
+# settlement family, and the reason. Drafted from the live catalog of
 # 2026-09-02: 888 859 objects over 263 models.
 #
 # A `misc` object still vetoes a footprint; it is kept out of the built-up
