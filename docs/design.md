@@ -41,7 +41,8 @@ DCS install (read-only)                 cache/<terrain>/           (rebuildable)
   .scn5   ───┤                            scene.nodes     node offsets, models, pools (0.35–25 MiB)
   .rn4    ───┤   decoders                 tables.json     airdromes, runways, stands, beacons,
   airfield ──┤ ─────────────────────▶                     radio, towns, nodes, CRS, classes
-  Lua files ─┘        │                   roads.graph     graph, geometry, betweenness (9–200 MiB)
+  Lua files ─┘        │                   roads.graph     graph, geometry, water (9–137 MiB)
+                      │                   roads.betweenness per edge (< 2 MiB)
                       │                   places          settlements (< 2 MiB)
                       │                   horizon/        one file per tile, filled lazily
                       ▼                   validation.json the last live validation figures
@@ -224,7 +225,8 @@ opening the install files it was derived from, except once after an update.
 | `mesh.toc` | The `.surface5` table of contents can only be pattern-scanned: 21 ms (MarianasWWII) to 0.7 s (GermanyCW) per open | 0.05–1.5 MB, every block's arrays and its runway subsets, the one material read | < 1 s |
 | `scene.nodes` | Parsing the `.scn5` head costs 2 s and 559 MiB on Germany | 0.35 MiB (MarianaIslands) to 24.5 MiB (GermanyCW): each node's array offsets, the model table, the group and the pools | 0.05–1.8 s |
 | `tables.json` | Airfields, stands, Lua tables, the fitted projection, scenery classes and any imported hook tables each cost a full decode; together they are small | 0.1 MB (MarianaIslands) to 2.4 MB (GermanyCW), read back in 1–10 ms | 54–560 ms |
-| `roads.graph` | The `.rn4` has no spatial order: 5.5 s and 3.3 GB to scan on Germany. Betweenness is global | 9.3 MiB (Caucasus) to 200 MiB (Germany) | 7 ms–5 s; betweenness 1 s (Caucasus) to ~250 s CPU (Germany) |
+| `roads.graph` | The `.rn4` has no spatial order: a 3.1 s scan on GermanyCW, and the water under 23 M samples | 8.6 MiB (Caucasus) to 137 MiB (GermanyCW) | 0.5 s (Caucasus) to 9.8 s (GermanyCW) |
+| `roads.betweenness` | Betweenness is global | 0.04 MiB (Caucasus) to 1.9 MiB (GermanyCW) | 0.4 s (Caucasus) to 29 s (GermanyCW) on two threads |
 | `places` | Settlements need every building on the terrain (§6.3) | 6–24 k rows, < 2 MiB | a whole objects-pool walk, 3.8 s (Caucasus) to 53 s (GermanyCW), plus 0.2–8 s grouping |
 | `horizon/` | 0.1–0.2 ms per site, 0.9–4 s per 20 × 20 km region on one core | up to 282 MiB (Caucasus) / ~720 MiB (Afghanistan) if every tile were touched | per tile, the first time a query touches it |
 | `validation.json` | Written by the live validation sortie, not computed | KiB | — |
@@ -400,11 +402,31 @@ the tallest models, so a new terrain's top models can be reviewed in minutes.
 
 ### 6.5 Road graph
 
-Built from the `.rn4` by junction id (§3.2), with degree-2 nodes whose edges
-are collinear within 1° contracted. Each edge has its polyline, class, length,
-`crosses_water` (any 25 m sample on water) and betweenness (Brandes on the
-largest component, sampled from 2 000 sources on large graphs, normalized
-0..1). Class names include tunnels (`tunnel_hose`, `roki_tunnel_road`).
+Built from the `.rn4` by junction id (§3.2): roads and rails are two networks
+that share no node, and a node where exactly two edges of one class meet and
+run on within 1° is contracted. Each edge has its polyline, class, length
+(the polyline and the gaps from its ends to its nodes, so a straight line
+between nodes never exceeds a path) and `crosses_water`: any 25 m sample
+under a water triangle that is not a road strip, even where a bridge's road
+strip wins the point. These are `roads.graph`, keyed on the road and surface
+files; the water is read a surface block at a time, each block under the
+roads prepared once with its water triangles alone, so a sample tests the
+few near it. Class names include tunnels (`tunnel_hose`,
+`roki_tunnel_road`).
+
+Betweenness is its own entry, `roads.betweenness`, built from the graph so a
+route never waits for it: Brandes over each network's largest component from
+at most 2 000 sources spread through it, on at most two threads at
+background priority on Windows, normalized 0..1 by the network's largest.
+
+The road file is read once, front to back, through a 16 MiB window, never
+whole and never mapped: on 2.9.30.28738, OS cache warm, the scan takes
+0.20 s and 62 MiB at peak on Caucasus against 0.23 s and 240 MiB reading it
+whole, 3.5 s and 0.65 GiB on GermanyCW against 3.9 s and 3.3 GiB, the
+difference what the whole file holds. On Caucasus both water rules, the
+water under a road strip and the winning triangle's, mark the same 799 of
+8 764 road edges. GermanyCW's 1.52 M road stretches contract to 465 k
+edges, and its road and rail graph has 357 k nodes.
 
 ## 7. The command line
 
@@ -460,7 +482,7 @@ correctness rule: a miss is a decision about the target.
 | `low_level_route` 100 km, 10 sites | not prototyped, 1–3 s estimated | 5 s |
 | `validate_placements`, 1 000 placements | ~2 s cold on Germany estimated | 3 s |
 | `point_info`, `airfield_info` | µs to a few ms | 20 ms cold |
-| cache build, all but betweenness and places | < 2 s; roads ≈ 5 s on Germany | 10 s |
+| cache build, all but betweenness and places | < 2 s; roads 0.5 / 9.8 s (Caucasus / GermanyCW, 2.9.30.28738), 3.1 s of it the GermanyCW scan and 4.6 s its water | 10 s |
 | private memory per query process | 15–45 MiB | 64 MiB |
 
 Accuracy:
