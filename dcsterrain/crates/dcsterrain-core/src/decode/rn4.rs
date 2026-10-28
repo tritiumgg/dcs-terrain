@@ -338,21 +338,12 @@ fn node(id: u32) -> Option<u32> {
 /// one id whose ends are spread across it, and joined through one node they
 /// would weld its dead ends together.
 fn unjoin_catch_alls(edges: &mut [Edge]) -> Vec<u32> {
-    let mut ends: HashMap<u32, Vec<[f64; 2]>> = HashMap::new();
-    for e in edges.iter().filter(|e| e.kind != KIND_AIRFIELD) {
-        let (first, last) = (e.points[0], e.points[e.points.len() - 1]);
-        for (id, p) in [(e.a, first), (e.b, last)] {
-            if let Some(id) = id {
-                ends.entry(id).or_default().push([p[0], p[2]]);
-            }
-        }
-    }
-    let mut wide: Vec<u32> = ends
-        .into_iter()
-        .filter(|(_, l)| spread(l) > JUNCTION_REACH_M)
-        .map(|(id, _)| id)
-        .collect();
-    wide.sort_unstable();
+    let wide = catch_alls(
+        edges
+            .iter()
+            .filter(|e| e.kind != KIND_AIRFIELD)
+            .flat_map(|e| ends(e.a, e.b, &e.points)),
+    );
     for e in edges.iter_mut().filter(|e| e.kind != KIND_AIRFIELD) {
         for end in [&mut e.a, &mut e.b] {
             if end.is_some_and(|id| wide.binary_search(&id).is_ok()) {
@@ -360,6 +351,35 @@ fn unjoin_catch_alls(edges: &mut [Edge]) -> Vec<u32> {
             }
         }
     }
+    wide
+}
+
+/// The named ends of an edge with `points`, as `(id, [x, z])`.
+pub fn ends(
+    a: Option<u32>,
+    b: Option<u32>,
+    points: &[[f64; 3]],
+) -> impl Iterator<Item = (u32, [f64; 2])> {
+    let (first, last) = (points[0], points[points.len() - 1]);
+    [(a, first), (b, last)]
+        .into_iter()
+        .filter_map(|(id, p)| id.map(|id| (id, [p[0], p[2]])))
+}
+
+/// The ids, sorted, among `ends` of the road and rail edges whose ends do not
+/// all lie within reach of their mean: each map's catch-all, which names no
+/// junction.
+pub fn catch_alls(ends: impl IntoIterator<Item = (u32, [f64; 2])>) -> Vec<u32> {
+    let mut by_id: HashMap<u32, Vec<[f64; 2]>> = HashMap::new();
+    for (id, p) in ends {
+        by_id.entry(id).or_default().push(p);
+    }
+    let mut wide: Vec<u32> = by_id
+        .into_iter()
+        .filter(|(_, l)| spread(l) > JUNCTION_REACH_M)
+        .map(|(id, _)| id)
+        .collect();
+    wide.sort_unstable();
     wide
 }
 
@@ -410,7 +430,7 @@ fn write_kind(net: &Network, kind: u8, path: &Path) -> io::Result<usize> {
     Ok(n)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub mod build {
     //! Road network files as the decoder reads them, for tests.
 

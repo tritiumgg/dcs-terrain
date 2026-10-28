@@ -8,6 +8,8 @@
 use std::fmt;
 
 use super::*;
+use crate::decode::rn4::{KIND_RAIL, KIND_ROAD};
+use crate::roads;
 use crate::source::Cover;
 
 /// A setting `Theatre::new` refuses.
@@ -394,6 +396,31 @@ impl Theatre {
         self.edges().1
     }
 
+    /// The road and rail graph, as the road file's edges would build it.
+    pub fn road_graph(&self) -> roads::Graph {
+        let classes = [ROAD_EW_CLASS, ROAD_NS_CLASS, RAIL_CLASS];
+        let stretch = |kind: u8, e: Edge| roads::Stretch {
+            kind,
+            class: classes.iter().position(|c| *c == e.class).unwrap() as u8,
+            a: Some(e.a),
+            b: Some(e.b),
+            points: e.points.iter().map(|p| [p[0], p[1]]).collect(),
+        };
+        let (road, rail) = self.edges();
+        let stretches = road
+            .into_iter()
+            .map(|e| stretch(KIND_ROAD, e))
+            .chain(rail.into_iter().map(|e| stretch(KIND_RAIL, e)))
+            .collect();
+        let mut water = |x: f64, z: f64| {
+            let (north, east) = (x - f64::from(ORIGIN_X_M), z - f64::from(ORIGIN_Z_M));
+            // The water under a road strip, which the bridge's covers.
+            self.in_sea(north, east) || self.in_lake(north, east) || self.in_river(east)
+        };
+        let classes = classes.iter().map(|c| c.to_string()).collect();
+        roads::build(classes, stretches, &mut water).expect("the water test answers every sample")
+    }
+
     /// Every scenery object: the town, the industrial pair, the poles and
     /// the box-less pair, ids counting up in that order.
     pub fn scenery(&self) -> Vec<Object> {
@@ -505,6 +532,43 @@ mod tests {
             .filter(|&c| t().cell((RUNWAY_NORTH_M / 50.0) as u32, c).surface == SURFACE_RUNWAY)
             .count() as u32;
         assert_eq!(runway, (RUNWAY_LENGTH_M / 50.0) as u32);
+    }
+
+    #[test]
+    fn the_bridge_is_one_edge_between_the_junctions_and_carries_the_most() {
+        let g = t().road_graph();
+        let road: Vec<usize> = (0..g.edges.len())
+            .filter(|&i| g.edges[i].kind == KIND_ROAD)
+            .collect();
+        // Contracted, the four arms of each junction and the link between.
+        assert_eq!(road.len(), 7);
+        let wet: Vec<usize> = road
+            .iter()
+            .copied()
+            .filter(|&i| g.edges[i].crosses_water)
+            .collect();
+        assert_eq!(wet.len(), 1);
+        let bridge = &g.edges[wet[0]];
+        let mut ends = [bridge.a, bridge.b].map(|n| g.nodes[n as usize]);
+        ends.sort_by(|p, q| p[1].total_cmp(&q[1]));
+        let junctions = [ROAD_NS_EAST_M, ROAD_EAST_EAST_M].map(|east| {
+            let (x, z) = t().abs(ROAD_EW_NORTH_M, east);
+            [x, z]
+        });
+        assert_eq!(ends, junctions);
+        assert_eq!(
+            bridge.length,
+            ROAD_EAST_EAST_M - ROAD_NS_EAST_M,
+            "the bridge's whole length and the road either side"
+        );
+
+        let b = roads::betweenness(&g, roads::SOURCES, 2);
+        assert_eq!(b[wet[0]], 1.0);
+        for &i in &road {
+            if i != wet[0] {
+                assert_eq!(b[i], 7.0 / 16.0, "edge {i}");
+            }
+        }
     }
 
     #[test]

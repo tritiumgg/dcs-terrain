@@ -10,6 +10,7 @@ pub mod decode;
 pub mod extract;
 pub mod grid;
 pub mod query;
+pub mod roads;
 pub mod source;
 pub mod synth;
 pub mod types;
