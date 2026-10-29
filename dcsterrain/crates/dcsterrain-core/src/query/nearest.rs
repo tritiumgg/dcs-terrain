@@ -13,7 +13,7 @@ const N_MAX: u32 = 50;
 /// until it holds enough.
 const SCENERY_FIRST_M: f64 = 250.0;
 
-/// The `n` nearest of `found`, nearest first, ties in the order found.
+/// The `n` nearest of `found`, nearest first, ties in the order given.
 fn nearest_of(mut found: Vec<Nearby>, n: usize) -> Vec<Nearby> {
     found.sort_by(|a, b| a.distance.total_cmp(&b.distance));
     found.truncate(n);
@@ -121,7 +121,8 @@ fn scenery(
         .map_err(refused)?;
         found.sort_by(|a, b| a.id.cmp(&b.id));
         found.dedup_by(|a, b| a.id == b.id);
-        // Only objects within the half-width are surely nearer than any
+        // Ties keep the order of their ids. Only objects within the
+        // half-width are surely nearer than any
         // outside the box.
         let sure = found.iter().filter(|f| f.distance <= r).count();
         if sure >= n || r >= farthest {

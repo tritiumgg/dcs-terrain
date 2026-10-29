@@ -170,27 +170,24 @@ pub fn scenery_in(terrain: &Terrain, q: SceneryInRequest) -> Result<SceneryInRes
             )]);
         }
     };
-    let mut objects: Vec<SceneryObject> = Vec::new();
+    // Keyed by id, so an object found twice counts once against the cap.
+    let mut found: BTreeMap<u64, SceneryObject> = BTreeMap::new();
     let mut over = false;
     src.objects_in(bbox, &mut |o| {
         if over || !wanted(o.class) || !test(o) {
             return;
         }
-        objects.push(row(o));
-        // Twice the cap leaves room for an object found twice.
-        over = objects.len() > 2 * q.max_rows as usize;
+        found.insert(o.id, row(o));
+        over = found.len() > q.max_rows as usize;
     })
     .map_err(refused)?;
-    objects.sort_by_key(|o| o.id);
-    objects.dedup_by_key(|o| o.id);
-    if over || objects.len() > q.max_rows as usize {
+    let objects: Vec<SceneryObject> = found.into_values().collect();
+    if over {
         return Err(vec![Issue::new(
             "too_many_rows",
             &format!(
-                "more than {} objects ({}{}); raise max_rows, name classes or shrink the region",
-                q.max_rows,
-                objects.len(),
-                if over { " or more" } else { "" }
+                "more than {} objects; raise max_rows, name classes or shrink the region",
+                q.max_rows
             ),
             "max_rows",
         )]);
