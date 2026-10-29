@@ -141,7 +141,7 @@ Request: `region`, `footprint`, `criteria`, `step` (default 2 × cell size),
 orientation_deg, score, terms}` ranked by the weighted sum of term scores
 after every hard test passes, suppressed at `spacing`, plus `stats
 {cells_considered, cells_passed, tiles_skipped, distance_capped}`. A tile whose
-height range or distance range cannot pass a hard criterion is skipped whole.
+zone map of a layer a hard criterion reads cannot pass is skipped whole (§5).
 Line-of-sight criteria run last.
 
 ### `visible`
@@ -384,26 +384,42 @@ a soft score. `valid` is always applied.
 |---|---|---|---|
 | `slope_max` | `deg` | max slope over footprint ≤ deg | 1 − max/deg |
 | `span_max` | `m` | max − min height over footprint corners and center ≤ m | 1 − span/m |
-| `surface_in` | `classes: ["land"]` | every footprint cell's `water` in set | 1 |
-| `surface_enum_in` | `values` | same on `surface` | 1 |
-| `cover_in` | `classes` | every footprint cell's `cover` in set | 1 |
+| `surface_in` | `classes: ["land"]` | every footprint cell's `water` in set | the share of cells in set |
+| `surface_enum_in` | `values` | same on `surface` | the share |
+| `cover_in` | `classes` | every footprint cell's `cover` in set | the share |
 | `cover_fraction_min` | `class, radius, min` | share of `class` within radius ≥ min | the share |
 | `dist_cover_band` | `class, min, max` | distance to `class` in band | 1 at min, 0 at max |
 | `dist_road_band`, `dist_rail_band` | `min, max` | distance in band | 1 at min, 0 at max |
-| `dist_water_min` | `m` | `dist_water` ≥ m | min(1, dist_water / (2 × m)) |
+| `dist_water_min` | `m` | `dist_water` ≥ m, searched to 2 × m and 5 km at least | min(1, dist_water / (2 × m)) |
 | `dist_airdrome_band` | `min, max, airdrome?` | to the nearest airdrome, or the one given by id or `name_id` | 1 at min, 0 at max |
 | `scenery_max` | `class, radius, max` | count within radius ≤ max | 1 − count/max |
 | `scenery_in_footprint_max` | `max` | OBB overlap count ≤ max | 1 − count/max |
 | `clearing_max` | `radius` (default 150), `max` | objects within radius ≤ max: what a heliport static removes at spawn | 1 − count/max |
-| `enclosure_min` | `deg` | `enclosure` ≥ deg | saturating |
-| `masked_from` | `bearing_deg, half_width_deg, min_elev_deg` | every horizon bin in the sector ≥ min_elev | mean margin |
+| `enclosure_min` | `deg` | `enclosure` ≥ deg | min(1, enclosure / (2 × deg)) |
+| `masked_from` | `bearing_deg, half_width_deg, min_elev_deg` | every horizon bin in the sector ≥ min_elev | the bins' mean margin over min_elev, over 10°, at most 1 |
 | `not_visible_from` | `observers, max_fraction, own_alt_agl` (default 2) | share of observers seeing the candidate ≤ max | 1 − share |
 | `visible_to` | `targets, min_fraction, own_alt_agl` (default 2) | share of targets the candidate sees ≥ min | the share |
 | `tpi_class_in` | `classes, threshold_m` (default 10) | with `t = threshold_m`: `ridge` when `tpi_300 > t`; `valley` when `< −t`; else `upper` when `tpi_2000 > t`; `lower` when `< −t`; else `mid` when slope > 5°; else `flat` | 1 |
-| `valid` | none | `valid == 1` | 1 |
+| `valid` | none | every footprint cell's `valid == 1` | the share |
 
 A distance with no stated maximum searches 5 km and reads anything farther as
-5 km; `stats.distance_capped` reports it.
+5 km; `stats.distance_capped` reports it. A band searches one cell past its
+maximum, so a site with nothing nearer fails it rather than reading the cap.
+
+A site is a candidate position at one orientation. The footprint's cells are
+those whose centers lie in it, and always the cell holding the site. A
+criterion with no footprint in it reads the layer at the site's cell; a
+count within a radius counts structures whose positions lie within it of the
+site; `masked_from`'s sector is the bins whose center lines lie within
+`half_width_deg` of the bearing, or the one bin holding it.
+
+Evaluation is cheapest first. The layers read at the site's cell are derived
+over the region once, and each grid tile's least and greatest value of each,
+or the codes it holds, skips a tile where no cell can pass, before its
+horizon is computed or its scenery read; the skip is exact, because each such
+test reads the site's own cell or a footprint that includes it. The horizon
+criteria follow on the tiles left and skip again; then the rest, in order of
+cost over the share of sites each fails; then line of sight.
 
 ## 6. Testing
 
