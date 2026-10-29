@@ -137,6 +137,39 @@ impl Window {
             (0..i64::from(self.rows)).contains(&r) && (0..i64::from(self.cols)).contains(&c);
         inside.then(|| self.data[(r * i64::from(self.cols) + c) as usize])
     }
+
+    /// As `sample`, from this window, which must hold the cells around
+    /// `(x, z)`: `None` off the grid, where a cell that carries weight lies
+    /// outside the window, or where it is `nodata`.
+    pub fn value_at(&self, g: &Grid, x: f64, z: f64) -> Option<f64> {
+        let (row, col) = g.cell_at(x, z)?;
+        let l = self.layer;
+        let present = |v: i32| (v != l.nodata()).then_some(f64::from(v));
+        if l != Layer::Height {
+            return present(self.get(row.into(), col.into())?);
+        }
+        let c = f64::from(g.cell_size);
+        let axis = |v: f64, origin: f64, n: u32| {
+            let f = ((v - origin) / c - 0.5).clamp(0.0, f64::from(n - 1));
+            let i = f.floor();
+            (i as i64, f - i)
+        };
+        let (r0, tr) = axis(x, g.origin_x, g.height);
+        let (c0, tc) = axis(z, g.origin_z, g.width);
+        let mut sum = 0.0;
+        for (dr, dc, weight) in [
+            (0, 0, (1.0 - tr) * (1.0 - tc)),
+            (0, 1, (1.0 - tr) * tc),
+            (1, 0, tr * (1.0 - tc)),
+            (1, 1, tr * tc),
+        ] {
+            if weight == 0.0 {
+                continue;
+            }
+            sum += weight * present(self.get(r0 + dr, c0 + dc)?)?;
+        }
+        Some(sum)
+    }
 }
 
 /// A layer's value at `(x, z)`, or `None` off the grid or where it is

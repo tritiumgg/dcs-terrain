@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap};
 use super::{Terrain, refused, resolve};
 use crate::classes::Class;
 use crate::decode::scn5::Pool;
-use crate::grid::{self, Grid, Window};
+use crate::grid::{self, Window};
 use crate::layers::{self, Cells, DISTANCE_CAP_M, Derived, TPI_300, TPI_2000, Target};
 use crate::source::{Cover, Ground, Layer, Source};
 use crate::types::{Issue, SampleRequest, SampleResponse, SampleRow};
@@ -176,40 +176,7 @@ fn raster_values(
     }
     let w = Window::read(src, l, r0, c0, (r1 - r0 + 1) as u32, (c1 - c0 + 1) as u32)
         .map_err(refused)?;
-    Ok(pts
-        .iter()
-        .map(|&[x, z]| window_value(&w, &g, l, x, z))
-        .collect())
-}
-
-/// As `grid::sample`, from a window holding the cells around `(x, z)`.
-fn window_value(w: &Window, g: &Grid, l: Layer, x: f64, z: f64) -> Option<f64> {
-    let (row, col) = g.cell_at(x, z)?;
-    let present = |v: i32| (v != l.nodata()).then_some(f64::from(v));
-    if l != Layer::Height {
-        return present(w.get(row.into(), col.into())?);
-    }
-    let c = f64::from(g.cell_size);
-    let axis = |v: f64, origin: f64, n: u32| {
-        let f = ((v - origin) / c - 0.5).clamp(0.0, f64::from(n - 1));
-        let i = f.floor();
-        (i as i64, f - i)
-    };
-    let (r0, tr) = axis(x, g.origin_x, g.height);
-    let (c0, tc) = axis(z, g.origin_z, g.width);
-    let mut sum = 0.0;
-    for (dr, dc, weight) in [
-        (0, 0, (1.0 - tr) * (1.0 - tc)),
-        (0, 1, (1.0 - tr) * tc),
-        (1, 0, tr * (1.0 - tc)),
-        (1, 1, tr * tc),
-    ] {
-        if weight == 0.0 {
-            continue;
-        }
-        sum += weight * present(w.get(r0 + dr, c0 + dc)?)?;
-    }
-    Some(sum)
+    Ok(pts.iter().map(|&[x, z]| w.value_at(&g, x, z)).collect())
 }
 
 /// Each point's value of a derived layer at the cell holding it, computed
