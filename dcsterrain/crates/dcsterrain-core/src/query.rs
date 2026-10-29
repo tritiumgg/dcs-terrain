@@ -18,6 +18,7 @@ use crate::source::{Refusal, Source};
 use crate::synth::Synth;
 use crate::types::{Issue, OPERATIONS, Provenance};
 
+pub mod criteria;
 mod describe;
 mod geo;
 mod geojson;

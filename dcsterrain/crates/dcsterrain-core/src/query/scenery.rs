@@ -11,7 +11,7 @@ use crate::types::{Issue, SceneryInRequest, SceneryInResponse, SceneryObject};
 /// A rectangle in the world: its center, its local x axis as a unit vector
 /// in DCS `(x, z)`, and its half extents along that axis and across it.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Rect {
+pub(super) struct Rect {
     c: [f64; 2],
     u: [f64; 2],
     half: [f64; 2],
@@ -20,7 +20,7 @@ struct Rect {
 impl Rect {
     /// A rectangle whose local x axis points `bearing` radians from north
     /// towards east, `along` long on it and `across` wide, centered on `c`.
-    fn new(c: [f64; 2], bearing: f64, along: f64, across: f64) -> Rect {
+    pub(super) fn new(c: [f64; 2], bearing: f64, along: f64, across: f64) -> Rect {
         Rect {
             c,
             u: [bearing.cos(), bearing.sin()],
@@ -41,7 +41,7 @@ impl Rect {
     }
 
     /// Whether the two meet, edges touching included: separating axes.
-    fn meets(&self, o: &Rect) -> bool {
+    pub(super) fn meets(&self, o: &Rect) -> bool {
         let d = [o.c[0] - self.c[0], o.c[1] - self.c[1]];
         [self.u, self.v(), o.u, o.v()].iter().all(|&a| {
             let gap = (d[0] * a[0] + d[1] * a[1]).abs();
@@ -50,7 +50,7 @@ impl Rect {
     }
 
     /// The box of the rectangle, min x, min z, max x, max z.
-    fn bbox(&self) -> [f64; 4] {
+    pub(super) fn bbox(&self) -> [f64; 4] {
         let rx = self.radius_on([1.0, 0.0]);
         let rz = self.radius_on([0.0, 1.0]);
         [
@@ -60,10 +60,30 @@ impl Rect {
             self.c[1] + rz,
         ]
     }
+
+    /// Whether the point lies in the rectangle, its edge included.
+    pub(super) fn contains(&self, p: [f64; 2]) -> bool {
+        let d = [p[0] - self.c[0], p[1] - self.c[1]];
+        let v = self.v();
+        (d[0] * self.u[0] + d[1] * self.u[1]).abs() <= self.half[0] + 1e-9
+            && (d[0] * v[0] + d[1] * v[1]).abs() <= self.half[1] + 1e-9
+    }
+
+    /// Its four corners, in order around it.
+    pub(super) fn corners(&self) -> [[f64; 2]; 4] {
+        let v = self.v();
+        let at = |a: f64, b: f64| {
+            [
+                self.c[0] + a * self.half[0] * self.u[0] + b * self.half[1] * v[0],
+                self.c[1] + a * self.half[0] * self.u[1] + b * self.half[1] * v[1],
+            ]
+        };
+        [at(1.0, 1.0), at(1.0, -1.0), at(-1.0, -1.0), at(-1.0, 1.0)]
+    }
 }
 
 /// An object's footprint: its model's box, turned and placed.
-fn footprint(o: &Object) -> Rect {
+pub(super) fn footprint(o: &Object) -> Rect {
     let [x0, _, z0, x1, _, z1] = o.bbox.map(f64::from);
     let (cl, cr) = ((x0 + x1) / 2.0, (z0 + z1) / 2.0);
     let u = [o.rotation.cos(), o.rotation.sin()];
