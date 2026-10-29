@@ -365,7 +365,10 @@ impl Sweep {
     /// The slope from the eye to radial `k`'s ground at its step `done`,
     /// the radial running `cos` north and `sin` east: within the mesh's
     /// reach the steepest over the triangles out to there, beyond it the
-    /// raster at that step; minus infinity where there is no ground.
+    /// raster at that step; minus infinity where there is no ground. The
+    /// mesh's slopes allow half of `visible`'s 0.1 mm, the raster's none:
+    /// the raster rounds its heights to the meter, so the hair is nothing
+    /// there.
     fn slope(&self, k: u64, done: u64, cos: f64, sin: f64) -> f64 {
         if let Some(&s) = self.near[k as usize].get(done as usize - 1) {
             return s;
