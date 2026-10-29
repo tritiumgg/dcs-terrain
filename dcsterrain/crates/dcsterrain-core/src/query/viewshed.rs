@@ -4,7 +4,8 @@
 //! the raster every half cell, keeping the steepest angle to the ground so
 //! far. A cell takes the radial nearest its center in bearing, and is seen
 //! when its target stands at or above that radial's steepest angle short of
-//! it: the test `visible` makes of a sightline, swept once for every cell.
+//! it: the test a half-cell raster walk makes of a sightline, swept once for
+//! every cell. `visible` judges over the mesh's triangles instead.
 
 use std::f64::consts::TAU;
 

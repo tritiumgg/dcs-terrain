@@ -147,14 +147,17 @@ Line-of-sight criteria run last.
 ### `visible`
 
 Request: `a: Point3, b: Point3`. Response: `{visible, blocking: Point3 | null,
-clearance_m}`, where clearance is the least vertical gap between the sightline
-and the terrain (negative when blocked) and `blocking` carries an absolute
-`alt`. The ends stand on the mesh triangle's own height; between them the
-height is sampled every half cell along the segment, bilinear, on a flat
-world, and a step no mesh covers does not block. Ends too close for a step
-between them report the lower end's height above its ground as the
-clearance. An end off the mesh is the issue `off_terrain`. DCS's own
-sightline ignores buildings and trees, and so does this.
+clearance_m}`, where clearance is the least vertical gap anywhere between
+the ends, so it reaches each end's own height above its ground, and is
+negative exactly when the line is blocked; `blocking` is where the ground
+first rises above the line, with an absolute `alt`. The ends stand on the
+mesh triangle's own height, and between them the line is judged exactly
+over every mesh triangle under it, on a flat world: where triangles overlap
+the one a point would report is the ground, and a stretch no triangle covers
+does not block. The ground blocks when it rises 0.1 mm above the line, so a
+line ending on the ground is not blocked by rounding (ADR 0003). An end off
+the mesh is the issue `off_terrain`. DCS's own sightline ignores buildings
+and trees, and so does this.
 
 ### `viewshed`
 
@@ -171,8 +174,10 @@ are `[x, z]`, exteriors counterclockwise on a map and holes clockwise.
 
 Radials are spaced to give one per mask cell on the outer ring, each stepped
 every half cell and keeping the steepest angle to the ground so far. A cell
-is judged against the radial nearest it in bearing, by the test `visible`
-makes, so the share matches a sightline to every cell. The rings run along
+is judged against the radial nearest it in bearing, by the test a raster
+walk makes, so the share matches a half-cell raster sightline to every cell;
+`visible` judges over the mesh's triangles instead, and differs from it
+mostly on a target on the ground (ADR 0003). The rings run along
 cell edges, holes included and cells meeting only at a corner apart, then are
 simplified to half a mask cell; `geojson` draws the same polygons whether or
 not `as_polygons` is set. A mask, or the window of heights under it, of more
