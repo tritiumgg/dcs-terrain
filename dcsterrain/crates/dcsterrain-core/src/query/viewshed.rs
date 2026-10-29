@@ -8,12 +8,14 @@
 //! every cell. `visible` judges over the mesh's triangles instead.
 
 use std::f64::consts::TAU;
+use std::sync::atomic::{AtomicU8, Ordering};
 
+use rayon::prelude::*;
 use serde_json::json;
 
 use super::geojson::{Features, props};
 use super::{Terrain, outline, refused};
-use crate::grid::Window;
+use crate::grid::{Grid, Window};
 use crate::source::Layer;
 use crate::types::{Issue, Polygon, ViewshedRequest, ViewshedResponse};
 
@@ -54,6 +56,64 @@ fn base64(bytes: &[u8]) -> String {
 }
 
 pub fn viewshed(terrain: &Terrain, q: ViewshedRequest) -> Result<ViewshedResponse, Vec<Issue>> {
+    let s = prepare(terrain, &q)?;
+    let (bits, seen, total) = s.run();
+    let (side, res, (origin_x, origin_z), o) = (s.side, s.res, s.origin, q.observer);
+
+    let polygons = (q.as_polygons || q.geojson).then(|| {
+        let lit = |r: i64, c: i64| {
+            let i = r * side + c;
+            (0..side).contains(&r)
+                && (0..side).contains(&c)
+                && bits[(i / 8) as usize] & (0x80 >> (i % 8)) != 0
+        };
+        let corner = |r: f64, c: f64| [origin_x + r * res, origin_z + c * res];
+        outline::polygons(&lit, side, side, &corner, res / 2.0)
+    });
+    let rings = q.as_polygons.then(|| {
+        polygons
+            .iter()
+            .flatten()
+            .flatten()
+            .map(|r| Polygon { points: r.clone() })
+            .collect()
+    });
+    let geojson = match &polygons {
+        Some(p) if q.geojson => {
+            let mut f = Features::new(terrain)?;
+            f.polygons(
+                p,
+                props([
+                    ("observer", json!(o)),
+                    ("radius", json!(q.radius)),
+                    ("target_alt_agl", json!(q.target_alt_agl)),
+                ]),
+            );
+            f.point([o.x, o.z], props([("alt_agl", json!(o.alt_agl))]));
+            Some(f.finish())
+        }
+        _ => None,
+    };
+    Ok(ViewshedResponse {
+        provenance: terrain.provenance(),
+        origin_x,
+        origin_z,
+        cell: res,
+        width: side as u32,
+        height: side as u32,
+        bits: base64(&bits),
+        visible_fraction: if total == 0 {
+            0.0
+        } else {
+            seen as f64 / total as f64
+        },
+        rings,
+        geojson,
+    })
+}
+
+/// Checks the request, and reads the heights its sweep stands on.
+fn prepare(terrain: &Terrain, q: &ViewshedRequest) -> Result<Sweep, Vec<Issue>> {
     let src = terrain.source();
     let g = src.grid();
     let cell = f64::from(g.cell_size);
@@ -142,125 +202,248 @@ pub fn viewshed(terrain: &Terrain, q: ViewshedRequest) -> Result<ViewshedRespons
         index(o.z + reach, g.origin_z),
     );
     let (rows, cols) = ((r_hi - r_lo + 1) as u32, (c_hi - c_lo + 1) as u32);
-    let eye = ground.height + o.alt_agl;
     let w = Window::read(src, Layer::Height, r_lo, c_lo, rows, cols).map_err(refused)?;
-    let height = |x: f64, z: f64| w.value_at(&g, x, z);
-
-    let step = cell / 2.0;
     let radials = ((TAU * q.radius / res).ceil() as u64).max(8);
-    let bearing = TAU / radials as f64;
-    let mut bits = vec![0u8; ((side * side) as usize).div_ceil(8)];
-    let mut set = |i: i64| bits[(i / 8) as usize] |= 0x80 >> (i % 8);
-    let centre = |r: i64, c: i64| {
-        (
-            origin_x + (r as f64 + 0.5) * res,
-            origin_z + (c as f64 + 0.5) * res,
-        )
-    };
+    Ok(Sweep {
+        w,
+        g,
+        o: (o.x, o.z),
+        eye: ground.height + o.alt_agl,
+        radius: q.radius,
+        target_alt_agl: q.target_alt_agl,
+        res,
+        step: cell / 2.0,
+        n,
+        side,
+        origin: (origin_x, origin_z),
+        radials,
+        bearing: TAU / radials as f64,
+        parallel: side * side >= PARALLEL_CELLS,
+    })
+}
 
-    // Each cell within the radius that has ground, keyed by its radial and
-    // the last step short of it, so each radial is swept once in order.
-    let (mut cells, mut seen) = (Vec::new(), 0u64);
-    for r in 0..side {
-        for c in 0..side {
-            let (x, z) = centre(r, c);
-            let (dx, dz) = (x - o.x, z - o.z);
-            let d = dx.hypot(dz);
-            // The cell holding the observer counts however small the radius.
-            let own = r == n && c == n;
-            if (d > q.radius && !own) || height(x, z).is_none() {
-                continue;
-            }
-            let i = r * side + c;
-            // Too close for a step between: nothing stands in the way.
-            let last = ((d / step).ceil() as u64).max(1) - 1;
-            if last == 0 {
-                set(i);
-                seen += 1;
-                continue;
-            }
-            let k = (dz.atan2(dx).rem_euclid(TAU) / bearing).round() as u64 % radials;
-            cells.push((k << 44) | (last << 24) | i as u64);
+/// Masks of at least this many cells are swept over every core; a smaller
+/// one is done before a pool of threads would have started.
+const PARALLEL_CELLS: i64 = 1 << 16;
+
+/// The low bits of a cell's key: the last step short of it, then its index.
+const LAST_AND_INDEX: u64 = (1 << 44) - 1;
+
+/// One viewshed's mask, observer and heights.
+struct Sweep {
+    w: Window,
+    g: Grid,
+    o: (f64, f64),
+    eye: f64,
+    radius: f64,
+    target_alt_agl: f64,
+    res: f64,
+    /// The distance between two samples of a radial.
+    step: f64,
+    /// The mask's cells from its edge to the observer's, and along a side.
+    n: i64,
+    side: i64,
+    origin: (f64, f64),
+    radials: u64,
+    /// The bearing between two radials.
+    bearing: f64,
+    parallel: bool,
+}
+
+/// What a cell of the mask asks of the sweep.
+enum Ask {
+    /// Out of the radius or off the ground: never set, never counted.
+    Out,
+    /// Too close for a step between: nothing stands in the way.
+    Near,
+    /// Its radial, the last step short of it and its index, in that order
+    /// from the high bits, so the keys of a radial sort into sweep order.
+    Swept(u64),
+}
+
+impl Sweep {
+    fn height(&self, x: f64, z: f64) -> Option<f64> {
+        self.w.value_at(&self.g, x, z)
+    }
+
+    fn centre(&self, r: i64, c: i64) -> (f64, f64) {
+        (
+            self.origin.0 + (r as f64 + 0.5) * self.res,
+            self.origin.1 + (c as f64 + 0.5) * self.res,
+        )
+    }
+
+    fn ask(&self, r: i64, c: i64) -> Ask {
+        let (x, z) = self.centre(r, c);
+        let (dx, dz) = (x - self.o.0, z - self.o.1);
+        let d = dx.hypot(dz);
+        // The cell holding the observer counts however small the radius.
+        let own = r == self.n && c == self.n;
+        if (d > self.radius && !own) || self.height(x, z).is_none() {
+            return Ask::Out;
+        }
+        let i = r * self.side + c;
+        let last = ((d / self.step).ceil() as u64).max(1) - 1;
+        if last == 0 {
+            return Ask::Near;
+        }
+        let k = (dz.atan2(dx).rem_euclid(TAU) / self.bearing).round() as u64 % self.radials;
+        Ask::Swept((k << 44) | (last << 24) | i as u64)
+    }
+
+    /// `f` over `items`, over every core when the mask is large enough.
+    fn map<T: Send, U: Send>(&self, items: Vec<T>, f: impl Fn(T) -> U + Sync + Send) -> Vec<U> {
+        if self.parallel {
+            items.into_par_iter().map(f).collect()
+        } else {
+            items.into_iter().map(f).collect()
         }
     }
-    cells.sort_unstable();
-    let total = cells.len() as u64 + seen;
 
-    let mut at = 0;
-    while at < cells.len() {
-        let k = cells[at] >> 44;
-        let (sin, cos) = (k as f64 * bearing).sin_cos();
-        let (mut steepest, mut done) = (f64::NEG_INFINITY, 0u64);
-        while at < cells.len() && cells[at] >> 44 == k {
-            let (last, i) = ((cells[at] >> 24) & 0xFFFFF, (cells[at] & 0xFFFFFF) as i64);
+    /// Sweeps one radial over its cells, keyed without the radial, and sets
+    /// each cell seen; returns how many it set.
+    fn radial(&self, k: u64, cells: &mut [u64], bits: &[AtomicU8]) -> u64 {
+        cells.sort_unstable();
+        let (sin, cos) = (k as f64 * self.bearing).sin_cos();
+        let (o, eye) = (self.o, self.eye);
+        let (mut steepest, mut done, mut seen) = (f64::NEG_INFINITY, 0u64, 0u64);
+        for &key in cells.iter() {
+            let (last, i) = (key >> 24, (key & 0xFFFFFF) as i64);
             while done < last {
                 done += 1;
-                let d = done as f64 * step;
-                if let Some(h) = height(o.x + d * cos, o.z + d * sin) {
+                let d = done as f64 * self.step;
+                if let Some(h) = self.height(o.0 + d * cos, o.1 + d * sin) {
                     steepest = steepest.max((h - eye) / d);
                 }
             }
-            let (x, z) = centre(i / side, i % side);
-            let d = (x - o.x).hypot(z - o.z);
-            let target = height(x, z).expect("kept for its ground") + q.target_alt_agl;
+            let (x, z) = self.centre(i / self.side, i % self.side);
+            let d = (x - o.0).hypot(z - o.1);
+            let target = self.height(x, z).expect("kept for its ground") + self.target_alt_agl;
             if (target - eye) / d >= steepest {
-                set(i);
+                set(bits, i);
                 seen += 1;
             }
-            at += 1;
         }
+        seen
     }
 
-    let polygons = (q.as_polygons || q.geojson).then(|| {
-        let lit = |r: i64, c: i64| {
-            let i = r * side + c;
-            (0..side).contains(&r)
-                && (0..side).contains(&c)
-                && bits[(i / 8) as usize] & (0x80 >> (i % 8)) != 0
-        };
-        let corner = |r: f64, c: f64| [origin_x + r * res, origin_z + c * res];
-        outline::polygons(&lit, side, side, &corner, res / 2.0)
-    });
-    let rings = q.as_polygons.then(|| {
-        polygons
-            .iter()
-            .flatten()
-            .flatten()
-            .map(|r| Polygon { points: r.clone() })
-            .collect()
-    });
-    let geojson = match &polygons {
-        Some(p) if q.geojson => {
-            let mut f = Features::new(terrain)?;
-            f.polygons(
-                p,
-                props([
-                    ("observer", json!(o)),
-                    ("radius", json!(q.radius)),
-                    ("target_alt_agl", json!(q.target_alt_agl)),
-                ]),
-            );
-            f.point([o.x, o.z], props([("alt_agl", json!(o.alt_agl))]));
-            Some(f.finish())
+    /// The mask's bits, the cells set and the cells counted.
+    ///
+    /// Each radial is swept on its own, so the radials go to any core in any
+    /// order and the mask is the same: a bit is only ever set, and each by
+    /// the one radial its cell takes.
+    fn run(&self) -> (Vec<u8>, u64, u64) {
+        let side = self.side;
+        let bits: Vec<AtomicU8> = (0..((side * side) as usize).div_ceil(8))
+            .map(|_| AtomicU8::new(0))
+            .collect();
+        // Each row's swept keys, and how many of its cells are near.
+        let rows = self.map((0..side).collect(), |r| {
+            let (mut keys, mut near) = (Vec::new(), 0u64);
+            for c in 0..side {
+                match self.ask(r, c) {
+                    Ask::Out => {}
+                    Ask::Near => {
+                        set(&bits, r * side + c);
+                        near += 1;
+                    }
+                    Ask::Swept(key) => keys.push(key),
+                }
+            }
+            (keys, near)
+        });
+        // The keys bucketed by radial, in place of a sort of them all.
+        let mut start = vec![0usize; self.radials as usize + 1];
+        for (keys, _) in &rows {
+            for &key in keys {
+                start[(key >> 44) as usize + 1] += 1;
+            }
         }
-        _ => None,
-    };
-    Ok(ViewshedResponse {
-        provenance: terrain.provenance(),
-        origin_x,
-        origin_z,
-        cell: res,
-        width: side as u32,
-        height: side as u32,
-        bits: base64(&bits),
-        visible_fraction: if total == 0 {
-            0.0
-        } else {
-            seen as f64 / total as f64
-        },
-        rings,
-        geojson,
-    })
+        for k in 0..self.radials as usize {
+            start[k + 1] += start[k];
+        }
+        let mut flat = vec![0u64; start[self.radials as usize]];
+        let mut at = start.clone();
+        for (keys, _) in &rows {
+            for &key in keys {
+                let k = (key >> 44) as usize;
+                flat[at[k]] = key & LAST_AND_INDEX;
+                at[k] += 1;
+            }
+        }
+        let mut radials = Vec::new();
+        let mut rest = &mut flat[..];
+        for k in 0..self.radials as usize {
+            let (mine, more) = rest.split_at_mut(start[k + 1] - start[k]);
+            if !mine.is_empty() {
+                radials.push((k as u64, mine));
+            }
+            rest = more;
+        }
+        let swept = self.map(radials, |(k, cells)| self.radial(k, cells, &bits));
+        let near: u64 = rows.iter().map(|r| r.1).sum();
+        let seen = near + swept.iter().sum::<u64>();
+        let total = near + start[self.radials as usize] as u64;
+        (
+            bits.into_iter().map(AtomicU8::into_inner).collect(),
+            seen,
+            total,
+        )
+    }
+
+    /// The sweep as one thread does it, every cell's key in one sort: what
+    /// `run` must give, bit for bit.
+    #[cfg(test)]
+    fn run_serial(&self) -> (Vec<u8>, u64, u64) {
+        let side = self.side;
+        let mut bits = vec![0u8; ((side * side) as usize).div_ceil(8)];
+        let mut set = |i: i64| bits[(i / 8) as usize] |= 0x80 >> (i % 8);
+        let (mut cells, mut seen) = (Vec::new(), 0u64);
+        for r in 0..side {
+            for c in 0..side {
+                match self.ask(r, c) {
+                    Ask::Out => {}
+                    Ask::Near => {
+                        set(r * side + c);
+                        seen += 1;
+                    }
+                    Ask::Swept(key) => cells.push(key),
+                }
+            }
+        }
+        cells.sort_unstable();
+        let total = cells.len() as u64 + seen;
+        let (o, eye) = (self.o, self.eye);
+        let mut at = 0;
+        while at < cells.len() {
+            let k = cells[at] >> 44;
+            let (sin, cos) = (k as f64 * self.bearing).sin_cos();
+            let (mut steepest, mut done) = (f64::NEG_INFINITY, 0u64);
+            while at < cells.len() && cells[at] >> 44 == k {
+                let (last, i) = ((cells[at] >> 24) & 0xFFFFF, (cells[at] & 0xFFFFFF) as i64);
+                while done < last {
+                    done += 1;
+                    let d = done as f64 * self.step;
+                    if let Some(h) = self.height(o.0 + d * cos, o.1 + d * sin) {
+                        steepest = steepest.max((h - eye) / d);
+                    }
+                }
+                let (x, z) = self.centre(i / side, i % side);
+                let d = (x - o.0).hypot(z - o.1);
+                let target = self.height(x, z).expect("kept for its ground") + self.target_alt_agl;
+                if (target - eye) / d >= steepest {
+                    set(i);
+                    seen += 1;
+                }
+                at += 1;
+            }
+        }
+        (bits, seen, total)
+    }
+}
+
+fn set(bits: &[AtomicU8], i: i64) {
+    bits[(i / 8) as usize].fetch_or(0x80 >> (i % 8), Ordering::Relaxed);
 }
 
 #[cfg(test)]
@@ -543,6 +726,50 @@ mod tests {
         assert_eq!(v["width"], 3);
         let e = answer(&t, "viewshed", &q(1e300, 1e300)).unwrap_err();
         assert_eq!(e[0].code, "too_large");
+    }
+
+    #[test]
+    fn the_sweep_over_every_core_is_the_one_thread_sweep_bit_for_bit() {
+        let t = synth();
+        let (x, z) = observer();
+        let (east, north) = (f64::from(ORIGIN_Z_M), f64::from(ORIGIN_X_M));
+        // On the hill's flank, on its top, on a plane, near the terrain's
+        // corner so the radius runs off the mesh, coarse and fine, low and
+        // high targets.
+        let mut hidden = 0;
+        for (x, z, radius, res, target) in [
+            (x, z, 7000.0, 50.0, 2.0),
+            (x, z, 3000.0, 50.0, 0.0),
+            (
+                HILL_A_NORTH_M + north,
+                HILL_A_EAST_M + east,
+                9000.0,
+                50.0,
+                30.0,
+            ),
+            (north + 30000.0, east + 60000.0, 8000.0, 100.0, 2.0),
+            (north + 2500.0, east + 3000.0, 9000.0, 50.0, 10.0),
+            (north + 20000.0, east + 50000.0, 7000.0, 50.0, 2.0),
+            (x + 13.0, z - 7.0, 6000.0, 75.0, 0.5),
+        ] {
+            let q: super::ViewshedRequest = serde_json::from_value(json!({
+                "observer": {"x": x, "z": z, "alt_agl": 2},
+                "radius": radius,
+                "target_alt_agl": target,
+                "resolution": res,
+            }))
+            .unwrap();
+            let mut s = super::prepare(&t, &q).unwrap();
+            let want = s.run_serial();
+            assert!(want.1 > 0, "{x} {z}");
+            hidden += usize::from(want.1 < want.2);
+            for parallel in [false, true] {
+                s.parallel = parallel;
+                assert!(s.run() == want, "{x} {z} {radius} {res} {parallel}");
+            }
+        }
+        // Most see some of their ground hidden.
+        assert!(hidden >= 4, "{hidden}");
     }
 
     #[test]
