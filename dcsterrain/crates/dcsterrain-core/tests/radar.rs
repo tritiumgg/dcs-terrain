@@ -6,7 +6,9 @@
 //! floor, and every call is timed. Set `DCSTERRAIN_INSTALL` to the DCS
 //! install root, and `DCSTERRAIN_TERRAINS` to a comma-separated list of ids
 //! to take only those; without the install this passes without reading
-//! anything, which is what CI does. Run it with `--release` and
+//! anything, which is what CI does. It also times the radar floor with the
+//! raster alone, the mesh near the site, and the mesh all the way, in
+//! milliseconds and, on Windows, CPU cycles. Run it with `--release` and
 //! `--nocapture` for the figures, and `RAYON_NUM_THREADS` to cap the
 //! cores. The install is only read; the cache is a scratch directory.
 
@@ -16,7 +18,8 @@ use std::time::Instant;
 use serde_json::{Value, json};
 
 use dcsterrain_core::cache::Cache;
-use dcsterrain_core::query::{Terrain, answer};
+use dcsterrain_core::query::{Terrain, answer, floor_msl_reaching};
+use dcsterrain_core::types::Observer;
 
 fn install_root() -> Option<PathBuf> {
     match std::env::var_os("DCSTERRAIN_INSTALL") {
@@ -51,6 +54,26 @@ impl Unit {
 
 const RADIUS: f64 = 20_000.0;
 const BANDS: [f64; 4] = [30.0, 100.0, 300.0, 1000.0];
+
+/// The raster alone, the mesh out to the reach a sweep takes, and the mesh
+/// all the way.
+const REACHES: [f64; 3] = [0.0, 1000.0, f64::INFINITY];
+
+/// The CPU cycles this process has spent, over all its threads; 0 where
+/// the platform does not count them.
+fn cycles() -> u64 {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+        use windows_sys::Win32::System::WindowsProgramming::QueryProcessCycleTime;
+        let mut c = 0u64;
+        // SAFETY: the pseudo-handle of this process, and a u64 to write to.
+        unsafe { QueryProcessCycleTime(GetCurrentProcess(), &mut c) };
+        c
+    }
+    #[cfg(not(windows))]
+    0
+}
 
 /// `op` with `q`, and the milliseconds it took.
 fn call(t: &Terrain, op: &str, q: &Value) -> (Value, f64) {
@@ -194,6 +217,11 @@ fn the_radar_floor_and_its_users_on_every_terrain() {
         let (mut raster_err, mut agree, mut judged, mut exact_ok, mut exact_n) =
             (Vec::new(), [0usize; 4], [0usize; 4], 0, 0);
         let mut nest_checked = 0;
+        // Per reach: each site's milliseconds and megacycles, and each
+        // cell's floor less the exact one.
+        let mut reach_ms: [Vec<f64>; 3] = Default::default();
+        let mut reach_mc: [Vec<f64>; 3] = Default::default();
+        let mut reach_err: [Vec<f64>; 3] = Default::default();
         for (name, sx, sz) in sites(&t, &mut u) {
             let site = json!({"x": sx, "z": sz, "alt_agl": 10});
 
@@ -301,6 +329,30 @@ fn the_radar_floor_and_its_users_on_every_terrain() {
                     usize::from(seen(exact + 0.001) && (floor_agl < 0.1 || !seen(exact - 0.05)));
             }
 
+            // What the mesh's reach buys: the raster alone, the mesh out to
+            // its reach, and the mesh all the way, each timed and against
+            // the exact floor at the same cells.
+            let exacts: Vec<Option<f64>> = (p["points"].as_array().unwrap().iter())
+                .map(|r| r["floor_msl"].as_f64())
+                .collect();
+            for (j, reach) in REACHES.iter().enumerate() {
+                let (c, s) = (cycles(), Instant::now());
+                let o = Observer {
+                    x: sx,
+                    z: sz,
+                    alt_agl: 10.0,
+                };
+                let (m, (rx, rz), rside) = floor_msl_reaching(&t, o, RADIUS, *reach).unwrap();
+                reach_ms[j].push(s.elapsed().as_secs_f64() * 1e3);
+                reach_mc[j].push((cycles() - c) as f64 / 1e6);
+                for (&(x, z, _, _), e) in cells.iter().zip(&exacts) {
+                    let Some(e) = e else { continue };
+                    let i =
+                        ((x - rx) / cell).floor() as i64 * rside + ((z - rz) / cell).floor() as i64;
+                    reach_err[j].push(m[i as usize] - e);
+                }
+            }
+
             let (_, coverage_ms) = call(
                 &t,
                 "coverage",
@@ -388,6 +440,23 @@ fn the_radar_floor_and_its_users_on_every_terrain() {
             percentile(&abs, 0.99),
             raster_err.iter().sum::<f64>() / raster_err.len().max(1) as f64,
         );
+        for (j, reach) in REACHES.iter().enumerate() {
+            let abs: Vec<f64> = reach_err[j].iter().map(|e| e.abs()).collect();
+            eprintln!(
+                "{id} mesh out to {reach} m: median {:.0} ms, {:.0} Mcycles; max {:.0} ms, \
+                 {:.0} Mcycles; floor − exact p50 {:.2} p95 {:.2} p99 {:.2} max {:.2} m, \
+                 mean {:+.2} m",
+                percentile(&reach_ms[j], 0.5),
+                percentile(&reach_mc[j], 0.5),
+                percentile(&reach_ms[j], 1.0),
+                percentile(&reach_mc[j], 1.0),
+                percentile(&abs, 0.5),
+                percentile(&abs, 0.95),
+                percentile(&abs, 0.99),
+                percentile(&abs, 1.0),
+                reach_err[j].iter().sum::<f64>() / reach_err[j].len().max(1) as f64,
+            );
+        }
         assert!(
             exact_ok == exact_n,
             "{id}: point floor exact at {exact_ok} of {exact_n}"

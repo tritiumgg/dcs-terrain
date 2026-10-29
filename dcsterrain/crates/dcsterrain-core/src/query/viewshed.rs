@@ -1,11 +1,12 @@
 //! `viewshed`: the cells around an observer at which a target is seen.
 //!
-//! Radials leave the observer one per mask cell on the outer ring and step
-//! the raster every half cell, keeping the steepest angle to the ground so
-//! far. A cell takes the radial nearest its center in bearing, and is seen
-//! when its target stands at or above that radial's steepest angle short of
-//! it: the test a half-cell raster walk makes of a sightline, swept once for
-//! every cell. `visible` judges over the mesh's triangles instead.
+//! Radials leave the observer one per mask cell on the outer ring and keep
+//! the steepest angle to the ground so far at every half cell: over the
+//! mesh's own triangles out to a kilometer, over the raster beyond. A cell
+//! takes the radial nearest its center in bearing, and is seen when its
+//! target stands at or above that radial's steepest angle short of it, so
+//! one sweep judges every cell. `visible` judges over the triangles all the
+//! way.
 
 use std::f64::consts::TAU;
 use std::sync::atomic::{AtomicU8, Ordering};

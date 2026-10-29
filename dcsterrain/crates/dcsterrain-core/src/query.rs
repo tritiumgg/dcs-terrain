@@ -42,7 +42,7 @@ mod visible;
 pub use chokepoints::chokepoints;
 pub use coverage::coverage;
 pub use describe::describe;
-pub use floor::radar_floor;
+pub use floor::{floor_msl_reaching, radar_floor};
 pub use geo::geo;
 pub use mgrs::mgrs;
 pub use nearest::nearest;

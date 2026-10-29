@@ -136,6 +136,36 @@ impl Floor {
     }
 }
 
+/// Each cell's floor above sea level, row major; the raster's corner; and
+/// its side.
+#[doc(hidden)]
+pub type FloorMsl = (Vec<f64>, (f64, f64), i64);
+
+/// The floor raster about `site` out to `radius` at the cell size, its
+/// radials crossing the mesh's triangles out to `mesh_reach` and the raster
+/// beyond: each cell's floor above sea level, row major, NaN where it has
+/// none; the raster's corner; and its side. For measuring what the reach
+/// buys; `radar_floor` is the operation.
+#[doc(hidden)]
+pub fn floor_msl_reaching(
+    terrain: &Terrain,
+    site: Observer,
+    radius: f64,
+    mesh_reach: f64,
+) -> Result<FloorMsl, Vec<Issue>> {
+    let fl = Floor::sweep_reaching(
+        terrain,
+        site,
+        ["site", "radius"],
+        radius,
+        None,
+        vec![],
+        mesh_reach,
+    )?;
+    let msl = fl.agl.iter().zip(&fl.ground).map(|(a, g)| a + g).collect();
+    Ok((msl, fl.origin, fl.side))
+}
+
 /// The issue with heights above ground to judge at, found at `path`, if
 /// any is not a finite height of 0 or more.
 pub(super) fn check_bands(bands: &[f64], path: &str) -> Option<Issue> {
