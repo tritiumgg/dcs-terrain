@@ -18,6 +18,7 @@ use crate::source::{Refusal, Source};
 use crate::synth::Synth;
 use crate::types::{Issue, OPERATIONS, Provenance};
 
+mod coverage;
 pub mod criteria;
 mod describe;
 mod floor;
@@ -34,6 +35,7 @@ mod spectrum;
 mod viewshed;
 mod visible;
 
+pub use coverage::coverage;
 pub use describe::describe;
 pub use floor::radar_floor;
 pub use geo::geo;
@@ -105,6 +107,7 @@ const HANDLERS: &[(&str, Handler)] = &[
     ("visible", |t, r| run(t, r, visible)),
     ("viewshed", |t, r| run(t, r, viewshed)),
     ("radar_floor", |t, r| run(t, r, radar_floor)),
+    ("coverage", |t, r| run(t, r, coverage)),
     ("approach_spectrum", |t, r| run(t, r, approach_spectrum)),
 ];
 
@@ -178,7 +181,7 @@ pub(crate) mod tests {
     fn refuses_an_unknown_operation_a_planned_one_and_a_bad_request() {
         let issue = |op: &str, req: Value| answer(&synth(), op, &req).unwrap_err()[0].code.clone();
         assert_eq!(issue("nope", json!({})), "unknown_operation");
-        assert_eq!(issue("coverage", json!({})), "not_built");
+        assert_eq!(issue("trafficability", json!({})), "not_built");
         assert_eq!(issue("describe", json!([1])), "invalid_request");
         assert_eq!(issue("sample", json!({"layers": 3})), "invalid_request");
     }

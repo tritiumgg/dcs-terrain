@@ -41,6 +41,34 @@ impl Area {
     }
 }
 
+impl Area {
+    /// The region's outline as one polygon, its exterior then any hole, in
+    /// DCS x and z; a circle as a 64-sided one.
+    pub fn outline(&self) -> Vec<Vec<[f64; 2]>> {
+        let circle = |x: f64, z: f64, r: f64| -> Vec<[f64; 2]> {
+            (0..64)
+                .map(|k| {
+                    let a = f64::from(k) * std::f64::consts::TAU / 64.0;
+                    [x + r * a.cos(), z + r * a.sin()]
+                })
+                .collect()
+        };
+        let [x0, z0, x1, z1] = self.bbox;
+        match &self.shape {
+            Shape::Box => vec![vec![[x0, z0], [x1, z0], [x1, z1], [x0, z1]]],
+            Shape::Circle { x, z, r } => vec![circle(*x, *z, *r)],
+            Shape::Polygon(p) => vec![p.clone()],
+            Shape::Ring { x, z, min, max } => {
+                let mut rings = vec![circle(*x, *z, *max)];
+                if *min > 0.0 {
+                    rings.push(circle(*x, *z, *min));
+                }
+                rings
+            }
+        }
+    }
+}
+
 /// Even-odd crossing test.
 fn inside(p: &[[f64; 2]], x: f64, z: f64) -> bool {
     let mut odd = false;
