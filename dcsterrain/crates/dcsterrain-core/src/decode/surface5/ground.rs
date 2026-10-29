@@ -1294,9 +1294,36 @@ mod tests {
             pts.push([a * 4.07 - 3.0, b * 4.11 - 3.0]);
             pts.push([100.0 + a * 0.23, 100.0 + b * 0.21]);
         }
+        // What any binning must answer, from every triangle and no bin: the
+        // covering triangle of highest rank, and any runway triangle at all.
+        let brute = |p: [f64; 2]| {
+            let mut best: Option<Ground> = None;
+            for (t, &tri) in levels.tri.iter().enumerate() {
+                let [a, b, c] = levels.corners(tri);
+                let Some((u, v)) = cover(a, b, c, p) else {
+                    continue;
+                };
+                let g = Ground {
+                    h: levels.height(tri, u, v),
+                    tritype: levels.tritype[t],
+                    runway: false,
+                    block: levels.index,
+                    tri: t,
+                };
+                if best.is_none_or(|cur| g.rank() > cur.rank()) {
+                    best = Some(g);
+                }
+            }
+            let runway = levels.runway.iter().any(|&tri| {
+                let [a, b, c] = levels.corners(tri);
+                cover(a, b, c, p).is_some()
+            });
+            (best, runway)
+        };
         let mut found = 0;
         for &p in &pts {
             let got = levels.point(p);
+            assert_eq!((got, levels.on_runway(p)), brute(p), "{p:?}");
             assert_eq!(got, flat.point(p), "{p:?}");
             assert_eq!(levels.on_runway(p), flat.on_runway(p), "{p:?}");
             assert_eq!(levels.water_under(p), flat.water_under(p), "{p:?}");
@@ -1317,6 +1344,19 @@ mod tests {
             levels.along(s, e, &mut a);
             flat.along(s, e, &mut b);
             assert_eq!(a, b, "{s:?} to {e:?}");
+            // Every triangle clipped, in triangle order, as no bin decides.
+            let d = [e[0] - s[0], e[1] - s[1]];
+            let every: Vec<Piece> = (levels.tri.iter().enumerate())
+                .filter_map(|(t, &tri)| {
+                    let z = tri.map(|v| levels.h[v as usize]);
+                    clip(levels.corners(tri), z, s, d).map(|(t2, h)| Piece {
+                        t: t2,
+                        h,
+                        rank: rank(levels.tritype[t], levels.index, t),
+                    })
+                })
+                .collect();
+            assert_eq!(a, every, "{s:?} to {e:?}");
         }
         // Every tile.
         let (ntx, ntz) = g.tiles();
