@@ -38,44 +38,26 @@ fn at(
     }
 }
 
-/// The closest point to `p` on the segment `a`–`b`.
-fn closest_on(a: [f64; 2], b: [f64; 2], p: [f64; 2]) -> [f64; 2] {
-    let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
-    let len2 = dx * dx + dz * dz;
-    let t = if len2 > 0.0 {
-        (((p[0] - a[0]) * dx + (p[1] - a[1]) * dz) / len2).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    [a[0] + t * dx, a[1] + t * dz]
-}
-
-/// Each edge of the network, the point on it closest to `from`: along its
-/// polyline and the gaps from its ends to its nodes.
-fn edges(src: &dyn Source, kind: u8, from: (f64, f64)) -> Result<Vec<Nearby>, Vec<Issue>> {
+/// The `n` edges of the network nearest `from`, nearest first, ties in edge
+/// order, each at its point closest to `from`: along its polyline and the
+/// gaps from its ends to its nodes.
+fn edges(
+    src: &dyn Source,
+    kind: u8,
+    from: (f64, f64),
+    n: usize,
+) -> Result<Vec<Nearby>, Vec<Issue>> {
     let g = src.road_graph().map_err(refused)?;
-    let p = [from.0, from.1];
     let label = if kind == KIND_ROAD { "road" } else { "rail" };
-    let mut out = Vec::new();
-    for (i, e) in g.edges.iter().enumerate().filter(|(_, e)| e.kind == kind) {
-        let mut path = Vec::with_capacity(g.line(e).len() + 2);
-        path.push(g.nodes[e.a as usize]);
-        path.extend(g.line(e).iter().map(|q| [f64::from(q[0]), f64::from(q[1])]));
-        path.push(g.nodes[e.b as usize]);
-        let mut best = path[0];
-        let mut best_d = f64::INFINITY;
-        for s in path.windows(2) {
-            let c = closest_on(s[0], s[1], p);
-            let d = (c[0] - p[0]).hypot(c[1] - p[1]);
-            if d < best_d {
-                (best, best_d) = (c, d);
-            }
-        }
-        let mut n = at(label, i.to_string(), None, (best[0], best[1]), from);
-        n.class = Some(g.class(e).to_string());
-        out.push(n);
-    }
-    Ok(out)
+    let found = g.nearest(kind, [from.0, from.1], n);
+    Ok(found
+        .into_iter()
+        .map(|(i, q)| {
+            let mut f = at(label, i.to_string(), None, (q[0], q[1]), from);
+            f.class = Some(g.class(&g.edges[i]).to_string());
+            f
+        })
+        .collect())
 }
 
 /// The `n` objects of `want` nearest `from`, searched in a box that doubles
@@ -159,8 +141,8 @@ pub fn nearest(terrain: &Terrain, q: NearestRequest) -> Result<NearestResponse, 
     let n = q.n as usize;
     let tables = || src.tables().map_err(refused);
     let results = match q.kind {
-        NearestKind::Road => nearest_of(edges(src, KIND_ROAD, from)?, n),
-        NearestKind::Rail => nearest_of(edges(src, KIND_RAIL, from)?, n),
+        NearestKind::Road => edges(src, KIND_ROAD, from, n)?,
+        NearestKind::Rail => edges(src, KIND_RAIL, from, n)?,
         NearestKind::Airdrome => {
             let found = tables()?
                 .airdromes
@@ -279,6 +261,80 @@ mod tests {
             "{rail:?}"
         );
         assert_eq!(rail[0]["kind"], "rail");
+    }
+
+    /// Every edge of the network at its closest point, by brute force: the
+    /// search the index replaced, kept to check it against.
+    fn every_edge(src: &dyn Source, kind: u8, from: (f64, f64)) -> Vec<Nearby> {
+        let g = src.road_graph().unwrap();
+        let p = [from.0, from.1];
+        let label = if kind == KIND_ROAD { "road" } else { "rail" };
+        let closest_on = |a: [f64; 2], b: [f64; 2]| {
+            let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
+            let len2 = dx * dx + dz * dz;
+            let t = if len2 > 0.0 {
+                (((p[0] - a[0]) * dx + (p[1] - a[1]) * dz) / len2).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            [a[0] + t * dx, a[1] + t * dz]
+        };
+        let mut out = Vec::new();
+        for (i, e) in g.edges.iter().enumerate().filter(|(_, e)| e.kind == kind) {
+            let mut path = vec![g.nodes[e.a as usize]];
+            path.extend(g.line(e).iter().map(|q| [f64::from(q[0]), f64::from(q[1])]));
+            path.push(g.nodes[e.b as usize]);
+            let (mut best, mut best_d) = (path[0], f64::INFINITY);
+            for s in path.windows(2) {
+                let c = closest_on(s[0], s[1]);
+                let d = (c[0] - p[0]).hypot(c[1] - p[1]);
+                if d < best_d {
+                    (best, best_d) = (c, d);
+                }
+            }
+            let mut n = at(label, i.to_string(), None, (best[0], best[1]), from);
+            n.class = Some(g.class(e).to_string());
+            out.push(n);
+        }
+        out
+    }
+
+    #[test]
+    fn the_nearest_edges_are_those_every_edge_ranks_first() {
+        let t = synth();
+        let f = form(&t);
+        let size = f.size_m();
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut unit = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for k in 0..300 {
+            // Across the terrain and past its edges, some on a coarse lattice
+            // so that edges tie.
+            let (mut north, mut east) = ((unit() * 1.4 - 0.2) * size, (unit() * 1.4 - 0.2) * size);
+            if k % 3 == 0 {
+                (north, east) = (
+                    (north / 500.0).round() * 500.0,
+                    (east / 500.0).round() * 500.0,
+                );
+            }
+            let from = f.abs(north, east);
+            for kind in [KIND_ROAD, KIND_RAIL] {
+                let all = every_edge(t.source(), kind, from);
+                for n in [1, 2, 5, 50] {
+                    let want = nearest_of(all.clone(), n);
+                    let got = edges(t.source(), kind, from, n).unwrap();
+                    assert_eq!(
+                        format!("{got:?}"),
+                        format!("{want:?}"),
+                        "{from:?} {kind} {n}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
