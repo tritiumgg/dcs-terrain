@@ -34,6 +34,7 @@ mod sample;
 mod scenery;
 pub mod sightline;
 mod spectrum;
+mod trafficability;
 mod unmask;
 mod viewshed;
 mod visible;
@@ -50,6 +51,7 @@ pub use route::{route, route_alternatives};
 pub use sample::{lattice, sample};
 pub use scenery::scenery_in;
 pub use spectrum::approach_spectrum;
+pub use trafficability::trafficability;
 pub use unmask::unmask_profile;
 pub use viewshed::viewshed;
 pub use visible::visible;
@@ -119,6 +121,7 @@ const HANDLERS: &[(&str, Handler)] = &[
     ("route", |t, r| run(t, r, route)),
     ("route_alternatives", |t, r| run(t, r, route_alternatives)),
     ("chokepoints", |t, r| run(t, r, chokepoints)),
+    ("trafficability", |t, r| run(t, r, trafficability)),
 ];
 
 /// Reads the request as `Q`, answers it with `f`, and writes the answer.
@@ -191,7 +194,7 @@ pub(crate) mod tests {
     fn refuses_an_unknown_operation_a_planned_one_and_a_bad_request() {
         let issue = |op: &str, req: Value| answer(&synth(), op, &req).unwrap_err()[0].code.clone();
         assert_eq!(issue("nope", json!({})), "unknown_operation");
-        assert_eq!(issue("trafficability", json!({})), "not_built");
+        assert_eq!(issue("find_sites", json!({})), "not_built");
         assert_eq!(issue("describe", json!([1])), "invalid_request");
         assert_eq!(issue("sample", json!({"layers": 3})), "invalid_request");
     }
