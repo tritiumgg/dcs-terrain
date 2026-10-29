@@ -15,6 +15,8 @@
 //! found so far, which leaves the answer exactly as a march of every sample
 //! would give it.
 
+use rayon::prelude::*;
+
 use crate::grid::Grid;
 use crate::source::{Layer, Refusal, Source};
 
@@ -153,18 +155,20 @@ fn batch(
     let span = i64::from(SPAN);
     // A horizon cell's center, in cells from the window's first cell center.
     let center = (span as f64 - 1.0) / 2.0;
+    // Every horizon cell marches on its own, so they go to any core in any
+    // order and each tile's bytes are the same.
     Ok(tiles
-        .iter()
+        .par_iter()
         .map(|&(tx, tz)| {
             let mut t = vec![UNDEFINED; tile_len(g)];
-            for (k, bins) in t.as_chunks_mut::<BINS>().0.iter_mut().enumerate() {
+            t.par_chunks_mut(BINS).enumerate().for_each(|(k, bins)| {
                 let (hr, hc) = (k as u32 / n, k as u32 % n);
                 let row = i64::from(tx) * ts + i64::from(hr) * span;
                 let col = i64::from(tz) * ts + i64::from(hc) * span;
                 let or = (row - r0) as f64 + center;
                 let oc = (col - c0) as f64 + center;
                 march(&v, &p, or, oc, range, &dirs, bins);
-            }
+            });
             t
         })
         .collect())
@@ -274,16 +278,18 @@ impl Pyramid {
     fn new(v: &Heights) -> Pyramid {
         let (rows, cols) = (v.rows, v.cols);
         let mut l0 = vec![NODATA; rows * cols];
-        for r in 0..rows {
-            let r1 = (r + 1).min(rows - 1);
-            for c in 0..cols {
-                let c1 = (c + 1).min(cols - 1);
-                l0[r * cols + c] = v.h[r * cols + c]
-                    .max(v.h[r * cols + c1])
-                    .max(v.h[r1 * cols + c])
-                    .max(v.h[r1 * cols + c1]);
-            }
-        }
+        l0.par_chunks_mut(cols.max(1))
+            .enumerate()
+            .for_each(|(r, row)| {
+                let r1 = (r + 1).min(rows - 1);
+                for (c, m) in row.iter_mut().enumerate() {
+                    let c1 = (c + 1).min(cols - 1);
+                    *m = v.h[r * cols + c]
+                        .max(v.h[r * cols + c1])
+                        .max(v.h[r1 * cols + c])
+                        .max(v.h[r1 * cols + c1]);
+                }
+            });
         let mut levels = vec![(cols, l0)];
         let mut pr = rows;
         for _ in 0..LEVELS {
