@@ -823,6 +823,16 @@ impl Source for Install {
         self.roads()
     }
 
+    /// Read when its cache entry needs no build: a query never waits the
+    /// minutes betweenness takes on the largest terrains, which `index`
+    /// spends instead.
+    fn road_betweenness(&self) -> Result<Option<&[f32]>, Refusal> {
+        if self.betweenness.get().is_none() && !self.cache.ready(&roads::ROADS_BETWEENNESS)? {
+            return Ok(None);
+        }
+        self.betweenness().map(Some)
+    }
+
     fn structures_in(
         &self,
         b: [f64; 4],
@@ -1470,7 +1480,12 @@ mod tests {
         let wet: Vec<bool> = g.edges.iter().map(|e| e.crosses_water).collect();
         assert_eq!(wet, [true, false]);
         assert_eq!(g.class(&g.edges[0]), "road");
+        // Not built yet, so a query reads none rather than wait for it.
+        assert_eq!(t.road_betweenness().unwrap(), None);
         assert_eq!(t.betweenness().unwrap(), [1.0, 0.0]);
+        assert_eq!(t.road_betweenness().unwrap(), Some(&[1.0f32, 0.0][..]));
+        let again = Install::open(&root.0, "Test", &Cache::new(&c.0)).unwrap();
+        assert_eq!(again.road_betweenness().unwrap(), Some(&[1.0f32, 0.0][..]));
         for name in ["roads.graph", "roads.betweenness"] {
             assert!(c.0.join("Test").join(name).is_file(), "{name}");
         }

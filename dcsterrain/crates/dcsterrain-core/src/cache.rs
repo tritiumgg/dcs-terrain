@@ -603,6 +603,20 @@ impl TerrainCache {
         })
     }
 
+    /// Whether `entry` opens without a build: it is current, or was made on
+    /// another build from files whose metadata still match, which a re-stamp
+    /// keeps (ADR 0002).
+    pub fn ready(&self, entry: &dyn Entry) -> Result<bool, Refusal> {
+        let (_, checked) = self.checked(entry)?;
+        Ok(match read_head(&self.dir.join(entry.name())) {
+            Ok(head) => {
+                judge(&head, entry.version(), &checked) == State::Current
+                    || judge_but_build(&head, entry.version(), &checked)
+            }
+            Err(_) => false,
+        })
+    }
+
     /// The entry, built first if it is missing or stale. Only a build reads
     /// the headers of the files it derives from, so a file no decoder reads
     /// refuses the entries of its role and no other.

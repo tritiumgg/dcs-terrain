@@ -108,6 +108,13 @@ pub trait Source {
         Err(lacks(self, "roads"))
     }
 
+    /// Each road and rail edge's betweenness, 0 to 1 of its network's most,
+    /// in the graph's edge order; `None` while it is still being built,
+    /// which on the largest terrains takes minutes.
+    fn road_betweenness(&self) -> Result<Option<&[f32]>, Refusal> {
+        Err(lacks(self, "road betweenness"))
+    }
+
     /// Calls `f` with the `x`, `z` and class of every scenery object that
     /// stands on the ground within `b`, min x, min z, max x, max z in DCS
     /// meters. It may also call `f` with objects just outside `b`.

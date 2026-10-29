@@ -18,6 +18,7 @@ pub struct Synth {
     form: Theatre,
     identity: Identity,
     roads: OnceLock<Graph>,
+    betweenness: OnceLock<Vec<f32>>,
     tables: OnceLock<Tables>,
 }
 
@@ -34,6 +35,7 @@ impl Synth {
                 fingerprint: format!("synth-{seed}-{size_km}-{cell_size}"),
             },
             roads: OnceLock::new(),
+            betweenness: OnceLock::new(),
             tables: OnceLock::new(),
         })
     }
@@ -129,6 +131,14 @@ impl Source for Synth {
 
     fn road_graph(&self) -> Result<&Graph, Refusal> {
         Ok(self.roads.get_or_init(|| self.form.road_graph()))
+    }
+
+    fn road_betweenness(&self) -> Result<Option<&[f32]>, Refusal> {
+        let g = self.road_graph()?;
+        let b = self
+            .betweenness
+            .get_or_init(|| crate::roads::betweenness(g, crate::roads::SOURCES, 2));
+        Ok(Some(b))
     }
 
     fn tables(&self) -> Result<&Tables, Refusal> {
