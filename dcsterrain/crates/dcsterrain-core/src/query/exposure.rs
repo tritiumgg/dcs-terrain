@@ -23,7 +23,9 @@ use serde_json::json;
 
 use super::floor::{Floor, check_bands, floats, site};
 use super::geojson::{Features, props};
-use super::viewshed::{CELLS_MAX, base64, check_reach, check_resolution, site_eye, too_large};
+use super::viewshed::{
+    CELLS_MAX, base64, check_reach, check_resolution, check_size, site_eye, too_large,
+};
 use super::{Area, Terrain, refused, resolve};
 use crate::grid::Window;
 use crate::source::Layer;
@@ -91,9 +93,16 @@ pub fn exposure(terrain: &Terrain, q: ExposureRequest) -> Result<ExposureRespons
         return Err(issues);
     }
     // Every site is checked before any is swept, so the request's issues
-    // come back together.
+    // come back together, a site the region leaves unswept with them.
+    let cell = f64::from(src.grid().cell_size);
+    let res = q.resolution.unwrap_or(cell);
+    let res_ok = check_resolution(src, q.resolution).is_none();
     for (i, s) in q.sites.iter().enumerate() {
-        let radius = check_reach(src, s.radius, None, &format!("sites.{i}.radius"));
+        let path = format!("sites.{i}.radius");
+        let mut radius = check_reach(src, s.radius, None, &path);
+        if radius.is_empty() && res_ok {
+            radius = check_size(s.radius, res, cell, &path);
+        }
         if let Err(e) = site_eye(terrain, s.observer, &format!("sites.{i}.observer"), radius) {
             issues.extend(e);
         }
@@ -122,7 +131,7 @@ pub fn exposure(terrain: &Terrain, q: ExposureRequest) -> Result<ExposureRespons
         .iter()
         .map(|&h| ExposureBand {
             alt_agl: h,
-            unseen_fraction: r.share(|v| v > h),
+            unseen_fraction: r.share(|v| v as f32 > h as f32),
         })
         .collect();
     let geojson = if q.geojson {
@@ -134,7 +143,7 @@ pub fn exposure(terrain: &Terrain, q: ExposureRequest) -> Result<ExposureRespons
             let set = |row: i64, col: i64| {
                 (0..r.rows).contains(&row)
                     && (0..r.cols).contains(&col)
-                    && r.agl[(row * r.cols + col) as usize] > h
+                    && r.agl[(row * r.cols + col) as usize] as f32 > h as f32
             };
             f.polygons(
                 &super::outline::polygons(&set, r.rows, r.cols, &corner, 0.0),
@@ -162,7 +171,7 @@ pub fn exposure(terrain: &Terrain, q: ExposureRequest) -> Result<ExposureRespons
             seen_count: base64(&r.seen),
         },
         target_alt_agl: target,
-        seen_fraction: r.share(|v| v <= target),
+        seen_fraction: r.share(|v| v as f32 <= target as f32),
         bands,
         geojson,
     })
@@ -208,8 +217,14 @@ fn reduce(terrain: &Terrain, q: &ExposureRequest, area: &Area) -> Result<Reduced
     let cell = f64::from(g.cell_size);
     let res = q.resolution.unwrap_or(cell);
     // The region's raster, aligned as every sweep's is: the cells whose
-    // centers lie in its box.
-    let [x0, z0, x1, z1] = area.bbox;
+    // centers lie in its box and on the grid, where alone there is ground,
+    // so however far a box reaches its indices stay small.
+    let [x0, z0, x1, z1] = [
+        area.bbox[0].max(g.origin_x),
+        area.bbox[1].max(g.origin_z),
+        area.bbox[2].min(g.origin_x + f64::from(g.height) * cell),
+        area.bbox[3].min(g.origin_z + f64::from(g.width) * cell),
+    ];
     let first = |v: f64, origin: f64| ((v - origin) / res - 0.5).ceil();
     let last = |v: f64, origin: f64| ((v - origin) / res - 0.5).floor();
     let (row0, col0) = (first(x0, g.origin_x), first(z0, g.origin_z));
@@ -236,6 +251,18 @@ fn reduce(terrain: &Terrain, q: &ExposureRequest, area: &Area) -> Result<Reduced
             origin.1 + (c as f64 + 0.5) * res,
         )
     };
+    if rows == 0 || cols == 0 {
+        // No cell to count, so no site to sweep.
+        return Ok(Reduced {
+            origin,
+            res,
+            rows: 0,
+            cols: 0,
+            agl: Vec::new(),
+            ground: Vec::new(),
+            seen: Vec::new(),
+        });
+    }
 
     // The heights under the region and a cell beyond, for the bilinear the
     // sweeps take, so a cell no site reaches is told from one with no
@@ -284,9 +311,14 @@ fn reduce(terrain: &Terrain, q: &ExposureRequest, area: &Area) -> Result<Reduced
         .collect();
     let mut seen = vec![0u8; (rows * cols) as usize];
 
-    let target = q.target_alt_agl;
+    // Counted as the floors are returned, so the count is what the returned
+    // floors say.
+    let target = q.target_alt_agl as f32;
     for (i, s) in q.sites.iter().enumerate() {
-        if !meets(area.bbox, s.observer.x, s.observer.z, s.radius) {
+        // A sweep keeps the cell holding its site however small its radius,
+        // and that cell's center lies within half a cell's diagonal.
+        let reach = s.radius.max(res * std::f64::consts::FRAC_1_SQRT_2);
+        if !meets(area.bbox, s.observer.x, s.observer.z, reach) {
             continue;
         }
         let at = [format!("sites.{i}.observer"), format!("sites.{i}.radius")];
@@ -322,7 +354,7 @@ fn reduce(terrain: &Terrain, q: &ExposureRequest, area: &Area) -> Result<Reduced
                         continue;
                     }
                     *a = a.min(f);
-                    if f <= target {
+                    if f as f32 <= target {
                         seen[c as usize] += 1;
                     }
                 }
@@ -556,7 +588,7 @@ mod tests {
     }
 
     #[test]
-    fn the_order_of_the_sites_changes_nothing_and_a_far_one_is_not_swept() {
+    fn the_order_of_the_sites_and_a_site_out_of_reach_change_nothing() {
         let t = synth();
         let mut sites = sites();
         let v = ask(&t, &sites, json!({}));
@@ -699,14 +731,66 @@ mod tests {
         let many: Vec<Value> = (0..65).map(|_| sites()[0].clone()).collect();
         let e = issue(json!({"sites": many, "target_alt_agl": 0}));
         assert_eq!(e[0].code, "too_large");
-        let e = issue(json!({"sites": sites(), "target_alt_agl": 0,
-            "region": {"Box": {"min_x": 0, "min_z": 0, "max_x": 1e6, "max_z": 1e6}}}));
+        // A sweep too large to make is refused before any site is swept,
+        // though the region would leave it unswept.
+        let mut s = sites();
+        s[1]["radius"] = json!(200_000);
+        let e = issue(json!({"sites": s, "target_alt_agl": 0, "region": region()}));
         assert_eq!(
             (e[0].code.as_str(), e[0].path.as_str()),
-            ("too_large", "region")
+            ("too_large", "sites.1.radius")
         );
         let e = issue(json!({"sites": sites(), "target_alt_agl": 0,
             "region": {"Box": {"min_x": 1, "min_z": 0, "max_x": 0, "max_z": 1}}}));
         assert_eq!(e[0].path, "region");
+    }
+
+    #[test]
+    fn a_site_reaches_its_own_cell_however_small_its_radius() {
+        let t = synth();
+        // A site 20 m off its cell's center, with a 1 m radius, and a
+        // region of that center alone: the site's disk misses the region,
+        // but its sweep keeps its own cell.
+        let (x, z) = at(HILL_A_NORTH_M, HILL_A_EAST_M);
+        let (cx, cz) = (
+            (x / 50.0).floor() * 50.0 + 25.0,
+            (z / 50.0).floor() * 50.0 + 25.0,
+        );
+        let o = json!({"x": cx + 20.0, "z": cz, "alt_agl": 10});
+        let region = json!({"Box": {"min_x": cx - 1.0, "min_z": cz - 1.0,
+                                    "max_x": cx + 1.0, "max_z": cz + 1.0}});
+        let v = answer(
+            &t,
+            "exposure",
+            &json!({"sites": [{"observer": o, "radius": 1}], "region": region,
+                    "target_alt_agl": 0}),
+        )
+        .unwrap();
+        let own = answer(&t, "radar_floor", &json!({"site": o, "radius": 1})).unwrap();
+        // The middle of its three by three raster.
+        let mine = floats(own["raster"]["floor_agl"].as_str().unwrap());
+        assert_eq!(v["raster"]["width"], 1);
+        assert_eq!(
+            floats(v["raster"]["floor_agl"].as_str().unwrap()),
+            [mine[4]]
+        );
+        assert_eq!(unbase64(v["raster"]["seen_count"].as_str().unwrap()), [1]);
+    }
+
+    #[test]
+    fn a_region_off_the_grid_holds_no_cell_however_far() {
+        let t = synth();
+        for far in [1e7, 1e21, 1e300] {
+            let v = ask(
+                &t,
+                &sites(),
+                json!({"region": {"Box": {"min_x": far, "min_z": far,
+                                           "max_x": 2.0 * far, "max_z": 2.0 * far}}}),
+            );
+            assert_eq!(
+                (v["raster"]["width"].as_u64(), v["seen_fraction"].as_f64()),
+                (Some(0), Some(0.0))
+            );
+        }
     }
 }
