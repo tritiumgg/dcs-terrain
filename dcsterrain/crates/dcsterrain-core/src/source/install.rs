@@ -41,6 +41,10 @@ const BAND: usize = 64;
 /// calling thread: handing out one costs more than it saves, and the first
 /// hand-out of a process starts the threads.
 const PARALLEL_MIN: usize = 2;
+/// Fewer blocks than this to read for `points` are read on the calling
+/// thread: a block a point or two falls on reads only what they need, in
+/// less time than waking the other threads takes.
+const POINTS_PARALLEL_MIN: usize = 8;
 
 mod roads;
 mod scenery;
@@ -589,15 +593,16 @@ impl Source for Install {
         }
         let mut order: Vec<usize> = on.keys().copied().collect();
         order.sort_unstable();
-        let mut best: Vec<Option<ground::Ground>> = vec![None; points.len()];
-        let mut runway = vec![false; points.len()];
-        for i in order {
+        let held: Vec<Option<Arc<Prepared>>> = {
+            let mut held = self.blocks.lock().unwrap();
+            order.iter().map(|i| held.get(i)).collect()
+        };
+        let answer = |(&i, held): (&usize, &Option<Arc<Prepared>>)| {
             let ks = &on[&i];
             let ps: Vec<[f64; 2]> = (ks.iter())
                 .map(|&k| grid_units(&self.grid, points[k as usize][0], points[k as usize][1]))
                 .collect();
-            let held = self.blocks.lock().unwrap().get(&i);
-            let answers = match held {
+            Ok(match held {
                 // A block few points fall on is answered without binning
                 // it, and not kept: preparing it would cost more than the
                 // points save.
@@ -609,12 +614,30 @@ impl Source for Install {
                 }
                 held => {
                     let b = match held {
-                        Some(b) => b,
+                        Some(b) => b.clone(),
                         None => self.block(i)?,
                     };
                     ps.iter().map(|&p| (b.point(p), b.on_runway(p))).collect()
                 }
-            };
+            })
+        };
+        // Each block is read and asked on whichever core is free, and the
+        // answers merged in block order, so they are the same however the
+        // work falls.
+        let unheld = held.iter().filter(|b| b.is_none()).count();
+        let answers: Vec<Vec<(Option<ground::Ground>, bool)>> = if unheld < POINTS_PARALLEL_MIN {
+            (order.iter().zip(&held))
+                .map(answer)
+                .collect::<Result<_, Refusal>>()?
+        } else {
+            (order.par_iter().zip(&held))
+                .map(answer)
+                .collect::<Result<_, Refusal>>()?
+        };
+        let mut best: Vec<Option<ground::Ground>> = vec![None; points.len()];
+        let mut runway = vec![false; points.len()];
+        for (i, answers) in order.iter().zip(answers) {
+            let ks = &on[i];
             for (&k, (g, r)) in ks.iter().zip(answers) {
                 let k = k as usize;
                 best[k] = ground::merge(best[k], g);
