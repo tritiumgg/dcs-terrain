@@ -184,7 +184,7 @@ fn describes_the_synthetic_terrain_with_no_install() {
 
 #[test]
 fn refuses_an_operation_not_built_and_a_flag_for_another_terrain() {
-    let out = run(&["query", "--terrain", "synth", "visible", "{}"]);
+    let out = run(&["query", "--terrain", "synth", "coverage", "{}"]);
     assert_eq!(out.status.code(), Some(1));
     assert_eq!(stdout_json(&out)["issues"][0]["code"], "not_built");
 

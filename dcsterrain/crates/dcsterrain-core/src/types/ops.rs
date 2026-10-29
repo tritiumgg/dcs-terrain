@@ -246,6 +246,9 @@ pub struct FindSitesStats {
 pub struct VisibleRequest {
     pub a: Point3,
     pub b: Point3,
+    /// Also return the answer as GeoJSON.
+    #[serde(default)]
+    pub geojson: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -258,6 +261,10 @@ pub struct VisibleResponse {
     /// The least vertical gap between sightline and terrain; negative when
     /// blocked.
     pub clearance_m: f64,
+    /// The sightline, its ends and the blocking point, when `geojson` was
+    /// asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
 }
 
 // viewshed
@@ -752,6 +759,7 @@ mod tests {
             visible: true,
             blocking: None,
             clearance_m: 12.5,
+            geojson: None,
         };
         let v = serde_json::to_value(&r).unwrap();
         assert_eq!(

@@ -20,11 +20,14 @@ use crate::types::{Issue, OPERATIONS, Provenance};
 
 mod describe;
 mod geo;
+mod geojson;
 mod mgrs;
 mod nearest;
 mod region;
 mod sample;
 mod scenery;
+mod sightline;
+mod visible;
 
 pub use describe::describe;
 pub use geo::geo;
@@ -33,6 +36,7 @@ pub use nearest::nearest;
 pub use region::{Area, resolve};
 pub use sample::sample;
 pub use scenery::scenery_in;
+pub use visible::visible;
 
 /// Every answer is on the 50 m grid.
 pub const CELL_SIZE_M: f64 = 50.0;
@@ -91,6 +95,7 @@ const HANDLERS: &[(&str, Handler)] = &[
     ("scenery_in", |t, r| run(t, r, scenery_in)),
     ("nearest", |t, r| run(t, r, nearest)),
     ("sample", |t, r| run(t, r, sample)),
+    ("visible", |t, r| run(t, r, visible)),
 ];
 
 /// Reads the request as `Q`, answers it with `f`, and writes the answer.
@@ -163,7 +168,7 @@ pub(crate) mod tests {
     fn refuses_an_unknown_operation_a_planned_one_and_a_bad_request() {
         let issue = |op: &str, req: Value| answer(&synth(), op, &req).unwrap_err()[0].code.clone();
         assert_eq!(issue("nope", json!({})), "unknown_operation");
-        assert_eq!(issue("visible", json!({})), "not_built");
+        assert_eq!(issue("coverage", json!({})), "not_built");
         assert_eq!(issue("describe", json!([1])), "invalid_request");
         assert_eq!(issue("sample", json!({"layers": 3})), "invalid_request");
     }

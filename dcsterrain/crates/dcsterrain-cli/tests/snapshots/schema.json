@@ -2972,6 +2972,11 @@
         },
         "b": {
           "$ref": "#/$defs/Point3"
+        },
+        "geojson": {
+          "default": false,
+          "description": "Also return the answer as GeoJSON.",
+          "type": "boolean"
         }
       },
       "required": [
@@ -3009,6 +3014,9 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "geojson": {
+          "description": "The sightline, its ends and the blocking point, when `geojson` was\nasked for."
         },
         "terrain": {
           "type": "string"
