@@ -140,7 +140,8 @@ orientation is one that passes every hard test if any does, the highest
 Request: `region`, `footprint`, `criteria`, `step` (default 2 × cell size, at
 least the cell size), `spacing` (non-maximum suppression radius, 0 or more),
 `limit` (default 20, 1 to 200), `weights: {name: f64}` (default 1 each, each
-finite and 0 or more, naming a criterion asked for or `valid`). Response:
+0 to 1000, naming a criterion asked for or `valid`; one name weighs every
+criterion asked for under it). Response:
 candidates `{x, z, orientation_deg, score, terms}`, plus `stats
 {cells_considered, cells_passed, tiles_skipped}`: the lattice points in the
 region, those with an orientation that passes, and the grid tiles skipped.
@@ -156,9 +157,10 @@ between its points is judged. Each candidate is the best of those `spacing`
 or more from every one before it; that is not the spaced set of greatest
 total score, which is NP-hard, and greedy reaches at least a fifth of its
 total. A tile whose zone map of a layer a hard criterion reads cannot pass is
-skipped whole (§5). Line-of-sight criteria run last. A region whose box spans
-more than 4 Mi cells, about 100 km square, is the issue `too_large`, because
-the layers are derived over all of it at once.
+skipped whole (§5). Line-of-sight criteria run last. More than 256 Ki sites,
+lattice points times orientations, is the issue `too_large`: about 36 km
+square at the default step and two orientations, because each site that
+passes is held with its terms until ranked.
 
 ### `visible`
 

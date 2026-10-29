@@ -19,8 +19,9 @@ your user cache directory.
 > and the `query` operations `describe`, `sample`, `geo`, `nearest`,
 > `scenery_in`, `visible`, `viewshed`, `radar_floor`, `coverage`,
 > `approach_spectrum`, `unmask_profile`, `route`, `route_alternatives`,
-> `chokepoints` and `trafficability` work today; every other operation is
-> planned, kept here so the shape is visible. Progress is in
+> `chokepoints`, `trafficability`, `score_site` and `find_sites` work today;
+> every other operation is planned, kept here so the shape is visible.
+> Progress is in
 > [docs/STATE.md](docs/STATE.md).
 
 ## Requirements
@@ -103,10 +104,15 @@ of it, asking before the live validation figures.
 `index` and `list-terrains` take `--cache <dir>` too, and `index` takes
 `--allow-crs-residual` as `query` does.
 
-Ask a siting question the same way, `find_sites` with its JSON (planned, not
-usable yet). The first question on a terrain will build its cache in seconds,
-later ones start warm, and many can go in one call as JSON lines on stdin
-(planned).
+Ask a siting question the same way: `score_site` judges one position against
+a list of criteria, and `find_sites` returns the best positions in a region,
+ranked and kept a spacing apart:
+
+```bash
+dcsterrain query --terrain Caucasus find_sites '{"region": {"Circle": {"x": -281782, "z": 647279, "radius": 10000}}, "footprint": {"width": 60, "depth": 40}, "criteria": [{"name": "slope_max", "params": {"deg": 5}}, {"name": "surface_in", "params": {"classes": ["land"]}}], "spacing": 1000}'
+```
+
+Many questions can go in one call as JSON lines on stdin (planned).
 `dcsterrain schema` prints every operation's request and response as JSON
 Schema.
 
