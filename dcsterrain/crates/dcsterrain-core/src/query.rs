@@ -28,6 +28,7 @@ mod mgrs;
 mod nearest;
 mod outline;
 mod region;
+mod route;
 mod sample;
 mod scenery;
 pub mod sightline;
@@ -43,6 +44,7 @@ pub use geo::geo;
 pub use mgrs::mgrs;
 pub use nearest::nearest;
 pub use region::{Area, resolve};
+pub use route::{route, route_alternatives};
 pub use sample::{lattice, sample};
 pub use scenery::scenery_in;
 pub use spectrum::approach_spectrum;
@@ -112,6 +114,8 @@ const HANDLERS: &[(&str, Handler)] = &[
     ("coverage", |t, r| run(t, r, coverage)),
     ("approach_spectrum", |t, r| run(t, r, approach_spectrum)),
     ("unmask_profile", |t, r| run(t, r, unmask_profile)),
+    ("route", |t, r| run(t, r, route)),
+    ("route_alternatives", |t, r| run(t, r, route_alternatives)),
 ];
 
 /// Reads the request as `Q`, answers it with `f`, and writes the answer.
