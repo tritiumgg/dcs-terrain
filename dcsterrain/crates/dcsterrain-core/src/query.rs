@@ -140,6 +140,11 @@ pub(crate) fn refused(e: Refusal) -> Vec<Issue> {
     vec![Issue::new("refused", &e.0, "")]
 }
 
+/// A request that cannot be answered as given, at `path` in it.
+pub(crate) fn invalid(message: &str, path: &str) -> Vec<Issue> {
+    vec![Issue::new("invalid_request", message, path)]
+}
+
 /// Answers one request, `op` with its JSON, timing it from here.
 pub fn answer(terrain: &Terrain, op: &str, request: &Value) -> Result<Value, Vec<Issue>> {
     let started = Instant::now();

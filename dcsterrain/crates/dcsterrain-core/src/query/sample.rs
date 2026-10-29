@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use super::{Terrain, refused, resolve};
+use super::{Terrain, invalid, refused, resolve};
 use crate::classes::Class;
 use crate::decode::scn5::Pool;
 use crate::grid::{self, Window};
@@ -82,10 +82,6 @@ fn want(name: &str) -> Option<Want> {
                 .then_some(Want::Derived(Derived::Horizon { bin }))
         }
     }
-}
-
-fn invalid(message: &str, path: &str) -> Vec<Issue> {
-    vec![Issue::new("invalid_request", message, path)]
 }
 
 fn too_many(n: usize, max: u32) -> Vec<Issue> {
