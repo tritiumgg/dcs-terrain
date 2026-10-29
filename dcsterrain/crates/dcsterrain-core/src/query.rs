@@ -21,12 +21,14 @@ use crate::types::{Issue, OPERATIONS, Provenance};
 mod describe;
 mod geo;
 mod mgrs;
+mod nearest;
 mod region;
 mod sample;
 
 pub use describe::describe;
 pub use geo::geo;
 pub use mgrs::mgrs;
+pub use nearest::nearest;
 pub use region::{Area, resolve};
 pub use sample::sample;
 
@@ -84,6 +86,7 @@ type Handler = fn(&Terrain, &Value) -> Result<Value, Vec<Issue>>;
 const HANDLERS: &[(&str, Handler)] = &[
     ("describe", |t, r| run(t, r, describe)),
     ("geo", |t, r| run(t, r, geo)),
+    ("nearest", |t, r| run(t, r, nearest)),
     ("sample", |t, r| run(t, r, sample)),
 ];
 
