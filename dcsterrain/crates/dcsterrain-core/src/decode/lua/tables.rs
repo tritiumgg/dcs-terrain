@@ -139,17 +139,8 @@ impl LuaTables {
     /// A label spelled as the file is wins; failing that, the one label that
     /// differs from it only in case, as `Hildesheim` labels `HildesHeim`.
     pub fn airdrome_id(&self, name_id: &str) -> Option<i64> {
-        if let Some(&id) = self.airdrome_ids.get(name_id) {
-            return Some(id);
-        }
-        let mut like = self
-            .airdrome_ids
-            .iter()
-            .filter(|(label, _)| label.eq_ignore_ascii_case(name_id));
-        match (like.next(), like.next()) {
-            (Some((_, &id)), None) => Some(id),
-            _ => None,
-        }
+        let labels = self.airdrome_ids.iter().map(|(l, &id)| (l.as_str(), id));
+        named(labels, name_id)
     }
 
     /// The beacon ids of airdrome `id`.
@@ -178,6 +169,20 @@ impl LuaTables {
         write_rows(&dir.join(RADIO_FILE), &self.radio)?;
         write_rows(&dir.join(TOWNS_FILE), &self.towns)?;
         write_rows(&dir.join(NODES_FILE), &self.nodes)
+    }
+}
+
+/// The value of the one of `items` named `name`: spelled as given wins;
+/// failing that, the one name that differs from it only in ASCII case. Two
+/// such, and none is.
+pub fn named<'a, T>(items: impl Iterator<Item = (&'a str, T)> + Clone, name: &str) -> Option<T> {
+    if let Some((_, v)) = items.clone().find(|(n, _)| *n == name) {
+        return Some(v);
+    }
+    let mut like = items.filter(|(n, _)| n.eq_ignore_ascii_case(name));
+    match (like.next(), like.next()) {
+        (Some((_, v)), None) => Some(v),
+        _ => None,
     }
 }
 
