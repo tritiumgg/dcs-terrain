@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use dcsterrain_core::cache::{Cache, TerrainCache};
 use dcsterrain_core::decode::install;
-use dcsterrain_core::source::install::{TABLES_JSON, Tables};
+use dcsterrain_core::source::install::{SCENE_NODES, TABLES_JSON, Tables};
 
 fn install_root() -> Option<PathBuf> {
     match std::env::var_os("DCSTERRAIN_INSTALL") {
@@ -332,6 +332,11 @@ fn every_terrain_builds_its_tables() {
     for listed in install::terrains(&root).unwrap() {
         let Some(id) = listed.id else { continue };
         let terrain = terrain(&root, &c.0, &id);
+        // The scene's index places the towers and has its own budget; it
+        // is built first, as scenery builds it, so only the tables are timed.
+        terrain
+            .get(&SCENE_NODES)
+            .unwrap_or_else(|e| panic!("{id}: {e}"));
         let start = Instant::now();
         let t = Tables::open(&terrain).unwrap_or_else(|e| panic!("{id}: {e}"));
         let built_ms = start.elapsed().as_secs_f64() * 1e3;
