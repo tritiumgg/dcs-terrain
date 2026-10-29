@@ -1,5 +1,6 @@
 //! Opt-in: 10 000 points scattered over a whole terrain, answered block by
-//! block at the default block budget, against the 3 s target on GermanyCW.
+//! block at the default block budget, against the 3 s target on GermanyCW,
+//! and 10 000 clustered on MarianaIslands, whose blocks outgrow the budget.
 //! Set `DCSTERRAIN_INSTALL` to the DCS install root; without it this passes
 //! without reading anything, which is what CI does. Run it with `--release`
 //! for the times. The install is only read; the cache is a scratch
@@ -9,8 +10,10 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use dcsterrain_core::cache::Cache;
+use dcsterrain_core::query::{Terrain, answer};
 use dcsterrain_core::source::Source;
 use dcsterrain_core::source::install::Install;
+use serde_json::json;
 
 fn install_root() -> Option<PathBuf> {
     match std::env::var_os("DCSTERRAIN_INSTALL") {
@@ -78,4 +81,64 @@ fn ten_thousand_scattered_points_answer_within_the_target() {
             assert!(s < target_s, "{id}: {s:.2} s, over the {target_s} s target");
         }
     }
+}
+
+#[test]
+fn a_sample_of_ten_thousand_scattered_points_answers_within_the_target() {
+    let Some(root) = install_root() else { return };
+    let build = dcsterrain_core::decode::install::read_build(&root).unwrap();
+    let id = "GermanyCW";
+    let dir = Scratch(
+        std::env::temp_dir().join(format!("dcsterrain-sample-{}-{id}", std::process::id())),
+    );
+    let t = Terrain::open(&root, id, &Cache::new(&dir.0), false).unwrap();
+    let pts: Vec<_> = scattered(t.source(), 10_000)
+        .into_iter()
+        .map(|[x, z]| json!({"x": x, "z": z}))
+        .collect();
+    let req = json!({"points": pts, "layers": ["height", "water", "surface", "cover"]});
+    let started = Instant::now();
+    let v = answer(&t, "sample", &req).unwrap();
+    let s = started.elapsed().as_secs_f64();
+    assert_eq!(v["rows"].as_array().unwrap().len(), 10_000);
+    eprintln!(
+        "{id} on {}: sample of 10 000 scattered points in {s:.2} s",
+        build.version
+    );
+    if cfg!(not(debug_assertions)) {
+        assert!(s < 3.0, "{s:.2} s, over the 3 s target");
+    }
+}
+
+/// On MarianaIslands the blocks under one point outgrow the block budget,
+/// so points answered one at a time read each block again for every point.
+#[test]
+fn clustered_points_read_each_block_once_where_the_blocks_outgrow_the_budget() {
+    let Some(root) = install_root() else { return };
+    let id = "MarianaIslands";
+    let dir = Scratch(
+        std::env::temp_dir().join(format!("dcsterrain-cluster-{}-{id}", std::process::id())),
+    );
+    let t = Install::open(&root, id, &Cache::new(&dir.0)).unwrap();
+    // 100 × 100 points 20 m apart about the first airdrome with a runway.
+    let tables = t.tables().unwrap();
+    let a = tables.airdromes.iter().find(|a| a.x.is_some()).unwrap();
+    let (x0, z0) = (a.x.unwrap() - 1000.0, a.z.unwrap() - 1000.0);
+    let pts: Vec<[f64; 2]> = (0..10_000)
+        .map(|k| {
+            [
+                x0 + f64::from(k / 100) * 20.0,
+                z0 + f64::from(k % 100) * 20.0,
+            ]
+        })
+        .collect();
+    let started = Instant::now();
+    let got = t.points(&pts).unwrap();
+    let s = started.elapsed().as_secs_f64();
+    eprintln!(
+        "{id}: 10 000 points over 2 km about {} in {:.0} ms, {} on the mesh",
+        a.name_id,
+        s * 1000.0,
+        got.iter().filter(|g| g.is_some()).count()
+    );
 }

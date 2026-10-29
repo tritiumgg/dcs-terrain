@@ -165,5 +165,6 @@ pub(crate) mod tests {
         assert_eq!(issue("nope", json!({})), "unknown_operation");
         assert_eq!(issue("visible", json!({})), "not_built");
         assert_eq!(issue("describe", json!([1])), "invalid_request");
+        assert_eq!(issue("sample", json!({"layers": 3})), "invalid_request");
     }
 }
