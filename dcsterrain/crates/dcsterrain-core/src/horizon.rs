@@ -41,6 +41,8 @@ pub const TILES_MAX: usize = 64;
 /// its tiles and `RANGE_M` around them: about 2 100 cells square, 9 MiB of
 /// heights and 12 MiB of the pyramid that skips the march over them.
 const BATCH: u32 = 8;
+/// The most windows one call reads.
+const WINDOWS_MAX: usize = 4;
 /// Pyramid levels above the cells: the coarsest square is 256 cells.
 const LEVELS: usize = 8;
 const NODATA: i16 = i16::MIN;
@@ -103,6 +105,15 @@ pub fn compute(
             None => batches.push((b, vec![i])),
         }
     }
+    // Each batch reads and lays out its own window, which costs as much as
+    // the march over a small batch, so tiles far apart are bounded too.
+    if batches.len() > WINDOWS_MAX {
+        return Err(Refusal(format!(
+            "these horizon tiles lie {} windows of {BATCH} tiles apart, over the {WINDOWS_MAX} \
+             one query may read; ask for tiles closer together",
+            batches.len()
+        )));
+    }
     for (_, idx) in batches {
         let mine: Vec<(u32, u32)> = idx.iter().map(|&i| tiles[i]).collect();
         let made = batch(src, &g, &mine)?;
@@ -141,7 +152,7 @@ fn batch(
     let n = tile_cells(g);
     let span = i64::from(SPAN);
     // A horizon cell's center, in cells from the window's first cell center.
-    let centre = (span as f64 - 1.0) / 2.0;
+    let center = (span as f64 - 1.0) / 2.0;
     Ok(tiles
         .iter()
         .map(|&(tx, tz)| {
@@ -150,8 +161,8 @@ fn batch(
                 let (hr, hc) = (k as u32 / n, k as u32 % n);
                 let row = i64::from(tx) * ts + i64::from(hr) * span;
                 let col = i64::from(tz) * ts + i64::from(hc) * span;
-                let or = (row - r0) as f64 + centre;
-                let oc = (col - c0) as f64 + centre;
+                let or = (row - r0) as f64 + center;
+                let oc = (col - c0) as f64 + center;
                 march(&v, &p, or, oc, range, &dirs, bins);
             }
             t
@@ -394,16 +405,16 @@ mod tests {
     use crate::synth::Synth;
     use crate::synth::{CELL_SIZE_M, DEFAULT_SEED, DEFAULT_SIZE_KM, HILL_A_EAST_M, HILL_A_NORTH_M};
 
-    /// Rough ground in tiles of 8: ridges, a spike every so often, and a
-    /// patch outside the mesh, so a march both skips squares and passes
-    /// samples over.
+    /// Rough ground: short ridges on long swells, a spike every so often,
+    /// and a patch outside the mesh, so a march both skips squares and
+    /// passes samples over.
     struct Rough {
         identity: Identity,
         grid: Grid,
     }
 
     impl Rough {
-        fn new() -> Rough {
+        fn new(height: u32, width: u32, tile_size: u32) -> Rough {
             Rough {
                 identity: Identity {
                     terrain: "rough".into(),
@@ -414,9 +425,9 @@ mod tests {
                     cell_size: 50,
                     origin_x: 0.0,
                     origin_z: 0.0,
-                    height: 90,
-                    width: 76,
-                    tile_size: 8,
+                    height,
+                    width,
+                    tile_size,
                 },
             }
         }
@@ -431,12 +442,13 @@ mod tests {
             }
             let (x, z) = (r as f64, c as f64);
             let ridge = 120.0 * (x / 9.0).sin() * (z / 13.0).cos() + 2.0 * x;
+            let swell = 900.0 * (x / 310.0).sin() * (z / 270.0).cos();
             let spike = if (r * 7 + c * 13) % 97 == 0 {
                 300.0
             } else {
                 0.0
             };
-            Some((ridge + spike).round() as i32)
+            Some((ridge + swell + spike).round() as i32)
         }
     }
 
@@ -467,8 +479,8 @@ mod tests {
         }
     }
 
-    /// Every sample of every ray, as the module describes the march, with
-    /// nothing skipped and nothing shared with it.
+    /// Every sample of every ray out to the range, as the module describes
+    /// the march, with nothing skipped and nothing shared with it.
     fn brute(s: &Rough, row: i64, col: i64) -> [u8; BINS] {
         let at = |r: f64, c: f64| -> Option<f64> {
             if r < 0.0 || c < 0.0 {
@@ -490,14 +502,17 @@ mod tests {
         let Some(eye) = at(or, oc).map(|h| h + OBSERVER_M) else {
             return out;
         };
+        let cell = f64::from(s.grid.cell_size);
+        // Past the grid's diagonal nothing is left to sample.
+        let diagonal = f64::from(s.grid.height).hypot(f64::from(s.grid.width));
+        let last = (2.0 * (RANGE_M / cell).min(diagonal + 2.0)) as i64;
         for (b, o) in out.iter_mut().enumerate() {
             let az = (b as f64 * 360.0 / BINS as f64).to_radians();
             let mut best = FLOOR_DEG.to_radians().tan();
-            // The grid's diagonal is under 120 cells, far short of the range.
-            for k in 1..=240 {
+            for k in 1..=last {
                 let t = k as f64 * 0.5;
                 if let Some(h) = at(or + t * az.cos(), oc + t * az.sin()) {
-                    best = best.max((h - eye) / (t * 50.0));
+                    best = best.max((h - eye) / (t * cell));
                 }
             }
             *o = encode(best);
@@ -505,32 +520,45 @@ mod tests {
         out
     }
 
+    /// Each horizon cell of `tiles` whose index in its tile `pick` takes,
+    /// against the brute march; returns how many were undefined, above level
+    /// and below it.
+    fn agree(s: &Rough, tiles: &[(u32, u32)], pick: impl Fn(usize) -> bool) -> [usize; 3] {
+        let ts = i64::from(s.grid.tile_size);
+        let n = tile_cells(&s.grid) as i64;
+        let mut seen = [0usize; 3];
+        for (&(tx, tz), t) in tiles.iter().zip(compute(s, tiles).unwrap()) {
+            assert_eq!(t.len(), tile_len(&s.grid));
+            for (k, bins) in t.as_chunks::<BINS>().0.iter().enumerate() {
+                if !pick(k) {
+                    continue;
+                }
+                let row = i64::from(tx) * ts + k as i64 / n * 4;
+                let col = i64::from(tz) * ts + k as i64 % n * 4;
+                assert_eq!(*bins, brute(s, row, col), "horizon cell at ({row}, {col})");
+                seen[match bins[0] {
+                    UNDEFINED => 0,
+                    40.. => 1,
+                    _ => 2,
+                }] += 1;
+            }
+        }
+        seen
+    }
+
     #[test]
     fn the_march_agrees_with_every_sample_of_every_ray() {
-        let s = Rough::new();
+        let s = Rough::new(90, 76, 8);
         let (ntx, ntz) = s.grid.tiles();
         let all: Vec<(u32, u32)> = (0..ntx)
             .flat_map(|x| (0..ntz).map(move |z| (x, z)))
             .collect();
         // Two scattered halves, each over several batches.
         let (even, odd): (Vec<_>, Vec<_>) = all.iter().partition(|(x, z)| (x + z) % 2 == 0);
-        let n = tile_cells(&s.grid) as i64;
         let mut seen = [0usize; 3];
         for set in [even, odd] {
-            let got = compute(&s, &set).unwrap();
-            for (&(tx, tz), t) in set.iter().zip(&got) {
-                assert_eq!(t.len(), tile_len(&s.grid));
-                for (k, bins) in t.as_chunks::<BINS>().0.iter().enumerate() {
-                    let row = i64::from(tx) * 8 + k as i64 / n * 4;
-                    let col = i64::from(tz) * 8 + k as i64 % n * 4;
-                    assert_eq!(*bins, brute(&s, row, col), "horizon cell at ({row}, {col})");
-                    let i = match bins[0] {
-                        UNDEFINED => 0,
-                        40.. => 1,
-                        _ => 2,
-                    };
-                    seen[i] += 1;
-                }
+            for (a, b) in seen.iter_mut().zip(agree(&s, &set, |_| true)) {
+                *a += b;
             }
         }
         // Cells outside the mesh, and both a horizon above and below level.
@@ -538,11 +566,26 @@ mod tests {
     }
 
     #[test]
-    fn refuses_more_tiles_than_one_query_may_compute() {
-        let s = Rough::new();
+    fn the_march_agrees_out_to_the_range_on_a_large_grid() {
+        // Wider than the range, so the far squares of the pyramid are
+        // skipped, rays end at the range, and windows start inside the grid.
+        let s = Rough::new(1900, 1750, 64);
+        // A corner, an inner tile, the partial last one and one off the
+        // grid, in four windows.
+        let tiles = [(0, 0), (14, 13), (29, 27), (15, 0), (31, 26)];
+        let seen = agree(&s, &tiles, |k| k % 7 == 3);
+        assert!(seen[0] > 0 && seen[1] > 20, "{seen:?}");
+    }
+
+    #[test]
+    fn refuses_more_tiles_or_windows_than_one_query_may_compute() {
+        let s = Rough::new(90, 76, 8);
         let many = vec![(0, 0); TILES_MAX + 1];
         let e = compute(&s, &many).unwrap_err();
         assert!(e.0.contains(&format!("{}", TILES_MAX + 1)), "{e}");
+        let apart: Vec<(u32, u32)> = (0..=WINDOWS_MAX as u32).map(|k| (k * BATCH, 0)).collect();
+        let e = compute(&s, &apart).unwrap_err();
+        assert!(e.0.contains(&format!("{} windows", WINDOWS_MAX + 1)), "{e}");
         assert!(compute(&s, &[]).unwrap().is_empty());
     }
 
