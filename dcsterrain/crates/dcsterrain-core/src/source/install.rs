@@ -13,7 +13,7 @@ use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use super::{CELL_SIZE, Ground, Identity, Layer, Refusal, Source, TILE_SIZE};
+use super::{CELL_SIZE, Ground, Identity, Layer, Object, Refusal, Source, TILE_SIZE};
 use crate::cache::{Cache, Entry, Parts, TerrainCache};
 use crate::classes::Class;
 use crate::decode::install::{self, Map};
@@ -533,6 +533,26 @@ impl Source for Install {
             .collect())
     }
 
+    fn tables(&self) -> Result<&Tables, Refusal> {
+        Install::tables(self)
+    }
+
+    fn objects_in(&self, b: [f64; 4], f: &mut dyn FnMut(&Object)) -> Result<(), Refusal> {
+        let s = self.scenery()?;
+        let (classes, models) = (s.classes(), &s.index().models);
+        s.each_in(Pool::Objects, b, |i| {
+            let m = &models[i.model as usize];
+            f(&Object {
+                id: i.id,
+                model: &m.name,
+                class: classes.of(i.model).class,
+                pos: i.pos,
+                rotation: i.rotation,
+                bbox: m.bbox,
+            })
+        })
+    }
+
     /// Each tile from the cache, the missing ones computed together and
     /// kept there.
     fn horizon(&self, tiles: &[(u32, u32)]) -> Result<Vec<Vec<u8>>, Refusal> {
@@ -1004,6 +1024,12 @@ mod tests {
         })
         .unwrap();
         assert_eq!(standing, [(0, Class::Building), (0, Class::Building)]);
+        let mut objects = Vec::new();
+        t.objects_in(b, &mut |o| objects.push((o.model.to_string(), o.class)))
+            .unwrap();
+        objects.sort();
+        assert_eq!(objects.len(), 4);
+        assert_eq!(objects[3], ("smoke#big".to_string(), Class::Effect));
 
         let cat = s.catalog().unwrap();
         let rows: Vec<_> = cat

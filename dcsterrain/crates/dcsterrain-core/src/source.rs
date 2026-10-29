@@ -13,6 +13,8 @@ use crate::roads::Graph;
 
 pub mod install;
 
+pub use install::Tables;
+
 /// Why a terrain cannot answer. The message names the file or the setting.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusal(pub String);
@@ -59,6 +61,20 @@ pub trait Source {
         points.iter().map(|p| self.point(p[0], p[1])).collect()
     }
 
+    /// The airdromes, runways, stands, beacons, radio, towns, nodes and the
+    /// projection.
+    fn tables(&self) -> Result<&Tables, Refusal> {
+        Err(lacks(self, "tables"))
+    }
+
+    /// Calls `f` with every scenery object within `b`, min x, min z, max x,
+    /// max z in DCS meters, `effect` objects too, and perhaps a few just
+    /// outside it.
+    fn objects_in(&self, b: [f64; 4], f: &mut dyn FnMut(&Object)) -> Result<(), Refusal> {
+        let _ = (b, f);
+        Err(lacks(self, "scenery"))
+    }
+
     /// The horizon tiles `tiles`, in order, as `horizon::compute` makes
     /// them. An install keeps each in its cache once computed.
     fn horizon(&self, tiles: &[(u32, u32)]) -> Result<Vec<Vec<u8>>, Refusal> {
@@ -98,6 +114,21 @@ pub trait Source {
 /// Why a terrain without `what` cannot answer.
 fn lacks<S: Source + ?Sized>(s: &S, what: &str) -> Refusal {
     Refusal(format!("{} has no {what}", s.identity().terrain))
+}
+
+/// One scenery object as placed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Object<'a> {
+    pub id: u64,
+    /// As the scene file spells it, lowercase.
+    pub model: &'a str,
+    pub class: Class,
+    /// World x, altitude, z.
+    pub pos: [f64; 3],
+    /// Of the model's local x axis, radians from north towards east.
+    pub rotation: f64,
+    /// The model's box, min x, y, z then max x, y, z, model-local.
+    pub bbox: [f32; 6],
 }
 
 /// The ground at one point.

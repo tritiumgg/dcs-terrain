@@ -24,9 +24,11 @@
 //!   absolute metres, tile counts) is computed by the closed form
 
 mod memory;
+mod tables;
 mod theatre;
 
 pub use memory::{Synth, TERRAIN_ID};
+pub use tables::{beacon_id, node_name, town_name};
 pub use theatre::{Cell, Edge, Object, SynthError, Theatre};
 
 // Extract format, v2. The tile layout, the water codes and the height,

@@ -309,7 +309,7 @@ fn run_query(
     };
     let terrain = if id == synth::TERRAIN_ID {
         match Synth::new(seed, size_km, cell) {
-            Ok(s) => Terrain::Synth(s),
+            Ok(s) => Terrain::Synth(Box::new(s)),
             Err(e) => return refused("terrain_refused", e.0),
         }
     } else {

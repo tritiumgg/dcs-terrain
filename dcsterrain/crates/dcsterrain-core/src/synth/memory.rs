@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 use crate::classes::{Class, Classes};
 use crate::decode::scn5::{Model, Pool};
 use crate::roads::Graph;
-use crate::source::{Ground, Identity, Layer, Refusal, Source, TILE_SIZE};
+use crate::source::{Ground, Identity, Layer, Object, Refusal, Source, TILE_SIZE, Tables};
 
 /// The terrain `--terrain synth` names.
 pub const TERRAIN_ID: &str = "synth";
@@ -18,6 +18,7 @@ pub struct Synth {
     form: Theatre,
     identity: Identity,
     roads: OnceLock<Graph>,
+    tables: OnceLock<Tables>,
 }
 
 impl Synth {
@@ -33,6 +34,7 @@ impl Synth {
                 fingerprint: format!("synth-{seed}-{size_km}-{cell_size}"),
             },
             roads: OnceLock::new(),
+            tables: OnceLock::new(),
         })
     }
 
@@ -96,6 +98,29 @@ impl Source for Synth {
 
     fn road_graph(&self) -> Result<&Graph, Refusal> {
         Ok(self.roads.get_or_init(|| self.form.road_graph()))
+    }
+
+    fn tables(&self) -> Result<&Tables, Refusal> {
+        Ok(self.tables.get_or_init(|| self.form.tables()))
+    }
+
+    fn objects_in(&self, b: [f64; 4], f: &mut dyn FnMut(&Object)) -> Result<(), Refusal> {
+        let (names, models) = models();
+        let classes = Classes::new(TERRAIN_ID, &models);
+        for o in self.form.scenery() {
+            if inside(b, o.x, o.z) {
+                let i = names.iter().position(|n| *n == o.model).unwrap();
+                f(&Object {
+                    id: o.id,
+                    model: &models[i].name,
+                    class: classes.of(i as u32).class,
+                    pos: [o.x, o.alt, o.z],
+                    rotation: o.rotation,
+                    bbox: models[i].bbox,
+                });
+            }
+        }
+        Ok(())
     }
 
     fn structures_in(
@@ -223,6 +248,52 @@ mod tests {
     fn cover_at(north: f64, east: f64) -> i32 {
         let c = f64::from(CELL_SIZE_M);
         synth().cell(Layer::Cover, (north / c) as i64, (east / c) as i64)
+    }
+
+    #[test]
+    fn the_tables_and_objects_are_the_constants() {
+        let s = synth();
+        let t = s.tables().unwrap();
+        let counts = [
+            t.airdromes.len(),
+            t.runways.len(),
+            t.stands.len(),
+            t.beacons.len(),
+            t.radio.len(),
+            t.towns.len(),
+            t.nodes.len(),
+        ];
+        let want = [
+            1,
+            1,
+            STAND_COUNT,
+            BEACON_COUNT,
+            RADIO_COUNT,
+            TOWNS_COUNT,
+            NODES_COUNT,
+        ];
+        assert_eq!(counts, want.map(|n| n as usize));
+        let a = &t.airdromes[0];
+        let (x, z) = s.form().abs(RUNWAY_NORTH_M, RUNWAY_EAST_M);
+        assert_eq!((a.x, a.z), (Some(x), Some(z)));
+        // The table's projection puts the airdrome where its lat/lon says.
+        let (bx, bz) = t.crs.tmerc().to_xz(a.lat.unwrap(), a.lon.unwrap());
+        assert!((bx - x).abs() < 1e-3 && (bz - z).abs() < 1e-3, "{bx} {bz}");
+
+        let mut all = Vec::new();
+        s.objects_in([f64::MIN, f64::MIN, f64::MAX, f64::MAX], &mut |o| {
+            all.push((o.id, o.model.to_string(), o.class))
+        })
+        .unwrap();
+        assert_eq!(all.len(), SCENERY_COUNT as usize);
+        assert_eq!(all[0].1, SCENERY_TOWN_MODEL.to_lowercase());
+        assert_eq!(all[0].0, SCENERY_FIRST_ID);
+        let mut standing = 0;
+        s.structures_in([f64::MIN, f64::MIN, f64::MAX, f64::MAX], &mut |_, _, _| {
+            standing += 1
+        })
+        .unwrap();
+        assert_eq!(standing, all.len());
     }
 
     #[test]

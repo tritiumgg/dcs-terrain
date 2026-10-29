@@ -22,7 +22,7 @@ pub const CELL_SIZE_M: f64 = 50.0;
 /// A terrain a request can be asked of.
 pub enum Terrain {
     /// The synthetic terrain, in memory.
-    Synth(Synth),
+    Synth(Box<Synth>),
     /// A terrain of a DCS install, read in place.
     Install(Box<Install>),
 }
@@ -38,7 +38,7 @@ impl Terrain {
 
     pub fn source(&self) -> &dyn Source {
         match self {
-            Terrain::Synth(s) => s,
+            Terrain::Synth(s) => s.as_ref(),
             Terrain::Install(i) => i.as_ref(),
         }
     }
@@ -165,7 +165,9 @@ mod tests {
     use serde_json::json;
 
     fn synth() -> Terrain {
-        Terrain::Synth(Synth::new(synth::DEFAULT_SEED, synth::DEFAULT_SIZE_KM, 50).unwrap())
+        Terrain::Synth(Box::new(
+            Synth::new(synth::DEFAULT_SEED, synth::DEFAULT_SIZE_KM, 50).unwrap(),
+        ))
     }
 
     #[test]
