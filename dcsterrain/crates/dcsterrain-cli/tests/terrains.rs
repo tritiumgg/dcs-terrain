@@ -624,11 +624,9 @@ fn index_imports_a_hook_directory_and_refuses_one_from_another_build() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("tables.json: built"));
 }
 
-#[test]
-fn index_refuses_a_projection_fitted_over_two_meters_off_unless_allowed() {
-    let t = install(false);
-    // Three beacons, one 4 m from where its degrees put it: the fit keeps
-    // it, and misses it by more than 2 m.
+/// Three beacons for GermanyCW, one 4 m from where its degrees put it: the
+/// fit keeps it, and misses it by more than 2 m.
+fn beacons_off_by_4_m(root: &Path) {
     let tm = dcsterrain_core::crs::table("GermanyCW").unwrap();
     let mut lua = String::from("beacons = {\n");
     for (k, (x, z)) in [(0.0, 0.0), (50_000.0, 10_000.0), (-20_000.0, 60_000.0)]
@@ -644,10 +642,16 @@ fn index_refuses_a_projection_fitted_over_two_meters_off_unless_allowed() {
     }
     lua += "}\n";
     put(
-        &t.0,
+        root,
         "Mods/terrains/GermanyColdWar/Beacons.lua",
         lua.as_bytes(),
     );
+}
+
+#[test]
+fn index_refuses_a_projection_fitted_over_two_meters_off_unless_allowed() {
+    let t = install(false);
+    beacons_off_by_4_m(&t.0);
     let root = t.0.to_str().unwrap();
     let c = scratch();
     let cache = c.0.to_str().unwrap();
@@ -815,4 +819,86 @@ fn check_refuses_an_id_the_install_lacks_naming_those_it_holds() {
         ),
         "{err}"
     );
+}
+
+#[test]
+fn check_fails_on_a_fit_over_two_meters_a_dropped_hook_and_unreadable_figures() {
+    let t = install(false);
+    let root = t.0.to_str().unwrap();
+    let c = scratch();
+    let cache = c.0.to_str().unwrap();
+    let h = hook("0.0.0.1");
+    let args = [
+        "--install",
+        root,
+        "--terrain",
+        "GermanyCW",
+        "--cache",
+        cache,
+    ];
+    let mut index = vec!["index", "--hook", h.0.to_str().unwrap()];
+    index.extend(args);
+    assert!(run(&index).status.success());
+    // The hook's directory goes, and a new Lua file rebuilds the tables, so
+    // the import cannot be redone.
+    let hook_dir = h.0.display().to_string();
+    drop(h);
+    beacons_off_by_4_m(&t.0);
+    put(&c.0, "GermanyCW/validation.json", b"not json");
+
+    let mut check = vec!["check", "--json"];
+    check.extend(args);
+    let out = run(&check);
+    assert_eq!(out.status.code(), Some(1));
+    let v = stdout_json(&out);
+    let problems: Vec<&str> = v["problems"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p.as_str().unwrap())
+        .collect();
+    assert_eq!(problems.len(), 3, "{problems:?}");
+    assert!(
+        problems[0].contains("validation.json is not JSON"),
+        "{problems:?}"
+    );
+    assert!(problems[1].contains("misses one by 2.67 m"), "{problems:?}");
+    assert!(
+        problems[2].starts_with("the hook's tables were dropped"),
+        "{problems:?}"
+    );
+    assert_eq!(v["tables"]["hook"]["dir"], hook_dir.as_str());
+    assert_eq!(v["validation"], Value::Null);
+}
+
+#[test]
+fn check_reports_the_scenery_past_an_airfield_file_no_decoder_reads() {
+    let t = install(false);
+    put(
+        &t.0,
+        "Mods/terrains/GermanyColdWar/AirfieldsTaxiways/Ghost.rn5",
+        &header("t5::rn5file", 1),
+    );
+    let c = scratch();
+    let out = run(&[
+        "check",
+        "--json",
+        "--install",
+        t.0.to_str().unwrap(),
+        "--terrain",
+        "GermanyCW",
+        "--cache",
+        c.0.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let v = stdout_json(&out);
+    assert_eq!(
+        v["problems"],
+        json!(
+            ["Mods/terrains/GermanyColdWar/AirfieldsTaxiways/Ghost.rn5: \
+             t5::rn5file version 1 has no decoder; this build reads version 0"]
+        )
+    );
+    assert_eq!(v["tables"], Value::Null);
+    assert_eq!(v["catalog"]["objects"], 1);
 }
