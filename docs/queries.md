@@ -241,33 +241,49 @@ heights above ground is not judged.
 Request: `network: "roads" | "railroads"`, `from`, `to`, `avoid:
 Vec<Region>`, `exposure_observers: Vec<Observer>`, `exposure_weight` (default
 1), `max_detour_factor` (default 3). Response: `{waypoints, length, ascent,
-descent, max_grade_pct, legs: [{from, to, length, ascent, descent,
-max_grade_pct, exposure, class}], snapped_from, snapped_to, straight_line}`.
+descent, max_grade_pct, legs: [{from, to, edge_id, class, length, ascent,
+descent, max_grade_pct, exposure}], snapped_from, snapped_to, straight_line}`.
 
-`length` is the planar length of the road geometry between the snapped ends;
-ascent and descent are summed from height every 25 m; `max_grade_pct` is the
-steepest 100 m window; `length / straight_line` is the detour factor. The
-subgraph is the endpoints' box expanded 25 %, grown until connected or past
-`max_detour_factor`; edges crossing `avoid` are removed; edge weight is
-`length × (1 + exposure_weight × exposure)`, exposure being the share of 25 m
-samples any observer sees; A* with a Euclidean heuristic; the polyline is
-simplified to at most one point per 500 m, keeping every graph node.
+Each end snaps to the nearest point of its network, part way along an edge.
+`length` is the planar length of the road geometry between the snapped ends,
+the edges' own lengths; a leg is one edge, or the part of it at an end;
+ascent and descent are summed from the mesh height every 25 m along each leg;
+`max_grade_pct` is the steepest 100 m window, or the whole of a shorter leg;
+`length / straight_line` is the detour factor, `straight_line` running between
+the ends as given.
+
+The search is A* over the network's nodes and the two snapped ends. An edge
+costs `length × (1 + exposure_weight × exposure)`, exposure being the share
+of its 25 m samples any observer sees a vehicle 2 m above the raster ground
+at, judged as `viewshed` judges. No edge costs less than its length, so the
+straight line to the far end is a consistent estimate and the route is the
+least-cost one, exactly. Only nodes whose distances to the two snapped ends
+sum to at most `max_detour_factor` times the straight line between them, or
+that line and 5 km when that is more, are searched: no route longer passes
+outside that ellipse. An edge any point of whose path lies in an `avoid`
+region is not used, and of the edges the ends snapped to, the part between
+the end and a node is not used when it reaches into one. With no route the
+answer is the issue `no_route`. The waypoints are every graph node and,
+between them, a point of the road's geometry each time 500 m have passed.
 
 ### `route_alternatives`
 
 Request: everything `route` takes, plus `k` (default 3, max 10),
 `max_stretch` (default 1.5), `max_overlap` (default 0.5), `penalty` (default
-1.6). Response: `routes`, each a full `route` response plus `stretch`,
-`overlap_with` (shared length share against each other route),
-`shared_edges_with_all` (edges every alternative uses: the true chokepoints of
-the pair) and `chokepoints` (edges on the route in the top decile of
-betweenness).
+1.6, more than 1). Response: `routes`, shortest first, each a full `route`
+response plus `stretch`, `overlap_with` (the share of its length each other
+route also runs along, in order), `shared_edges_with_all` (edges some stretch
+of which every route runs along: the true chokepoints of the pair) and
+`chokepoints` (its edges in the top tenth of their network's betweenness;
+null while betweenness is still being built).
 
-The penalty method: route the shortest, then up to 4 × `k` times multiply the
-weight of every edge on the routes found so far by `penalty`, route again,
-accept a result within the stretch and overlap limits, and stop at `k` or when
-candidates repeat. Yen's k-shortest is not used: its alternatives differ by
-one edge and look the same to a player.
+The penalty method: route the shortest, then, up to 4 × `k` searches in all,
+multiply the cost of every edge of the last route found by `penalty` and
+route again. A route is kept when it is new, at most `max_stretch` times the
+shortest's length, and shares at most `max_overlap` of its length with each
+route kept, and they of theirs with it; the search stops at `k` routes. Yen's
+k-shortest is not used: its alternatives differ by one edge and look the same
+to a player. The method promises nothing of the alternatives it misses.
 
 ### `nearest`
 
@@ -295,15 +311,30 @@ turned model box meets it, edges touching included, among the objects within
 
 ### `chokepoints`
 
-Request: `region`, `network`, `limit`. Response: edges ranked by betweenness,
-with class, `crosses_water`, the mean `tpi_300` along the geometry, and the
-midpoint. Errors with "still being built" until betweenness exists.
+Request: `region`, `network`, `limit` (default 20, max 500). Response:
+`edges`, the edges any point of whose path lies in the region, ranked by
+betweenness, ties in edge order, each with its `edge_id`, `betweenness`,
+`class`, `crosses_water`, `tpi_300_mean` (the mean `tpi_300` of the cells
+under it every 25 m, null where none has ground) and `midpoint`, halfway
+along it. Until betweenness is built, which `index` does, the answer is the
+issue `not_ready`; a query never builds it, since that takes minutes on the
+largest terrains.
 
 ### `trafficability`
 
-Request: `x, z`, `max_slope_deg`, `network`. Response: `{reachable,
-nearest_road, distance, blocking: Point | null, reason}`, by sampling the
-straight line to the nearest road every 25 m for slope and water.
+Request: `x, z`, `max_slope_deg` (more than 0, at most 60), `network`.
+Response: `{reachable, nearest_road, distance, cost, blocking: Point | null,
+reason}`, judging the straight line to the nearest point of the network every
+25 m by the off-road cost of the cell under it. Water, a cell with no
+ground, or a slope past `max_slope_deg` blocks, and `blocking` is the first
+sample that does. `cost` is the line's length weighted by the cost per meter
+of the cell under each sample, null when it is blocked.
+
+The cost per meter is 1 on open flat ground, divided by a factor for cover
+(plain and runway 1, field 0.8, beach 0.6, town 0.5, forest 0.25) and one for
+slope (1 − 0.75 × (slope / `max_slope_deg`)², a quarter at the limit): a
+coarse cross-country movement map of this tool's own, not measured against
+the game's ground units.
 
 ## 4. Operations added
 
@@ -469,7 +500,8 @@ Every operation has tests on `Synth` with closed-form expectations: `visible`
 across the hill and around it; `viewshed` fraction against brute force;
 `radar_floor` behind the hill against its geometry, and `coverage`'s dead zone
 from it; `unmask_profile` first-seen distance from the hill; `route` choosing
-the bridge and avoiding a box; `find_sites` accepting only the plane and
+the bridge and avoiding a box, A* equal to Dijkstra and to Bellman–Ford, and
+`route_alternatives` finding the two roads to the bridge; `find_sites` accepting only the plane and
 rejecting the lake; `masked_from` true east of the big hill and false west;
 `chokepoints` ranking the bridge first; `scenery_in` counts against the
 generator's objects; `cover_in` on each cover patch; `towns` against
