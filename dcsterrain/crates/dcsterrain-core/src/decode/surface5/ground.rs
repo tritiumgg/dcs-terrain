@@ -9,7 +9,7 @@
 //! that bin's cells.
 
 use super::mesh::Block;
-use super::sample::{ROAD_STRIP, cover, rank, round_height, water_class};
+use super::sample::{EDGE_TOLERANCE, ROAD_STRIP, cover, rank, round_height, water_class};
 use crate::extract::Bounds;
 use crate::grid::Grid;
 use crate::source::{Cover, Layer};
@@ -354,6 +354,102 @@ impl Prepared {
     }
 }
 
+/// The part of a segment one triangle covers: from `t[0]` to `t[1]` of the
+/// way along it, the triangle's height rising linearly from `h[0]` to `h[1]`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Piece {
+    pub t: [f64; 2],
+    pub h: [f64; 2],
+    /// Where pieces overlap, the one of higher rank is the ground.
+    pub rank: u64,
+}
+
+impl Prepared {
+    /// Every triangle of this block over the segment from `a` to `b`, in
+    /// grid units, clipped to the part of it the triangle covers.
+    pub fn along(&self, a: [f64; 2], b: [f64; 2], out: &mut Vec<Piece>) {
+        let bins = &self.bins;
+        if bins.rows == 0 {
+            return;
+        }
+        let w = f64::from(BIN_CELLS);
+        let d = [b[0] - a[0], b[1] - a[1]];
+        // The rows of bins the segment crosses, and in each the columns of
+        // the stretch of it within that row, widened by the bins' slack: a
+        // triangle that covers any point of the segment is listed in the
+        // bin that point falls in.
+        let (r0, r1) = bin_span(a[0].min(b[0]), a[0].max(b[0]));
+        let mut seen: Vec<u32> = Vec::new();
+        for r in r0.max(bins.row0)..=r1.min(bins.row0 + bins.rows - 1) {
+            let (lo, hi) = (r as f64 * w - BIN_SLACK, (r + 1) as f64 * w + BIN_SLACK);
+            let (t0, t1) = if d[0] == 0.0 {
+                (0.0, 1.0)
+            } else {
+                let (u, v) = ((lo - a[0]) / d[0], (hi - a[0]) / d[0]);
+                (u.min(v).max(0.0), u.max(v).min(1.0))
+            };
+            let (z0, z1) = (a[1] + t0 * d[1], a[1] + t1 * d[1]);
+            let (c0, c1) = bin_span(z0.min(z1), z0.max(z1));
+            for c in c0..=c1 {
+                seen.extend_from_slice(bins.get(r, c));
+            }
+        }
+        seen.sort_unstable();
+        seen.dedup();
+        for k in seen {
+            let tri = self.tri[k as usize];
+            let z = tri.map(|v| self.h[v as usize]);
+            if let Some((t, h)) = clip(self.corners(tri), z, a, d) {
+                out.push(Piece {
+                    t,
+                    h,
+                    rank: rank(self.tritype[k as usize], self.index, k as usize),
+                });
+            }
+        }
+    }
+}
+
+/// The stretch of the segment `a + t d`, `t` in 0..1, that the triangle
+/// with corners `c` and heights `z` covers, as `cover` decides it, and the
+/// triangle's height at each end of it; `None` where it covers none of it
+/// or only a point.
+fn clip(c: [[f64; 2]; 3], z: [f64; 3], a: [f64; 2], d: [f64; 2]) -> Option<([f64; 2], [f64; 2])> {
+    let (v0x, v0z) = (c[1][0] - c[0][0], c[1][1] - c[0][1]);
+    let (v1x, v1z) = (c[2][0] - c[0][0], c[2][1] - c[0][1]);
+    let den = v0x * v1z - v1x * v0z;
+    if den == 0.0 {
+        return None;
+    }
+    // The weights towards the second and third corners, each `w + t dw`.
+    let (px, pz) = (a[0] - c[0][0], a[1] - c[0][1]);
+    let u = ((px * v1z - v1x * pz) / den, (d[0] * v1z - v1x * d[1]) / den);
+    let v = ((v0x * pz - px * v0z) / den, (v0x * d[1] - d[0] * v0z) / den);
+    let e = EDGE_TOLERANCE;
+    let (mut lo, mut hi) = (0.0f64, 1.0f64);
+    // Each of u, v and 1 - u - v at least -e.
+    for (f0, fd) in [
+        (u.0 + e, u.1),
+        (v.0 + e, v.1),
+        (1.0 + e - u.0 - v.0, -u.1 - v.1),
+    ] {
+        if fd == 0.0 {
+            if f0 < 0.0 {
+                return None;
+            }
+        } else if fd > 0.0 {
+            lo = lo.max(-f0 / fd);
+        } else {
+            hi = hi.min(-f0 / fd);
+        }
+    }
+    if lo >= hi {
+        return None;
+    }
+    let h = |t: f64| z[0] + (u.0 + t * u.1) * (z[1] - z[0]) + (v.0 + t * v.1) * (z[2] - z[0]);
+    Some(([lo, hi], [h(lo), h(hi)]))
+}
+
 /// For each of `points`, in grid units, block `b`'s winning triangle there
 /// and whether its runway subset covers it, testing every triangle rather
 /// than binning them: for a handful of points, binning a block costs more
@@ -666,6 +762,41 @@ mod tests {
         assert!(at(&b, &g, 200.0, 200.0).unwrap().runway);
         assert!(at(&b, &g, -1.0, 500.0).is_none());
         assert!(at(&b, &g, 500.0, 1000.5).is_none());
+    }
+
+    #[test]
+    fn a_segment_is_cut_where_it_crosses_triangle_edges() {
+        let g = grid(24);
+        let b = prepared(&[square([0, LAKE])], &g);
+        // From south of the square, across the diagonal, to past its east edge.
+        let (a, e) = ([100.0, -50.0], [900.0, 1050.0]);
+        let mut pieces = Vec::new();
+        b[0].along(
+            grid_units(&g, a[0], a[1]),
+            grid_units(&g, e[0], e[1]),
+            &mut pieces,
+        );
+        assert_eq!(pieces.len(), 2, "{pieces:?}");
+        for k in 0..=200 {
+            let t = f64::from(k) / 200.0;
+            let (x, z) = (a[0] + t * (e[0] - a[0]), a[1] + t * (e[1] - a[1]));
+            let want = at(&b, &g, x, z);
+            let on: Vec<&Piece> = pieces
+                .iter()
+                .filter(|p| p.t[0] <= t && t <= p.t[1])
+                .collect();
+            assert_eq!(want.is_some(), !on.is_empty(), "t {t}");
+            if let Some(w) = want {
+                let p = on.iter().max_by_key(|p| p.rank).unwrap();
+                let h = p.h[0] + (t - p.t[0]) / (p.t[1] - p.t[0]) * (p.h[1] - p.h[0]);
+                assert!((h - w.h).abs() < 1e-6, "t {t}: {h} against {}", w.h);
+                assert_eq!(p.rank, w.rank());
+            }
+        }
+        // Both ends land on the square's edges, within the edge tolerance.
+        let lo = pieces.iter().map(|p| p.t[0]).fold(1.0, f64::min);
+        let hi = pieces.iter().map(|p| p.t[1]).fold(0.0, f64::max);
+        assert!((lo - 50.0 / 1100.0).abs() < 1e-6 && (hi - 1050.0 / 1100.0).abs() < 1e-6);
     }
 
     #[test]

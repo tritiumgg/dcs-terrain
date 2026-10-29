@@ -8,6 +8,7 @@ use std::fmt;
 
 use crate::classes::Class;
 use crate::decode::scn5::Pool;
+pub use crate::decode::surface5::ground::Piece;
 use crate::grid::Grid;
 use crate::roads::Graph;
 
@@ -59,6 +60,14 @@ pub trait Source {
     /// it, so the points need not be near one another.
     fn points(&self, points: &[[f64; 2]]) -> Result<Vec<Option<Ground>>, Refusal> {
         points.iter().map(|p| self.point(p[0], p[1])).collect()
+    }
+
+    /// Every mesh triangle under the segment from `a` to `b`, each `[x, z]`,
+    /// clipped to the part of the segment it covers, in no order. Where
+    /// pieces overlap, the one of higher rank is the ground, as at a point.
+    fn along(&self, a: [f64; 2], b: [f64; 2]) -> Result<Vec<Piece>, Refusal> {
+        let _ = (a, b);
+        Err(lacks(self, "mesh triangles"))
     }
 
     /// The airdromes, runways, stands, beacons, radio, towns, nodes and the

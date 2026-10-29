@@ -13,7 +13,7 @@ use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use super::{CELL_SIZE, Ground, Identity, Layer, Object, Refusal, Source, TILE_SIZE};
+use super::{CELL_SIZE, Ground, Identity, Layer, Object, Piece, Refusal, Source, TILE_SIZE};
 use crate::cache::{Cache, Entry, Parts, TerrainCache};
 use crate::classes::Class;
 use crate::decode::install::{self, Map};
@@ -546,6 +546,38 @@ impl Source for Install {
                 })
             })
             .collect())
+    }
+
+    /// The blocks under the segment are found a tile's length of it at a
+    /// time, so a long diagonal reads only the blocks near it, and each is
+    /// asked only about the bins the segment crosses.
+    fn along(&self, a: [f64; 2], b: [f64; 2]) -> Result<Vec<Piece>, Refusal> {
+        let mut out = Vec::new();
+        if !a.iter().chain(&b).all(|v| v.is_finite()) {
+            return Ok(out);
+        }
+        let g = &self.grid;
+        let tm = f64::from(g.tile_size) * f64::from(g.cell_size);
+        let n = ((b[0] - a[0]).hypot(b[1] - a[1]) / tm).ceil().max(1.0) as usize;
+        let mut ids = Vec::new();
+        for k in 0..n {
+            let (s, e) = (k as f64 / n as f64, (k + 1) as f64 / n as f64);
+            let x = [a[0] + s * (b[0] - a[0]), a[0] + e * (b[0] - a[0])];
+            let z = [a[1] + s * (b[1] - a[1]), a[1] + e * (b[1] - a[1])];
+            ids.extend(self.under(
+                x[0].min(x[1]),
+                x[0].max(x[1]),
+                z[0].min(z[1]),
+                z[0].max(z[1]),
+            ));
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        let (ga, gb) = (grid_units(g, a[0], a[1]), grid_units(g, b[0], b[1]));
+        for i in ids {
+            self.block(i)?.along(ga, gb, &mut out);
+        }
+        Ok(out)
     }
 
     fn tables(&self) -> Result<&Tables, Refusal> {

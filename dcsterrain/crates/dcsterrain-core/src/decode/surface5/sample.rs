@@ -18,7 +18,7 @@ const WATER: u32 = SEA | LAKE | RIVER;
 
 /// How far outside a triangle, in barycentric terms, a point may lie and
 /// still be covered, so a point on a shared edge is covered by both.
-const EDGE_TOLERANCE: f64 = 1e-7;
+pub(super) const EDGE_TOLERANCE: f64 = 1e-7;
 
 /// The barycentric weights of `p` towards `b` and `c` in the triangle
 /// `a, b, c`, or `None` when the triangle does not cover it or has no area.
