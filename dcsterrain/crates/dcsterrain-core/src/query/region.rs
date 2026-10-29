@@ -39,6 +39,79 @@ impl Area {
             Shape::Polygon(p) => inside(p, x, z),
         }
     }
+
+    /// Whether any point of the segment from `a` to `b`, `[x, z]`, lies in
+    /// the region, its edge included.
+    pub fn meets(&self, a: [f64; 2], b: [f64; 2]) -> bool {
+        let [x0, z0, x1, z1] = self.bbox;
+        if a[0].max(b[0]) < x0 || a[0].min(b[0]) > x1 || a[1].max(b[1]) < z0 || a[1].min(b[1]) > z1
+        {
+            return false;
+        }
+        if self.contains(a[0], a[1]) || self.contains(b[0], b[1]) {
+            return true;
+        }
+        // Both ends lie outside, so the segment meets the region only by
+        // crossing its boundary.
+        match &self.shape {
+            Shape::Box => {
+                let corners = [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
+                crosses_ring(&corners, a, b)
+            }
+            Shape::Polygon(p) => crosses_ring(p, a, b),
+            Shape::Circle { x, z, r } => distance_to(a, b, [*x, *z]) <= *r,
+            Shape::Ring { x, z, min, max } => {
+                let c = [*x, *z];
+                let far = (a[0] - x).hypot(a[1] - z).max((b[0] - x).hypot(b[1] - z));
+                // The distance to the center runs continuously from its
+                // least to its greatest along the segment.
+                distance_to(a, b, c) <= *max && far >= *min
+            }
+        }
+    }
+}
+
+/// The least distance from `p` to the segment from `a` to `b`.
+fn distance_to(a: [f64; 2], b: [f64; 2], p: [f64; 2]) -> f64 {
+    let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
+    let len2 = dx * dx + dz * dz;
+    let t = if len2 > 0.0 {
+        (((p[0] - a[0]) * dx + (p[1] - a[1]) * dz) / len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (a[0] + t * dx - p[0]).hypot(a[1] + t * dz - p[1])
+}
+
+/// Whether the segment from `a` to `b` meets any side of the closed ring
+/// `ring`, touching included.
+fn crosses_ring(ring: &[[f64; 2]], a: [f64; 2], b: [f64; 2]) -> bool {
+    let n = ring.len();
+    (0..n).any(|i| segments_meet(a, b, ring[i], ring[(i + 1) % n]))
+}
+
+/// Whether two closed segments share a point.
+fn segments_meet(p: [f64; 2], q: [f64; 2], r: [f64; 2], s: [f64; 2]) -> bool {
+    let cross = |o: [f64; 2], a: [f64; 2], b: [f64; 2]| {
+        (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    };
+    let within = |o: [f64; 2], a: [f64; 2], b: [f64; 2]| {
+        o[0] >= a[0].min(b[0])
+            && o[0] <= a[0].max(b[0])
+            && o[1] >= a[1].min(b[1])
+            && o[1] <= a[1].max(b[1])
+    };
+    let (d1, d2) = (cross(r, s, p), cross(r, s, q));
+    let (d3, d4) = (cross(p, q, r), cross(p, q, s));
+    if ((d1 > 0.0 && d2 < 0.0) || (d1 < 0.0 && d2 > 0.0))
+        && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0))
+    {
+        return true;
+    }
+    (d1 == 0.0 && within(p, r, s))
+        || (d2 == 0.0 && within(q, r, s))
+        || (d3 == 0.0 && within(r, p, q))
+        || (d4 == 0.0 && within(s, p, q))
 }
 
 impl Area {
@@ -287,5 +360,78 @@ mod tests {
             max_dist: 1.0,
         };
         assert_eq!(code(band), "unknown_airdrome");
+    }
+
+    #[test]
+    fn a_segment_meets_a_region_where_any_point_of_it_lies_in_it() {
+        let shapes = [
+            Area {
+                bbox: [0.0, 0.0, 100.0, 50.0],
+                shape: Shape::Box,
+            },
+            Area {
+                bbox: [20.0, 20.0, 80.0, 80.0],
+                shape: Shape::Circle {
+                    x: 50.0,
+                    z: 50.0,
+                    r: 30.0,
+                },
+            },
+            Area {
+                bbox: [10.0, 10.0, 90.0, 90.0],
+                shape: Shape::Ring {
+                    x: 50.0,
+                    z: 50.0,
+                    min: 20.0,
+                    max: 40.0,
+                },
+            },
+            Area {
+                bbox: [0.0, 0.0, 100.0, 100.0],
+                shape: Shape::Polygon(vec![
+                    [0.0, 0.0],
+                    [100.0, 0.0],
+                    [100.0, 40.0],
+                    [40.0, 40.0],
+                    [40.0, 100.0],
+                    [0.0, 100.0],
+                ]),
+            },
+        ];
+        let mut state = 0x853c_49e6_748f_ea9b_u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64 * 160.0 - 30.0
+        };
+        let mut met = [0; 4];
+        for _ in 0..4000 {
+            let (a, b) = ([next(), next()], [next(), next()]);
+            for (k, s) in shapes.iter().enumerate() {
+                let sampled = (0..=4000).any(|i| {
+                    let t = f64::from(i) / 4000.0;
+                    s.contains(a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]))
+                });
+                // Sampling can miss a corner the segment only clips.
+                if sampled {
+                    assert!(s.meets(a, b), "shape {k}: {a:?} {b:?}");
+                    met[k] += 1;
+                } else if s.meets(a, b) {
+                    let fine = (0..=1_000_000).any(|i| {
+                        let t = f64::from(i) / 1e6;
+                        s.contains(a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]))
+                    });
+                    assert!(fine, "shape {k}: {a:?} {b:?} meets nothing");
+                }
+            }
+        }
+        assert!(met.iter().all(|&m| m > 500), "{met:?}");
+        // A segment wholly inside the ring's hole meets nothing.
+        assert!(!shapes[2].meets([45.0, 45.0], [55.0, 52.0]));
+        // One through the box's corner alone meets it; one passing beside it
+        // does not.
+        assert!(shapes[0].meets([90.0, 60.0], [110.0, 40.0]));
+        assert!(!shapes[0].meets([100.0, 60.0], [110.0, 50.0]));
     }
 }
