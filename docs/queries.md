@@ -58,7 +58,7 @@ endpoints also returns them as `Point` features.
 | `visible` | the sightline as a `LineString` with `visible` and `clearance_m`, and the blocking point when there is one |
 | `route` | the route as a `LineString`, and each leg as one with its `length`, `ascent`, `descent`, `max_grade_pct`, `exposure` and `class` |
 | `route_alternatives` | each route as a `LineString` with its stretch and overlap; the edges every alternative shares, as `LineString`s marked `shared` |
-| `low_level_route` | the path as a `LineString`, with the waypoints' MSL and AGL altitudes as `alt_msl` and `alt_agl` arrays in its properties, and each leg with its height above ground and the sites that see it. Coordinates stay two-dimensional, because RFC 7946 reads a third one as height above the ellipsoid, not MSL |
+| `low_level_route` (deferred) | the path as a `LineString`, with the waypoints' MSL and AGL altitudes as `alt_msl` and `alt_agl` arrays in its properties, and each leg with its height above ground and the sites that see it. Coordinates stay two-dimensional, because RFC 7946 reads a third one as height above the ellipsoid, not MSL |
 | `nearest` | a `Point` per result with its kind, name and distance; for roads and rail, the matched edge as a `LineString` |
 | `scenery_in` | each object's box as a `Polygon` with its model, class and height; the region or footprint queried |
 | `chokepoints` | each edge as a `LineString` with its rank, betweenness, class and `crosses_water` |
@@ -356,6 +356,8 @@ Procedural forest is not a collision; a placement in forest is reported from
 `cover`.
 
 ### `low_level_route`
+
+**Deferred, not built.** `plan.md` says why and what a later version takes.
 
 Request: `from`, `to`, `agl_band {min, max}`, `sites` as `exposure` takes,
 `max_climb_gradient`, `corridor_width`, `resolution` (default 200 m).

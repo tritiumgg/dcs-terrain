@@ -82,7 +82,6 @@ a valid RFC 7946 `FeatureCollection` whose features match its JSON response.
 | Q11 | `airfield_info` | Opt-in: every Caucasus airdrome answers; runway courses and lengths equal the tables | Q1 | agent, opt-in |
 | Q12 | `exposure` | The minimum over sites equals per-site floors; the count of sites seeing a cell against brute force | Q5 | agent |
 | Q13 | `validate_placements` over point, rectangle, circle and polygon shapes, with the land or water, slope and depth each placement asks for | One synthetic case per issue kind and per shape, including a shape that touches an object only at its edge; opt-in: placements in a Caucasus building, lake and runway are each reported with the object | Q1, N7, N8 | agent, opt-in |
-| Q14 | `low_level_route` | On `Synth`, a route behind a hill from a site stays masked where the hill allows and within the AGL band; cost recorded on Caucasus | Q12 | agent, opt-in |
 | Q15 | `towns` and the `places` entry: 200 m grouping, size class and form, naming, outlines on request; `nearest` kind `place` and `point_info`'s place field | Synthetic places against brute-force linkage; opt-in: each terrain at hand records its class counts; on Caucasus the 47 towns with census figures rank with correlation at least 0.7 | N7, Q1 | agent, opt-in |
 | Q16 | Performance pass over the operations built so far: the query benchmark (`cargo bench --bench query`) over `Synth` and, opt-in, an install, cold and warm, with allocations and the cache's size per entry; each kept optimization its own commit with its measured delta | About 2× on the geometric mean of the benchmark's cases on Caucasus and GermanyCW, or the shortfall recorded with its reason; answers unchanged; no cache entry larger | Q2, N11 | agent, opt-in |
 
@@ -132,7 +131,7 @@ How to review one terrain:
 | Milestone | Contains | Proof |
 |---|---|---|
 | MS1 Engine on the install | A1, N0–N7, N10, N12, X1 | `query --terrain Caucasus describe` and `sample` answer from the install with no step before; every decoder passes its opt-in checks; `Synth` passes every grid test |
-| MS2 Queries | N8, N9, N11, Q1–Q15 | Every operation tested on `Synth`; opt-in benchmarks within the targets on Caucasus |
+| MS2 Queries | N8, N9, N11, Q1–Q13, Q15 | Every operation tested on `Synth`; opt-in benchmarks within the targets on Caucasus |
 | MS3 Assistant and release | S1, V1, R1, R2, C1 | An assistant with the skill answers the FARP example; live validation within target; release binaries; a guide a newcomer follows |
 
 N0 goes first among the N tasks because it could stop the design: if DCS holds
@@ -144,3 +143,14 @@ Q13's removed-objects check has no known source. No install file records an
 area where a terrain removes scenery: `NotInstances.lua` lists exactly the
 `.scn5` group records, and a heliport clears the scenery around it when a
 mission spawns it. Q13 finds a source or drops the check.
+
+Q14, `low_level_route`, is deferred until a user asks for routes. `exposure`
+already maps where the sites cannot see, and that answers most of the
+question. A route would stack approximations: terrain-only clearance, line of
+sight with no radar model, and waypoints that DCS's AI flies as straight
+lines. Nothing at a live install can check it. As specified it also ignores
+speed. Turn radius grows with the square of speed, so a jet and a helicopter
+need different routes, and the time a site sees a leg needs a ground speed.
+Picked up, it is helicopter first: a `speed` in KCAS and a `max_g`, the time
+seen per leg from ground speed, and a refusal when the turn radius is more
+than the grid can honor.

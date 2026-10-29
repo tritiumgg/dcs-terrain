@@ -559,7 +559,6 @@ correctness rule: a miss is a decision about the target.
 | `find_sites` with one LOS criterion, 36 observers | not measured | 10 s |
 | `find_sites` with a horizon criterion, first touch | 3.4–4.9 s for the horizon of a 20 × 20 km region, 7–10 ms once cached (Caucasus, 2.9.30.28738) | 5 s, then 500 ms |
 | `route` 50 km | 2.5 / 13 ms | 500 ms |
-| `low_level_route` 100 km, 10 sites | not prototyped, 1–3 s estimated | 5 s |
 | `validate_placements`, 1 000 placements | ~2 s cold on Germany estimated | 3 s |
 | `point_info`, `airfield_info` | µs to a few ms | 20 ms cold |
 | cache build, all but betweenness and places | < 2 s; roads 0.5 / 9.8 s (Caucasus / GermanyCW, 2.9.30.28738), 3.1 s of it the GermanyCW scan and 4.6 s its water | 10 s |
@@ -640,8 +639,9 @@ Each names what settles it.
     `airfields_building_*`) are uncertain. *Settles it:* the opt-in checks per
     terrain in N8 and Q15, and each terrain's catalog reviewed into its
     override file; only Caucasus has one.
-12. **Low-level routes ignore obstacles.** Wires, pylons and masts are not
-    modeled, so `low_level_route` clears terrain only and says so. *Settles
-    it:* a user asking for obstacles.
+12. **Low-level routes are deferred.** `exposure` maps where the sites
+    cannot see; `low_level_route` is not built. Wires, pylons and masts are
+    not modeled, and the specified request ignores speed. *Settles it:* a
+    user asking for routes; `plan.md` says what the first version takes.
 13. **Assistants without a shell** cannot use the tool. *Settles it:* a user
     who needs one; an MCP wrapper is then its own task.
