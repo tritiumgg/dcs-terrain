@@ -490,6 +490,9 @@ impl Source for Install {
             }
         }
         let want: Vec<(u32, u32)> = missing.iter().map(|&i| tiles[i]).collect();
+        if !want.is_empty() {
+            parts.prepare()?;
+        }
         for (i, p) in missing
             .into_iter()
             .zip(crate::horizon::compute(self, &want)?)

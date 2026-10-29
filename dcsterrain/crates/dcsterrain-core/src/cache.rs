@@ -151,7 +151,7 @@ impl Stored {
         let entries = entries_in(&path);
         let mut builds: Vec<String> = entries
             .iter()
-            .filter_map(|(name, _)| read_head(&path.join(name)).ok())
+            .filter_map(|(name, _)| read_head(&first_part(&path.join(name))).ok())
             .filter_map(|h| build_of(&h.key).map(str::to_string))
             .collect();
         builds.sort();
@@ -323,6 +323,21 @@ fn subdirs(dir: &Path) -> Result<Vec<String>, Refusal> {
         .collect();
     out.sort();
     Ok(out)
+}
+
+/// An entry's file or, for one kept as parts, one of its parts, which
+/// carries the build it was made or last re-stamped on.
+fn first_part(path: &Path) -> PathBuf {
+    if !is_real_dir(path) {
+        return path.to_path_buf();
+    }
+    fs::read_dir(path)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| path.to_path_buf())
 }
 
 /// The entries in a build's directory, sorted, without a builder's
@@ -852,20 +867,29 @@ impl Parts {
             .opened(path.clone(), false)
             .payload()
             .map_err(|e| cannot("read", &path, e))?;
+        // A cache that cannot be written still answers from what it holds;
+        // the next read tries the re-stamp again.
         if restamp {
-            self.put(name, &payload)?;
+            let _ = self.put(name, &payload);
         }
         Ok(Some(payload))
     }
 
-    /// Writes part `name`, under a temporary name renamed into place.
-    pub fn put(&self, name: &str, payload: &[u8]) -> Result<(), Refusal> {
+    /// Makes the directory, refusing one inside the install: called before
+    /// parts are computed, which takes seconds, and not only after.
+    pub fn prepare(&self) -> Result<(), Refusal> {
         if self.made_dir.get().is_none() {
             self.cache.make_dir()?;
             let dir = self.cache.dir.join(self.entry.name());
             fs::create_dir_all(&dir).map_err(|e| cannot("create", &dir, e))?;
             let _ = self.made_dir.set(());
         }
+        Ok(())
+    }
+
+    /// Writes part `name`, under a temporary name renamed into place.
+    pub fn put(&self, name: &str, payload: &[u8]) -> Result<(), Refusal> {
+        self.prepare()?;
         let key = self.key()?;
         let (open, close) = framing(self.entry.version(), key, payload.len() as u64, false);
         let label = format!("{}-{name}", self.entry.name());
