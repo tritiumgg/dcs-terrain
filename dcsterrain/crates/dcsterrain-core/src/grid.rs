@@ -232,11 +232,29 @@ pub fn sample(
     Ok(Some(sum))
 }
 
+/// How far `p` lies outside the box `[min_x, min_z, max_x, max_z]`, 0
+/// within it.
+pub fn box_distance([x0, z0, x1, z1]: [f64; 4], p: [f64; 2]) -> f64 {
+    let dx = (x0 - p[0]).max(p[0] - x1).max(0.0);
+    let dz = (z0 - p[1]).max(p[1] - z1).max(0.0);
+    dx.hypot(dz)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::source::{Cover, Ground, Identity, TILE_SIZE};
     use crate::synth::{self, Synth};
+
+    #[test]
+    fn measures_how_far_a_point_lies_outside_a_box() {
+        let b = [0.0, 0.0, 10.0, 20.0];
+        assert_eq!(box_distance(b, [5.0, 5.0]), 0.0);
+        assert_eq!(box_distance(b, [10.0, 20.0]), 0.0);
+        assert_eq!(box_distance(b, [-3.0, 5.0]), 3.0);
+        assert_eq!(box_distance(b, [5.0, 24.0]), 4.0);
+        assert_eq!(box_distance(b, [13.0, 24.0]), 5.0);
+    }
 
     fn synth() -> Synth {
         Synth::new(

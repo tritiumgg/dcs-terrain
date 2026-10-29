@@ -32,7 +32,7 @@ use super::scenery::{OBJECT_REACH_M, Rect, footprint as object_rect};
 use super::sightline::exact;
 use super::visible::altitude;
 use crate::classes::Class;
-use crate::grid::{Grid, Window};
+use crate::grid::{Grid, Window, box_distance};
 use crate::horizon;
 use crate::layers::{Cells, DISTANCE_CAP_M, Derived, Raster, TPI_300, TPI_2000, Target, derive};
 use crate::source::{Layer, Refusal, Source};
@@ -1047,11 +1047,7 @@ fn can_pass(ctx: &Ctx, k: &Check, cells: Cells) -> Option<bool> {
             // the least distance from the box to any airdrome and the least
             // farthest distance.
             let b = cell_box(&ctx.g, cells);
-            let near = |p: &[f64; 2]| {
-                let dx = (b[0] - p[0]).max(p[0] - b[2]).max(0.0);
-                let dz = (b[1] - p[1]).max(p[1] - b[3]).max(0.0);
-                dx.hypot(dz)
-            };
+            let near = |p: &[f64; 2]| box_distance(b, *p);
             let far = |p: &[f64; 2]| {
                 let dx = (p[0] - b[0]).abs().max((p[0] - b[2]).abs());
                 let dz = (p[1] - b[1]).abs().max((p[1] - b[3]).abs());

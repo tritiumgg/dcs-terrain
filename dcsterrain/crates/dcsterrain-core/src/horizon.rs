@@ -17,7 +17,7 @@
 
 use rayon::prelude::*;
 
-use crate::grid::Grid;
+use crate::grid::{Grid, box_distance};
 use crate::source::{Layer, Refusal, Source};
 
 /// Bearings, the first due north and each next one clockwise.
@@ -366,10 +366,7 @@ fn march(
                     let (x0, x1) = (bi as f64 * size, (bi + 1) as f64 * size);
                     let (z0, z1) = (bj as f64 * size, (bj + 1) as f64 * size);
                     // The nearest and the farthest the square lies from the eye.
-                    let near = (x0 - or)
-                        .max(or - x1)
-                        .max(0.0)
-                        .hypot((z0 - oc).max(oc - z1).max(0.0));
+                    let near = box_distance([x0, z0, x1, z1], [or, oc]);
                     let far = (or - x0)
                         .abs()
                         .max((or - x1).abs())
