@@ -558,7 +558,7 @@ correctness rule: a miss is a decision about the target.
 | `find_sites` 20 × 20 km, geometric | 15–24 ms | 500 ms |
 | `find_sites` with one LOS criterion, 36 observers | not measured | 10 s |
 | `find_sites` with a horizon criterion, first touch | 3.4–4.9 s for the horizon of a 20 × 20 km region, 7–10 ms once cached (Caucasus, 2.9.30.28738) | 5 s, then 500 ms |
-| `route` 50 km | 2.5 / 13 ms | 500 ms |
+| `route` 50 km | 2.5 / 13 ms; 100 pairs of 2–80 km on each of 8 terrains, the search 0.05–1.6 ms p50 and the whole operation 4.9–43 ms p50, 90 ms p95 at most, on 2.9.30.28738 (`data/route-search.md`) | 500 ms |
 | `validate_placements`, 1 000 placements | ~2 s cold on Germany estimated | 3 s |
 | `point_info`, `airfield_info` | µs to a few ms | 20 ms cold |
 | cache build, all but betweenness and places | < 2 s; roads 0.5 / 9.8 s (Caucasus / GermanyCW, 2.9.30.28738), 3.1 s of it the GermanyCW scan and 4.6 s its water | 10 s |
