@@ -1,7 +1,8 @@
 //! The terrain under a straight segment: `exact` over the mesh's own
 //! triangles, which `visible` judges by, and `walk` over the 50 m raster,
 //! which steps a line the way `viewshed`'s radial sweep does and so is what
-//! that sweep is checked against.
+//! that sweep is checked against. `floor` finds over the same triangles
+//! the lowest a target at the far end may stand and be seen.
 
 use std::collections::{BinaryHeap, HashMap};
 
@@ -110,6 +111,54 @@ pub fn exact(pieces: &[Piece], a: [f64; 3], b: [f64; 3]) -> Sight {
         clearance: None,
         blocking: None,
     };
+    let line = |t: f64| a[2] + t * (b[2] - a[2]);
+    spans(pieces, |s, e, ground| {
+        let (gs, ge) = (line(s) - ground(s), line(e) - ground(e));
+        let least = gs.min(ge);
+        sight.clearance = Some(sight.clearance.map_or(least, |c: f64| c.min(least)));
+        if sight.blocking.is_none() && least < -BLOCK_TOLERANCE_M {
+            // Where the gap first falls past the tolerance.
+            let t = if gs < -BLOCK_TOLERANCE_M {
+                s
+            } else {
+                s + (e - s) * (gs + BLOCK_TOLERANCE_M) / (gs - ge)
+            };
+            let (x, z) = (a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]));
+            sight.blocking = Some([x, z, ground(t)]);
+        }
+    });
+    sight
+}
+
+/// The lowest altitude at the far end of a segment at which a target is
+/// seen from an eye at altitude `eye` at its near end, over the mesh
+/// triangles `pieces` that `Source::along` found under it, or infinity
+/// when the ground at the eye rises over it. Exact, as `exact` is: the
+/// line from the eye clears the ground at `t` when the target stands at or
+/// above `eye + (ground(t) − eye) / t`, which over one triangle's plane is
+/// monotonic in `t`, so its greatest is at a crossing. The ends' own
+/// ground is left to the caller. The world is flat.
+pub fn floor(pieces: &[Piece], eye: f64) -> f64 {
+    let mut floor = f64::NEG_INFINITY;
+    spans(pieces, |s, e, ground| {
+        if s <= 0.0 && ground(0.0) - eye > BLOCK_TOLERANCE_M {
+            floor = f64::INFINITY;
+        }
+        // Next to the eye the bound tends to the slope or falls away, and
+        // the far end of the span bounds it.
+        for t in [s, e] {
+            if t > 0.0 {
+                floor = floor.max(eye + (ground(t) - eye) / t);
+            }
+        }
+    });
+    floor
+}
+
+/// Calls `f` with each stretch `[s, e]` between consecutive crossings of
+/// the pieces, and the ground over it, the plane of the piece of highest
+/// rank that covers it; stretches no piece covers are skipped.
+fn spans(pieces: &[Piece], mut f: impl FnMut(f64, f64, &dyn Fn(f64) -> f64)) {
     let mut ts: Vec<f64> = pieces.iter().flat_map(|p| p.t).collect();
     ts.sort_unstable_by(f64::total_cmp);
     ts.dedup();
@@ -119,7 +168,6 @@ pub fn exact(pieces: &[Piece], a: [f64; 3], b: [f64; 3]) -> Sight {
     // The pieces begun so far, highest rank on top; one that has ended is
     // dropped when it reaches the top, since the sweep never goes back.
     let mut live: BinaryHeap<(u64, usize)> = BinaryHeap::new();
-    let line = |t: f64| a[2] + t * (b[2] - a[2]);
     for w in ts.windows(2) {
         let (s, e) = (w[0], w[1]);
         let m = 0.5 * (s + e);
@@ -134,21 +182,8 @@ pub fn exact(pieces: &[Piece], a: [f64; 3], b: [f64; 3]) -> Sight {
         };
         let p = &pieces[i];
         let ground = |t: f64| p.h[0] + (t - p.t[0]) / (p.t[1] - p.t[0]) * (p.h[1] - p.h[0]);
-        let (gs, ge) = (line(s) - ground(s), line(e) - ground(e));
-        let least = gs.min(ge);
-        sight.clearance = Some(sight.clearance.map_or(least, |c: f64| c.min(least)));
-        if sight.blocking.is_none() && least < -BLOCK_TOLERANCE_M {
-            // Where the gap first falls past the tolerance.
-            let t = if gs < -BLOCK_TOLERANCE_M {
-                s
-            } else {
-                s + (e - s) * (gs + BLOCK_TOLERANCE_M) / (gs - ge)
-            };
-            let (x, z) = (a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]));
-            sight.blocking = Some([x, z, ground(t)]);
-        }
+        f(s, e, &ground);
     }
-    sight
 }
 
 #[cfg(test)]
@@ -186,6 +221,22 @@ mod tests {
             "{x} {g}"
         );
         assert!((s.clearance.unwrap() + 50.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_floor_behind_the_ridge_is_where_a_line_grazes_its_crest() {
+        // From 101 m, a line grazing the 100 m crest halfway drops 1 m to
+        // it and 2 m in all by the far end.
+        let f = floor(&ridge(), 101.0);
+        assert!((f - 99.0).abs() < 1e-9, "{f}");
+        let to = |alt: f64| exact(&ridge(), [0.0, 0.0, 101.0], [1000.0, 0.0, alt]);
+        assert_eq!(to(f).blocking, None);
+        assert!(to(f - 0.01).blocking.is_some());
+        // An eye under its own ground sees nothing; one on it sees the slope.
+        assert_eq!(floor(&ridge(), -1.0), f64::INFINITY);
+        let rising = [piece([0.0, 1.0], [0.0, 10.0], 1)];
+        assert!((floor(&rising, 0.0) - 10.0).abs() < 1e-9);
+        assert_eq!(floor(&[], 5.0), f64::NEG_INFINITY);
     }
 
     #[test]
