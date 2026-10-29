@@ -10,6 +10,7 @@ use crate::classes::Class;
 use crate::decode::rn4::{KIND_RAIL, KIND_ROAD};
 use crate::decode::scn5::Pool;
 use crate::grid::{Grid, Window};
+use crate::horizon;
 use crate::source::{Cover, Layer, Refusal, Source};
 
 /// How far a distance searches when the asker names no maximum.
@@ -56,6 +57,10 @@ pub enum Derived {
     Density { pool: Pool, radius: f64 },
     /// The share of the covered cells within `radius` that are of `cover`.
     CoverFraction { cover: Cover, radius: f64 },
+    /// Degrees, the mean of the horizon's bins over the horizon cell
+    /// holding the cell; undefined where that cell's center is outside the
+    /// mesh. Reads the horizon tiles, computing those not yet made.
+    Enclosure,
 }
 
 /// What a distance is measured to.
@@ -258,6 +263,7 @@ pub fn derive(src: &(impl Source + ?Sized), d: Derived, at: Cells) -> Result<Ras
             raster(share.collect())
         }
         Derived::Distance { to, cap } => distance(src, to, within, cap, at)?,
+        Derived::Enclosure => raster(enclosure(src, at)?),
     })
 }
 
@@ -274,6 +280,54 @@ fn span(g: &Grid, at: Cells) -> f64 {
     let r = apart(at.row0, at.rows, tr * g.tile_size);
     let c = apart(at.col0, at.cols, tc * g.tile_size);
     r.hypot(c) * f64::from(g.cell_size)
+}
+
+/// The mean of each cell's horizon bins, from the horizon tiles under the
+/// cells on the grid.
+fn enclosure(src: &(impl Source + ?Sized), at: Cells) -> Result<Vec<f32>, Refusal> {
+    let g = src.grid();
+    let ts = i64::from(g.tile_size);
+    let span = i64::from(horizon::SPAN);
+    let n = i64::from(horizon::tile_cells(&g));
+    let (r0, r1) = (
+        at.row0.max(0),
+        (at.row0 + i64::from(at.rows)).min(i64::from(g.height)),
+    );
+    let (c0, c1) = (
+        at.col0.max(0),
+        (at.col0 + i64::from(at.cols)).min(i64::from(g.width)),
+    );
+    let mut out = vec![f32::NAN; at.len()];
+    if r0 >= r1 || c0 >= c1 {
+        return Ok(out);
+    }
+    let (tx0, tz0) = (r0 / ts, c0 / ts);
+    let ntz = (c1 - 1) / ts - tz0 + 1;
+    let tiles: Vec<(u32, u32)> = (tx0..=(r1 - 1) / ts)
+        .flat_map(|tx| (tz0..tz0 + ntz).map(move |tz| (tx as u32, tz as u32)))
+        .collect();
+    // Each horizon cell's mean, once.
+    let means: Vec<Vec<f32>> = src
+        .horizon(&tiles)?
+        .iter()
+        .map(|t| {
+            t.chunks(horizon::BINS)
+                .map(|bins| {
+                    let deg: Option<f64> = bins.iter().map(|&b| horizon::degrees(b)).sum();
+                    deg.map_or(f32::NAN, |d| (d / horizon::BINS as f64) as f32)
+                })
+                .collect()
+        })
+        .collect();
+    for r in r0..r1 {
+        for c in c0..c1 {
+            let t = ((r / ts - tx0) * ntz + c / ts - tz0) as usize;
+            let k = ((r % ts) / span * n + (c % ts) / span) as usize;
+            let o = (r - at.row0) as usize * at.cols as usize + (c - at.col0) as usize;
+            out[o] = means[t][k];
+        }
+    }
+    Ok(out)
 }
 
 fn valid(src: &(impl Source + ?Sized), at: Cells) -> Result<Vec<f32>, Refusal> {
@@ -783,6 +837,60 @@ mod tests {
         assert!(steep > 1000);
         // The summit is flat, so it faces nowhere.
         assert!(one(&s, Derived::Aspect, HILL_A_NORTH_M, HILL_A_EAST_M).is_nan());
+    }
+
+    #[test]
+    fn enclosure_is_the_mean_horizon_low_on_the_hill_and_high_in_the_col() {
+        let s = synth();
+        let g = s.grid();
+        let at = |n: f64, e: f64| derive(&s, Derived::Enclosure, around(n, e, 9)).unwrap();
+        let top = at(HILL_A_NORTH_M, HILL_A_EAST_M);
+        let col = at(HILL_A_NORTH_M, (HILL_A_EAST_M + HILL_B_EAST_M) / 2.0);
+        // The plane rising to the north holds the top's mean near level.
+        let top_most = top.values.iter().copied().fold(f32::MIN, f32::max);
+        let col_least = col.values.iter().copied().fold(f32::MAX, f32::min);
+        assert!(top.values[40] < 0.0, "{:?}", top.values);
+        assert!(
+            col_least > top_most + 1.0,
+            "{top_most} on top, {col_least} in the col"
+        );
+
+        // Each cell has the mean of its horizon cell's bins.
+        let span = i64::from(horizon::SPAN);
+        let n = i64::from(horizon::tile_cells(&g));
+        let ts = i64::from(g.tile_size);
+        let mut tiles = std::collections::HashMap::new();
+        for (r, c) in each(col.cells) {
+            let tile = ((r / ts) as u32, (c / ts) as u32);
+            let t = tiles
+                .entry(tile)
+                .or_insert_with(|| s.horizon(&[tile]).unwrap().remove(0));
+            let k = ((r % ts) / span * n + (c % ts) / span) as usize;
+            let bins = &t[k * horizon::BINS..(k + 1) * horizon::BINS];
+            let sum: f64 = bins.iter().map(|&b| horizon::degrees(b).unwrap()).sum();
+            close(
+                col.get(r, c).unwrap(),
+                sum / horizon::BINS as f64,
+                1e-5,
+                &format!("({r}, {c})"),
+            );
+        }
+
+        // Off the grid, and on it outside the mesh, it is undefined.
+        let edge = derive(
+            &s,
+            Derived::Enclosure,
+            Cells {
+                row0: -4,
+                col0: 600,
+                rows: 4 + (MESH_MARGIN_M / C) as u32,
+                cols: 2,
+            },
+        )
+        .unwrap();
+        assert!(edge.values.iter().all(|v| v.is_nan()), "{:?}", edge.values);
+        let inside = at(MESH_MARGIN_M + 1000.0, 30_000.0);
+        assert!(inside.values.iter().all(|v| !v.is_nan()));
     }
 
     #[test]
