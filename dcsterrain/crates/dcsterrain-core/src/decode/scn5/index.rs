@@ -13,9 +13,12 @@
 //! u32 G, G ×      u32 model, f64[3] position, f64 heading
 //! ```
 
-use std::io::{Read, Seek};
+use std::io::{self, Read, Seek};
 
-use super::{Error, GroupRecord, MAX_MODELS, Model, Pool, PoolToc, Scene, layout, malformed};
+use super::{
+    Error, GroupRecord, MAX_MODELS, Model, Pool, PoolToc, Scene, layout, locate, malformed, placed,
+};
+use crate::decode::surface5::ReadAt;
 
 /// One instancer node: its instance count, translation, and where its
 /// position, model and axis arrays start, from the data base.
@@ -148,6 +151,24 @@ impl<'a> Reader<'a> {
 }
 
 impl Index {
+    /// The world position of instance `id`, a pooled instance or a group
+    /// record, read from the scene file `r`; `None` when the file holds no
+    /// instance of that id.
+    pub fn position<R: ReadAt + ?Sized>(&self, r: &R, id: u64) -> io::Result<Option<[f64; 3]>> {
+        let first = (self.nodes.len() as u64) << self.shift;
+        if let Some(g) = id.checked_sub(first) {
+            let g = usize::try_from(g).ok().and_then(|g| self.group.get(g));
+            return Ok(g.map(|g| g.pos));
+        }
+        let Some((k, index)) = locate(id, self.shift, |k| self.nodes.get(k).map(|n| n.n)) else {
+            return Ok(None);
+        };
+        let n = &self.nodes[k];
+        let mut p = [0u8; 12];
+        r.read_exact_at(&mut p, self.data_base + n.p + 12 * index)?;
+        Ok(Some(placed(n.t, &p, 0)))
+    }
+
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer(Vec::new());
         w.u32(self.version);

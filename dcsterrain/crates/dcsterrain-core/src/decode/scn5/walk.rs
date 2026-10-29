@@ -234,6 +234,29 @@ mod tests {
     }
 
     #[test]
+    fn places_one_instance_by_id_where_the_walk_places_it() {
+        for version in [8, 9] {
+            let b = scene(version).file();
+            let mut r = Cursor::new(&b);
+            let index = Scene::open(&mut r, "X.scn5")
+                .unwrap()
+                .index(&mut r)
+                .unwrap();
+            let file = b.as_slice();
+            for i in walk(&b).unwrap() {
+                assert_eq!(
+                    index.position(file, i.id).unwrap(),
+                    Some(i.pos),
+                    "v{version}"
+                );
+            }
+            // Past a node's instances, and past the group.
+            assert_eq!(index.position(file, 3).unwrap(), None);
+            assert_eq!(index.position(file, (2 << 13) + 2).unwrap(), None);
+        }
+    }
+
+    #[test]
     fn walks_every_pooled_instance_in_id_order_then_the_group() {
         for version in [8, 9] {
             let built = scene(version);
