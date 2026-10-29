@@ -325,9 +325,10 @@ largest terrains.
 Request: `x, z`, `max_slope_deg` (more than 0, at most 60), `network`.
 Response: `{reachable, nearest_road, distance, cost, blocking: Point | null,
 reason}`, judging the straight line to the nearest point of the network every
-25 m by the off-road cost of the cell under it. Water, a cell with no
-ground, or a slope past `max_slope_deg` blocks, and `blocking` is the first
-sample that does. `cost` is the line's length weighted by the cost per meter
+25 m by the off-road cost of the cell under it, short of the road itself,
+which may be a bridge. Water, a cell with no ground, or a slope past
+`max_slope_deg` blocks, and `blocking` is the first sample that does. A road
+more than 20 km away is the issue `too_far`. `cost` is the line's length weighted by the cost per meter
 of the cell under each sample, null when it is blocked.
 
 The cost per meter is 1 on open flat ground, divided by a factor for cover

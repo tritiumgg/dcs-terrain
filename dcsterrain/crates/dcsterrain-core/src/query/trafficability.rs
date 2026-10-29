@@ -14,6 +14,9 @@ use crate::types::{Issue, Point, TrafficabilityRequest, TrafficabilityResponse};
 /// The steepest limit a request may set: past it the cost model's slope
 /// factor says nothing a vehicle could use.
 const MAX_SLOPE_LIMIT_DEG: f64 = 60.0;
+/// The longest line judged: past it the nearest road is no way out on
+/// foot or wheels, and the window of cells under it grows past a query.
+pub const MAX_DISTANCE_M: f64 = 20_000.0;
 
 fn water_name(w: i32) -> &'static str {
     match w {
@@ -29,7 +32,8 @@ pub fn trafficability(
     q: TrafficabilityRequest,
 ) -> Result<TrafficabilityResponse, Vec<Issue>> {
     if !(q.x.is_finite() && q.z.is_finite()) {
-        return Err(vec![Issue::new("invalid_point", "must be finite", "x")]);
+        let path = if q.x.is_finite() { "z" } else { "x" };
+        return Err(vec![Issue::new("invalid_point", "must be finite", path)]);
     }
     if !(q.max_slope_deg > 0.0 && q.max_slope_deg <= MAX_SLOPE_LIMIT_DEG) {
         return Err(vec![Issue::new(
@@ -49,6 +53,15 @@ pub fn trafficability(
         )]);
     };
     let distance = (road[0] - p[0]).hypot(road[1] - p[1]);
+    if distance > MAX_DISTANCE_M {
+        return Err(vec![Issue::new(
+            "too_far",
+            &format!(
+                "the nearest road is {distance:.0} m away, past the {MAX_DISTANCE_M} m judged"
+            ),
+            "",
+        )]);
+    }
     let line = [p, road];
     let samples = samples_along(&line);
     let grid = src.grid();
@@ -66,7 +79,8 @@ pub fn trafficability(
         "passable: no slope over {}° and no water on the {distance:.0} m to the road",
         q.max_slope_deg
     );
-    for (i, s) in samples.iter().enumerate() {
+    // The last sample is the road itself, which may be a bridge over water.
+    for (i, s) in samples.iter().enumerate().take(samples.len() - 1) {
         let cell = grid
             .cell_at(s[0], s[1])
             .and_then(|(r, c)| field.get(r.into(), c.into()))
@@ -83,6 +97,9 @@ pub fn trafficability(
                 reason = match b {
                     Block::NoGround => format!("no ground {along:.0} m along the line"),
                     Block::Water(w) => format!("{} {along:.0} m along the line", water_name(w)),
+                    Block::Cover(_) => {
+                        format!("cover no vehicle crosses {along:.0} m along the line")
+                    }
                     Block::Steep(d) => format!(
                         "a slope of {d:.1}°, over the {}° allowed, {along:.0} m along the line",
                         q.max_slope_deg
@@ -190,5 +207,13 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(e[0].code, "invalid_request");
+        let (x, z) = at(&t, 5000.0, 5000.0);
+        let far = answer(
+            &t,
+            "trafficability",
+            &json!({"x": x, "z": z, "max_slope_deg": 20, "network": "roads"}),
+        )
+        .unwrap_err();
+        assert_eq!(far[0].code, "too_far");
     }
 }

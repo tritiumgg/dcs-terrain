@@ -49,6 +49,8 @@ pub enum Block {
     Water(i32),
     /// Its slope in degrees.
     Steep(f64),
+    /// A cover no vehicle crosses, as the `cover` layer codes it.
+    Cover(i32),
 }
 
 /// Each cell's cost per meter over a rectangle, row-major with columns
@@ -75,6 +77,8 @@ impl CostField {
                     Err(Block::NoGround)
                 } else if w != 0 {
                     Err(Block::Water(w))
+                } else if cover_factor(c).is_none() {
+                    Err(Block::Cover(c))
                 } else {
                     cost(s, w, c, max_slope_deg).ok_or(Block::Steep(s))
                 }
