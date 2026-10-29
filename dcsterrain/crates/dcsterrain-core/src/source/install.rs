@@ -227,18 +227,22 @@ fn tile_index(g: &Grid, boxes: &[[f64; 4]]) -> (Vec<u32>, Vec<u32>) {
     for k in 1..start.len() {
         start[k] += start[k - 1];
     }
-    let mut fill = start.clone();
+    // Each tile's start is its fill cursor and ends at the next tile's
+    // start; shifting them back by one tile then restores the starts, with
+    // no second array the size of the grid.
     let mut ids = vec![0u32; start[n] as usize];
     for (i, s) in spans.iter().enumerate() {
         let Some((rows, cols)) = s else { continue };
         for r in rows.clone() {
             for c in cols.clone() {
-                let f = &mut fill[r * ntz as usize + c];
+                let f = &mut start[r * ntz as usize + c];
                 ids[*f as usize] = i as u32;
                 *f += 1;
             }
         }
     }
+    start.copy_within(0..n, 1);
+    start[0] = 0;
     (start, ids)
 }
 
