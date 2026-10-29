@@ -47,8 +47,8 @@ pub trait Entry: Sync {
     fn roles(&self) -> &[&str];
     /// Builds the payload from `files`, the install files of its roles with
     /// the class and version each header states, read for this build.
-    /// `cache` is the terrain's, whose directory may still hold the entry
-    /// being replaced, and through which an entry built from another gets it.
+    /// `cache` is the terrain's, through which an entry built from another
+    /// gets it.
     fn build(&self, cache: &TerrainCache, files: &[FileEntry]) -> Result<Vec<u8>, Refusal>;
     /// Whether the entry is a JSON document, whose payload is a JSON value.
     /// A JSON entry cannot open with the binary header and stay JSON, so it
@@ -57,11 +57,6 @@ pub trait Entry: Sync {
     /// payload.
     fn json(&self) -> bool {
         false
-    }
-    /// Whether the entry is kept across a DCS update that leaves its files
-    /// alone, re-stamped with the new build rather than rebuilt (ADR 0002).
-    fn survives_build(&self) -> bool {
-        true
     }
 }
 
@@ -618,11 +613,12 @@ impl TerrainCache {
             if judge(&head, entry.version(), &checked) == State::Current {
                 return Ok(head.opened(path, false));
             }
-            if entry.survives_build() && judge_but_build(&head, entry.version(), &checked) {
+            // Kept across a DCS update that leaves its files alone (ADR 0002).
+            if judge_but_build(&head, entry.version(), &checked) {
                 return self.restamp(entry, head, &files, &checked);
             }
         }
-        self.build(entry, files, &checked, false)
+        self.build(entry, files, &checked)
     }
 
     /// An entry made on another build whose files' metadata still match:
@@ -640,7 +636,7 @@ impl TerrainCache {
         let path = self.dir.join(entry.name());
         let (_, key) = self.built_key(files)?;
         if but_build(&key) != but_build(&head.key) {
-            return self.build(entry, files.to_vec(), checked, false);
+            return self.build(entry, files.to_vec(), checked);
         }
         self.make_dir()?;
         let json = entry.json();
@@ -669,19 +665,11 @@ impl TerrainCache {
         Ok(head.opened(path, false))
     }
 
-    /// The entry built now, whether or not the one there is current: for a
-    /// build whose inputs the key does not cover, such as the hook's tables.
-    pub fn rebuild(&self, entry: &dyn Entry) -> Result<Opened, Refusal> {
-        let (files, checked) = self.checked(entry)?;
-        self.build(entry, files, &checked, true)
-    }
-
     fn build(
         &self,
         entry: &dyn Entry,
         files: Vec<Located>,
         checked: &str,
-        forced: bool,
     ) -> Result<Opened, Refusal> {
         let path = self.dir.join(entry.name());
         // Refused before the build, which can take minutes, not after it.
@@ -689,17 +677,13 @@ impl TerrainCache {
         let (classified, key) = self.built_key(&files)?;
         let payload = entry.build(self, &classified)?;
         let (open, close) = framing(entry.version(), &key, payload.len() as u64, entry.json());
-        // A forced build must not settle for the entry another builder put
-        // there, which lacks what forced it.
         let fill = |f: &mut File| {
             f.write_all(&open)?;
             f.write_all(&payload)?;
             f.write_all(close)
         };
         self.write(entry.name(), fill, |dest| {
-            !forced
-                && read_head(dest)
-                    .is_ok_and(|h| judge(&h, entry.version(), checked) == State::Current)
+            read_head(dest).is_ok_and(|h| judge(&h, entry.version(), checked) == State::Current)
         })?;
         let head = read_head(&path).map_err(|e| cannot("read", &path, e))?;
         Ok(head.opened(path, true))
@@ -863,8 +847,7 @@ impl Parts {
         let version = self.entry.version();
         let restamp = judge(&head, version, &self.checked) != State::Current;
         if restamp
-            && !(self.entry.survives_build()
-                && judge_but_build(&head, version, &self.checked)
+            && !(judge_but_build(&head, version, &self.checked)
                 && but_build(self.key()?) == but_build(&head.key))
         {
             return Ok(None);
@@ -1168,7 +1151,6 @@ mod tests {
         roles: &'static [&'static str],
         builds: AtomicUsize,
         json: bool,
-        survives: bool,
     }
 
     impl Counted {
@@ -1179,7 +1161,6 @@ mod tests {
                 roles,
                 builds: AtomicUsize::new(0),
                 json: false,
-                survives: true,
             }
         }
         /// The same as a JSON entry, whose payload records the directory
@@ -1215,9 +1196,6 @@ mod tests {
         }
         fn json(&self) -> bool {
             self.json
-        }
-        fn survives_build(&self) -> bool {
-            self.survives
         }
     }
 
@@ -1368,13 +1346,10 @@ mod tests {
     }
 
     #[test]
-    fn an_update_re_stamps_an_entry_whose_files_survive_it_and_rebuilds_the_rest() {
+    fn an_update_re_stamps_an_entry_whose_files_survive_it() {
         let f = Fixture::new();
         let mesh = Counted::new("mesh.toc", &["surface"]);
-        let tables = Counted {
-            survives: false,
-            ..Counted::json("tables.json", &["surface"])
-        };
+        let tables = Counted::json("tables.json", &["surface"]);
         let doc = Counted::json("doc.json", &["roads"]);
         f.touch(SURFACE, 1_000_000);
         let t = f.terrain();
@@ -1389,10 +1364,7 @@ mod tests {
         assert!(!got.built);
         assert_eq!(got.payload().unwrap(), b"mesh.toc of Caucasus");
         assert_eq!(t.state(&mesh).unwrap(), State::Current);
-        assert!(
-            t.get(&tables).unwrap().built,
-            "the hook's tables are a build's own"
-        );
+        assert!(!t.get(&tables).unwrap().built);
         let after = t.get(&doc).unwrap();
         assert!(!after.built);
         assert_eq!(t.state(&doc).unwrap(), State::Current);
@@ -1402,7 +1374,7 @@ mod tests {
             serde_json::from_slice::<serde_json::Value>(b).unwrap()["payload"].clone()
         };
         assert_eq!(payload(&after), payload(&before));
-        assert_eq!((mesh.builds(), tables.builds(), doc.builds()), (1, 2, 1));
+        assert_eq!((mesh.builds(), tables.builds(), doc.builds()), (1, 1, 1));
         let names: Vec<String> = entries_in(t.dir()).into_iter().map(|(n, _)| n).collect();
         assert_eq!(names, ["doc.json", "mesh.toc", "tables.json"]);
 
@@ -1799,9 +1771,6 @@ mod tests {
         assert!(matches!(t.state(&tables).unwrap(), State::Stale(_)));
         assert!(t.get(&tables).unwrap().built);
         assert_eq!(tables.builds(), 2);
-        // A rebuild builds whether or not the entry is current.
-        assert!(t.rebuild(&tables).unwrap().built);
-        assert_eq!(tables.builds(), 3);
     }
 
     #[test]
