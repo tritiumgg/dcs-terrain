@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 use crate::classes::{Class, Classes};
 use crate::decode::scn5::{Model, Pool};
 use crate::roads::Graph;
-use crate::source::{Ground, Identity, Layer, Object, Refusal, Source, TILE_SIZE, Tables};
+use crate::source::{Ground, Identity, Layer, Object, Piece, Refusal, Source, TILE_SIZE, Tables};
 
 /// The terrain `--terrain synth` names.
 pub const TERRAIN_ID: &str = "synth";
@@ -94,6 +94,37 @@ impl Source for Synth {
             surface: t.surface(n, e),
             cover: t.cover(n, e),
         }))
+    }
+
+    /// The closed form has no triangles, so the segment is cut every eighth
+    /// of a cell into pieces straight between the heights at their ends: the
+    /// ends are then the heights `point` gives, as a mesh's are, where cell
+    /// triangles from corner heights would stand a valley's end below its
+    /// piece. A piece with either end off the mesh is left out.
+    fn along(&self, a: [f64; 2], b: [f64; 2]) -> Result<Vec<Piece>, Refusal> {
+        let t = &self.form;
+        let step = f64::from(t.cell_size) / 8.0;
+        let n = ((b[0] - a[0]).hypot(b[1] - a[1]) / step).ceil().max(1.0) as u32;
+        let at = |k: u32| {
+            let f = f64::from(k) / f64::from(n);
+            let (x, z) = (a[0] + f * (b[0] - a[0]), a[1] + f * (b[1] - a[1]));
+            let (north, east) = (x - f64::from(ORIGIN_X_M), z - f64::from(ORIGIN_Z_M));
+            (f, t.covered(north, east).then(|| t.height(north, east)))
+        };
+        let mut out = Vec::new();
+        let mut last = at(0);
+        for k in 1..=n {
+            let next = at(k);
+            if let ((s, Some(hs)), (e, Some(he))) = (last, next) {
+                out.push(Piece {
+                    t: [s, e],
+                    h: [hs, he],
+                    rank: 0,
+                });
+            }
+            last = next;
+        }
+        Ok(out)
     }
 
     fn road_graph(&self) -> Result<&Graph, Refusal> {
@@ -242,6 +273,23 @@ mod tests {
 
     fn synth() -> Synth {
         Synth::new(DEFAULT_SEED, DEFAULT_SIZE_KM, CELL_SIZE_M).unwrap()
+    }
+
+    #[test]
+    fn a_segment_is_pieces_meeting_at_the_heights_points_give() {
+        let s = synth();
+        // From the mesh margin, across the coast and the lake, to the hills.
+        let (a, b) = ([-29_000.0, -44_000.0], [20_000.0, -10_000.0]);
+        let pieces = s.along(a, b).unwrap();
+        // The first eighth-cell lies in the margin, outside the mesh.
+        assert!(pieces[0].t[0] > 0.0);
+        for p in &pieces {
+            for (t, h) in p.t.iter().zip(p.h) {
+                let (x, z) = (a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]));
+                assert_eq!(s.point(x, z).unwrap().unwrap().height, h, "t {t}");
+            }
+        }
+        assert_eq!(pieces.last().unwrap().t[1], 1.0);
     }
 
     /// The cover of the cell whose centre is nearest an offset.
