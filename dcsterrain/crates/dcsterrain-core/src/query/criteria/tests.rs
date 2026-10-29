@@ -739,3 +739,88 @@ fn the_evaluator_agrees_with_a_brute_force_oracle() {
         );
     }
 }
+
+#[test]
+fn the_horizon_zone_map_skips_tiles_no_site_of_which_is_masked() {
+    // No site within 6 km of the hill has 20° of horizon to the west, so
+    // every tile left after the ground's zone maps goes on its horizon's.
+    let (n, e) = (synth::HILL_A_NORTH_M, synth::HILL_A_EAST_M);
+    let [x0, z0] = at(n - 3000.0, e - 6000.0);
+    let [x1, z1] = at(n + 3000.0, e + 6000.0);
+    let cands = box_lattice([x0, z0, x1, z1], 500.0);
+    let cs = criteria(json!([
+        {"name": "masked_from",
+         "params": {"bearing_deg": 270, "half_width_deg": 20, "min_elev_deg": 20}}
+    ]));
+    let e = assert_pruning_changes_nothing(&cands, &square(40.0), &cs, 1);
+    assert!(e.sites.is_empty());
+    assert_eq!(e.stats.tiles_skipped, e.stats.tiles);
+}
+
+#[test]
+fn a_limit_of_zero_scores_without_dividing_by_it() {
+    let (y, n) = passes_and_fails(
+        json!({"name": "scenery_max", "params": {"class": "building", "radius": 1500, "max": 0}}),
+        20.0,
+        plain(),
+        at(synth::SCENERY_TOWN_NORTH_M, synth::SCENERY_TOWN_EAST_M),
+    );
+    assert_eq!((y.score, n.score), (1.0, 0.0));
+    // The plane rises, so no footprint spans nothing.
+    let t = term(
+        plain(),
+        100.0,
+        &criterion(json!({"name": "span_max", "params": {"m": 0}})),
+    );
+    assert!(!t.pass && t.score == 0.0, "{t:?}");
+    // A band of one distance scores 1 on it.
+    let road = at(synth::ROAD_EW_NORTH_M, 20_000.0);
+    let t = term(
+        road,
+        20.0,
+        &criterion(json!({"name": "dist_road_band", "params": {"min": 0, "max": 0}})),
+    );
+    assert!(t.pass && t.score == 1.0, "{t:?}");
+}
+
+#[test]
+fn a_param_out_of_range_is_named_by_its_path() {
+    let cases = [
+        (
+            json!({"name": "surface_enum_in", "params": {"values": [1, 0]}}),
+            "values.1",
+        ),
+        (
+            json!({"name": "masked_from",
+                "params": {"bearing_deg": 0, "half_width_deg": 10, "min_elev_deg": f64::NAN}}),
+            "min_elev_deg",
+        ),
+        (
+            json!({"name": "cover_fraction_min",
+                "params": {"class": "forest", "radius": 300, "min": 1.5}}),
+            "min",
+        ),
+        (json!({"name": "slope_max", "params": {"deg": -1}}), "deg"),
+        (
+            json!({"name": "cover_in", "params": {"classes": []}}),
+            "classes",
+        ),
+    ];
+    for (c, field) in cases {
+        // A NaN reads as null, which no f64 takes; build that one directly.
+        let c = serde_json::from_value(c).unwrap_or(Criterion::MaskedFrom {
+            bearing_deg: 0.0,
+            half_width_deg: 10.0,
+            min_elev_deg: f64::NAN,
+        });
+        let e = evaluate(synth(), &[plain()], &square(20.0), &[c], Mode::Every).unwrap_err();
+        assert_eq!(e[0].path, format!("criteria.0.params.{field}"));
+    }
+    let big = Footprint {
+        width: 20_000.0,
+        depth: 10.0,
+        orientations_deg: vec![0.0],
+    };
+    let e = evaluate(synth(), &[plain()], &big, &[], Mode::Every).unwrap_err();
+    assert_eq!(e[0].path, "footprint");
+}

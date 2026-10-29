@@ -402,9 +402,10 @@ a soft score. `valid` is always applied.
 | `tpi_class_in` | `classes, threshold_m` (default 10) | with `t = threshold_m`: `ridge` when `tpi_300 > t`; `valley` when `< −t`; else `upper` when `tpi_2000 > t`; `lower` when `< −t`; else `mid` when slope > 5°; else `flat` | 1 |
 | `valid` | none | every footprint cell's `valid == 1` | the share |
 
-A distance with no stated maximum searches 5 km and reads anything farther as
-5 km; `stats.distance_capped` reports it. A band searches one cell past its
-maximum, so a site with nothing nearer fails it rather than reading the cap.
+A criterion searches each distance past where its answer could change, so
+none reads a cap: a band one cell past its maximum, so a site with nothing
+nearer fails it, and `dist_water_min` to twice its minimum, 5 km at the
+least, past which it scores 1. A footprint's sides are at most 10 km.
 
 A site is a candidate position at one orientation. The footprint's cells are
 those whose centers lie in it, and always the cell holding the site. A

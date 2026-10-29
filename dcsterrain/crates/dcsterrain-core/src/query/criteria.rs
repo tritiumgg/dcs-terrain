@@ -43,6 +43,8 @@ use crate::types::{Criterion, Footprint, Issue, Point3, Term, TpiClass, WaterCla
 const SAMPLE: usize = 256;
 /// The mean margin over a masked sector's floor that scores 1.
 pub const MASK_MARGIN_FULL_DEG: f64 = 10.0;
+/// The longest side a footprint may have.
+pub const FOOTPRINT_MAX_M: f64 = 10_000.0;
 /// The side of a bucket of the objects' index.
 const BUCKET_M: f64 = 250.0;
 
@@ -77,8 +79,6 @@ pub struct Stats {
     pub tiles: u64,
     /// Tiles skipped whole.
     pub tiles_skipped: u64,
-    /// Whether a distance read as its cap.
-    pub distance_capped: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -306,11 +306,21 @@ fn compile(
             }
             Criterion::SurfaceEnumIn { values } => {
                 nonempty(values.len(), "values", &mut issues);
+                // 0 is the code of a cell no mesh covers, which no site
+                // stands on.
+                for (i, &v) in values.iter().enumerate() {
+                    if !(1..64).contains(&v) {
+                        issues.push(bad(
+                            at(&format!("values.{i}")),
+                            "must be a surface code from 1 to 63",
+                        ));
+                    }
+                }
                 Kind::Codes {
                     layer: Layer::Surface,
                     allowed: values
                         .iter()
-                        .filter(|&&v| v < 64)
+                        .filter(|&&v| (1..64).contains(&v))
                         .fold(0, |m, &v| m | 1 << v),
                 }
             }
@@ -415,8 +425,10 @@ fn compile(
                 half_width_deg,
                 min_elev_deg,
             } => {
-                if ![bearing_deg, min_elev_deg].iter().all(|v| v.is_finite()) {
-                    issues.push(bad(at("bearing_deg"), "angles must be finite"));
+                for (v, field) in [(bearing_deg, "bearing_deg"), (min_elev_deg, "min_elev_deg")] {
+                    if !v.is_finite() {
+                        issues.push(bad(at(field), "must be a finite angle"));
+                    }
                 }
                 if !(0.0..=180.0).contains(&half_width_deg) {
                     issues.push(bad(
@@ -1099,13 +1111,16 @@ pub fn evaluate(
 ) -> Result<Evaluation, Vec<Issue>> {
     let fp_ok = [footprint.width, footprint.depth]
         .iter()
-        .all(|v| v.is_finite() && *v >= 0.0)
+        .all(|v| (0.0..=FOOTPRINT_MAX_M).contains(v))
         && !footprint.orientations_deg.is_empty()
         && footprint.orientations_deg.iter().all(|d| d.is_finite());
     if !fp_ok {
         return Err(vec![Issue::new(
             "invalid_request",
-            "a footprint needs a finite size, 0 or more, and one or more finite orientations",
+            &format!(
+                "a footprint needs a size from 0 to {FOOTPRINT_MAX_M} m and one or more finite \
+                 orientations"
+            ),
             "footprint",
         )]);
     }
@@ -1181,9 +1196,7 @@ pub fn evaluate(
     }
     let mut centers = Vec::with_capacity(wants.len());
     for w in &wants {
-        let raster = derive(src, *w, at).map_err(r)?;
-        stats.distance_capped |= raster.capped;
-        centers.push(raster);
+        centers.push(derive(src, *w, at).map_err(r)?);
     }
     let tpi = has(&|k| matches!(k, Kind::Tpi { .. })).then(|| {
         let i = |d| wants.iter().position(|w| *w == d).expect("wanted");
