@@ -99,7 +99,23 @@ struct Reader<'a> {
     at: usize,
 }
 
-impl Reader<'_> {
+fn le32<const N: usize>(c: &[u8; N], at: usize) -> u32 {
+    u32::from_le_bytes(c[at..at + 4].try_into().unwrap())
+}
+
+fn le64<const N: usize>(c: &[u8; N], at: usize) -> u64 {
+    u64::from_le_bytes(c[at..at + 8].try_into().unwrap())
+}
+
+impl<'a> Reader<'a> {
+    /// A count of records of `N` bytes each, then the records.
+    fn records<const N: usize>(&mut self) -> Result<&'a [[u8; N]], Error> {
+        let n = self.count(N)?;
+        let (records, _) = self.b[self.at..self.at + n * N].as_chunks::<N>();
+        self.at += n * N;
+        Ok(records)
+    }
+
     fn take<const N: usize>(&mut self) -> Result<[u8; N], Error> {
         let s = self
             .b
@@ -116,9 +132,6 @@ impl Reader<'_> {
     }
     fn f32(&mut self) -> Result<f32, Error> {
         self.take().map(f32::from_le_bytes)
-    }
-    fn f64(&mut self) -> Result<f64, Error> {
-        self.take().map(f64::from_le_bytes)
     }
     /// A count of records of at least `bytes` each, refused when the rest
     /// cannot hold that many, so a corrupt count allocates nothing.
@@ -209,26 +222,29 @@ impl Index {
             }
             models.push(Model { name, bbox });
         }
-        let n = r.count(4 + 24 + 24)?;
-        let mut nodes = Vec::with_capacity(n);
-        for _ in 0..n {
-            nodes.push(Placed {
-                n: r.u32()?,
-                t: [r.f64()?, r.f64()?, r.f64()?],
-                p: r.u64()?,
-                model: r.u64()?,
-                axis: r.u64()?,
-            });
-        }
-        let g = r.count(4 + 32)?;
-        let mut group = Vec::with_capacity(g);
-        for _ in 0..g {
-            group.push(GroupRecord {
-                model: r.u32()?,
-                pos: [r.f64()?, r.f64()?, r.f64()?],
-                rotation: r.f64()?,
-            });
-        }
+        // The fixed-size records are read from one slice each, their count
+        // already checked against the bytes left: half a million nodes on the
+        // largest terrain, read on every first scenery request.
+        let nodes = r
+            .records::<{ 4 + 24 + 24 }>()?
+            .iter()
+            .map(|c| Placed {
+                n: le32(c, 0),
+                t: [le64(c, 4), le64(c, 12), le64(c, 20)].map(f64::from_bits),
+                p: le64(c, 28),
+                model: le64(c, 36),
+                axis: le64(c, 44),
+            })
+            .collect::<Vec<_>>();
+        let group = r
+            .records::<{ 4 + 32 }>()?
+            .iter()
+            .map(|c| GroupRecord {
+                model: le32(c, 0),
+                pos: [le64(c, 4), le64(c, 12), le64(c, 20)].map(f64::from_bits),
+                rotation: f64::from_bits(le64(c, 28)),
+            })
+            .collect::<Vec<_>>();
         if r.at != b.len() {
             return Err(malformed(format!(
                 "holds {} bytes past its group",
