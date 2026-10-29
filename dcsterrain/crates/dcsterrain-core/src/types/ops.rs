@@ -684,7 +684,8 @@ fn default_penalty() -> f64 {
 pub struct RouteAlternativesResponse {
     #[serde(flatten)]
     pub provenance: Provenance,
-    /// Shortest first.
+    /// The least-cost route first, which with no exposure weight is the
+    /// shortest, then the alternatives in the order found.
     pub routes: Vec<Alternative>,
     /// Each route, the edges they all share and the ends, when `geojson`
     /// was asked for.

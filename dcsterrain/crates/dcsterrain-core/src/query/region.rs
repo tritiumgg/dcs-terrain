@@ -73,14 +73,8 @@ impl Area {
 
 /// The least distance from `p` to the segment from `a` to `b`.
 fn distance_to(a: [f64; 2], b: [f64; 2], p: [f64; 2]) -> f64 {
-    let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
-    let len2 = dx * dx + dz * dz;
-    let t = if len2 > 0.0 {
-        (((p[0] - a[0]) * dx + (p[1] - a[1]) * dz) / len2).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    (a[0] + t * dx - p[0]).hypot(a[1] + t * dz - p[1])
+    let c = crate::roads::closest_on(a, b, p);
+    (c[0] - p[0]).hypot(c[1] - p[1])
 }
 
 /// Whether the segment from `a` to `b` meets any side of the closed ring

@@ -2326,7 +2326,7 @@
           "description": "Each route, the edges they all share and the ends, when `geojson`\nwas asked for."
         },
         "routes": {
-          "description": "Shortest first.",
+          "description": "The least-cost route first, which with no exposure weight is the\nshortest, then the alternatives in the order found.",
           "items": {
             "$ref": "#/$defs/Alternative"
           },

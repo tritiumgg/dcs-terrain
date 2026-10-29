@@ -240,7 +240,7 @@ heights above ground is not judged.
 
 Request: `network: "roads" | "railroads"`, `from`, `to`, `avoid:
 Vec<Region>`, `exposure_observers: Vec<Observer>`, `exposure_weight` (default
-1), `max_detour_factor` (default 3). Response: `{waypoints, length, ascent,
+1, at most 1000), `max_detour_factor` (default 3). Response: `{waypoints, length, ascent,
 descent, max_grade_pct, legs: [{from, to, edge_id, class, length, ascent,
 descent, max_grade_pct, exposure}], snapped_from, snapped_to, straight_line}`.
 
@@ -270,18 +270,19 @@ between them, a point of the road's geometry each time 500 m have passed.
 
 Request: everything `route` takes, plus `k` (default 3, max 10),
 `max_stretch` (default 1.5), `max_overlap` (default 0.5), `penalty` (default
-1.6, more than 1). Response: `routes`, shortest first, each a full `route`
-response plus `stretch`, `overlap_with` (the share of its length each other
+1.6, more than 1, at most 10). Response: `routes`, the least-cost first (the
+shortest when `exposure_weight` is 0), then in the order found, each a full
+`route` response plus `stretch`, `overlap_with` (the share of its length each other
 route also runs along, in order), `shared_edges_with_all` (edges some stretch
 of which every route runs along: the true chokepoints of the pair) and
 `chokepoints` (its edges in the top tenth of their network's betweenness;
 null while betweenness is still being built).
 
-The penalty method: route the shortest, then, up to 4 × `k` searches in all,
+The penalty method: route the least-cost, then, up to 4 × `k` searches in all,
 multiply the cost of every edge of the last route found by `penalty` and
 route again. A route is kept when it is new, at most `max_stretch` times the
-shortest's length, and shares at most `max_overlap` of its length with each
-route kept, and they of theirs with it; the search stops at `k` routes. Yen's
+least-cost route's length, and shares at most `max_overlap` of its length
+with each route kept, and they of theirs with it; the search stops at `k` routes. Yen's
 k-shortest is not used: its alternatives differ by one edge and look the same
 to a player. The method promises nothing of the alternatives it misses.
 

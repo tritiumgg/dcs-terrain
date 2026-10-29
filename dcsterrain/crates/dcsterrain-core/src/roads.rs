@@ -88,7 +88,7 @@ impl<F: FnMut(f64, f64) -> bool> Water for F {
     }
 }
 
-fn dist(p: [f64; 2], q: [f64; 2]) -> f64 {
+pub(crate) fn dist(p: [f64; 2], q: [f64; 2]) -> f64 {
     (p[0] - q[0]).hypot(p[1] - q[1])
 }
 
@@ -639,7 +639,7 @@ impl Graph {
 }
 
 /// The closest point to `p` on the segment `a`–`b`.
-fn closest_on(a: [f64; 2], b: [f64; 2], p: [f64; 2]) -> [f64; 2] {
+pub(crate) fn closest_on(a: [f64; 2], b: [f64; 2], p: [f64; 2]) -> [f64; 2] {
     let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
     let len2 = dx * dx + dz * dz;
     let t = if len2 > 0.0 {

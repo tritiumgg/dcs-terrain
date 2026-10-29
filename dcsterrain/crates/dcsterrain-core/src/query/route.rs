@@ -14,9 +14,9 @@
 //!
 //! Alternatives come by the penalty method: each route found has its edges'
 //! costs multiplied by `penalty`, and the search runs again. A route is kept
-//! when it is no longer than `max_stretch` times the shortest and shares no
-//! more than `max_overlap` of its length with any route kept, or of theirs
-//! with it. It finds routes a player tells apart, where the k shortest paths
+//! when it is no longer than `max_stretch` times the least-cost route and
+//! shares no more than `max_overlap` of its length with any route kept, or
+//! of theirs with it. It finds routes a player tells apart, where the k shortest paths
 //! differ by a turn; it promises nothing of the alternatives it misses.
 
 use std::collections::HashMap;
@@ -28,7 +28,7 @@ use super::region::{Area, resolve};
 use super::sightline::{Heights, walk};
 use super::{Terrain, refused};
 use crate::decode::rn4::{KIND_RAIL, KIND_ROAD};
-use crate::roads::{Adjacency, Edge, Graph};
+use crate::roads::{Adjacency, Edge, Graph, dist};
 use crate::search;
 use crate::source::{Refusal, Source};
 use crate::types::{
@@ -52,6 +52,11 @@ const MIN_DETOUR_M: f64 = 5000.0;
 const K_MAX: u32 = 10;
 /// Searches per alternative asked for, at most.
 const SEARCHES_PER_K: u32 = 4;
+/// The largest exposure weight and penalty taken: compounded over every
+/// search an alternative makes, larger ones would carry a cost past what a
+/// float holds.
+const EXPOSURE_WEIGHT_MAX: f64 = 1000.0;
+const PENALTY_MAX: f64 = 10.0;
 
 /// The edge kind a request's network names.
 pub(super) fn kind_of(n: Network) -> u8 {
@@ -105,10 +110,6 @@ impl Found {
     }
 }
 
-fn dist(p: [f64; 2], q: [f64; 2]) -> f64 {
-    (p[0] - q[0]).hypot(p[1] - q[1])
-}
-
 fn issue(code: &str, message: &str, path: &str) -> Vec<Issue> {
     vec![Issue::new(code, message, path)]
 }
@@ -147,10 +148,10 @@ impl<'a> Planner<'a> {
                 return Err(issue("invalid_point", "must be finite", path));
             }
         }
-        if !(q.exposure_weight >= 0.0 && q.exposure_weight.is_finite()) {
+        if !(0.0..=EXPOSURE_WEIGHT_MAX).contains(&q.exposure_weight) {
             return Err(issue(
                 "invalid_request",
-                "must be finite and not negative",
+                &format!("must be 0 to {EXPOSURE_WEIGHT_MAX}"),
                 "exposure_weight",
             ));
         }
@@ -412,6 +413,11 @@ impl<'a> Planner<'a> {
                 });
             }
         }
+        // An end snapped onto a node leaves a piece of no length, which no
+        // leg should report.
+        if out.iter().any(|p| p.from != p.to) {
+            out.retain(|p| p.from != p.to);
+        }
         out
     }
 
@@ -504,7 +510,11 @@ pub(super) fn samples_along(line: &[[f64; 2]]) -> Vec<[f64; 2]> {
         }
         walked += l;
     }
+    // A sample within rounding of the end is the end.
     let end = line[line.len() - 1];
+    if out.len() > 1 && dist(out[out.len() - 1], end) < 1e-6 {
+        out.pop();
+    }
     if out.last() != Some(&end) {
         out.push(end);
     }
@@ -644,8 +654,11 @@ fn shared_by_all(routes: &[&Found]) -> Vec<(usize, f64, f64)> {
                 })
                 .collect();
         }
-        if let Some(&(lo, _)) = common.first() {
-            let hi = common.iter().map(|c| c.1).fold(lo, f64::max);
+        // An edge run along twice may hold stretches apart: the longest.
+        if let Some(&(lo, hi)) = common
+            .iter()
+            .max_by(|x, y| (x.1 - x.0).total_cmp(&(y.1 - y.0)))
+        {
             out.push((e, lo, hi));
         }
     }
@@ -683,6 +696,7 @@ fn top_decile(
                 .filter(|p| b[p.edge] >= cut && b[p.edge] > 0.0)
                 .map(|p| p.edge as i64)
                 .collect();
+            edges.sort_unstable();
             edges.dedup();
             Some(edges)
         })
@@ -796,10 +810,10 @@ pub fn route_alternatives(
     if !(0.0..=1.0).contains(&q.max_overlap) {
         return Err(issue("invalid_request", "must be 0 to 1", "max_overlap"));
     }
-    if !(q.penalty > 1.0 && q.penalty.is_finite()) {
+    if !(q.penalty > 1.0 && q.penalty <= PENALTY_MAX) {
         return Err(issue(
             "invalid_request",
-            "must be finite and more than 1",
+            &format!("must be more than 1 and at most {PENALTY_MAX}"),
             "penalty",
         ));
     }
@@ -810,22 +824,27 @@ pub fn route_alternatives(
         .search(&penalty, true)
         .map_err(refused)?
         .ok_or_else(no_route)?;
-    let shortest = first.length(g);
+    // Stretch is against the least-cost route, which with no exposure
+    // weight is the shortest.
+    let reference = first.length(g);
     let mut kept = vec![first];
     let mut last = kept[0].clone();
     for _ in 1..SEARCHES_PER_K * q.k {
         if kept.len() == q.k as usize {
             break;
         }
-        for piece in &last.pieces {
-            *penalty.entry(piece.edge).or_insert(1.0) *= q.penalty;
+        let mut used: Vec<usize> = last.pieces.iter().map(|p| p.edge).collect();
+        used.sort_unstable();
+        used.dedup();
+        for e in used {
+            *penalty.entry(e).or_insert(1.0) *= q.penalty;
         }
         let Some(c) = p.search(&penalty, true).map_err(refused)? else {
             break;
         };
         let len = c.length(g);
         let new = !kept.iter().any(|k| k.pieces == c.pieces);
-        let within = shortest <= 0.0 || len <= q.max_stretch * shortest;
+        let within = reference <= 0.0 || len <= q.max_stretch * reference;
         let apart = kept.iter().all(|k| {
             let s = shared(g, &c, k);
             let share = |l: f64| if l > 0.0 { s / l } else { 1.0 };
@@ -836,7 +855,6 @@ pub fn route_alternatives(
         }
         last = c;
     }
-    kept.sort_by(|a, b| a.length(g).total_cmp(&b.length(g)));
     let refs: Vec<&Found> = kept.iter().collect();
     let common = shared_by_all(&refs);
     let shared_ids: Vec<i64> = common.iter().map(|&(e, _, _)| e as i64).collect();
@@ -845,7 +863,6 @@ pub fn route_alternatives(
         [q.route.from.x, q.route.from.z],
         [q.route.to.x, q.route.to.z],
     );
-    let shortest = kept[0].length(g);
     let mut routes = Vec::new();
     for (i, (f, chokepoints)) in kept.iter().zip(chokes).enumerate() {
         let route = p.describe(f, straight)?;
@@ -864,7 +881,11 @@ pub fn route_alternatives(
             .collect();
         routes.push(Alternative {
             route,
-            stretch: if shortest > 0.0 { len / shortest } else { 1.0 },
+            stretch: if reference > 0.0 {
+                len / reference
+            } else {
+                1.0
+            },
             overlap_with,
             shared_edges_with_all: shared_ids.clone(),
             chokepoints,
