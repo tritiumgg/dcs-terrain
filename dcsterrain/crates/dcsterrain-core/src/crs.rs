@@ -132,6 +132,49 @@ impl Tmerc {
     }
 }
 
+impl Tmerc {
+    /// The bearing from `a` to `b`, each DCS `[x, z]`, in degrees clockwise
+    /// from true north at `a`, 0 when they coincide: the azimuth of the
+    /// normal section, the plane holding the ellipsoid's normal at `a` and
+    /// the point `b`, taken in `a`'s local east-north plane. It departs
+    /// from the geodesic's initial azimuth as the square of the distance:
+    /// under 1e-5° within 100 km, under 2.5e-4° within 500 km.
+    pub fn true_bearing(&self, a: [f64; 2], b: [f64; 2]) -> f64 {
+        let (lat, lon) = self.to_latlon(a[0], a[1]);
+        let (lat_b, lon_b) = self.to_latlon(b[0], b[1]);
+        let (pa, pb) = (ecef(lat, lon), ecef(lat_b, lon_b));
+        let d = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
+        let (sp, cp) = lat.to_radians().sin_cos();
+        let (sl, cl) = lon.to_radians().sin_cos();
+        let east = -sl * d[0] + cl * d[1];
+        let north = -sp * cl * d[0] - sp * sl * d[1] + cp * d[2];
+        bearing(north, east)
+    }
+}
+
+/// The bearing from `a` to `b`, each DCS `[x, z]`, in degrees clockwise
+/// from grid north, DCS `x`, 0 when they coincide. It differs from the true
+/// bearing by the meridian convergence, which grows with the distance from
+/// the central meridian and the latitude: about 8° at Caucasus's east edge.
+pub fn grid_bearing(a: [f64; 2], b: [f64; 2]) -> f64 {
+    bearing(b[0] - a[0], b[1] - a[1])
+}
+
+/// Degrees clockwise from the north axis, in [0, 360).
+fn bearing(north: f64, east: f64) -> f64 {
+    // Adding zero turns a negative zero into a positive one.
+    east.atan2(north).to_degrees().rem_euclid(360.0) % 360.0 + 0.0
+}
+
+/// Earth-centered coordinates of a position on the ellipsoid.
+fn ecef(lat: f64, lon: f64) -> [f64; 3] {
+    let e2 = F * (2.0 - F);
+    let (sp, cp) = lat.to_radians().sin_cos();
+    let (sl, cl) = lon.to_radians().sin_cos();
+    let n = A / (1.0 - e2 * sp * sp).sqrt();
+    [n * cp * cl, n * cp * sl, n * (1.0 - e2) * sp]
+}
+
 /// `-v`, without the sign a zero would print with.
 fn negated(v: f64) -> f64 {
     if v == 0.0 { 0.0 } else { -v }
@@ -422,5 +465,96 @@ mod tests {
             CAUCASUS.proj4(),
             "+proj=tmerc +lat_0=0 +lon_0=33 +k_0=0.9996 +x_0=-99517 +y_0=-4998115 +datum=WGS84 +units=m"
         );
+    }
+
+    /// The geodesic's initial azimuth in degrees, by Vincenty's inverse
+    /// iteration on WGS84: the reference a bearing is checked against.
+    fn geodesic_azimuth(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+        let reduced = |lat: f64| ((1.0 - F) * lat.to_radians().tan()).atan();
+        let (su1, cu1) = reduced(lat1).sin_cos();
+        let (su2, cu2) = reduced(lat2).sin_cos();
+        let l = (lon2 - lon1).to_radians();
+        let mut lam = l;
+        for _ in 0..200 {
+            let (sl, cl) = lam.sin_cos();
+            let ss = ((cu2 * sl).powi(2) + (cu1 * su2 - su1 * cu2 * cl).powi(2)).sqrt();
+            let cs = su1 * su2 + cu1 * cu2 * cl;
+            let sigma = ss.atan2(cs);
+            let sa = cu1 * cu2 * sl / ss;
+            let c2a = 1.0 - sa * sa;
+            let c2sm = if c2a == 0.0 {
+                0.0
+            } else {
+                cs - 2.0 * su1 * su2 / c2a
+            };
+            let c = F / 16.0 * c2a * (4.0 + F * (4.0 - 3.0 * c2a));
+            let next = l
+                + (1.0 - c)
+                    * F
+                    * sa
+                    * (sigma + c * ss * (c2sm + c * cs * (-1.0 + 2.0 * c2sm * c2sm)));
+            let done = (next - lam).abs() < 1e-14;
+            lam = next;
+            if done {
+                break;
+            }
+        }
+        let (sl, cl) = lam.sin_cos();
+        (cu2 * sl)
+            .atan2(cu1 * su2 - su1 * cu2 * cl)
+            .to_degrees()
+            .rem_euclid(360.0)
+    }
+
+    fn turn(a: f64, b: f64) -> f64 {
+        ((a - b + 540.0).rem_euclid(360.0) - 180.0).abs()
+    }
+
+    #[test]
+    fn the_true_bearing_is_the_geodesic_azimuth_within_its_bound() {
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut unit = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        // The worst within 100 km, and within 500 km.
+        let mut worst = [0.0f64; 2];
+        for (_, t) in TABLE {
+            for _ in 0..2000 {
+                let a = [(unit() - 0.5) * 1.2e6, (unit() - 0.5) * 1.2e6];
+                let (r, th) = (unit().powi(2) * 500e3 + 1.0, unit() * std::f64::consts::TAU);
+                let b = [a[0] + r * th.cos(), a[1] + r * th.sin()];
+                let (lat1, lon1) = t.to_latlon(a[0], a[1]);
+                let (lat2, lon2) = t.to_latlon(b[0], b[1]);
+                let want = geodesic_azimuth(lat1, lon1, lat2, lon2);
+                let off = turn(t.true_bearing(a, b), want);
+                if r <= 100e3 {
+                    worst[0] = worst[0].max(off);
+                }
+                worst[1] = worst[1].max(off);
+            }
+        }
+        assert!(worst[0] < 1e-5 && worst[1] < 2.5e-4, "{worst:?}°");
+    }
+
+    #[test]
+    fn north_along_a_meridian_is_true_north_and_grid_north_is_x() {
+        // 30 km east of the central meridian a meridian leans west of grid
+        // north, so the two bearings differ by the convergence.
+        let a = CAUCASUS.to_xz(43.0, 33.4);
+        let b = CAUCASUS.to_xz(43.2, 33.4);
+        let (a, b) = ([a.0, a.1], [b.0, b.1]);
+        assert!(turn(CAUCASUS.true_bearing(a, b), 0.0) < 1e-6);
+        let grid = grid_bearing(a, b);
+        // Convergence is about the longitude off the meridian times the
+        // sine of the latitude.
+        let want = 0.4 * 43.1f64.to_radians().sin();
+        assert!((grid - (360.0 - want)).abs() < 2e-3, "{grid}");
+        assert_eq!(grid_bearing([0.0, 0.0], [-1.0, 0.0]), 180.0);
+        assert_eq!(grid_bearing([0.0, 0.0], [0.0, 1.0]), 90.0);
+        assert_eq!(grid_bearing([0.0, 0.0], [0.0, 0.0]), 0.0);
+        assert_eq!(CAUCASUS.true_bearing(a, a), 0.0);
     }
 }
