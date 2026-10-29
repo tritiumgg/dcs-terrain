@@ -3,7 +3,7 @@
 use serde_json::json;
 
 use super::geojson::{Features, props};
-use super::sightline::{Heights, walk};
+use super::sightline::exact;
 use super::{Terrain, refused};
 use crate::types::{Issue, Point3, VisibleRequest, VisibleResponse};
 
@@ -54,15 +54,12 @@ pub fn visible(terrain: &Terrain, q: VisibleRequest) -> Result<VisibleResponse, 
         (Ok(a), Ok(b)) => (a, b),
         (a, b) => return Err([a.err(), b.err()].into_iter().flatten().collect()),
     };
-    let step = f64::from(src.grid().cell_size) / 2.0;
-    let sight = walk(
-        &mut Heights::new(src),
-        [q.a.x, q.a.z, alt_a],
-        [q.b.x, q.b.z, alt_b],
-        step,
-    )
-    .map_err(refused)?;
-    // Ends too close for a step between them see each other over nothing
+    // Over the mesh's own triangles rather than the raster: the raster's
+    // rounded heights hide a target on the ground about one time in
+    // twenty-five that the mesh shows (ADR 0003).
+    let pieces = src.along([q.a.x, q.a.z], [q.b.x, q.b.z]).map_err(refused)?;
+    let sight = exact(&pieces, [q.a.x, q.a.z, alt_a], [q.b.x, q.b.z, alt_b]);
+    // Ends with no triangle found between them see each other over nothing
     // but the ground they stand on.
     let clearance_m = sight
         .clearance
@@ -236,6 +233,25 @@ mod tests {
             assert_eq!(v["visible"], margin > 0.0, "{margin}");
             let c = v["clearance_m"].as_f64().unwrap();
             assert!((c - least).abs() < 1.0, "{c} against {least}");
+        }
+    }
+
+    #[test]
+    fn a_target_on_level_ground_is_seen_from_just_above_it() {
+        // East across the plane, clear of the hills, the water and the
+        // sea: the line meets the ground only at the target, where a
+        // rounded height a step short of it would stand above the line.
+        let t = synth();
+        for east in [25_000.0, 25_013.0, 25_031.0] {
+            let (a, b) = (at(30_000.0, east), at(30_000.0, east + 8_000.0));
+            let v = answer(
+                &t,
+                "visible",
+                &json!({"a": {"x": a.0, "z": a.1, "alt_agl": 2}, "b": {"x": b.0, "z": b.1, "alt_agl": 0}}),
+            )
+            .unwrap();
+            assert_eq!(v["visible"], true, "{east}");
+            assert!(v["clearance_m"].as_f64().unwrap().abs() < 1e-3, "{v}");
         }
     }
 

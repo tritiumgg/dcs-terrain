@@ -1,7 +1,7 @@
-//! The terrain under a straight segment, read from the 50 m raster.
-//!
-//! `walk` is the only place a sightline is stepped, so an exact walk over the
-//! mesh's own triangles can replace it without touching what calls it.
+//! The terrain under a straight segment: `exact` over the mesh's own
+//! triangles, which `visible` judges by, and `walk` over the 50 m raster,
+//! which steps a line the way `viewshed`'s radial sweep does and so is what
+//! that sweep is checked against.
 
 use std::collections::{BinaryHeap, HashMap};
 
