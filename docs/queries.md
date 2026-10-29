@@ -149,12 +149,12 @@ Line-of-sight criteria run last.
 Request: `a: Point3, b: Point3`. Response: `{visible, blocking: Point3 | null,
 clearance_m}`, where clearance is the least vertical gap anywhere between
 the ends, so it reaches each end's own height above its ground, and is
-negative exactly when the line is blocked; `blocking` is where the ground
+below −0.1 mm exactly when the line is blocked; `blocking` is where the ground
 first rises above the line, with an absolute `alt`. The ends stand on the
 mesh triangle's own height, and between them the line is judged exactly
 over every mesh triangle under it, on a flat world: where triangles overlap
 the one a point would report is the ground, and a stretch no triangle covers
-does not block. The ground blocks when it rises 0.1 mm above the line, so a
+does not block. The ground blocks when it rises more than 0.1 mm above the line, so a
 line ending on the ground is not blocked by rounding (ADR 0003). An end off
 the mesh is the issue `off_terrain`. DCS's own sightline ignores buildings
 and trees, and so does this.

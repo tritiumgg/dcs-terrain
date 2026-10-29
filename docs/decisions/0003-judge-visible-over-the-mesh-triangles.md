@@ -26,8 +26,8 @@ recorded in [`data/sightline-exact.md`](../data/sightline-exact.md):
   GermanyCW; over the same span their clearances differ by 0.6 m at p99.
 - **A target on the ground:** the raster hides 36 of 1031 such lines on
   Caucasus and 44 of 1035 on GermanyCW that the exact sweep sees, 3.5 % and
-  4.3 %. Its rounded height a
-  step short of the target stands above a line that ends on the ground.
+  4.3 %, most likely because a line ending on the ground has no margin
+  near the target for heights rounded to the meter.
   The exact sweep hides 0 and 3 lines the raster sees.
 - **Cost:** the exact sweep is cheaper on both: 2.4 times in total on
   Caucasus, 8 times on GermanyCW, whose raster p99 is 763 ms against 30 ms.
@@ -43,10 +43,10 @@ The synthetic terrain is a closed form with no triangles.
 `visible` takes every mesh triangle under the segment from
 `Source::along` and judges the line exactly over them, the highest rank
 winning where triangles overlap, a stretch no triangle covers not blocking.
-The line is blocked where the ground rises 0.1 mm or more above it, and the
-blocking point is where it first does. `clearance_m` is the least gap
+The line is blocked where the ground rises more than 0.1 mm above it, and
+the blocking point is where it first does. `clearance_m` is the least gap
 anywhere between the ends, so it reaches each end's own height above its
-ground and is negative exactly when the line is blocked. The synthetic
+ground; it is below −0.1 mm exactly when the line is blocked. The synthetic
 terrain answers `along` by cutting the segment every eighth of a cell into
 straight pieces between its closed-form heights, so its ends are the heights
 `point` gives. `viewshed` keeps its raster radial sweep.

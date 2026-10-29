@@ -87,9 +87,10 @@ absolute.
   its 25 m step.
 - **A target on the ground:** the raster hides 36 of 1031 (Caucasus) and 44
   of 1035 (GermanyCW) lines the exact sweep sees, 3.5 % and 4.3 %; the
-  exact sweep hides 0 and 3 the raster sees. The raster's rounded height a
-  step from the target stands above a line ending on the ground about half
-  the time.
+  exact sweep hides 0 and 3 the raster sees. A line ending on the ground
+  has no margin near the target for heights rounded to the meter, which is
+  the likely cause; where along those lines the raster blocks was not
+  recorded.
 - **Clearance to the ends:** a high observer's line falls steeply to the
   target, and the raster's last step is 25 m short of it, so its least gap
   is up to 20 m larger than the exact one, which reaches the target's own
