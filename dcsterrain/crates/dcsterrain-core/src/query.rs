@@ -24,6 +24,7 @@ mod mgrs;
 mod nearest;
 mod region;
 mod sample;
+mod scenery;
 
 pub use describe::describe;
 pub use geo::geo;
@@ -31,6 +32,7 @@ pub use mgrs::mgrs;
 pub use nearest::nearest;
 pub use region::{Area, resolve};
 pub use sample::sample;
+pub use scenery::scenery_in;
 
 /// Every answer is on the 50 m grid.
 pub const CELL_SIZE_M: f64 = 50.0;
@@ -86,6 +88,7 @@ type Handler = fn(&Terrain, &Value) -> Result<Value, Vec<Issue>>;
 const HANDLERS: &[(&str, Handler)] = &[
     ("describe", |t, r| run(t, r, describe)),
     ("geo", |t, r| run(t, r, geo)),
+    ("scenery_in", |t, r| run(t, r, scenery_in)),
     ("nearest", |t, r| run(t, r, nearest)),
     ("sample", |t, r| run(t, r, sample)),
 ];
