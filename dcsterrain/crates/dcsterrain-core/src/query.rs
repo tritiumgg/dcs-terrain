@@ -32,6 +32,7 @@ mod sample;
 mod scenery;
 pub mod sightline;
 mod spectrum;
+mod unmask;
 mod viewshed;
 mod visible;
 
@@ -45,6 +46,7 @@ pub use region::{Area, resolve};
 pub use sample::{lattice, sample};
 pub use scenery::scenery_in;
 pub use spectrum::approach_spectrum;
+pub use unmask::unmask_profile;
 pub use viewshed::viewshed;
 pub use visible::visible;
 
@@ -109,6 +111,7 @@ const HANDLERS: &[(&str, Handler)] = &[
     ("radar_floor", |t, r| run(t, r, radar_floor)),
     ("coverage", |t, r| run(t, r, coverage)),
     ("approach_spectrum", |t, r| run(t, r, approach_spectrum)),
+    ("unmask_profile", |t, r| run(t, r, unmask_profile)),
 ];
 
 /// Reads the request as `Q`, answers it with `f`, and writes the answer.
