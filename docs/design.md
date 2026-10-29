@@ -553,7 +553,7 @@ correctness rule: a miss is a decision about the target.
 | `sample` 10 k scattered over a whole terrain | 8.5 / 25.9 / 2.7 s at the 32 MiB block budget, 0.7 / 13.5 / 1.2 s sorted by tile Z-order, 0.7 / 2.9 / 1.3 s with each block prepared once (Caucasus / GermanyCW / Afghanistan); block by block, a block holding 32 points or fewer tested triangle by triangle rather than binned, 0.33 / 1.4–1.6 s (Caucasus / GermanyCW, OS cache warm, 2.9.30.28738), and 10 k points over 2 km on MarianaIslands 74 ms; query benchmark 0.075 / 0.18 s warm, 1.0 / 1.7 s cold (Caucasus / GermanyCW) | 3 s on GermanyCW |
 | `visible` 10–40 km | over the mesh's triangles, 1–4 ms over 8–38 km on Caucasus in a fresh process, OS cache warm; over 2000 lines of 1–40 km, p50 0.60 / 0.37 ms and p99 9.3 / 30 ms (Caucasus / GermanyCW), 2.9.30.28738; query benchmark over 1–40 km, p50 0.35 / 0.30 ms warm within a batch, 4.3 / 6.5 ms cold in a fresh process | 1 ms within a batch, 20 ms cold |
 | one `query` call end to end, OS cache warm | 42–48 ms for `visible` on Caucasus, 2.9.30.28738; query benchmark 8.5 / 10.6 ms for `visible`, 11.3 / 19.1 ms for `describe` (Caucasus / GermanyCW) | 50 ms for `describe`, `sample`, `visible` |
-| `viewshed`, `radar_floor` 20 km | 89–111 ms; `viewshed` 120 ms at 20 km and 644 ms at 50 km on Caucasus, OS cache warm, on 2.9.30.28738; query benchmark `viewshed` 20 km 15 / 12 ms warm, 23 / 14 ms cold (Caucasus / GermanyCW) | 300 ms |
+| `viewshed`, `radar_floor` 20 km | 89–111 ms; `radar_floor` 20 km 96–153 ms median per terrain over eight terrains at 5 threads, GeoJSON bands included (`data/radar-floor.md`); `viewshed` 120 ms at 20 km and 644 ms at 50 km on Caucasus, OS cache warm, on 2.9.30.28738; query benchmark `viewshed` 20 km 15 / 12 ms warm, 23 / 14 ms cold (Caucasus / GermanyCW) | 300 ms |
 | `exposure`, 10 sites of 20 km | ~1 s estimated | 3 s |
 | `find_sites` 20 × 20 km, geometric | 15–24 ms | 500 ms |
 | `find_sites` with one LOS criterion, 36 observers | not measured | 10 s |
@@ -616,8 +616,13 @@ Each names what settles it.
    *Settled for `visible`:* it walks the mesh's triangles (ADR 0003); the
    raster agreed on 99.8 % of lines to a target 2 m up, but hid 3.5–4.3 % of
    lines to a target on the ground (`data/sightline-exact.md`). `viewshed`,
-   and `radar_floor` after it, still step the raster. *Settles it:* each
-   sweep measured against `visible` when it is built.
+   and `radar_floor` after it, still step the raster. *Measured for
+   `radar_floor`:* its bands agree with `visible` on 99.7 % of cell-bands
+   over eight terrains, but its floor runs low of the exact one by up to
+   p99 330 m at 20 km where the ground falls away from the site, the near
+   ground's rounding multiplied by the ratio of the ranges; the point form
+   is exact (`data/radar-floor.md`). *Settles it:* whether the sweep takes
+   its near ground, or all of it, from the mesh's triangles.
 5. **The horizon cache's growth under real use** is not measured; every
    tile of Caucasus would take about 290 MiB. The cold cost is measured
    (§6.2). *Settles it:* the skill's use, watched through `cache list`.

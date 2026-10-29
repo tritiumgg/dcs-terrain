@@ -49,7 +49,7 @@ endpoints also returns them as `Point` features.
 |---|---|
 | `sample` | a `Point` per row, its layer values as properties |
 | `viewshed` | one `MultiPolygon` of the visible area, holes included, with the observer, radius and target height |
-| `radar_floor` | one `MultiPolygon` per band, lowest first, with `alt_agl` |
+| `radar_floor` | one `MultiPolygon` per band, lowest first, with `alt_agl`; with `points`, a `Point` per point with its floors |
 | `coverage` | one `MultiPolygon` per band's dead zones with `alt_agl`; the asset's outline when given |
 | `approach_spectrum` | a `Polygon` wedge per blind arc, out to `radius`, with the band and the arc's bearings |
 | `unmask_profile` | the route as a `LineString`; a `LineString` per masked segment; the first-seen point |
@@ -186,11 +186,16 @@ than 4 Mi cells is the issue `too_large`: about 50 km at 50 m.
 ### `coverage`
 
 Request: `site: Observer`, `envelope {radius, alt_bands_agl}`, `asset: Region
-| null`, `min_masked_range` (default 8 km). Response per band: `{alt_agl,
-covered_fraction, dead_zones: Vec<Polygon>, asset_covered_fraction,
-blind_approach_exists}`, the last true when some radial stays masked from
-`radius` in to `min_masked_range`. Computed from the radar floor: a cell is
-covered at a band when its floor is at or below it.
+| null`, `min_masked_range` (default 8 km), `resolution` (default the cell
+size). Response per band, in the order asked: `{alt_agl, covered_fraction,
+dead_zones: Vec<Polygon>, asset_covered_fraction, blind_approach_exists}`.
+Computed from the radar floor: a cell is covered at a band when its floor is
+at or below it, and `covered_fraction` is the share of the cells within the
+radius with ground that are. The dead zones are the rest, as `viewshed`'s
+rings are, holes told by winding. `asset_covered_fraction` is over the
+asset's cells within the radius, 0 when it has none there.
+`blind_approach_exists` is true when some radial, one per cell on the outer
+ring, is blind as `approach_spectrum` judges one.
 
 ### `approach_spectrum`
 
@@ -205,13 +210,29 @@ to_deg}>`, `unmask_dist_min`, `unmask_dist_median` and `unmask_dist_max`;
 with `sector`, the same summaries restricted to it as `sector_summary`.
 Computed from the radar floor along each radial, where the original design
 marched each radial at half-cell steps; the answer is the same geometry.
+Each radial is marched in from `radius` every half cell, a target seen where
+the floor of the cell under it is at or below its band. A radial is blind
+when it is never seen or first seen inside `min_masked_range`; one with no
+ground under it is not. The step is rounded so the radials divide the circle
+evenly, the first due north. A blind arc is a run of blind radials, half a
+step either side, and may close over north; a sector runs clockwise from
+`from_deg` to `to_deg`, the whole circle when they are equal. `resolution`
+(default the cell size) is the floor's.
 
 ### `unmask_profile`
 
-Request: `site: Observer`, `route: Vec<Point3>`, `step` (default 100 m).
+Request: `site: Observer`, `route: Vec<Point3>` of two points or more,
+`step` (default 100 m).
 Response: `{first_seen: Point3 | null, first_seen_dist_from_site,
 first_seen_dist_along_route, masked_segments: Vec<{from, to}>,
-visible_fraction}`.
+visible_fraction}`. The route is sampled every `step` from its first point,
+and at its last. A sample between two heights above ground takes their
+blend above the ground under it; otherwise the blend of the two ends'
+altitudes. Each is judged against its point floor over the mesh's
+triangles, so it is seen exactly when `visible` sees it. `first_seen` has an
+absolute `alt`; a masked segment runs from its first masked sample's
+distance along the route to its last's; a sample off the mesh between
+heights above ground is not judged.
 
 ### `route`
 
@@ -312,6 +333,22 @@ so a map can color them as contours.
 The viewshed sweep keeps the running maximum elevation angle along each
 radial; the floor at a cell is that angle times range, plus the site height,
 minus the ground. One sweep, the cost of a viewshed. Flat world.
+
+The raster, `{origin_x, origin_z, cell, width, height, floor_agl,
+floor_msl}`, is laid out as `viewshed`'s mask, each layer one little-endian
+`f32` per cell, base64, NaN beyond the radius or off the ground; a
+`viewshed` at any target height is, but for rounding, the cells whose
+`floor_agl` is at or below it. `bands` gives each band's `seen_fraction`,
+lowest first, the bands sorted and repeats dropped. The GeoJSON bands run
+along cell edges unsimplified, so each lies inside the next exactly as its
+cells do. With `points` (at most 10 000) the response is instead one row
+`{x, z, ground, floor_agl, floor_msl}` per point, each judged over the
+mesh's triangles as `visible` judges a sightline, so it is the least
+altitude `visible` sees; the floors are null beyond `radius`, off the mesh,
+or where the site stands under its own ground. The raster steps the 50 m
+raster and so departs from the exact floor most where the ground near the
+site is steep: its error at range is the near ground's rounding times the
+ratio of the ranges (`data/radar-floor.md`).
 
 ### `exposure`
 
