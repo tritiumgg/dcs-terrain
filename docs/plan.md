@@ -84,6 +84,7 @@ a valid RFC 7946 `FeatureCollection` whose features match its JSON response.
 | Q13 | `validate_placements` over point, rectangle, circle and polygon shapes, with the land or water, slope and depth each placement asks for | One synthetic case per issue kind and per shape, including a shape that touches an object only at its edge; opt-in: placements in a Caucasus building, lake and runway are each reported with the object | Q1, N7, N8 | agent, opt-in |
 | Q14 | `low_level_route` | On `Synth`, a route behind a hill from a site stays masked where the hill allows and within the AGL band; cost recorded on Caucasus | Q12 | agent, opt-in |
 | Q15 | `towns` and the `places` entry: 200 m grouping, size class and form, naming, outlines on request; `nearest` kind `place` and `point_info`'s place field | Synthetic places against brute-force linkage; opt-in: each terrain at hand records its class counts; on Caucasus the 47 towns with census figures rank with correlation at least 0.7 | N7, Q1 | agent, opt-in |
+| Q16 | Performance pass over the operations built so far: the query benchmark (`cargo bench --bench query`) over `Synth` and, opt-in, an install, cold and warm, with allocations and the cache's size per entry; each kept optimization its own commit with its measured delta | About 2× on the geometric mean of the benchmark's cases on Caucasus and GermanyCW, or the shortfall recorded with its reason; answers unchanged; no cache entry larger | Q2, N11 | agent, opt-in |
 
 ### S, V, X, R
 
