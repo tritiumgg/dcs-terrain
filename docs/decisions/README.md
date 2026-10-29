@@ -36,3 +36,4 @@ are in git at commit `4b85bd0`.
 | [0003](0003-judge-visible-over-the-mesh-triangles.md) | Accepted | 2026-10-29 | Judge `visible` over the mesh's triangles, not the raster |
 | [0004](0004-spread-query-work-over-every-core-below-normal-priority.md) | Accepted | 2026-10-29 | Spread a query's work over every core, below normal priority |
 | [0005](0005-drop-the-hook-and-place-airdrome-ids-by-position.md) | Accepted | 2026-10-29 | Drop the hook, and give an airdrome its id by its beacons' positions |
+| [0006](0006-cross-the-mesh-near-the-site-in-the-radial-sweep.md) | Accepted | 2026-10-29 | Cross the mesh's triangles near the site in the radial sweep |

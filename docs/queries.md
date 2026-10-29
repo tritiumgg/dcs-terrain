@@ -173,9 +173,9 @@ that have ground, the cell holding the observer always among them. `rings`
 are `[x, z]`, exteriors counterclockwise on a map and holes clockwise.
 
 Radials are spaced to give one per mask cell on the outer ring, each stepped
-every half cell and keeping the steepest angle to the ground so far. A cell
-is judged against the radial nearest it in bearing, by the test a raster
-walk makes, so the share matches a half-cell raster sightline to every cell;
+every half cell and keeping the steepest angle to the ground so far: out
+to 1 km over the mesh's own triangles, beyond it over the raster
+(ADR 0006). A cell is judged against the radial nearest it in bearing;
 `visible` judges over the mesh's triangles instead, and differs from it
 mostly on a target on the ground (ADR 0003). The rings run along
 cell edges, holes included and cells meeting only at a corner apart, then are
@@ -382,10 +382,10 @@ point, each judged over the
 mesh's triangles as `visible` judges a sightline, so it is the least
 altitude `visible` sees, to within half its 0.1 mm tolerance; the floors
 are null beyond `radius`, off the mesh, or where the site stands under its
-own ground. The raster steps the 50 m
-raster and so departs from the exact floor most where the ground near the
-site is steep: its error at range is the near ground's rounding times the
-ratio of the ranges (`data/radar-floor.md`).
+own ground. The raster crosses the mesh out to 1 km and steps the 50 m
+raster beyond, the raster's rounding there moving the floor by its error
+times the ratio of the ranges: up to p99 41 m at 20 km
+(`data/radar-floor.md`, ADR 0006).
 
 ### `exposure`
 

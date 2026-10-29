@@ -40,6 +40,9 @@ of 64 random points (on the two Marianas terrains that is the sea). Radius
 
 ## Results
 
+These are from before ADR 0006, the sweep stepping the raster alone; the
+last section has the sweep as it now runs.
+
 Medians over the sites, in milliseconds. Agreement is cells at
 30/100/300/1 000 m, of 100 per site.
 
@@ -94,3 +97,42 @@ the triangles, not in the floor.
 
 The bands, which are what a map draws, are barely touched: where the floor
 is far off it is deep in a shadow, far above every band.
+
+## The mesh near the site (ADR 0006)
+
+The same sites and cells, measured again on 2026-10-29 on 2.9.30.28738 at 5
+threads. This time the sweep alone was run three ways: over the raster, over
+the mesh's triangles out to 1 km with the raster beyond, and over the mesh
+all the way. Each was timed after the `radar_floor` call above had warmed
+the caches. Wall-clock is in milliseconds; CPU cycles are the process's
+over all its threads (`QueryProcessCycleTime`), in millions. Medians over
+the sites, the slowest site after the slash. The error is the floor less
+the exact point floor at the same cells, absolute p99, and the mean signed.
+
+| Terrain | raster ms | Mcycles | p99 / mean | 1 km ms | Mcycles | p99 / mean | all ms | Mcycles | p99 / mean |
+|---|---|---|---|---|---|---|---|---|---|
+| Afghanistan | 23 / 24 | 375 | 34.3 / −4.6 m | 70 / 85 | 654 | 26.2 / −3.7 m | 490 / 605 | 7 340 | 5.8 / +0.1 m |
+| Caucasus | 22 / 22 | 361 | 5.8 / −0.5 m | 41 / 55 | 488 | 5.8 / −0.5 m | 136 / 144 | 1 575 | 2.9 / −0.1 m |
+| GermanyCW | 20 / 21 | 337 | 22.7 / −1.1 m | 89 / 174 | 703 | 22.7 / −1.1 m | 307 / 515 | 4 877 | 1.8 / 0.0 m |
+| MarianaIslands | 23 / 26 | 377 | 17.7 / −1.5 m | 79 / 113 | 1 113 | 10.4 / −1.1 m | 1 188 / 1 328 | 11 586 | 3.9 / 0.0 m |
+| MarianaIslandsWWII | 25 / 26 | 401 | 329.7 / −13.7 m | 199 / 440 | 1 256 | 40.7 / −2.3 m | 773 / 2 534 | 10 410 | 3.9 / +0.1 m |
+| Nevada | 25 / 27 | 427 | 171.7 / −12.8 m | 57 / 63 | 647 | 32.9 / −3.2 m | 138 / 214 | 2 004 | 7.2 / +0.1 m |
+| PersianGulf | 26 / 31 | 432 | 50.1 / −5.1 m | 44 / 59 | 480 | 21.0 / −2.0 m | 297 / 375 | 5 020 | 8.9 / 0.0 m |
+| Syria | 29 / 31 | 464 | 123.4 / −7.7 m | 162 / 220 | 1 144 | 10.3 / −0.6 m | 300 / 404 | 3 538 | 8.3 / +0.1 m |
+
+- **All the way** is within 9 m of the exact floor at p99 everywhere, but
+  costs 4 to 30 times the raster's cycles. It passes 300 ms on four
+  terrains, MarianaIslands' median at 1.2 s.
+- **Out to 1 km** costs 0.1 to 0.9 Gcycles more than the raster. It takes
+  out the tail where the ground falls from the site, MarianaIslandsWWII's
+  p99 from 330 to 41 m. Where the near ground is level (Caucasus,
+  GermanyCW) it changes nothing.
+- **`radar_floor` with the mesh out to 1 km**, GeoJSON bands included, took
+  91–303 ms at the median per terrain. Its bands still nest at every
+  checked vertex (29 347), agree with `visible` on 12 370 of 12 400
+  cell-bands, and the point floor is exact at 3 100 of 3 100 cells.
+- **Before the blocks were read once for all the radials**, the 2 513
+  segments of one 20 km sweep around Guam took about 43 s. Each re-read
+  blocks of 100 000 to 680 000 triangles that together outgrew the 32 MiB
+  block budget. Read once, they take 1.2–1.7 s for 1 369 triangles a radial
+  and 80–94 ms out to 1 km.
