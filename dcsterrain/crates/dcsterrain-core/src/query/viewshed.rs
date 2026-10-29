@@ -152,6 +152,31 @@ pub(super) fn check_reach(
     issues
 }
 
+/// The issue, at `path`, with a sweep out to a valid `radius` at cells of
+/// `res` over terrain cells of `cell`: its mask, or the window of heights
+/// under it, holding more cells than one may.
+pub(super) fn check_size(radius: f64, res: f64, cell: f64, path: &str) -> Vec<Issue> {
+    let side = 2.0 * (radius / res).ceil() + 1.0;
+    if side * side > CELLS_MAX as f64 {
+        return too_large(
+            "mask",
+            (side * side) as u64,
+            "shrink the radius or coarsen the resolution",
+            path,
+        );
+    }
+    let span = (2.0 * (radius + 2.0 * cell) / cell).floor() + 2.0;
+    if span * span > CELLS_MAX as f64 {
+        return too_large(
+            "window of heights",
+            (span * span) as u64,
+            "shrink the radius",
+            path,
+        );
+    }
+    Vec::new()
+}
+
 /// The issue with a resolution, which may be no finer than the cell size.
 pub(super) fn check_resolution(src: &dyn Source, resolution: Option<f64>) -> Option<Issue> {
     let cell = f64::from(src.grid().cell_size);
@@ -234,18 +259,16 @@ pub(super) fn prepare_reaching(
     // every index below.
     let eye = site_eye(terrain, o, at[0], issues)?;
 
+    // Counted before any index is made, so no radius overflows one.
+    let size = check_size(radius, res, cell, at[1]);
+    if !size.is_empty() {
+        return Err(size);
+    }
+
     // The mask, aligned to multiples of its cell from the grid's origin, so
     // at the cell size its cells are the grid's.
     let n = (radius / res).ceil();
     let side = 2.0 * n + 1.0;
-    if side * side > CELLS_MAX as f64 {
-        return Err(too_large(
-            "mask",
-            (side * side) as u64,
-            "shrink the radius or coarsen the resolution",
-            at[1],
-        ));
-    }
     let (n, side) = (n as i64, side as i64);
     let row0 = ((o.x - g.origin_x) / res).floor() as i64 - n;
     let col0 = ((o.z - g.origin_z) / res).floor() as i64 - n;
@@ -255,17 +278,7 @@ pub(super) fn prepare_reaching(
     );
 
     // The heights out to the radius and a cell beyond, for the bilinear.
-    // Counted before any index is made, so no radius overflows one.
     let reach = radius + 2.0 * cell;
-    let span = (2.0 * reach / cell).floor() + 2.0;
-    if span * span > CELLS_MAX as f64 {
-        return Err(too_large(
-            "window of heights",
-            (span * span) as u64,
-            "shrink the radius",
-            at[1],
-        ));
-    }
     let index = |v: f64, origin: f64| ((v - origin) / cell).floor() as i64;
     let (r_lo, r_hi) = (
         index(o.x - reach, g.origin_x),
