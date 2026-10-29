@@ -10,6 +10,7 @@ publish = false
 
 [dependencies]
 mlua = { version = "0.12.2", features = ["lua51", "vendored"] }
+rayon = "1.11.0"
 regex = { version = "1.13.1", default-features = false, features = ["std", "perf"] }
 schemars = "1.2.3"
 serde = { version = "1.0.229", features = ["derive"] }

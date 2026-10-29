@@ -97,29 +97,34 @@ impl Window {
         let ts = i64::from(g.tile_size);
         let on_grid = r_lo < r_hi && c_lo < c_hi;
         let tiles = |lo: i64, hi: i64| lo / ts..(hi - 1) / ts + 1;
-        // Each tile the window touches is read once.
+        // Each tile the window touches is read once, all of them together.
+        let mut want: Vec<(u32, u32)> = Vec::new();
         for tx in tiles(r_lo, r_hi).take_while(|_| on_grid) {
             for tz in tiles(c_lo, c_hi) {
-                let t = src.tile(layer, tx as u32, tz as u32)?;
-                if t.len() as i64 != ts * ts {
-                    return Err(Refusal(format!(
-                        "{} tile ({tx}, {tz}) holds {} cells, not {}",
-                        layer.name(),
-                        t.len(),
-                        ts * ts
-                    )));
-                }
-                let (r0, r1) = (r_lo.max(tx * ts), r_hi.min((tx + 1) * ts));
-                let (c0, c1) = (c_lo.max(tz * ts), c_hi.min((tz + 1) * ts));
-                for r in r0..r1 {
-                    for c in c0..c1 {
-                        let from = (r - tx * ts) * ts + (c - tz * ts);
-                        let to = (r - row0) * i64::from(cols) + (c - col0);
-                        data[to as usize] = t[from as usize];
-                    }
-                }
+                want.push((tx as u32, tz as u32));
             }
         }
+        src.tiles(layer, &want, &mut |i, t| {
+            let (tx, tz) = (i64::from(want[i].0), i64::from(want[i].1));
+            if t.len() as i64 != ts * ts {
+                return Err(Refusal(format!(
+                    "{} tile ({tx}, {tz}) holds {} cells, not {}",
+                    layer.name(),
+                    t.len(),
+                    ts * ts
+                )));
+            }
+            let (r0, r1) = (r_lo.max(tx * ts), r_hi.min((tx + 1) * ts));
+            let (c0, c1) = (c_lo.max(tz * ts), c_hi.min((tz + 1) * ts));
+            for r in r0..r1 {
+                for c in c0..c1 {
+                    let from = (r - tx * ts) * ts + (c - tz * ts);
+                    let to = (r - row0) * i64::from(cols) + (c - col0);
+                    data[to as usize] = t[from as usize];
+                }
+            }
+            Ok(())
+        })?;
         Ok(Window {
             layer,
             row0,

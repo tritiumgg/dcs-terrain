@@ -13,7 +13,11 @@ use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use super::{CELL_SIZE, Ground, Identity, Layer, Object, Piece, Refusal, Source, TILE_SIZE};
+use rayon::prelude::*;
+
+use super::{
+    CELL_SIZE, EachTile, Ground, Identity, Layer, Object, Piece, Refusal, Source, TILE_SIZE,
+};
 use crate::cache::{Cache, Entry, Parts, TerrainCache};
 use crate::classes::Class;
 use crate::decode::install::{self, Map};
@@ -30,6 +34,13 @@ pub const BLOCK_BUDGET: usize = 32 << 20;
 const FEW_POINTS: usize = 32;
 /// Rasterized tiles kept between requests, of every layer: about 20 KiB each.
 pub const TILE_COUNT: usize = 256;
+/// Tiles rasterized together: a few for each core, and few enough that the
+/// blocks under them, all held at once, stay a small part of the terrain.
+const BAND: usize = 64;
+/// Fewer blocks to prepare or tiles to rasterize than this are done on the
+/// calling thread: handing out one costs more than it saves, and the first
+/// hand-out of a process starts the threads.
+const PARALLEL_MIN: usize = 2;
 
 mod roads;
 mod scenery;
@@ -437,25 +448,52 @@ impl Install {
         Ok(b)
     }
 
+    /// The blocks under tile `(tx, tz)`, in block order; none off the grid.
+    fn tile_under(&self, tx: u32, tz: u32) -> Vec<usize> {
+        let g = &self.grid;
+        let (ntx, ntz) = g.tiles();
+        if tx >= ntx || tz >= ntz {
+            return Vec::new();
+        }
+        let ts = g.tile_size;
+        let last = |k: u32, n: u32| ((k + 1) * ts).min(n) - 1;
+        let (x0, z0) = g.centre(tx * ts, tz * ts);
+        let (x1, z1) = g.centre(last(tx, g.height), last(tz, g.width));
+        self.under(x0, x1, z0, z1)
+    }
+
+    /// Blocks `ids`, distinct, in order: those held as they are, the rest
+    /// read and prepared on every core when there are enough of them to pay
+    /// for it. Each is prepared once, by one thread.
+    fn blocks_of(&self, ids: &[usize]) -> Result<Vec<Arc<Prepared>>, Refusal> {
+        let mut out: Vec<Option<Arc<Prepared>>> = {
+            let mut held = self.blocks.lock().unwrap();
+            ids.iter().map(|i| held.get(i)).collect()
+        };
+        let missing: Vec<usize> = (0..ids.len()).filter(|&k| out[k].is_none()).collect();
+        let made: Vec<Arc<Prepared>> = if missing.len() < PARALLEL_MIN {
+            (missing.iter())
+                .map(|&k| self.block(ids[k]))
+                .collect::<Result<_, _>>()?
+        } else {
+            (missing.par_iter())
+                .map(|&k| self.block(ids[k]))
+                .collect::<Result<_, _>>()?
+        };
+        for (&k, b) in missing.iter().zip(made) {
+            out[k] = Some(b);
+        }
+        Ok(out.into_iter().flatten().collect())
+    }
+
     /// Every layer of tile `(tx, tz)`, rasterized on first use.
     pub fn ground_tile(&self, tx: u32, tz: u32) -> Result<Arc<Tile>, Refusal> {
         if let Some(t) = self.tiles.lock().unwrap().get(&(tx, tz)) {
             return Ok(t);
         }
-        let g = &self.grid;
-        let (ntx, ntz) = g.tiles();
-        let mut under = Vec::new();
-        if tx < ntx && tz < ntz {
-            let ts = g.tile_size;
-            let last = |k: u32, n: u32| ((k + 1) * ts).min(n) - 1;
-            let (x0, z0) = g.centre(tx * ts, tz * ts);
-            let (x1, z1) = g.centre(last(tx, g.height), last(tz, g.width));
-            for i in self.under(x0, x1, z0, z1) {
-                under.push(self.block(i)?);
-            }
-        }
+        let under = self.blocks_of(&self.tile_under(tx, tz))?;
         let refs: Vec<&Prepared> = under.iter().map(|b| b.as_ref()).collect();
-        let t = Arc::new(ground::tile(&refs, g, tx, tz));
+        let t = Arc::new(ground::tile(&refs, &self.grid, tx, tz));
         self.tiles.lock().unwrap().put((tx, tz), t.clone(), 1);
         Ok(t)
     }
@@ -472,6 +510,53 @@ impl Source for Install {
 
     fn tile(&self, layer: Layer, tx: u32, tz: u32) -> Result<Vec<i32>, Refusal> {
         Ok(self.ground_tile(tx, tz)?.layer(layer))
+    }
+
+    /// A band of tiles at a time: the blocks under the band's missing tiles
+    /// are prepared together, then the tiles rasterized together, each on
+    /// every core. The band keeps its own blocks and tiles while it works,
+    /// so a window wider than either cache reads each block and rasterizes
+    /// each tile once, and keeps the blocks the next band shares with it.
+    fn tiles(&self, layer: Layer, tiles: &[(u32, u32)], f: &mut EachTile) -> Result<(), Refusal> {
+        let mut kept: HashMap<usize, Arc<Prepared>> = HashMap::new();
+        for (n, band) in tiles.chunks(BAND).enumerate() {
+            let mut got: Vec<Option<Arc<Tile>>> = {
+                let mut held = self.tiles.lock().unwrap();
+                band.iter().map(|t| held.get(t)).collect()
+            };
+            let missing: Vec<usize> = (0..band.len()).filter(|&k| got[k].is_none()).collect();
+            if missing.len() < PARALLEL_MIN {
+                for &k in &missing {
+                    got[k] = Some(self.ground_tile(band[k].0, band[k].1)?);
+                }
+            } else {
+                let under: Vec<Vec<usize>> = (missing.iter())
+                    .map(|&k| self.tile_under(band[k].0, band[k].1))
+                    .collect();
+                let mut need: Vec<usize> = under.iter().flatten().copied().collect();
+                need.sort_unstable();
+                need.dedup();
+                kept.retain(|i, _| need.binary_search(i).is_ok());
+                let new: Vec<usize> = need.into_iter().filter(|i| !kept.contains_key(i)).collect();
+                kept.extend(new.iter().copied().zip(self.blocks_of(&new)?));
+                let g = &self.grid;
+                let made: Vec<Arc<Tile>> = (missing.par_iter().zip(&under))
+                    .map(|(&k, ids)| {
+                        let refs: Vec<&Prepared> = ids.iter().map(|i| kept[i].as_ref()).collect();
+                        Arc::new(ground::tile(&refs, g, band[k].0, band[k].1))
+                    })
+                    .collect();
+                let mut held = self.tiles.lock().unwrap();
+                for (&k, t) in missing.iter().zip(made) {
+                    held.put(band[k], t.clone(), 1);
+                    got[k] = Some(t);
+                }
+            }
+            for (k, t) in got.into_iter().flatten().enumerate() {
+                f(n * BAND + k, &t.layer(layer))?;
+            }
+        }
+        Ok(())
     }
 
     fn point(&self, x: f64, z: f64) -> Result<Option<Ground>, Refusal> {
@@ -831,6 +916,135 @@ mod tests {
         }
         assert!(got.iter().any(|g| g.is_some_and(|g| g.surface == 5)));
         assert!(got.iter().any(|g| g.is_some_and(|g| g.surface == 4)));
+    }
+
+    /// `square` stretched `s` times about its corner and moved to `t`.
+    fn stretched(t: [f32; 3], s: f32, tritype: [u32; 2]) -> build::Block {
+        let mut b = square(tritype);
+        b.t = t;
+        for v in &mut b.bbox {
+            *v *= s;
+        }
+        let p = vec3(
+            "Pbase",
+            &[
+                [0.0, 100.0, 0.0],
+                [1000.0 * s, 200.0, 0.0],
+                [0.0, 100.0, 1000.0 * s],
+                [1000.0 * s, 50.0, 1000.0 * s],
+                [100.0 * s, 110.0, 100.0 * s],
+                [300.0 * s, 130.0, 100.0 * s],
+                [100.0 * s, 110.0, 300.0 * s],
+            ],
+        );
+        b.arrays[4] = p;
+        b
+    }
+
+    /// An install over more tiles than a band, under overlapping blocks of
+    /// several kinds, some heights a road strip below the rest.
+    fn wide() -> Scratch {
+        let mut blocks = Vec::new();
+        for i in 0..6 {
+            for j in 0..6 {
+                let kind = [[1024, LAKE], [0, 0], [ROAD_STRIP, ROAD_STRIP]][(i + 2 * j) % 3];
+                let t = [4500.0 * i as f32, 10.0 * j as f32, 4500.0 * j as f32];
+                blocks.push(stretched(t, 5.0, kind));
+            }
+        }
+        let n = blocks.len() as u32;
+        install(&file(&blocks, n))
+    }
+
+    #[test]
+    fn reads_together_answer_as_reads_one_at_a_time() {
+        let root = wide();
+        let c = Scratch::new();
+        let cache = Cache::new(&c.0);
+        // Each answer from its own terrain, so no cache carries one to the
+        // other, and a budget of one block, so a band holds what the cache
+        // cannot.
+        let open = || {
+            Install::open(&root.0, "Test", &cache)
+                .unwrap()
+                .with_block_budget(1)
+        };
+        let (one, all) = (open(), open());
+        let g = one.grid();
+        let (ntx, ntz) = g.tiles();
+        assert!((ntx * ntz) as usize > BAND, "{ntx} × {ntz} tiles");
+        // Every tile, and one past the grid, in the order a window reads.
+        let mut want: Vec<(u32, u32)> = (0..ntx)
+            .flat_map(|x| (0..ntz).map(move |z| (x, z)))
+            .collect();
+        want.push((ntx, 0));
+        for layer in Layer::ALL {
+            let mut seen = 0;
+            all.tiles(layer, &want, &mut |i, t| {
+                assert_eq!(i, seen);
+                seen += 1;
+                let (tx, tz) = want[i];
+                assert_eq!(
+                    t,
+                    one.tile(layer, tx, tz).unwrap(),
+                    "{layer:?} ({tx}, {tz})"
+                );
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(seen, want.len());
+        }
+        let w = Window::read(&open(), Layer::Height, -3, 5, g.height + 6, g.width - 9).unwrap();
+        for r in 0..i64::from(w.rows) {
+            for c in 0..i64::from(w.cols) {
+                let (row, col) = (w.row0 + r, w.col0 + c);
+                let cell = (row >= 0 && row < i64::from(g.height)).then(|| {
+                    let (tx, tz, k) = g.tile_of(row as u32, col as u32);
+                    one.tile(Layer::Height, tx, tz).unwrap()[k]
+                });
+                assert_eq!(
+                    w.get(row, col),
+                    Some(cell.unwrap_or(-32768)),
+                    "({row}, {col})"
+                );
+            }
+        }
+
+        // Points across every block, through the parallel path.
+        let mut pts = Vec::new();
+        for k in 0..3000 {
+            let f = f64::from(k);
+            pts.push([(f * 37.3) % 28_000.0, (f * 53.9) % 28_000.0]);
+        }
+        let got = open().points(&pts).unwrap();
+        assert!(got.iter().filter(|p| p.is_some()).count() > 2000);
+        for (p, g) in pts.iter().zip(&got) {
+            assert_eq!(*g, one.point(p[0], p[1]).unwrap(), "{p:?}");
+        }
+
+        // A long line, its pieces in block order as one block at a time
+        // gives them.
+        let (a, b) = ([100.0, 27_000.0], [26_500.0, 300.0]);
+        let pieces = open().along(a, b).unwrap();
+        let mut ids = one.under(
+            a[0].min(b[0]),
+            a[0].max(b[0]),
+            a[1].min(b[1]),
+            a[1].max(b[1]),
+        );
+        ids.retain(|&i| {
+            let mut v = Vec::new();
+            let (ga, gb) = (grid_units(&g, a[0], a[1]), grid_units(&g, b[0], b[1]));
+            one.block(i).unwrap().along(ga, gb, &mut v);
+            !v.is_empty()
+        });
+        let mut serial = Vec::new();
+        let (ga, gb) = (grid_units(&g, a[0], a[1]), grid_units(&g, b[0], b[1]));
+        for i in ids {
+            one.block(i).unwrap().along(ga, gb, &mut serial);
+        }
+        assert!(serial.len() > 10, "{}", serial.len());
+        assert_eq!(pieces, serial);
     }
 
     #[test]

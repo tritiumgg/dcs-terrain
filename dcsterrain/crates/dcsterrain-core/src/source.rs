@@ -16,6 +16,9 @@ pub mod install;
 
 pub use install::Tables;
 
+/// What `Source::tiles` hands each tile to: its index and its cells.
+pub type EachTile<'a> = dyn FnMut(usize, &[i32]) -> Result<(), Refusal> + 'a;
+
 /// Why a terrain cannot answer. The message names the file or the setting.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusal(pub String);
@@ -49,6 +52,16 @@ pub trait Source {
     /// columns fastest. A cell past the grid, or one no mesh triangle covers,
     /// is the layer's `nodata`.
     fn tile(&self, layer: Layer, tx: u32, tz: u32) -> Result<Vec<i32>, Refusal>;
+
+    /// `tile` of each of `tiles`, `(tx, tz)`, calling `f` with its index in
+    /// `tiles` and its cells, in order. An install rasterizes the tiles it
+    /// does not hold together, on every core, a band of them at a time.
+    fn tiles(&self, layer: Layer, tiles: &[(u32, u32)], f: &mut EachTile) -> Result<(), Refusal> {
+        for (i, &(tx, tz)) in tiles.iter().enumerate() {
+            f(i, &self.tile(layer, tx, tz)?)?;
+        }
+        Ok(())
+    }
 
     /// The ground at DCS `(x, z)` itself, not at a cell center: the winning
     /// surface's own height, which is what the game reports. `None` where

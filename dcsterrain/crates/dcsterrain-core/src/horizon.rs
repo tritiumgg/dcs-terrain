@@ -197,28 +197,33 @@ impl Heights {
         let nodata = Layer::Height.nodata();
         if rows > 0 && cols > 0 {
             let (r1, c1) = (r0 + rows as i64, c0 + cols as i64);
+            let mut want: Vec<(u32, u32)> = Vec::new();
             for tx in r0 / ts..=(r1 - 1) / ts {
                 for tz in c0 / ts..=(c1 - 1) / ts {
-                    let t = src.tile(Layer::Height, tx as u32, tz as u32)?;
-                    if t.len() as i64 != ts * ts {
-                        return Err(Refusal(format!(
-                            "height tile ({tx}, {tz}) holds {} cells, not {}",
-                            t.len(),
-                            ts * ts
-                        )));
-                    }
-                    for r in r0.max(tx * ts)..r1.min((tx + 1) * ts) {
-                        for c in c0.max(tz * ts)..c1.min((tz + 1) * ts) {
-                            let v = t[((r - tx * ts) * ts + c - tz * ts) as usize];
-                            h[(r - r0) as usize * cols + (c - c0) as usize] = if v == nodata {
-                                NODATA
-                            } else {
-                                v.clamp(-i32::from(i16::MAX), i32::from(i16::MAX)) as i16
-                            };
-                        }
-                    }
+                    want.push((tx as u32, tz as u32));
                 }
             }
+            src.tiles(Layer::Height, &want, &mut |i, t| {
+                let (tx, tz) = (i64::from(want[i].0), i64::from(want[i].1));
+                if t.len() as i64 != ts * ts {
+                    return Err(Refusal(format!(
+                        "height tile ({tx}, {tz}) holds {} cells, not {}",
+                        t.len(),
+                        ts * ts
+                    )));
+                }
+                for r in r0.max(tx * ts)..r1.min((tx + 1) * ts) {
+                    for c in c0.max(tz * ts)..c1.min((tz + 1) * ts) {
+                        let v = t[((r - tx * ts) * ts + c - tz * ts) as usize];
+                        h[(r - r0) as usize * cols + (c - c0) as usize] = if v == nodata {
+                            NODATA
+                        } else {
+                            v.clamp(-i32::from(i16::MAX), i32::from(i16::MAX)) as i16
+                        };
+                    }
+                }
+                Ok(())
+            })?;
         }
         let top = h.iter().filter(|&&v| v != NODATA).max().copied();
         Ok(Heights {
