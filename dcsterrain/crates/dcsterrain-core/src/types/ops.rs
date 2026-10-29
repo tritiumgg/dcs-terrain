@@ -13,8 +13,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    BoundingBox, Criterion, Footprint, LatLon, Network, Observer, Point, Point3, Polygon,
-    Provenance, Region,
+    BoundingBox, CoverClass, Criterion, Footprint, LatLon, Network, Observer, Point, Point3,
+    Polygon, Provenance, Region, WaterClass,
 };
 
 // describe
@@ -993,6 +993,78 @@ pub struct TrafficabilityResponse {
     /// for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geojson: Option<serde_json::Value>,
+}
+
+// point_info
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PointInfoRequest {
+    /// At most 10 000.
+    pub points: Vec<Point>,
+    /// Also return the answer as GeoJSON.
+    #[serde(default)]
+    pub geojson: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PointInfoResponse {
+    #[serde(flatten)]
+    pub provenance: Provenance,
+    /// In the order of the request's.
+    pub points: Vec<PointInfo>,
+    /// A point per request point with its fields, when `geojson` was asked
+    /// for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
+}
+
+/// What stands at one point. The ground fields are the mesh triangle's own
+/// and null where no mesh covers the point; `slope` and `aspect` are the
+/// cell's holding it. Every distance is in DCS meters, along the flat
+/// x–z plane the game measures in.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PointInfo {
+    pub x: f64,
+    pub z: f64,
+    /// The water surface over water, the ground elsewhere.
+    pub height: Option<f64>,
+    pub water: Option<WaterClass>,
+    /// Meters of water over the bed; null on land.
+    pub depth: Option<f64>,
+    pub cover: Option<CoverClass>,
+    /// Degrees from level; null where a neighboring cell has no ground.
+    pub slope: Option<f64>,
+    /// The downslope direction in degrees clockwise from grid north, DCS
+    /// `x`; null on ground flatter than half a degree.
+    pub aspect: Option<f64>,
+    /// Null when the terrain lists no towns.
+    pub town: Option<TownFix>,
+    /// The nearest point of the nearest road; null when the terrain has
+    /// none.
+    pub road: Option<Nearby>,
+    /// Null when no airdrome has a position.
+    pub airfield: Option<Nearby>,
+    pub lat: f64,
+    pub lon: f64,
+    /// Null outside 80° S to 84° N, where MGRS uses polar grids.
+    pub mgrs: Option<String>,
+}
+
+/// The point placed from its nearest town, as a reader would say it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TownFix {
+    pub name: String,
+    pub x: f64,
+    pub z: f64,
+    pub distance: f64,
+    /// From the town to the point, clockwise from true north at the town.
+    pub bearing_true_deg: f64,
+    /// From the town to the point, clockwise from grid north, DCS `x`.
+    pub bearing_grid_deg: f64,
+    /// The true bearing's point of the eight-point compass.
+    pub compass: String,
+    /// Such as "6 km NE of Zugdidi"; "at Zugdidi" within 50 m of it.
+    pub description: String,
 }
 
 #[cfg(test)]

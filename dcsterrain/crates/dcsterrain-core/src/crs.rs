@@ -332,7 +332,7 @@ pub fn fit(pairs: &[Pair]) -> Option<Fit> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     const CAUCASUS: Tmerc = tm(33, 99517.0, 4998115.0);
@@ -469,7 +469,7 @@ mod tests {
 
     /// The geodesic's initial azimuth in degrees, by Vincenty's inverse
     /// iteration on WGS84: the reference a bearing is checked against.
-    fn geodesic_azimuth(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    pub(crate) fn geodesic_azimuth(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
         let reduced = |lat: f64| ((1.0 - F) * lat.to_radians().tan()).atan();
         let (su1, cu1) = reduced(lat1).sin_cos();
         let (su2, cu2) = reduced(lat2).sin_cos();
@@ -506,7 +506,7 @@ mod tests {
             .rem_euclid(360.0)
     }
 
-    fn turn(a: f64, b: f64) -> f64 {
+    pub(crate) fn turn(a: f64, b: f64) -> f64 {
         ((a - b + 540.0).rem_euclid(360.0) - 180.0).abs()
     }
 

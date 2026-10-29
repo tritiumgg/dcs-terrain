@@ -2198,6 +2198,187 @@
       ],
       "type": "object"
     },
+    "PointInfo": {
+      "description": "What stands at one point. The ground fields are the mesh triangle's own\nand null where no mesh covers the point; `slope` and `aspect` are the\ncell's holding it. Every distance is in DCS meters, along the flat\nx–z plane the game measures in.",
+      "properties": {
+        "airfield": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Nearby"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null when no airdrome has a position."
+        },
+        "aspect": {
+          "description": "The downslope direction in degrees clockwise from grid north, DCS\n`x`; null on ground flatter than half a degree.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cover": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CoverClass"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "depth": {
+          "description": "Meters of water over the bed; null on land.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "height": {
+          "description": "The water surface over water, the ground elsewhere.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "lat": {
+          "format": "double",
+          "type": "number"
+        },
+        "lon": {
+          "format": "double",
+          "type": "number"
+        },
+        "mgrs": {
+          "description": "Null outside 80° S to 84° N, where MGRS uses polar grids.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "road": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Nearby"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The nearest point of the nearest road; null when the terrain has\nnone."
+        },
+        "slope": {
+          "description": "Degrees from level; null where a neighboring cell has no ground.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "town": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TownFix"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null when the terrain lists no towns."
+        },
+        "water": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WaterClass"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "z",
+        "lat",
+        "lon"
+      ],
+      "type": "object"
+    },
+    "PointInfoRequest": {
+      "properties": {
+        "geojson": {
+          "default": false,
+          "description": "Also return the answer as GeoJSON.",
+          "type": "boolean"
+        },
+        "points": {
+          "description": "At most 10 000.",
+          "items": {
+            "$ref": "#/$defs/Point"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "points"
+      ],
+      "type": "object"
+    },
+    "PointInfoResponse": {
+      "properties": {
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "geojson": {
+          "description": "A point per request point with its fields, when `geojson` was asked\nfor."
+        },
+        "points": {
+          "description": "In the order of the request's.",
+          "items": {
+            "$ref": "#/$defs/PointInfo"
+          },
+          "type": "array"
+        },
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "terrain",
+        "dcs_build",
+        "terrain_fingerprint",
+        "cell_size",
+        "elapsed_ms",
+        "points"
+      ],
+      "type": "object"
+    },
     "Polygon": {
       "description": "A simple polygon as `[x, z]` vertices, closed by its first point.",
       "properties": {
@@ -3278,6 +3459,55 @@
       ],
       "type": "object"
     },
+    "TownFix": {
+      "description": "The point placed from its nearest town, as a reader would say it.",
+      "properties": {
+        "bearing_grid_deg": {
+          "description": "From the town to the point, clockwise from grid north, DCS `x`.",
+          "format": "double",
+          "type": "number"
+        },
+        "bearing_true_deg": {
+          "description": "From the town to the point, clockwise from true north at the town.",
+          "format": "double",
+          "type": "number"
+        },
+        "compass": {
+          "description": "The true bearing's point of the eight-point compass.",
+          "type": "string"
+        },
+        "description": {
+          "description": "Such as \"6 km NE of Zugdidi\"; \"at Zugdidi\" within 50 m of it.",
+          "type": "string"
+        },
+        "distance": {
+          "format": "double",
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "x",
+        "z",
+        "distance",
+        "bearing_true_deg",
+        "bearing_grid_deg",
+        "compass",
+        "description"
+      ],
+      "type": "object"
+    },
     "TpiClass": {
       "description": "A landform class from local relief, then regional relief, then slope:\nthe first that holds of `ridge`, `valley`, `upper`, `lower`, `mid`, and\n`flat` otherwise.",
       "enum": [
@@ -3852,6 +4082,21 @@
           ],
           "type": "object"
         },
+        "point_info": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/PointInfoRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/PointInfoResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
         "radar_floor": {
           "properties": {
             "request": {
@@ -4021,7 +4266,8 @@
         "nearest",
         "scenery_in",
         "chokepoints",
-        "trafficability"
+        "trafficability",
+        "point_info"
       ],
       "type": "object"
     }

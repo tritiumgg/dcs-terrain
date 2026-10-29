@@ -29,6 +29,7 @@ mod geojson;
 mod mgrs;
 mod nearest;
 mod outline;
+mod point_info;
 mod region;
 mod route;
 mod sample;
@@ -49,6 +50,7 @@ pub use floor::{floor_msl_reaching, radar_floor};
 pub use geo::geo;
 pub use mgrs::mgrs;
 pub use nearest::nearest;
+pub use point_info::point_info;
 pub use region::{Area, resolve};
 pub use route::{route, route_alternatives};
 pub use sample::{lattice, sample};
@@ -129,6 +131,7 @@ const HANDLERS: &[(&str, Handler)] = &[
     ("trafficability", |t, r| run(t, r, trafficability)),
     ("score_site", |t, r| run(t, r, score_site)),
     ("find_sites", |t, r| run(t, r, find_sites)),
+    ("point_info", |t, r| run(t, r, point_info)),
 ];
 
 /// Reads the request as `Q`, answers it with `f`, and writes the answer.

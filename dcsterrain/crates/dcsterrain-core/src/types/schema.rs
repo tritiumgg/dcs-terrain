@@ -46,6 +46,7 @@ pub const OPERATIONS: &[Operation] = &[
     op::<SceneryInRequest, SceneryInResponse>("scenery_in"),
     op::<ChokepointsRequest, ChokepointsResponse>("chokepoints"),
     op::<TrafficabilityRequest, TrafficabilityResponse>("trafficability"),
+    op::<PointInfoRequest, PointInfoResponse>("point_info"),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
