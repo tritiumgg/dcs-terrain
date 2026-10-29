@@ -129,20 +129,36 @@ the converted lists in order, through the terrain's fitted projection;
 ### `score_site`
 
 Request: `x, z`, `footprint`, `criteria`. Response: for the best orientation,
-`{orientation_deg, terms: [{name, value, pass, score}], hard_fail}`. Each
-criterion gives one term; `pass` is its hard test, `score` a 0..1 soft value,
-1 best.
+`{orientation_deg, score, terms: [{name, value, pass, score}], hard_fail}`.
+Each criterion gives one term; `pass` is its hard test, `score` a 0..1 soft
+value, 1 best. The site's `score` is the sum of its terms' scores. The best
+orientation is one that passes every hard test if any does, the highest
+`score` among those, and the first given on a tie.
 
 ### `find_sites`
 
-Request: `region`, `footprint`, `criteria`, `step` (default 2 × cell size),
-`spacing` (non-maximum suppression radius), `limit` (default 20, max 200),
-`weights: {name: f64}` (default 1 each). Response: candidates `{x, z,
-orientation_deg, score, terms}` ranked by the weighted sum of term scores
-after every hard test passes, suppressed at `spacing`, plus `stats
-{cells_considered, cells_passed, tiles_skipped, distance_capped}`. A tile whose
-zone map of a layer a hard criterion reads cannot pass is skipped whole (§5).
-Line-of-sight criteria run last.
+Request: `region`, `footprint`, `criteria`, `step` (default 2 × cell size, at
+least the cell size), `spacing` (non-maximum suppression radius, 0 or more),
+`limit` (default 20, 1 to 200), `weights: {name: f64}` (default 1 each, each
+finite and 0 or more, naming a criterion asked for or `valid`). Response:
+candidates `{x, z, orientation_deg, score, terms}`, plus `stats
+{cells_considered, cells_passed, tiles_skipped}`: the lattice points in the
+region, those with an orientation that passes, and the grid tiles skipped.
+No criterion reads a distance's cap (§5), so none is reported.
+
+A weighted overlay on the lattice `step` apart from the region box's minimum
+corner: every hard test first, then each position at its best orientation,
+as `score_site` picks it but by the weighted sum of its term scores. Best
+first, ties by the lesser x, then the lesser z, greedy non-maximum
+suppression keeps a candidate unless one kept lies nearer than `spacing`,
+until `limit` are kept. The answer is exact on the lattice and nothing
+between its points is judged. Each candidate is the best of those `spacing`
+or more from every one before it; that is not the spaced set of greatest
+total score, which is NP-hard, and greedy reaches at least a fifth of its
+total. A tile whose zone map of a layer a hard criterion reads cannot pass is
+skipped whole (§5). Line-of-sight criteria run last. A region whose box spans
+more than 4 Mi cells, about 100 km square, is the issue `too_large`, because
+the layers are derived over all of it at once.
 
 ### `visible`
 

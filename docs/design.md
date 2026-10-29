@@ -555,7 +555,7 @@ correctness rule: a miss is a decision about the target.
 | one `query` call end to end, OS cache warm | 42–48 ms for `visible` on Caucasus, 2.9.30.28738; query benchmark 8.5 / 10.6 ms for `visible`, 11.3 / 19.1 ms for `describe` (Caucasus / GermanyCW) | 50 ms for `describe`, `sample`, `visible` |
 | `viewshed`, `radar_floor` 20 km | 89–111 ms; `radar_floor` 20 km 91–303 ms median per terrain over eight terrains at 5 threads, the mesh out to 1 km and GeoJSON bands included, MarianaIslandsWWII 3 ms over the target (`data/radar-floor.md`); `viewshed` 120 ms at 20 km and 644 ms at 50 km on Caucasus, OS cache warm, on 2.9.30.28738; query benchmark `viewshed` 20 km 15 / 12 ms warm, 23 / 14 ms cold (Caucasus / GermanyCW) | 300 ms |
 | `exposure`, 10 sites of 20 km | ~1 s estimated | 3 s |
-| `find_sites` 20 × 20 km, geometric | 15–24 ms | 500 ms |
+| `find_sites` 20 × 20 km, geometric | 15–24 ms; a FARP's ten criteria every 100 m, 57–205 ms over the 8 terrains of 2.9.30.28738, tiles read, 5 threads (`data/find-sites.md`) | 500 ms |
 | `find_sites` with one LOS criterion, 36 observers | not measured | 10 s |
 | `find_sites` with a horizon criterion, first touch | 3.4–4.9 s for the horizon of a 20 × 20 km region, 7–10 ms once cached (Caucasus, 2.9.30.28738) | 5 s, then 500 ms |
 | `route` 50 km | 2.5 / 13 ms; 100 pairs of 2–80 km on each of 8 terrains, the search 0.05–1.6 ms p50 and the whole operation 4.9–43 ms p50, 90 ms p95 at most, on 2.9.30.28738 (`data/route-search.md`) | 500 ms |
