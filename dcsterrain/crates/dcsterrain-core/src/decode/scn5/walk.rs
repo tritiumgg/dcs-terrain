@@ -7,7 +7,7 @@
 
 use std::io::{self, Read, Seek, SeekFrom};
 
-use super::{Error, Pool, Scene, heading_of, malformed, model_of};
+use super::{Error, Pool, Scene, heading_of, locate, malformed, model_of, placed};
 
 /// How many of a pool's ids are checked against their own boxes.
 const SAMPLE: u64 = 1000;
@@ -63,14 +63,11 @@ impl Scene {
 
     /// The node and index an id names, when the file holds that instance.
     fn locate(&self, id: u64) -> Option<(usize, u64)> {
-        let node = usize::try_from(id >> self.shift()).ok()?;
-        let index = id & ((1 << self.shift()) - 1);
-        (index < u64::from(self.nodes.get(node)?.n)).then_some((node, index))
+        locate(id, self.shift(), |k| self.nodes.get(k).map(|n| n.n))
     }
 
     fn world(&self, node: usize, p: &[u8], index: usize) -> [f64; 3] {
-        let t = self.nodes[node].t;
-        [0, 1, 2].map(|k| t[k] + f32_at(p, 12 * index + 4 * k))
+        placed(self.nodes[node].t, p, index)
     }
 
     /// Each instance's pools, bit k set for `Pool::ALL[k]`. An instance may

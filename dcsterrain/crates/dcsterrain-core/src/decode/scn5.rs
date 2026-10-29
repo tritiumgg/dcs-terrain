@@ -658,6 +658,24 @@ impl Scene {
     }
 }
 
+/// The node and index an id names, split at `shift`, when node `k` holds
+/// `count(k)` instances and so holds that one.
+fn locate(id: u64, shift: u32, count: impl Fn(usize) -> Option<u32>) -> Option<(usize, u64)> {
+    let node = usize::try_from(id >> shift).ok()?;
+    let index = id & ((1 << shift) - 1);
+    (index < u64::from(count(node)?)).then_some((node, index))
+}
+
+/// Instance `index`'s world position: its node's translation `t` plus its
+/// `P`, three `f32` each 12 bytes into `p`.
+fn placed(t: [f64; 3], p: &[u8], index: usize) -> [f64; 3] {
+    let at = |k: usize| {
+        let i = 12 * index + 4 * k;
+        f64::from(f32::from_le_bytes(p[i..i + 4].try_into().unwrap()))
+    };
+    [0, 1, 2].map(|k| t[k] + at(k))
+}
+
 pub fn reader(path: &Path) -> io::Result<BufReader<File>> {
     Ok(BufReader::new(File::open(path)?))
 }
