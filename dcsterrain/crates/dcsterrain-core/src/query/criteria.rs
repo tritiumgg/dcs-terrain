@@ -1550,3 +1550,6 @@ fn every(
     }
     Ok(sites)
 }
+
+#[cfg(test)]
+mod tests;
