@@ -213,9 +213,11 @@ marched each radial at half-cell steps; the answer is the same geometry.
 Each radial is marched in from `radius` every half cell, a target seen where
 the floor of the cell under it is at or below its band. A radial is blind
 when it is never seen or first seen inside `min_masked_range`; one with no
-ground under it is not. The step is rounded so the radials divide the circle
-evenly, the first due north. A blind arc is a run of blind radials, half a
-step either side, and may close over north; a sector runs clockwise from
+ground under it is not; so with `radius` inside `min_masked_range` every
+radial with ground is blind. The step, 0.1° to 90°, is rounded so the
+radials divide the circle evenly, the first due north. A blind arc is a run
+of blind radials, half a step either side, and may close over north; a
+sector runs clockwise from
 `from_deg` to `to_deg`, the whole circle when they are equal. `resolution`
 (default the cell size) is the floor's.
 
@@ -340,12 +342,14 @@ floor_msl}`, is laid out as `viewshed`'s mask, each layer one little-endian
 `viewshed` at any target height is, but for rounding, the cells whose
 `floor_agl` is at or below it. `bands` gives each band's `seen_fraction`,
 lowest first, the bands sorted and repeats dropped. The GeoJSON bands run
-along cell edges unsimplified, so each lies inside the next exactly as its
-cells do. With `points` (at most 10 000) the response is instead one row
-`{x, z, ground, floor_agl, floor_msl}` per point, each judged over the
+along cell edges unsimplified, so each lies inside the next as its cells
+do, to the centimeter positions keep. With `points` (at most 10 000) the
+response is instead one row `{x, z, ground, floor_agl, floor_msl}` per
+point, each judged over the
 mesh's triangles as `visible` judges a sightline, so it is the least
-altitude `visible` sees; the floors are null beyond `radius`, off the mesh,
-or where the site stands under its own ground. The raster steps the 50 m
+altitude `visible` sees, to within half its 0.1 mm tolerance; the floors
+are null beyond `radius`, off the mesh, or where the site stands under its
+own ground. The raster steps the 50 m
 raster and so departs from the exact floor most where the ground near the
 site is steep: its error at range is the near ground's rounding times the
 ratio of the ranges (`data/radar-floor.md`).
