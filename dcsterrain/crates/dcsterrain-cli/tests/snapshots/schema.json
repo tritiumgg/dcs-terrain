@@ -8,12 +8,15 @@
           "type": "number"
         },
         "chokepoints": {
-          "description": "Edges of this route in the top decile of betweenness.",
+          "description": "Edges of this route in the top decile of their network's\nbetweenness; null while betweenness is still being built.",
           "items": {
             "format": "int64",
             "type": "integer"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "descent": {
           "format": "double",
@@ -44,7 +47,7 @@
           "type": "array"
         },
         "shared_edges_with_all": {
-          "description": "Edges every alternative uses: the pair's true chokepoints.",
+          "description": "Edges along which every alternative runs: the pair's true\nchokepoints.",
           "items": {
             "format": "int64",
             "type": "integer"
@@ -87,8 +90,7 @@
         "straight_line",
         "stretch",
         "overlap_with",
-        "shared_edges_with_all",
-        "chokepoints"
+        "shared_edges_with_all"
       ],
       "type": "object"
     },
@@ -287,8 +289,12 @@
     "Chokepoint": {
       "properties": {
         "betweenness": {
+          "description": "0 to 1, of the network's most.",
           "format": "double",
           "type": "number"
+        },
+        "class": {
+          "type": "string"
         },
         "crosses_water": {
           "type": "boolean"
@@ -309,6 +315,7 @@
       "required": [
         "edge_id",
         "betweenness",
+        "class",
         "crosses_water",
         "tpi_300_mean",
         "midpoint"
@@ -317,7 +324,14 @@
     },
     "ChokepointsRequest": {
       "properties": {
+        "geojson": {
+          "default": false,
+          "description": "Also return the answer as GeoJSON.",
+          "type": "boolean"
+        },
         "limit": {
+          "default": 20,
+          "description": "At most 500.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -326,13 +340,13 @@
           "$ref": "#/$defs/Network"
         },
         "region": {
-          "$ref": "#/$defs/Region"
+          "$ref": "#/$defs/Region",
+          "description": "Edges any point of whose path lies in it."
         }
       },
       "required": [
         "region",
-        "network",
-        "limit"
+        "network"
       ],
       "type": "object"
     },
@@ -346,7 +360,7 @@
           "type": "string"
         },
         "edges": {
-          "description": "Highest betweenness first.",
+          "description": "Highest betweenness first, ties in edge order.",
           "items": {
             "$ref": "#/$defs/Chokepoint"
           },
@@ -356,6 +370,9 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "geojson": {
+          "description": "Each edge, when `geojson` was asked for."
         },
         "terrain": {
           "type": "string"
@@ -1664,9 +1681,17 @@
           "format": "double",
           "type": "number"
         },
+        "class": {
+          "type": "string"
+        },
         "descent": {
           "format": "double",
           "type": "number"
+        },
+        "edge_id": {
+          "description": "The graph edge the leg runs along, all of it or, at an end of the\nroute, part.",
+          "format": "int64",
+          "type": "integer"
         },
         "exposure": {
           "description": "The fraction of the leg the exposure observers see.",
@@ -1691,6 +1716,8 @@
       "required": [
         "from",
         "to",
+        "edge_id",
+        "class",
         "length",
         "ascent",
         "descent",
@@ -2229,6 +2256,11 @@
         "from": {
           "$ref": "#/$defs/Point"
         },
+        "geojson": {
+          "default": false,
+          "description": "Also return the answer as GeoJSON.",
+          "type": "boolean"
+        },
         "k": {
           "default": 3,
           "description": "At most 10.",
@@ -2238,6 +2270,7 @@
         },
         "max_detour_factor": {
           "default": 3.0,
+          "description": "No route longer than this times the straight line between the\nsnapped ends, or 5 km longer when that is more, is searched for.",
           "format": "double",
           "type": "number"
         },
@@ -2286,6 +2319,9 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "geojson": {
+          "description": "Each route, the edges they all share and the ends, when `geojson`\nwas asked for."
         },
         "routes": {
           "description": "Shortest first.",
@@ -2337,8 +2373,14 @@
         "from": {
           "$ref": "#/$defs/Point"
         },
+        "geojson": {
+          "default": false,
+          "description": "Also return the answer as GeoJSON.",
+          "type": "boolean"
+        },
         "max_detour_factor": {
           "default": 3.0,
+          "description": "No route longer than this times the straight line between the\nsnapped ends, or 5 km longer when that is more, is searched for.",
           "format": "double",
           "type": "number"
         },
@@ -2378,6 +2420,9 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "geojson": {
+          "description": "The route, each leg and the ends, when `geojson` was asked for."
         },
         "legs": {
           "items": {
@@ -3010,7 +3055,13 @@
     },
     "TrafficabilityRequest": {
       "properties": {
+        "geojson": {
+          "default": false,
+          "description": "Also return the answer as GeoJSON.",
+          "type": "boolean"
+        },
         "max_slope_deg": {
+          "description": "Steeper ground than this blocks; at most 60.",
           "format": "double",
           "type": "number"
         },
@@ -3052,6 +3103,14 @@
           "format": "double",
           "type": "number"
         },
+        "cost": {
+          "description": "The line's length weighted by how hard its ground is to cross, in\nmeters of open flat ground; null when it is not reachable.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "dcs_build": {
           "type": "string"
         },
@@ -3063,6 +3122,9 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "geojson": {
+          "description": "The line, its ends and the blocking point, when `geojson` was asked\nfor."
         },
         "nearest_road": {
           "$ref": "#/$defs/Point"

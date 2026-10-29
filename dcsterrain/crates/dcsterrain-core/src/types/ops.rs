@@ -580,8 +580,13 @@ pub struct RouteRequest {
     pub exposure_observers: Vec<Observer>,
     #[serde(default = "default_exposure_weight")]
     pub exposure_weight: f64,
+    /// No route longer than this times the straight line between the
+    /// snapped ends, or 5 km longer when that is more, is searched for.
     #[serde(default = "default_max_detour_factor")]
     pub max_detour_factor: f64,
+    /// Also return the answer as GeoJSON.
+    #[serde(default)]
+    pub geojson: bool,
 }
 
 fn default_exposure_weight() -> f64 {
@@ -599,6 +604,9 @@ pub struct RouteResponse {
     pub provenance: Provenance,
     #[serde(flatten)]
     pub route: Route,
+    /// The route, each leg and the ends, when `geojson` was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
 }
 
 /// A route over the network between the two snapped endpoints.
@@ -624,6 +632,10 @@ pub struct Route {
 pub struct Leg {
     pub from: Point,
     pub to: Point,
+    /// The graph edge the leg runs along, all of it or, at an end of the
+    /// route, part.
+    pub edge_id: i64,
+    pub class: String,
     pub length: f64,
     pub ascent: f64,
     pub descent: f64,
@@ -674,6 +686,10 @@ pub struct RouteAlternativesResponse {
     pub provenance: Provenance,
     /// Shortest first.
     pub routes: Vec<Alternative>,
+    /// Each route, the edges they all share and the ends, when `geojson`
+    /// was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
 }
 
 /// One alternative: a full route, and how it relates to the others.
@@ -685,10 +701,12 @@ pub struct Alternative {
     pub stretch: f64,
     /// Shared length fraction against each other returned route, in order.
     pub overlap_with: Vec<f64>,
-    /// Edges every alternative uses: the pair's true chokepoints.
+    /// Edges along which every alternative runs: the pair's true
+    /// chokepoints.
     pub shared_edges_with_all: Vec<i64>,
-    /// Edges of this route in the top decile of betweenness.
-    pub chokepoints: Vec<i64>,
+    /// Edges of this route in the top decile of their network's
+    /// betweenness; null while betweenness is still being built.
+    pub chokepoints: Option<Vec<i64>>,
 }
 
 // nearest
@@ -810,23 +828,38 @@ pub struct SceneryObject {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ChokepointsRequest {
+    /// Edges any point of whose path lies in it.
     pub region: Region,
     pub network: Network,
+    /// At most 500.
+    #[serde(default = "default_chokepoints_limit")]
     pub limit: u32,
+    /// Also return the answer as GeoJSON.
+    #[serde(default)]
+    pub geojson: bool,
+}
+
+fn default_chokepoints_limit() -> u32 {
+    20
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ChokepointsResponse {
     #[serde(flatten)]
     pub provenance: Provenance,
-    /// Highest betweenness first.
+    /// Highest betweenness first, ties in edge order.
     pub edges: Vec<Chokepoint>,
+    /// Each edge, when `geojson` was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Chokepoint {
     pub edge_id: i64,
+    /// 0 to 1, of the network's most.
     pub betweenness: f64,
+    pub class: String,
     pub crosses_water: bool,
     /// Mean `tpi_300` along the edge's geometry.
     pub tpi_300_mean: f64,
@@ -839,8 +872,12 @@ pub struct Chokepoint {
 pub struct TrafficabilityRequest {
     pub x: f64,
     pub z: f64,
+    /// Steeper ground than this blocks; at most 60.
     pub max_slope_deg: f64,
     pub network: Network,
+    /// Also return the answer as GeoJSON.
+    #[serde(default)]
+    pub geojson: bool,
 }
 
 /// Judged along the straight line to the nearest road, sampled every 25 m
@@ -852,10 +889,17 @@ pub struct TrafficabilityResponse {
     pub reachable: bool,
     pub nearest_road: Point,
     pub distance: f64,
+    /// The line's length weighted by how hard its ground is to cross, in
+    /// meters of open flat ground; null when it is not reachable.
+    pub cost: Option<f64>,
     /// The first sample that fails, when one does.
     pub blocking: Option<Point>,
     /// Why the line is or is not passable, for a reader.
     pub reason: String,
+    /// The line, its ends and the blocking point, when `geojson` was asked
+    /// for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
 }
 
 #[cfg(test)]
