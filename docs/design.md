@@ -118,8 +118,9 @@ A failed check refuses the terrain the same way.
 
 ### 3.3 The ground
 
-- **Point mode.** A point's height, water, surface and cover are the winning
-  finest-mesh triangle's own. This is the ground `land.getHeight` returns.
+- **Point mode.** A point's height, water depth, water, surface and cover are
+  the winning finest-mesh triangle's own, height and depth interpolated from
+  its corners. This is the ground `land.getHeight` returns.
 - **Precedence where triangles overlap:** a road strip (`TRITYPE & 8`) wins,
   then a water triangle (`TRITYPE & 7`), then the higher block index, then the
   higher triangle index. Without the road rule the Roki tunnel area is 729 m
@@ -564,7 +565,7 @@ correctness rule: a miss is a decision about the target.
 | `find_sites` with a horizon criterion, first touch | 3.4–4.9 s for the horizon of a 20 × 20 km region, 7–10 ms once cached (Caucasus, 2.9.30.28738) | 5 s, then 500 ms |
 | `route` 50 km | 2.5 / 13 ms; 100 pairs of 2–80 km on each of 8 terrains, the search 0.05–1.6 ms p50 and the whole operation 4.9–43 ms p50, 90 ms p95 at most, on 2.9.30.28738 (`data/route-search.md`) | 500 ms |
 | `validate_placements`, 1 000 placements | ~2 s cold on Germany estimated | 3 s |
-| `point_info`, `airfield_info` | µs to a few ms | 20 ms cold |
+| `point_info`, `airfield_info` | µs to a few ms; `point_info` 0.4–2.2 ms a point warm over 3 000 uniform points on each of 8 terrains, most of it the nearest road from points far out at sea, on 2.9.30.28738 (`data/point-info.md`) | 20 ms cold |
 | cache build, all but betweenness and places | < 2 s; roads 0.5 / 9.8 s (Caucasus / GermanyCW, 2.9.30.28738), 3.1 s of it the GermanyCW scan and 4.6 s its water | 10 s |
 | private memory per query process | 15–45 MiB | 64 MiB |
 

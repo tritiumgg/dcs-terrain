@@ -20,6 +20,7 @@ it.
 | [data/route-search.md](data/route-search.md) | A\* against Dijkstra on every installed terrain's roads: agreement, nodes settled, and what a route costs |
 | [data/find-sites.md](data/find-sites.md) | A FARP-like `find_sites` on every installed terrain: each candidate rescored alone, the spacing, a brute-force search, and times |
 | [data/airdrome-ids.md](data/airdrome-ids.md) | Airdrome ids joined by position on every installed terrain, against the shipped missions and held out against the labels |
+| [data/point-info.md](data/point-info.md) | `point_info` on every installed terrain: the nearest town against a scan of every town, bearings against the geodesic, and cost |
 | [data/caucasus-scenery-catalogue.tsv](data/caucasus-scenery-catalogue.tsv) | The Caucasus scenery model census |
 
 The project was reset on 2026-10-27. The documents before it — nine frozen

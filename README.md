@@ -19,9 +19,9 @@ your user cache directory.
 > and the `query` operations `describe`, `sample`, `geo`, `nearest`,
 > `scenery_in`, `visible`, `viewshed`, `radar_floor`, `coverage`,
 > `approach_spectrum`, `unmask_profile`, `route`, `route_alternatives`,
-> `chokepoints`, `trafficability`, `score_site` and `find_sites` work today;
-> every other operation is planned, kept here so the shape is visible.
-> Progress is in
+> `chokepoints`, `trafficability`, `score_site`, `find_sites` and `point_info`
+> work today; every other operation is planned, kept here so the shape is
+> visible. Progress is in
 > [docs/STATE.md](docs/STATE.md).
 
 ## Requirements
@@ -68,7 +68,8 @@ dcsterrain query --terrain Caucasus describe
 
 Ask for layer values at points or on a lattice in a region, convert positions
 to latitude, longitude and MGRS, find the nearest road, airdrome, town, node,
-beacon or scenery object, or list the scenery in a region:
+beacon or scenery object, list the scenery in a region, or describe a point:
+its ground, and how far and which way it lies from the nearest town:
 
 ```bash
 dcsterrain query --terrain Caucasus sample '{"points": [{"x": -281782, "z": 647279}], "layers": ["height", "slope", "dist_road"]}'

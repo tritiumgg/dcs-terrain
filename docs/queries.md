@@ -360,10 +360,22 @@ the game's ground units.
 
 ### `point_info`
 
-Request: `points: Vec<Point>`. Response per point: height (point mode), water
+Request: `points: Vec<Point>`, at most 10 000. Response per point: height (point mode), water
 class and depth, cover, slope and aspect, the nearest town with bearing and
 distance ("6 km NE of Zugdidi"), the place it stands in if any, the nearest
 road with its class and distance, the nearest airfield, lat/lon and MGRS.
+
+The ground fields are the winning triangle's, depth interpolated as height
+is and null on land; slope and aspect are the cell's, aspect from grid
+north. The town is the nearest of every town in the tables, measured in the
+x–z plane, ties to the first listed, with two bearings from it to the point:
+`bearing_true_deg`, the normal section's azimuth in the town's local
+east-north plane, within 1e-5° of the geodesic's inside 100 km, and
+`bearing_grid_deg` from DCS x. They differ by the meridian convergence, up
+to several degrees far from the central meridian. The description takes the
+true bearing's point of the eight-point compass: hundreds of meters inside
+950 m, whole kilometers beyond, and "at" the town within 50 m. The place
+field comes with places.
 
 ### `airfield_info`
 
