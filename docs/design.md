@@ -393,8 +393,8 @@ A horizon tile holds the 16 × 16 horizon cells of one grid tile, 8 KiB.
 Tiles are computed the first time a query touches them and cached in
 `horizon/`; up to 8 × 8 tiles share one window of heights, the tiles and
 40 km around them, about 9 MiB as 16-bit heights plus 12 MiB of pyramid. One
-call computes at most 64 tiles, about a 25 km square, and refuses more before
-computing anything, naming the count. `enclosure` is the mean of the bins in
+call computes at most 64 tiles, about a 25 km square, from at most four
+windows, and refuses more before computing anything, naming the count. `enclosure` is the mean of the bins in
 degrees, undefined where the horizon cell's center is outside the mesh. On
 Caucasus on 2.9.30.28738 a 20 × 20 km region around an airfield (54 tiles)
 first costs 3.4–4.9 s on one core, the low ground the slowest because little
