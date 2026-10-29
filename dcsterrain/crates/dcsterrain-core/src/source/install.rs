@@ -543,8 +543,12 @@ impl Install {
                 .map(|&k| self.block(ids[k]))
                 .collect::<Result<_, _>>()?
         } else {
+            // Collected whole and then checked in order, so of two blocks that
+            // fail the one refused is the first, however the work fell.
             (missing.par_iter())
                 .map(|&k| self.block(ids[k]))
+                .collect::<Vec<_>>()
+                .into_iter()
                 .collect::<Result<_, _>>()?
         };
         for (&k, b) in missing.iter().zip(made) {
@@ -695,6 +699,8 @@ impl Source for Install {
         } else {
             (order.par_iter().zip(&held))
                 .map(answer)
+                .collect::<Vec<_>>()
+                .into_iter()
                 .collect::<Result<_, Refusal>>()?
         };
         let mut best: Vec<Option<ground::Ground>> = vec![None; points.len()];
