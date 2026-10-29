@@ -307,9 +307,12 @@
           "$ref": "#/$defs/Point"
         },
         "tpi_300_mean": {
-          "description": "Mean `tpi_300` along the edge's geometry.",
+          "description": "Mean `tpi_300` along the edge's geometry, null where no sample has\nground.",
           "format": "double",
-          "type": "number"
+          "type": [
+            "number",
+            "null"
+          ]
         }
       },
       "required": [
@@ -317,7 +320,6 @@
         "betweenness",
         "class",
         "crosses_water",
-        "tpi_300_mean",
         "midpoint"
       ],
       "type": "object"

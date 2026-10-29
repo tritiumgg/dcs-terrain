@@ -54,7 +54,7 @@ const K_MAX: u32 = 10;
 const SEARCHES_PER_K: u32 = 4;
 
 /// The edge kind a request's network names.
-pub fn kind_of(n: Network) -> u8 {
+pub(super) fn kind_of(n: Network) -> u8 {
     match n {
         Network::Roads => KIND_ROAD,
         Network::Railroads => KIND_RAIL,
@@ -245,7 +245,7 @@ impl<'a> Planner<'a> {
         }
         if self.exposure[e].is_nan() {
             let line = self.g.piece(&self.g.edges[e], 0.0, 1.0);
-            let share = seen_share(&mut self.heights, &self.observers, &samples(&line))?;
+            let share = seen_share(&mut self.heights, &self.observers, &samples_along(&line))?;
             self.exposure[e] = share as f32;
         }
         Ok(f64::from(self.exposure[e]))
@@ -419,7 +419,7 @@ impl<'a> Planner<'a> {
             .collect();
         // Every leg sampled from its start, its end included; the samples
         // of the whole route are the legs' joined.
-        let per_leg: Vec<Vec<[f64; 2]>> = lines.iter().map(|l| samples(l)).collect();
+        let per_leg: Vec<Vec<[f64; 2]>> = lines.iter().map(|l| samples_along(l)).collect();
         let all: Vec<[f64; 2]> = per_leg.iter().flatten().copied().collect();
         let ground = self.src.points(&all).map_err(refused)?;
         let mut legs = Vec::new();
@@ -482,7 +482,7 @@ fn point(p: [f64; 2]) -> Point {
 }
 
 /// Points along `line` every `SAMPLE_STEP_M` from its start, and its end.
-fn samples(line: &[[f64; 2]]) -> Vec<[f64; 2]> {
+pub(super) fn samples_along(line: &[[f64; 2]]) -> Vec<[f64; 2]> {
     let mut out = vec![line[0]];
     let mut next = SAMPLE_STEP_M;
     let mut walked = 0.0;
@@ -1214,7 +1214,7 @@ mod tests {
 
     #[test]
     fn samples_and_grades_measure_what_they_say() {
-        let s = samples(&[[0.0, 0.0], [60.0, 0.0], [60.0, 10.0]]);
+        let s = samples_along(&[[0.0, 0.0], [60.0, 0.0], [60.0, 10.0]]);
         assert_eq!(s, [[0.0, 0.0], [25.0, 0.0], [50.0, 0.0], [60.0, 10.0]]);
         let flat_then_steep = [(0.0, 0.0), (100.0, 0.0), (150.0, 10.0), (200.0, 10.0)];
         assert!(close(steepest(&flat_then_steep), 10.0));

@@ -18,6 +18,7 @@ use crate::source::{Refusal, Source};
 use crate::synth::Synth;
 use crate::types::{Issue, OPERATIONS, Provenance};
 
+mod chokepoints;
 mod coverage;
 pub mod criteria;
 mod describe;
@@ -37,6 +38,7 @@ mod unmask;
 mod viewshed;
 mod visible;
 
+pub use chokepoints::chokepoints;
 pub use coverage::coverage;
 pub use describe::describe;
 pub use floor::radar_floor;
@@ -116,6 +118,7 @@ const HANDLERS: &[(&str, Handler)] = &[
     ("unmask_profile", |t, r| run(t, r, unmask_profile)),
     ("route", |t, r| run(t, r, route)),
     ("route_alternatives", |t, r| run(t, r, route_alternatives)),
+    ("chokepoints", |t, r| run(t, r, chokepoints)),
 ];
 
 /// Reads the request as `Q`, answers it with `f`, and writes the answer.

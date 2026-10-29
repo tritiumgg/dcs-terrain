@@ -861,8 +861,9 @@ pub struct Chokepoint {
     pub betweenness: f64,
     pub class: String,
     pub crosses_water: bool,
-    /// Mean `tpi_300` along the edge's geometry.
-    pub tpi_300_mean: f64,
+    /// Mean `tpi_300` along the edge's geometry, null where no sample has
+    /// ground.
+    pub tpi_300_mean: Option<f64>,
     pub midpoint: Point,
 }
 
