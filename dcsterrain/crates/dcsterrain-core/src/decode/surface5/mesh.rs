@@ -492,8 +492,11 @@ impl Surface5 {
                 )))
             }
         };
-        let mut blocks = Vec::new();
-        for _ in 0..r.u32()? {
+        // A block takes at least 95 bytes, so a corrupt count reserves no
+        // more than the bytes left could hold.
+        let n = r.u32()?;
+        let mut blocks = Vec::with_capacity((n as usize).min((bytes.len() - r.at) / 95));
+        for _ in 0..n {
             let t = [r.f32()?, r.f32()?, r.f32()?];
             let mut bbox = [0f32; 6];
             for v in &mut bbox {
@@ -504,16 +507,17 @@ impl Surface5 {
                 0 => None,
                 _ => Some(r.array()?),
             };
-            let subsets = (0..r.u32()?)
-                .map(|_| {
-                    Ok(SubsetToc {
-                        shader: name(r.u16()?)?,
-                        material: name(r.u16()?)?,
-                        base: r.array()?,
-                        tri: r.array()?,
-                    })
-                })
-                .collect::<Result<_, Malformed>>()?;
+            // Likewise a subset takes 40.
+            let k = r.u32()?;
+            let mut subsets = Vec::with_capacity((k as usize).min((bytes.len() - r.at) / 40));
+            for _ in 0..k {
+                subsets.push(SubsetToc {
+                    shader: name(r.u16()?)?,
+                    material: name(r.u16()?)?,
+                    base: r.array()?,
+                    tri: r.array()?,
+                });
+            }
             blocks.push(BlockInfo {
                 t,
                 bbox,
