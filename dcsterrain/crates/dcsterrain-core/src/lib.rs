@@ -15,6 +15,7 @@ pub mod horizon;
 pub mod layers;
 pub mod query;
 pub mod roads;
+pub mod search;
 pub mod source;
 pub mod synth;
 pub mod threads;
