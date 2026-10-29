@@ -354,6 +354,19 @@ impl<'a> Planner<'a> {
         }))
     }
 
+    /// The end, 0 for `a` or 1 for `b`, by which the piece of a snapped
+    /// edge between `end` and node `v` runs, as the search took it: of the
+    /// open ends at `v`, the nearer, which on an edge from a node to itself
+    /// may be either.
+    fn side(&self, end: Snap, v: usize) -> f64 {
+        let e = &self.g.edges[end.edge];
+        [(0.0, e.a, end.at), (1.0, e.b, 1.0 - end.at)]
+            .into_iter()
+            .filter(|&(share, node, _)| node as usize == v && self.open(end.edge, end.at, share))
+            .min_by(|x, y| x.2.total_cmp(&y.2))
+            .map_or(0.0, |(share, _, _)| share)
+    }
+
     /// The pieces a search's nodes ran along: between two graph nodes the
     /// edge that costs least, as the search took it.
     fn pieces(&self, nodes: &[usize], rate: &HashMap<usize, f64>) -> Vec<Piece> {
@@ -372,25 +385,15 @@ impl<'a> Planner<'a> {
                     to: to.at,
                 });
             } else if u == s {
-                let e = &g.edges[from.edge];
-                // Toward whichever end it reached; at a loop edge, the
-                // cheaper way, as the search took it.
-                let toward_a = v == e.a as usize
-                    && (v != e.b as usize || from.at <= 1.0 - from.at)
-                    && self.open(from.edge, from.at, 0.0);
                 out.push(Piece {
                     edge: from.edge,
                     from: from.at,
-                    to: if toward_a { 0.0 } else { 1.0 },
+                    to: self.side(from, v),
                 });
             } else if v == t {
-                let e = &g.edges[to.edge];
-                let from_a = u == e.a as usize
-                    && (u != e.b as usize || to.at <= 1.0 - to.at)
-                    && self.open(to.edge, 0.0, to.at);
                 out.push(Piece {
                     edge: to.edge,
-                    from: if from_a { 0.0 } else { 1.0 },
+                    from: self.side(to, u),
                     to: to.at,
                 });
             } else {
@@ -1213,6 +1216,90 @@ mod tests {
         bad("route_alternatives", json!({"max_overlap": 2}));
         let far = json!({"exposure_observers": [{"x": 1e7, "z": 0, "alt_agl": 2}]});
         assert_eq!(code("route", far), "off_terrain");
+    }
+
+    #[test]
+    fn a_start_on_an_edge_from_a_node_to_itself_leaves_by_the_open_side() {
+        use crate::roads::{Stretch, build};
+        // A square loop from node 0 back to itself, and a road west from it.
+        let id = |n| Some(n);
+        let stretches = vec![
+            Stretch {
+                kind: KIND_ROAD,
+                class: 0,
+                a: id(1),
+                b: id(1),
+                points: vec![
+                    [0.0, 0.0],
+                    [0.0, 500.0],
+                    [500.0, 500.0],
+                    [500.0, 0.0],
+                    [0.0, 0.0],
+                ],
+            },
+            Stretch {
+                kind: KIND_ROAD,
+                class: 0,
+                a: id(1),
+                b: id(2),
+                points: vec![[0.0, 0.0], [-1000.0, 0.0]],
+            },
+        ];
+        let g = build(vec!["road".into()], stretches, &mut |_: f64, _: f64| false).unwrap();
+        let t = synth();
+        let src = t.source();
+        // Four fifths of the way round, 400 m short of the node, the short
+        // way back to it through a box avoided.
+        let loop_edge = g.edges.iter().position(|e| e.a == e.b).unwrap();
+        let other = 1 - loop_edge;
+        let from = Snap {
+            edge: loop_edge,
+            at: 0.8,
+            point: [400.0, 0.0],
+        };
+        let west = g.edges[other].clone();
+        let to = Snap {
+            edge: other,
+            at: if g.nodes[west.b as usize][0] < 0.0 {
+                1.0
+            } else {
+                0.0
+            },
+            point: [-1000.0, 0.0],
+        };
+        let r = crate::types::Region::Box(crate::types::BoundingBox {
+            min_x: 150.0,
+            min_z: -50.0,
+            max_x: 250.0,
+            max_z: 50.0,
+        });
+        let avoid = vec![resolve(src, &r, "avoid.0").unwrap()];
+        let blocked = g
+            .edges
+            .iter()
+            .map(|e| meets(&g, e, 0.0, 1.0, &avoid[0]))
+            .collect();
+        let mut p = Planner {
+            src,
+            g: &g,
+            adj: Adjacency::new(&g, KIND_ROAD),
+            from,
+            to,
+            avoid,
+            blocked,
+            observers: Vec::new(),
+            exposure_weight: 0.0,
+            exposure: vec![f32::NAN; g.edges.len()],
+            heights: Heights::new(src),
+            bound: f64::INFINITY,
+        };
+        let found = p.search(&HashMap::new(), true).unwrap().unwrap();
+        assert_eq!(found.pieces[0].to, 0.0, "{:?}", found.pieces);
+        assert!(
+            close(found.length(&g), 1600.0 + 1000.0),
+            "{}",
+            found.length(&g)
+        );
     }
 
     #[test]
