@@ -95,6 +95,8 @@ impl Piece {
 struct Found {
     cost: f64,
     pieces: Vec<Piece>,
+    /// How many nodes the search settled.
+    settled: usize,
 }
 
 impl Found {
@@ -348,6 +350,7 @@ impl<'a> Planner<'a> {
         Ok(Some(Found {
             cost: path.cost,
             pieces: self.pieces(&path.nodes, &rate),
+            settled: path.settled,
         }))
     }
 
@@ -1220,5 +1223,192 @@ mod tests {
         assert!(close(steepest(&flat_then_steep), 10.0));
         assert_eq!(steepest(&[(0.0, 0.0), (50.0, 5.0)]), 10.0);
         assert_eq!(climb(&[(0.0, 0.0), (1.0, 3.0), (2.0, 1.0)]), (3.0, 2.0));
+    }
+}
+
+/// Opt-in: routes on every terrain of a real install, A* against Dijkstra
+/// on random pairs. Set `DCSTERRAIN_INSTALL` to the install root, and
+/// `DCSTERRAIN_ROUTES` to the pairs per terrain if not 100; without the
+/// install this passes reading nothing, which is what CI does. Run it with
+/// `--release` and `--nocapture` for the figures. The install is only read;
+/// the cache is a scratch directory, so each terrain's road graph is built.
+#[cfg(test)]
+mod install_tests {
+    use std::path::PathBuf;
+    use std::time::Instant;
+
+    use super::*;
+    use crate::cache::Cache;
+    use crate::decode::install::terrains;
+    use crate::roads::tests::Unit;
+    use crate::scratch::Scratch;
+
+    fn percentile(v: &[f64], p: f64) -> f64 {
+        if v.is_empty() {
+            return f64::NAN;
+        }
+        let mut v = v.to_vec();
+        v.sort_unstable_by(f64::total_cmp);
+        v[((v.len() - 1) as f64 * p).round() as usize]
+    }
+
+    fn ms(t: Instant) -> f64 {
+        t.elapsed().as_secs_f64() * 1000.0
+    }
+
+    /// `n` pairs of points within 300 m of road nodes, 2 to 80 km apart.
+    fn pairs(g: &Graph, u: &mut Unit, n: usize) -> Vec<(Point, Point)> {
+        let roads: Vec<[f64; 2]> = {
+            let mut used = vec![false; g.nodes.len()];
+            for e in g.edges.iter().filter(|e| e.kind == KIND_ROAD) {
+                used[e.a as usize] = true;
+                used[e.b as usize] = true;
+            }
+            (0..g.nodes.len())
+                .filter(|&i| used[i])
+                .map(|i| g.nodes[i])
+                .collect()
+        };
+        let pick = |u: &mut Unit| {
+            let p = roads[(u.next() * roads.len() as f64) as usize % roads.len()];
+            Point {
+                x: p[0] + (u.next() - 0.5) * 600.0,
+                z: p[1] + (u.next() - 0.5) * 600.0,
+            }
+        };
+        let mut out = Vec::new();
+        while out.len() < n {
+            let (a, b) = (pick(u), pick(u));
+            let d = (a.x - b.x).hypot(a.z - b.z);
+            if (2000.0..=80_000.0).contains(&d) {
+                out.push((a, b));
+            }
+        }
+        out
+    }
+
+    fn request(from: Point, to: Point) -> RouteRequest {
+        RouteRequest {
+            network: Network::Roads,
+            from,
+            to,
+            avoid: Vec::new(),
+            exposure_observers: Vec::new(),
+            exposure_weight: 1.0,
+            max_detour_factor: 3.0,
+            geojson: false,
+        }
+    }
+
+    #[test]
+    fn a_star_equals_dijkstra_on_every_installed_terrain() {
+        let Some(root) = std::env::var_os("DCSTERRAIN_INSTALL").map(PathBuf::from) else {
+            eprintln!("DCSTERRAIN_INSTALL is not set; skipped");
+            return;
+        };
+        // Five threads, so the runs beside this one keep their share.
+        crate::threads::init(Some(5));
+        let n: usize = std::env::var("DCSTERRAIN_ROUTES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(100);
+        let build = std::fs::read_to_string(root.join("autoupdate.cfg")).unwrap_or_default();
+        let version = build
+            .lines()
+            .find(|l| l.contains("\"version\""))
+            .and_then(|l| l.split('"').nth(3))
+            .unwrap_or("unknown")
+            .to_string();
+        println!("build {version}, {n} pairs per terrain");
+        println!(
+            "| terrain | road edges | graph s | pairs routed | A* p50 / p95 ms | Dijkstra p50 / p95 ms | settled A* / Dijkstra p50 | length p50 km | detour p50 / p95 | route op p50 / p95 ms | alternatives p50 ms | k p50 |"
+        );
+        println!("|---|---|---|---|---|---|---|---|---|---|---|---|");
+        let scratch = Scratch::new();
+        let cache = Cache::new(&scratch.0);
+        let mut u = Unit(0x2545_f491_4f6c_dd1d);
+        for listed in terrains(&root).unwrap() {
+            let Some(id) = listed.id else { continue };
+            let t = match Terrain::open(&root, &id, &cache, true) {
+                Ok(t) => t,
+                Err(e) => {
+                    println!("| {id} | refused: {} |", e.0);
+                    continue;
+                }
+            };
+            let started = Instant::now();
+            let g = t.source().road_graph().unwrap();
+            let graph_s = started.elapsed().as_secs_f64();
+            let road_edges = g.edges.iter().filter(|e| e.kind == KIND_ROAD).count();
+            let (mut ta, mut td, mut sa, mut sd, mut len, mut detour) =
+                (vec![], vec![], vec![], vec![], vec![], vec![]);
+            let mut routed = 0;
+            let mut op = vec![];
+            let mut alt = vec![];
+            let mut ks = vec![];
+            for (i, (a, b)) in pairs(g, &mut u, n).into_iter().enumerate() {
+                let q = request(a, b);
+                let mut p = Planner::new(&t, &q).unwrap();
+                let clock = Instant::now();
+                let fa = p.search(&HashMap::new(), true).unwrap();
+                ta.push(ms(clock));
+                let clock = Instant::now();
+                let fd = p.search(&HashMap::new(), false).unwrap();
+                td.push(ms(clock));
+                assert_eq!(fa.is_some(), fd.is_some(), "{id}: {a:?} {b:?}");
+                let (Some(fa), Some(fd)) = (fa, fd) else {
+                    continue;
+                };
+                assert!(
+                    (fa.cost - fd.cost).abs() <= 1e-9 * fd.cost.max(1.0),
+                    "{id}: {a:?} {b:?}: A* {} against Dijkstra {}",
+                    fa.cost,
+                    fd.cost
+                );
+                routed += 1;
+                sa.push(fa.settled as f64);
+                sd.push(fd.settled as f64);
+                let l = fa.length(g);
+                len.push(l / 1000.0);
+                detour.push(l / (a.x - b.x).hypot(a.z - b.z));
+                if i < 20 {
+                    let req = serde_json::to_value(&q).unwrap();
+                    let clock = Instant::now();
+                    let v = crate::query::answer(&t, "route", &req).unwrap();
+                    op.push(ms(clock));
+                    assert!((v["length"].as_f64().unwrap() - l).abs() < 1e-6 * l.max(1.0));
+                }
+                if i < 5 {
+                    let req = serde_json::to_value(RouteAlternativesRequest {
+                        route: q.clone(),
+                        k: 3,
+                        max_stretch: 1.5,
+                        max_overlap: 0.5,
+                        penalty: 1.6,
+                    })
+                    .unwrap();
+                    let clock = Instant::now();
+                    let v = crate::query::answer(&t, "route_alternatives", &req).unwrap();
+                    alt.push(ms(clock));
+                    ks.push(v["routes"].as_array().unwrap().len() as f64);
+                }
+            }
+            println!(
+                "| {id} | {road_edges} | {graph_s:.1} | {routed} of {n} | {:.2} / {:.2} | {:.2} / {:.2} | {:.0} / {:.0} | {:.1} | {:.2} / {:.2} | {:.1} / {:.1} | {:.0} | {:.0} |",
+                percentile(&ta, 0.5),
+                percentile(&ta, 0.95),
+                percentile(&td, 0.5),
+                percentile(&td, 0.95),
+                percentile(&sa, 0.5),
+                percentile(&sd, 0.5),
+                percentile(&len, 0.5),
+                percentile(&detour, 0.5),
+                percentile(&detour, 0.95),
+                percentile(&op, 0.5),
+                percentile(&op, 0.95),
+                percentile(&alt, 0.5),
+                percentile(&ks, 0.5),
+            );
+        }
     }
 }
