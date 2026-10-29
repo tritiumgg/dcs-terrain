@@ -9,6 +9,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+bytemuck = "1.19.0"
 mlua = { version = "0.12.2", features = ["lua51", "vendored"] }
 rayon = "1.11.0"
 regex = { version = "1.13.1", default-features = false, features = ["std", "perf"] }

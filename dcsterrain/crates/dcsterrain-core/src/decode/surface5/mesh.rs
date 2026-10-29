@@ -563,15 +563,16 @@ impl Surface5 {
         union(self.blocks.iter().map(BlockInfo::world_box))
     }
 
-    /// The bytes of an array, refused unless its stride is `stride` and it
-    /// lies inside the file.
-    fn bytes<R: ReadAt + ?Sized>(
+    /// An array of `T`, read straight into place, refused unless its
+    /// stride is `T`'s size and it lies inside the file. `T` is made of
+    /// little-endian 32-bit words, as the file is.
+    fn array<R: ReadAt + ?Sized, T: bytemuck::Pod>(
         &self,
         r: &R,
         what: impl Fn() -> String,
         a: Array,
-        stride: u16,
-    ) -> Result<Vec<u8>, Error> {
+    ) -> Result<Vec<T>, Error> {
+        let stride = std::mem::size_of::<T>() as u16;
         if a.stride != stride {
             return Err(malformed(format!(
                 "{} has a stride of {}, where {stride} is read",
@@ -597,35 +598,14 @@ impl Surface5 {
                 what()
             )));
         }
-        let mut b = vec![0u8; a.size as usize];
-        r.read_exact_at(&mut b, start)?;
-        Ok(b)
-    }
-
-    fn words<R: ReadAt + ?Sized, T>(
-        &self,
-        r: &R,
-        what: impl Fn() -> String,
-        a: Array,
-        conv: fn([u8; 4]) -> T,
-    ) -> Result<Vec<T>, Error> {
-        let b = self.bytes(r, what, a, 4)?;
-        Ok(b.as_chunks::<4>().0.iter().map(|c| conv(*c)).collect())
-    }
-
-    fn triples<R: ReadAt + ?Sized, T>(
-        &self,
-        r: &R,
-        what: impl Fn() -> String,
-        a: Array,
-        conv: fn([u8; 4]) -> T,
-    ) -> Result<Vec<[T; 3]>, Error> {
-        let b = self.bytes(r, what, a, 12)?;
-        Ok(b.as_chunks::<12>()
-            .0
-            .iter()
-            .map(|c| [0, 4, 8].map(|k| conv(c[k..k + 4].try_into().unwrap())))
-            .collect())
+        let mut v = vec![T::zeroed(); (a.size / u64::from(stride)) as usize];
+        r.read_exact_at(bytemuck::cast_slice_mut(&mut v), start)?;
+        if cfg!(target_endian = "big") {
+            for w in bytemuck::cast_slice_mut::<T, u32>(&mut v) {
+                *w = u32::from_le(*w);
+            }
+        }
+        Ok(v)
     }
 
     /// Reads finest block `index`, with the subsets of `materials`.
@@ -637,11 +617,11 @@ impl Surface5 {
     ) -> Result<Block, Error> {
         let info = &self.blocks[index];
         let field = |name: &'static str| move || format!("block {index}'s {name} field");
-        let tritype = self.words(r, field("TRITYPE"), info.tritype, u32::from_le_bytes)?;
-        let tri = self.triples(r, field("TRI"), info.tri, u32::from_le_bytes)?;
-        let p = self.triples(r, field("Pbase"), info.pbase, f32::from_le_bytes)?;
+        let tritype = self.array::<_, u32>(r, field("TRITYPE"), info.tritype)?;
+        let tri = self.array::<_, [u32; 3]>(r, field("TRI"), info.tri)?;
+        let p = self.array::<_, [f32; 3]>(r, field("Pbase"), info.pbase)?;
         let depth = match info.depth {
-            Some(a) => self.words(r, field("depth"), a, f32::from_le_bytes)?,
+            Some(a) => self.array::<_, f32>(r, field("depth"), a)?,
             None => vec![0.0; p.len()],
         };
         if tritype.len() != tri.len() {
@@ -690,8 +670,8 @@ impl Surface5 {
                 continue;
             }
             let what = || format!("block {index}'s {material} subset");
-            let base = self.words(r, what, s.base, u32::from_le_bytes)?;
-            let local = self.triples(r, what, s.tri, u32::from_le_bytes)?;
+            let base = self.array::<_, u32>(r, what, s.base)?;
+            let local = self.array::<_, [u32; 3]>(r, what, s.tri)?;
             check_indices(&what(), &local, base.len())?;
             let tri: Vec<[u32; 3]> = local.iter().map(|t| t.map(|k| base[k as usize])).collect();
             check_indices(&what(), &tri, p.len())?;
