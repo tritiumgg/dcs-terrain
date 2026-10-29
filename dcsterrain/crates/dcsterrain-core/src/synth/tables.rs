@@ -65,10 +65,6 @@ impl Theatre {
             id: Some(AIRDROME_ID.into()),
             name_id: AIRDROME_NAME_ID.into(),
             display_name: Some(AIRDROME_DISPLAY_NAME.into()),
-            code: Some(AIRDROME_CODE.into()),
-            civilian: None,
-            abandoned: None,
-            class: None,
             x: Some(rx),
             z: Some(rz),
             lat: Some(rlat),
@@ -198,7 +194,6 @@ impl Theatre {
             },
             lua_included: Vec::new(),
             lua_unresolved: Vec::new(),
-            hook: None,
         }
     }
 }

@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use dcsterrain_core::cache::{Cache, TerrainCache};
 use dcsterrain_core::decode::install;
-use dcsterrain_core::source::install::{TABLES_JSON, Tables, TablesJson};
+use dcsterrain_core::source::install::{TABLES_JSON, Tables};
 
 fn install_root() -> Option<PathBuf> {
     match std::env::var_os("DCSTERRAIN_INSTALL") {
@@ -157,15 +157,22 @@ fn as_game(mut stand: Value) -> Value {
     stand
 }
 
-/// The fields only a running sim knows, which the hook imports. It also
-/// gives the game's display name, which the beacons only approximate.
-const HOOK: [&str; 4] = ["code", "civilian", "abandoned", "class"];
+/// The live airdrome fields `tables.json` does not carry: those only the
+/// running game knows, the scene objects it ties to an airdrome, and its
+/// names by language.
+const NOT_CARRIED: [&str; 9] = [
+    "code",
+    "civilian",
+    "abandoned",
+    "class",
+    "names",
+    "towers",
+    "warehouses",
+    "fueldepots",
+    "shelters",
+];
 
-/// The live airdrome fields `tables.json` does not carry: the scene objects
-/// the game ties to an airdrome, and its names by language.
-const NOT_CARRIED: [&str; 5] = ["names", "towers", "warehouses", "fueldepots", "shelters"];
-
-/// Every table but the airdromes' hook fields and display names equal to the live extract of
+/// Every table but the airdromes' display names equal to the live extract of
 /// 2.9.29.27468, the 2.9.30 terrain files being the same. A town's and an
 /// airdrome's position through the projection are held to a centimeter
 /// and its degrees to 1e-6, the six places ED writes.
@@ -179,7 +186,7 @@ fn caucasus_tables_equal_the_live_extract() {
     let b = &terrain.map().build;
     eprintln!("built on DCS {} ({})", b.version, b.timestamp);
     let t = Tables::open(&terrain).unwrap();
-    compare(&extract, &t, false);
+    compare(&extract, &t);
 
     let live = table(&extract, "airdromes.json");
     let named = live
@@ -198,71 +205,7 @@ fn caucasus_tables_equal_the_live_extract() {
     );
 }
 
-/// A hook directory from the live extract's build is refused, naming the
-/// build and timestamp that differ.
-#[test]
-fn a_hook_directory_from_another_build_is_refused_by_name() {
-    let (Some(root), Some(extract)) = (install_root(), live_extract()) else {
-        return;
-    };
-    let c = Scratch::new("refused");
-    let terrain = terrain(&root, &c.0, "Caucasus");
-    let manifest: Value =
-        serde_json::from_slice(&fs::read(extract.join("manifest.json")).unwrap()).unwrap();
-    let b = &terrain.map().build;
-    if manifest["dcs_build"] == b.version.as_str() {
-        eprintln!("the live extract is from the installed build; skipped");
-        return;
-    }
-    let e = terrain
-        .rebuild(&TablesJson::with_hook(&extract))
-        .unwrap_err();
-    eprintln!("{e}");
-    let want = format!(
-        "dcs_build {}, not {}",
-        manifest["dcs_build"].as_str().unwrap(),
-        b.version
-    );
-    assert!(e.0.contains(&want), "{e}");
-    assert!(e.0.contains("build timestamp"), "{e}");
-    assert!(
-        !e.0.contains("not Caucasus"),
-        "the terrain is the same: {e}"
-    );
-}
-
-/// With the live extract's airdromes imported as the hook's, restamped
-/// with the installed build, every field `tables.json` carries equals the
-/// live extract's.
-#[test]
-fn caucasus_with_the_hook_equals_the_live_extract() {
-    let (Some(root), Some(extract)) = (install_root(), live_extract()) else {
-        return;
-    };
-    let c = Scratch::new("hooked");
-    let terrain = terrain(&root, &c.0, "Caucasus");
-    let b = &terrain.map().build;
-    let h = Scratch::new("hook");
-    let hook = h.0.clone();
-    fs::create_dir_all(&hook).unwrap();
-    let mut manifest: Value =
-        serde_json::from_slice(&fs::read(extract.join("manifest.json")).unwrap()).unwrap();
-    manifest["dcs_build"] = json!(b.version);
-    manifest["dcs_build_timestamp"] = json!(b.timestamp);
-    fs::write(hook.join("manifest.json"), manifest.to_string()).unwrap();
-    fs::copy(extract.join("airdromes.json"), hook.join("airdromes.json")).unwrap();
-    terrain.rebuild(&TablesJson::with_hook(&hook)).unwrap();
-    let t = Tables::open(&terrain).unwrap();
-    let i = t.hook.as_ref().unwrap();
-    assert_eq!(
-        (i.airdromes, i.unmatched.len(), &i.dropped),
-        (t.airdromes.len(), 0, &None)
-    );
-    compare(&extract, &t, true);
-}
-
-fn compare(extract: &Path, t: &Tables, hooked: bool) {
-    let unfilled: &[&str] = if hooked { &[] } else { &HOOK };
+fn compare(extract: &Path, t: &Tables) {
     let plain = |key| Compare {
         key,
         skip: &[],
@@ -317,11 +260,7 @@ fn compare(extract: &Path, t: &Tables, hooked: bool) {
             ours_only: &[],
         },
     );
-    let mut skip: Vec<&str> = vec!["lat", "lon", "x", "z", "beacon_ids"];
-    skip.extend(unfilled);
-    if !hooked {
-        skip.push("display_name");
-    }
+    let mut skip: Vec<&str> = vec!["lat", "lon", "x", "z", "beacon_ids", "display_name"];
     skip.extend(NOT_CARRIED);
     let live_airdromes = table(extract, "airdromes.json");
     equal(
@@ -368,13 +307,9 @@ fn compare(extract: &Path, t: &Tables, hooked: bool) {
         let mut got: Vec<&str> = o.beacon_ids.iter().map(String::as_str).collect();
         got.sort();
         assert_eq!(got, want, "{} beacon ids", o.name_id);
-        for k in unfilled {
-            assert_eq!(
-                serde_json::to_value(o).unwrap()[*k],
-                Value::Null,
-                "{}.{k}",
-                o.name_id
-            );
+        let ours = serde_json::to_value(o).unwrap();
+        for k in NOT_CARRIED {
+            assert!(ours.get(k).is_none(), "{}.{k}", o.name_id);
         }
     }
     eprintln!("positions: worst {worst_m:.4} m and {worst_deg:.2e} degrees from the game's");

@@ -9,12 +9,12 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use dcsterrain_core::cache::{self, Cache, Entry, Stored};
+use dcsterrain_core::cache::{self, Cache, Stored};
 use dcsterrain_core::check;
 use dcsterrain_core::classes;
 use dcsterrain_core::decode::install;
 use dcsterrain_core::query::{self, Terrain};
-use dcsterrain_core::source::install::{Tables, TablesJson};
+use dcsterrain_core::source::install::Tables;
 use dcsterrain_core::synth::{self, Synth};
 use dcsterrain_core::types::Issue;
 use serde_json::{Value, json};
@@ -95,10 +95,6 @@ enum Command {
         /// The terrain's id, as `list-terrains` shows it.
         #[arg(long)]
         terrain: String,
-        /// A directory of the optional hook's tables, from the same terrain and
-        /// build, whose airdrome fields only a running DCS knows are merged in.
-        #[arg(long, value_name = "DIR")]
-        hook: Option<PathBuf>,
         /// Accept a projection fitted to the terrain's beacons that misses one
         /// by more than 2 m.
         #[arg(long)]
@@ -231,10 +227,9 @@ fn main() -> ExitCode {
         Command::Index {
             install,
             terrain,
-            hook,
             allow_crs_residual,
             cache,
-        } => index(install, &terrain, hook, allow_crs_residual, cache),
+        } => index(install, &terrain, allow_crs_residual, cache),
         Command::Check {
             install,
             terrain,
@@ -536,7 +531,6 @@ fn report(done: Result<(), String>) -> ExitCode {
 fn index(
     install: Option<PathBuf>,
     id: &str,
-    hook: Option<PathBuf>,
     allow_crs_residual: bool,
     cache: CacheDir,
 ) -> ExitCode {
@@ -545,28 +539,13 @@ fn index(
         let root = install_root(install)?;
         let map = install::open(&root, id).map_err(|e| e.0)?;
         let terrain = cache.terrain(&root, &map);
-        // The hook's tables are no input the key covers, so importing them
-        // rebuilds the tables whether or not they are current; a directory
-        // from another build is refused before anything is built.
-        let hooked = hook.as_deref().map(TablesJson::with_hook);
-        if let Some(t) = &hooked {
-            t.check_hook(&map).map_err(|e| e.0)?;
-        }
         println!(
             "{} {} at {}",
             map.theatre,
             map.build.version,
             terrain.dir().display()
         );
-        // The hook's tables go first, so an airdrome they give another id
-        // than `Radio.lua` does refuses before the slow entries are built.
-        let mut entries = cache::entries();
-        if let Some(t) = &hooked {
-            terrain.rebuild(t).map_err(|e| e.0)?;
-            println!("{}: built", t.name());
-            entries.retain(|e| e.name() != t.name());
-        }
-        for entry in entries {
+        for entry in cache::entries() {
             let fresh = terrain.get(entry).map_err(|e| e.0)?.built;
             println!(
                 "{}: {}",
@@ -574,19 +553,8 @@ fn index(
                 if fresh { "built" } else { "current" }
             );
         }
-        let tables = Tables::open(&terrain).map_err(|e| e.0)?;
-        if let Some(h) = &tables.hook {
-            match &h.dropped {
-                None => println!(
-                    "the hook's tables from {}: {} airdromes, {} it names that no taxiway file does",
-                    h.dir,
-                    h.airdromes,
-                    h.unmatched.len()
-                ),
-                Some(why) => println!("the hook's tables from {} were dropped: {why}", h.dir),
-            }
-        }
-        tables
+        Tables::open(&terrain)
+            .map_err(|e| e.0)?
             .check_crs(&map.theatre, allow_crs_residual)
             .map_err(|e| e.0)
     })())
@@ -770,19 +738,6 @@ fn check_text(r: &check::Report) -> String {
             "  Lua unresolved: {}\n",
             list_or_none(&t.lua_unresolved)
         ));
-        let hook = match &t.hook {
-            None => "none imported".into(),
-            Some(h) => match &h.dropped {
-                Some(why) => format!("from {} dropped: {why}", h.dir),
-                None => format!(
-                    "from {}: {} airdromes, {} it names that no taxiway file does",
-                    h.dir,
-                    h.airdromes,
-                    h.unmatched.len()
-                ),
-            },
-        };
-        out.push_str(&format!("  the hook's tables: {hook}\n"));
     }
 
     if let Some(c) = &r.catalog {

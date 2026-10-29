@@ -561,69 +561,6 @@ fn cache_list_names_the_build_each_terrain_was_made_on() {
     assert!(other.0.join("Caucasus/0.0.0.0/keep").is_file());
 }
 
-/// A hook directory for GermanyCW at `build`, naming one airdrome the
-/// terrain has no taxiway file for.
-fn hook(build: &str) -> Tree {
-    let t = scratch();
-    let manifest = json!({
-        "theatre": "GermanyCW", "dcs_build": build,
-        "dcs_build_timestamp": "20000101-000000",
-    });
-    put(&t.0, "manifest.json", manifest.to_string().as_bytes());
-    let airdromes = json!([{"id": 1, "name_id": "Ghost", "code": "EDXX"}]);
-    put(&t.0, "airdromes.json", airdromes.to_string().as_bytes());
-    t
-}
-
-#[test]
-fn index_imports_a_hook_directory_and_refuses_one_from_another_build() {
-    let t = install(false);
-    let root = t.0.to_str().unwrap();
-    let c = scratch();
-    let cache = c.0.to_str().unwrap();
-    let index = |hook: &Path| {
-        run(&[
-            "index",
-            "--install",
-            root,
-            "--terrain",
-            "GermanyCW",
-            "--cache",
-            cache,
-            "--hook",
-            hook.to_str().unwrap(),
-        ])
-    };
-
-    let other = hook("2.9.29.27468");
-    let out = index(&other.0);
-    assert_eq!(out.status.code(), Some(1));
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("dcs_build 2.9.29.27468, not 0.0.0.1"), "{err}");
-    assert!(!c.0.join("GermanyCW").exists(), "built before refusing");
-
-    let same = hook("0.0.0.1");
-    let out = index(&same.0);
-    let text = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert!(text.contains("tables.json: built"), "{text}");
-    assert!(
-        text.contains("0 airdromes, 1 it names that no taxiway file does"),
-        "{text}"
-    );
-    let entry = c.0.join("GermanyCW/tables.json");
-    let doc: Value = serde_json::from_slice(&fs::read(entry).unwrap()).unwrap();
-    assert_eq!(doc["payload"]["hook"]["unmatched"], json!(["Ghost"]));
-
-    // Asked again, it imports again rather than finding the entry current.
-    let out = index(&same.0);
-    assert!(String::from_utf8_lossy(&out.stdout).contains("tables.json: built"));
-}
-
 /// Three beacons for GermanyCW, one 4 m from where its degrees put it: the
 /// fit keeps it, and misses it by more than 2 m.
 fn beacons_off_by_4_m(root: &Path) {
@@ -859,12 +796,11 @@ fn check_refuses_an_id_the_install_lacks_naming_those_it_holds() {
 }
 
 #[test]
-fn check_fails_on_a_fit_over_two_meters_a_dropped_hook_and_unreadable_figures() {
+fn check_fails_on_a_fit_over_two_meters_and_unreadable_figures() {
     let t = install(false);
     let root = t.0.to_str().unwrap();
     let c = scratch();
     let cache = c.0.to_str().unwrap();
-    let h = hook("0.0.0.1");
     let args = [
         "--install",
         root,
@@ -873,13 +809,9 @@ fn check_fails_on_a_fit_over_two_meters_a_dropped_hook_and_unreadable_figures() 
         "--cache",
         cache,
     ];
-    let mut index = vec!["index", "--hook", h.0.to_str().unwrap()];
+    let mut index = vec!["index"];
     index.extend(args);
     assert!(run(&index).status.success());
-    // The hook's directory goes, and a new Lua file rebuilds the tables, so
-    // the import cannot be redone.
-    let hook_dir = h.0.display().to_string();
-    drop(h);
     beacons_off_by_4_m(&t.0);
     put(&c.0, "GermanyCW/validation.json", b"not json");
 
@@ -894,17 +826,12 @@ fn check_fails_on_a_fit_over_two_meters_a_dropped_hook_and_unreadable_figures() 
         .iter()
         .map(|p| p.as_str().unwrap())
         .collect();
-    assert_eq!(problems.len(), 3, "{problems:?}");
+    assert_eq!(problems.len(), 2, "{problems:?}");
     assert!(
         problems[0].contains("validation.json is not JSON"),
         "{problems:?}"
     );
     assert!(problems[1].contains("misses one by 2.67 m"), "{problems:?}");
-    assert!(
-        problems[2].starts_with("the hook's tables were dropped"),
-        "{problems:?}"
-    );
-    assert_eq!(v["tables"]["hook"]["dir"], hook_dir.as_str());
     assert_eq!(v["validation"], Value::Null);
 }
 

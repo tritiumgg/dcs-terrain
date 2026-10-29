@@ -18,7 +18,7 @@ use crate::classes::{Class, Row};
 use crate::decode::install::{self, Listed};
 use crate::decode::lua::tables::Crs;
 use crate::source::Refusal;
-use crate::source::install::{HORIZON, HookImport, Install, MAX_CRS_RESIDUAL_M, Tables};
+use crate::source::install::{HORIZON, Install, MAX_CRS_RESIDUAL_M, Tables};
 
 /// Everything `check` found about one terrain.
 #[derive(Debug, Clone, Serialize)]
@@ -88,7 +88,6 @@ pub struct TablesReport {
     pub lua_included: Vec<String>,
     /// Each name a Lua file read that nothing assigned.
     pub lua_unresolved: Vec<String>,
-    pub hook: Option<HookImport>,
 }
 
 /// The scenery classes: totals, the models placed most and the tallest.
@@ -200,11 +199,6 @@ pub fn check(
                         t.crs.n.unwrap_or(0)
                     ));
                 }
-                if let Some(why) = t.hook.as_ref().and_then(|h| h.dropped.clone()) {
-                    report
-                        .problems
-                        .push(format!("the hook's tables were dropped: {why}"));
-                }
                 report.tables = Some(tables_report(t));
             }
             Err(e) => report.problems.push(e.0),
@@ -251,7 +245,6 @@ fn tables_report(t: Tables) -> TablesReport {
         crs: t.crs,
         lua_included: t.lua_included,
         lua_unresolved: t.lua_unresolved,
-        hook: t.hook,
     }
 }
 
