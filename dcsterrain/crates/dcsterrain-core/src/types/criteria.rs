@@ -165,6 +165,25 @@ pub enum WaterClass {
     River,
 }
 
+impl WaterClass {
+    /// In the order of their codes in the `water` layer.
+    pub const ALL: [WaterClass; 4] = [
+        WaterClass::Land,
+        WaterClass::Lake,
+        WaterClass::Sea,
+        WaterClass::River,
+    ];
+
+    pub fn code(self) -> u8 {
+        self as u8
+    }
+
+    /// The class the `water` layer codes as `code`.
+    pub fn of_code(code: u8) -> Option<WaterClass> {
+        WaterClass::ALL.get(usize::from(code)).copied()
+    }
+}
+
 /// The `cover` layer's classes by name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -179,6 +198,18 @@ pub enum CoverClass {
 }
 
 impl CoverClass {
+    pub fn of(cover: Cover) -> CoverClass {
+        match cover {
+            Cover::Plain => CoverClass::Plain,
+            Cover::Field => CoverClass::Field,
+            Cover::Forest => CoverClass::Forest,
+            Cover::Town => CoverClass::Town,
+            Cover::Beach => CoverClass::Beach,
+            Cover::Runway => CoverClass::Runway,
+            Cover::Water => CoverClass::Water,
+        }
+    }
+
     pub fn cover(self) -> Cover {
         match self {
             CoverClass::Plain => Cover::Plain,
@@ -210,6 +241,19 @@ pub enum TpiClass {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn classes_round_trip_through_their_layer_codes() {
+        for (k, w) in WaterClass::ALL.into_iter().enumerate() {
+            assert_eq!(usize::from(w.code()), k);
+            assert_eq!(WaterClass::of_code(w.code()), Some(w));
+        }
+        assert_eq!(WaterClass::of_code(4), None);
+        assert_eq!(serde_json::to_value(WaterClass::River).unwrap(), "river");
+        for c in Cover::ALL {
+            assert_eq!(CoverClass::of(c).cover(), c);
+        }
+    }
 
     #[test]
     fn a_criterion_is_a_name_and_its_params() {

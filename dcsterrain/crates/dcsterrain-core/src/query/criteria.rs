@@ -36,7 +36,7 @@ use crate::grid::{Grid, Window, box_distance};
 use crate::horizon;
 use crate::layers::{Cells, DISTANCE_CAP_M, Derived, Raster, TPI_300, TPI_2000, Target, derive};
 use crate::source::{Layer, Refusal, Source};
-use crate::types::{Criterion, Footprint, Issue, Point3, Term, TpiClass, WaterClass};
+use crate::types::{Criterion, Footprint, Issue, Point3, Term, TpiClass};
 
 /// Sites evaluated in full before the order of the per-site tests is fixed
 /// from the share of them each test failed.
@@ -293,15 +293,9 @@ fn compile(
             }
             Criterion::SurfaceIn { classes } => {
                 nonempty(classes.len(), "classes", &mut issues);
-                let code = |w: &WaterClass| match w {
-                    WaterClass::Land => 0,
-                    WaterClass::Lake => 1,
-                    WaterClass::Sea => 2,
-                    WaterClass::River => 3,
-                };
                 Kind::Codes {
                     layer: Layer::Water,
-                    allowed: classes.iter().fold(0, |m, w| m | 1 << code(w)),
+                    allowed: classes.iter().fold(0, |m, w| m | 1 << w.code()),
                 }
             }
             Criterion::SurfaceEnumIn { values } => {
