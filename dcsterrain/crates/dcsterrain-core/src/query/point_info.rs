@@ -27,7 +27,7 @@ fn compass(bearing: f64) -> &'static str {
 }
 
 /// "6 km NE of Zugdidi": hundreds of meters inside 950 m, whole kilometers
-/// from there, where the hundreds round to one.
+/// from there, each rounded half up, where the hundreds round to one.
 fn describe(name: &str, distance: f64, compass: &str) -> String {
     if distance < AT_TOWN_M {
         return format!("at {name}");
@@ -35,7 +35,7 @@ fn describe(name: &str, distance: f64, compass: &str) -> String {
     let far = if distance < 950.0 {
         format!("{:.0} m", (distance / 100.0).round() * 100.0)
     } else {
-        format!("{:.0} km", distance / 1000.0)
+        format!("{:.0} km", (distance / 1000.0).round())
     };
     format!("{far} {compass} of {name}")
 }
@@ -74,9 +74,21 @@ pub fn point_info(terrain: &Terrain, q: PointInfoRequest) -> Result<PointInfoRes
             &format!("points.{k}"),
         )]);
     }
-    let pts: Vec<[f64; 2]> = q.points.iter().map(|p| [p.x, p.z]).collect();
     let tables = src.tables().map_err(refused)?;
     let tm = tables.crs.tmerc();
+    let pts: Vec<[f64; 2]> = q.points.iter().map(|p| [p.x, p.z]).collect();
+    let latlon: Vec<(f64, f64)> = pts.iter().map(|p| tm.to_latlon(p[0], p[1])).collect();
+    // So far from the terrain that the projection gives no position.
+    if let Some(k) = latlon
+        .iter()
+        .position(|(lat, lon)| !(lat.is_finite() && lon.is_finite()))
+    {
+        return Err(vec![Issue::new(
+            "invalid_point",
+            "the terrain's projection has no position this far out",
+            &format!("points.{k}"),
+        )]);
+    }
     let ground = src.points(&pts).map_err(refused)?;
     let mut capped = false;
     let slope = derived_values(src, Derived::Slope, &pts, &mut capped)?;
@@ -87,7 +99,7 @@ pub fn point_info(terrain: &Terrain, q: PointInfoRequest) -> Result<PointInfoRes
         let from = (p[0], p[1]);
         let g = ground[k];
         let road = edges(src, KIND_ROAD, from, 1)?.pop();
-        let (lat, lon) = tm.to_latlon(p[0], p[1]);
+        let (lat, lon) = latlon[k];
         out.push(PointInfo {
             x: p[0],
             z: p[1],
@@ -307,6 +319,8 @@ mod tests {
         assert_eq!(describe("Zugdidi", 60.0, "E"), "100 m E of Zugdidi");
         assert_eq!(describe("Zugdidi", 940.0, "S"), "900 m S of Zugdidi");
         assert_eq!(describe("Zugdidi", 960.0, "S"), "1 km S of Zugdidi");
+        assert_eq!(describe("Zugdidi", 1500.0, "S"), "2 km S of Zugdidi");
+        assert_eq!(describe("Zugdidi", 2500.0, "S"), "3 km S of Zugdidi");
         assert_eq!(describe("Zugdidi", 6200.0, "NE"), "6 km NE of Zugdidi");
     }
 
@@ -347,6 +361,11 @@ mod tests {
         let bad = point_info(&t, q).unwrap_err().remove(0);
         assert_eq!(
             (bad.code.as_str(), bad.path.as_str()),
+            ("invalid_point", "points.1")
+        );
+        let far = issue(json!({"points": [{"x": 0, "z": 0}, {"x": 1e15, "z": 1e15}]}));
+        assert_eq!(
+            (far.code.as_str(), far.path.as_str()),
             ("invalid_point", "points.1")
         );
     }
