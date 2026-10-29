@@ -11,6 +11,7 @@ use crate::decode::rn4::{KIND_RAIL, KIND_ROAD};
 use crate::decode::scn5::Pool;
 use crate::grid::{Grid, Window};
 use crate::horizon;
+use crate::roads::{Edge, Graph};
 use crate::source::{Cover, Layer, Refusal, Source};
 
 /// How far a distance searches when the asker names no maximum.
@@ -599,42 +600,51 @@ fn distance(
 /// The cells of `win` that an edge of `kind` passes through.
 fn crossed(src: &(impl Source + ?Sized), kind: u8, win: Cells) -> Result<Vec<bool>, Refusal> {
     let g = src.grid();
-    let [x0, z0, x1, z1] = win.bounds(&g);
-    let mut seeds = vec![false; win.len()];
     let graph = src.road_graph()?;
-    for e in graph.edges.iter().filter(|e| e.kind == kind) {
-        let line = graph.line(e);
-        let meets = line
-            .iter()
-            .fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| {
-                let (x, z) = (f64::from(p[0]), f64::from(p[1]));
-                [b[0].min(x), b[1].min(z), b[2].max(x), b[3].max(z)]
-            });
-        if meets[0] > x1 || meets[2] < x0 || meets[1] > z1 || meets[3] < z0 {
-            continue;
-        }
-        // In cells from the window's corner.
-        let c = f64::from(g.cell_size);
-        let at = |p: &[f32; 2]| {
-            [
-                (f64::from(p[0]) - g.origin_x) / c - win.row0 as f64,
-                (f64::from(p[1]) - g.origin_z) / c - win.col0 as f64,
-            ]
-        };
-        let mut mark = |r: i64, k: i64| {
-            if (0..i64::from(win.rows)).contains(&r) && (0..i64::from(win.cols)).contains(&k) {
-                seeds[r as usize * win.cols as usize + k as usize] = true;
-            }
-        };
-        if let [p] = line {
-            let [r, k] = at(p);
-            mark(r.floor() as i64, k.floor() as i64);
-        }
-        for s in line.windows(2) {
-            walk(at(&s[0]), at(&s[1]), &mut mark);
-        }
-    }
+    let mut seeds = vec![false; win.len()];
+    // A cell wider, so that no rounding in placing a point in a cell can
+    // leave out an edge that marks one.
+    let c = f64::from(g.cell_size);
+    let [x0, z0, x1, z1] = win.bounds(&g);
+    graph.edges_near(kind, [x0 - c, z0 - c, x1 + c, z1 + c], &mut |i| {
+        cross(&g, win, graph, &graph.edges[i], &mut seeds);
+    });
     Ok(seeds)
+}
+
+/// Marks in `seeds` the cells of `win` that `e` passes through.
+fn cross(g: &Grid, win: Cells, graph: &Graph, e: &Edge, seeds: &mut [bool]) {
+    let [x0, z0, x1, z1] = win.bounds(g);
+    let line = graph.line(e);
+    let meets = line
+        .iter()
+        .fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| {
+            let (x, z) = (f64::from(p[0]), f64::from(p[1]));
+            [b[0].min(x), b[1].min(z), b[2].max(x), b[3].max(z)]
+        });
+    if meets[0] > x1 || meets[2] < x0 || meets[1] > z1 || meets[3] < z0 {
+        return;
+    }
+    // In cells from the window's corner.
+    let c = f64::from(g.cell_size);
+    let at = |p: &[f32; 2]| {
+        [
+            (f64::from(p[0]) - g.origin_x) / c - win.row0 as f64,
+            (f64::from(p[1]) - g.origin_z) / c - win.col0 as f64,
+        ]
+    };
+    let mut mark = |r: i64, k: i64| {
+        if (0..i64::from(win.rows)).contains(&r) && (0..i64::from(win.cols)).contains(&k) {
+            seeds[r as usize * win.cols as usize + k as usize] = true;
+        }
+    };
+    if let [p] = line {
+        let [r, k] = at(p);
+        mark(r.floor() as i64, k.floor() as i64);
+    }
+    for s in line.windows(2) {
+        walk(at(&s[0]), at(&s[1]), &mut mark);
+    }
 }
 
 /// Calls `f` with every cell the segment from `a` to `b` passes through,
@@ -1377,6 +1387,34 @@ mod tests {
         walk([2.5, 0.5], [2.5, 3.5], &mut |i, j| got.push((i, j)));
         walk([7.2, 7.2], [7.9, 7.1], &mut |i, j| got.push((i, j)));
         assert_eq!(got, [(2, 0), (2, 1), (2, 2), (2, 3), (7, 7)]);
+    }
+
+    #[test]
+    fn crossed_marks_what_a_pass_over_every_edge_marks() {
+        let mut p = placed();
+        let mut u = crate::roads::tests::Unit(11);
+        let o = p.synth.form().abs(3000.0, 3000.0);
+        p.roads = crate::roads::tests::random_graph(&mut u, [o.0, o.1], 0.5);
+        let g = p.grid();
+        let span = 44_000.0 / C;
+        let mut marked = 0;
+        for _ in 0..200 {
+            let win = Cells {
+                row0: (u.next() * span) as i64 - 50,
+                col0: (u.next() * span) as i64 - 50,
+                rows: 1 + (u.next() * 300.0) as u32,
+                cols: 1 + (u.next() * 300.0) as u32,
+            };
+            for kind in [KIND_ROAD, KIND_RAIL] {
+                let mut want = vec![false; win.len()];
+                for e in p.roads.edges.iter().filter(|e| e.kind == kind) {
+                    cross(&g, win, &p.roads, e, &mut want);
+                }
+                assert_eq!(crossed(&p, kind, win).unwrap(), want, "{win:?} {kind}");
+                marked += want.iter().filter(|&&v| v).count();
+            }
+        }
+        assert!(marked > 10_000, "only {marked} cells marked");
     }
 
     #[test]
