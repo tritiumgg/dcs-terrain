@@ -1,5 +1,17 @@
 {
   "$defs": {
+    "AirdromeRef": {
+      "anyOf": [
+        {
+          "format": "int64",
+          "type": "integer"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "An airdrome as a request names it: a number is its id; a string is its\n`name_id` or, where no `name_id` matches, its id written in digits."
+    },
     "Alternative": {
       "description": "One alternative: a full route, and how it relates to the others.",
       "properties": {
@@ -896,7 +908,7 @@
           "type": "object"
         },
         {
-          "description": "Distance to the nearest airdrome, or to `airdrome_id` when given.",
+          "description": "Distance to the nearest airdrome, or to `airdrome` when given: its id\nas a number, or its `name_id`.",
           "properties": {
             "name": {
               "const": "dist_airdrome_band",
@@ -904,11 +916,14 @@
             },
             "params": {
               "properties": {
-                "airdrome_id": {
-                  "format": "int64",
-                  "type": [
-                    "integer",
-                    "null"
+                "airdrome": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AirdromeRef"
+                    },
+                    {
+                      "type": "null"
+                    }
                   ]
                 },
                 "max": {
@@ -2212,9 +2227,8 @@
           "properties": {
             "AirdromeBand": {
               "properties": {
-                "airdrome_id": {
-                  "format": "int64",
-                  "type": "integer"
+                "airdrome": {
+                  "$ref": "#/$defs/AirdromeRef"
                 },
                 "max_dist": {
                   "format": "double",
@@ -2226,7 +2240,7 @@
                 }
               },
               "required": [
-                "airdrome_id",
+                "airdrome",
                 "min_dist",
                 "max_dist"
               ],

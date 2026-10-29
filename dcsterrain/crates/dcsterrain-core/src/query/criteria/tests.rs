@@ -237,7 +237,7 @@ fn dist_airdrome_band_passes_near_the_runway() {
     );
     assert!((y.value - 1000.0).abs() < 1e-6, "{y:?}");
     let c = criterion(json!({"name": "dist_airdrome_band",
-                             "params": {"min": 0, "max": 3000, "airdrome_id": 99}}));
+                             "params": {"min": 0, "max": 3000, "airdrome": 99}}));
     let e = evaluate(synth(), &[plain()], &square(20.0), &[c], Mode::Every).unwrap_err();
     assert_eq!(e[0].code, "unknown_airdrome");
 }

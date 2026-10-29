@@ -1,8 +1,10 @@
 //! A request's region as its bounding box and a membership test.
 
 use super::refused;
+use crate::decode::lua::tables::named;
 use crate::source::Source;
-use crate::types::{Issue, Region};
+use crate::source::install::{AirdromeRow, Tables};
+use crate::types::{AirdromeRef, Issue, Region};
 
 /// A region ready to test: its box, min x, min z, max x, max z, and its
 /// shape within the box.
@@ -198,18 +200,19 @@ pub fn resolve(src: &dyn Source, r: &Region, path: &str) -> Result<Area, Vec<Iss
                 shape: Shape::Polygon(p.points.clone()),
             })
         }
-        &Region::AirdromeBand {
-            airdrome_id,
+        Region::AirdromeBand {
+            airdrome,
             min_dist,
             max_dist,
         } => {
+            let (min_dist, max_dist) = (*min_dist, *max_dist);
             if !finite(&[min_dist, max_dist]) || min_dist < 0.0 || min_dist > max_dist {
                 return Err(issue(
                     path,
                     "a band needs 0 <= min_dist <= max_dist, both finite",
                 ));
             }
-            let [x, z] = airdromes(src, Some(airdrome_id), &format!("{path}.airdrome_id"))?[0];
+            let [x, z] = airdromes(src, Some(airdrome), &format!("{path}.airdrome"))?[0];
             Ok(Area {
                 bbox: [x - max_dist, z - max_dist, x + max_dist, z + max_dist],
                 shape: Shape::Ring {
@@ -223,16 +226,34 @@ pub fn resolve(src: &dyn Source, r: &Region, path: &str) -> Result<Area, Vec<Iss
     }
 }
 
-/// The reference point of the airdrome `id`, or of every airdrome placed
-/// when none is named; the issue, at `path`, when there is none to give.
+/// The airdrome `r` names: a number is its id; a string is its `name_id`,
+/// spelled as the files spell it or, failing that, the one that differs from
+/// it only in case, and failing any, its id written in digits.
+pub(super) fn airdrome<'a>(tables: &'a Tables, r: &AirdromeRef) -> Option<&'a AirdromeRow> {
+    let all = &tables.airdromes;
+    let by_id = |id: i64| all.iter().find(|a| a.id == Some(id));
+    let name = match r {
+        AirdromeRef::Id(id) => return by_id(*id),
+        AirdromeRef::Name(name) => name,
+    };
+    if let Some(a) = named(all.iter().map(|a| (a.name_id.as_str(), a)), name) {
+        return Some(a);
+    }
+    let digits = !name.is_empty() && name.bytes().all(|c| c.is_ascii_digit());
+    digits.then(|| name.parse().ok()).flatten().and_then(by_id)
+}
+
+/// The reference point of the airdrome `r` names, or of every airdrome
+/// placed when none is named; the issue, at `path`, when there is none to
+/// give.
 pub(super) fn airdromes(
     src: &dyn Source,
-    id: Option<i64>,
+    r: Option<&AirdromeRef>,
     path: &str,
 ) -> Result<Vec<[f64; 2]>, Vec<Issue>> {
     let tables = src.tables().map_err(refused)?;
     let none = |message: String| vec![Issue::new("unknown_airdrome", &message, path)];
-    let Some(id) = id else {
+    let Some(r) = r else {
         let at: Vec<[f64; 2]> = tables
             .airdromes
             .iter()
@@ -245,14 +266,18 @@ pub(super) fn airdromes(
         }
         return Ok(at);
     };
-    let a = tables
-        .airdromes
-        .iter()
-        .find(|a| a.id == Some(id))
-        .ok_or_else(|| none(format!("no airdrome has the id {id}")))?;
+    let a = airdrome(tables, r).ok_or_else(|| {
+        none(match r {
+            AirdromeRef::Id(id) => format!("no airdrome has the id {id}"),
+            AirdromeRef::Name(n) => format!("no airdrome has the name_id or id `{n}`"),
+        })
+    })?;
     match (a.x, a.z) {
         (Some(x), Some(z)) => Ok(vec![[x, z]]),
-        _ => Err(none(format!("airdrome {id} has no runway to place it"))),
+        _ => Err(none(format!(
+            "airdrome {} has no runway to place it",
+            a.name_id
+        ))),
     }
 }
 
@@ -318,13 +343,30 @@ mod tests {
         let t = s.tables().unwrap();
         let (ax, az) = (t.airdromes[0].x.unwrap(), t.airdromes[0].z.unwrap());
         let ring = Region::AirdromeBand {
-            airdrome_id: synth::AIRDROME_ID.into(),
+            airdrome: AirdromeRef::Id(synth::AIRDROME_ID.into()),
             min_dist: 1000.0,
             max_dist: 2000.0,
         };
         let r = resolve(&s, &ring, "region").unwrap();
         assert!(r.contains(ax + 1500.0, az) && !r.contains(ax + 500.0, az));
         assert!(!r.contains(ax + 1500.0, az + 1500.0));
+    }
+
+    #[test]
+    fn an_id_in_digits_and_a_name_id_name_the_same_airdrome() {
+        let s = synth();
+        let t = s.tables().unwrap();
+        let name = |n: &str| airdrome(t, &AirdromeRef::Name(n.into())).map(|a| &a.name_id);
+        let id = synth::AIRDROME_ID.to_string();
+        let want = Some(&t.airdromes[0].name_id);
+        assert_eq!(name(synth::AIRDROME_NAME_ID), want);
+        assert_eq!(name(&id), want);
+        assert_eq!(name(&synth::AIRDROME_NAME_ID.to_lowercase()), want);
+        let by_id = airdrome(t, &AirdromeRef::Id(synth::AIRDROME_ID.into()));
+        assert_eq!(by_id.map(|a| &a.name_id), want);
+        for n in ["99", "", "+1", "Nowhere"] {
+            assert_eq!(name(n), None, "{n}");
+        }
     }
 
     #[test]
@@ -349,7 +391,7 @@ mod tests {
         };
         assert_eq!(code(nan), "invalid_region");
         let band = Region::AirdromeBand {
-            airdrome_id: 99,
+            airdrome: AirdromeRef::Id(99),
             min_dist: 0.0,
             max_dist: 1.0,
         };

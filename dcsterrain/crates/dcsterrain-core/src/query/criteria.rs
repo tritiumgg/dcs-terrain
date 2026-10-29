@@ -368,13 +368,10 @@ fn compile(
                     test: Test::Beyond { m },
                 }
             }
-            &Criterion::DistAirdromeBand {
-                min,
-                max,
-                airdrome_id,
-            } => {
+            Criterion::DistAirdromeBand { min, max, airdrome } => {
+                let (min, max) = (*min, *max);
                 band(min, max, &mut issues);
-                match airdromes(src, airdrome_id, &at("airdrome_id")) {
+                match airdromes(src, airdrome.as_ref(), &at("airdrome")) {
                     Ok(at) => Kind::Airdrome { at, min, max },
                     Err(mut i) => {
                         issues.append(&mut i);

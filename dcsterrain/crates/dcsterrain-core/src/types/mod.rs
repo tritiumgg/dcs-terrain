@@ -42,10 +42,19 @@ pub enum Region {
     Polygon(Polygon),
     /// The ring between two distances from an airdrome's reference point.
     AirdromeBand {
-        airdrome_id: i64,
+        airdrome: AirdromeRef,
         min_dist: f64,
         max_dist: f64,
     },
+}
+
+/// An airdrome as a request names it: a number is its id; a string is its
+/// `name_id` or, where no `name_id` matches, its id written in digits.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum AirdromeRef {
+    Id(i64),
+    Name(String),
 }
 
 /// A simple polygon as `[x, z]` vertices, closed by its first point.
@@ -180,9 +189,16 @@ mod tests {
             {"Box": {"min_x": 0, "min_z": 1, "max_x": 2, "max_z": 3}},
             {"Circle": {"x": 1, "z": 2, "radius": 3}},
             {"Polygon": {"points": [[0, 0], [1, 0], [0, 1]]}},
-            {"AirdromeBand": {"airdrome_id": 22, "min_dist": 5000, "max_dist": 20000}},
+            {"AirdromeBand": {"airdrome": 22, "min_dist": 5000, "max_dist": 20000}},
+            {"AirdromeBand": {"airdrome": "Batumi", "min_dist": 5000, "max_dist": 20000}},
         ]))
         .unwrap();
+        let named = |r: &Region| match r {
+            Region::AirdromeBand { airdrome, .. } => airdrome.clone(),
+            _ => unreachable!(),
+        };
+        assert_eq!(named(&regions[3]), AirdromeRef::Id(22));
+        assert_eq!(named(&regions[4]), AirdromeRef::Name("Batumi".into()));
         assert_eq!(
             regions[0],
             Region::Box(BoundingBox {

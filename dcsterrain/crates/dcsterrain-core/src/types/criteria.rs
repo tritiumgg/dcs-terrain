@@ -4,7 +4,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{Observer, Point3};
+use super::{AirdromeRef, Observer, Point3};
 use crate::source::Cover;
 
 /// One criterion, written `{"name": "slope_max", "params": {"deg": 8}}`.
@@ -57,12 +57,13 @@ pub enum Criterion {
     DistWaterMin {
         m: f64,
     },
-    /// Distance to the nearest airdrome, or to `airdrome_id` when given.
+    /// Distance to the nearest airdrome, or to `airdrome` when given: its id
+    /// as a number, or its `name_id`.
     DistAirdromeBand {
         min: f64,
         max: f64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        airdrome_id: Option<i64>,
+        airdrome: Option<AirdromeRef>,
     },
     /// Scenery objects of `class` within `radius`, at most `max`.
     SceneryMax {
