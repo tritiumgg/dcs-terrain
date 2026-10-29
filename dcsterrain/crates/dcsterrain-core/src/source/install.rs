@@ -37,6 +37,10 @@ pub const TILE_COUNT: usize = 256;
 /// Tiles rasterized together: a few for each core, and few enough that the
 /// blocks under them, all held at once, stay a small part of the terrain.
 const BAND: usize = 64;
+/// The most the blocks under one band may take to read, every subset
+/// included: a band over blocks this large is cut shorter, so a terrain of
+/// large blocks holds no more of them at once than one of small blocks.
+const BAND_READ_BYTES: u64 = 48 << 20;
 /// Fewer blocks to prepare or tiles to rasterize than this are done on the
 /// calling thread: handing out one costs more than it saves, and the first
 /// hand-out of a process starts the threads.
@@ -494,6 +498,37 @@ impl Install {
         self.under(x0, x1, z0, z1)
     }
 
+    /// `tiles` cut into runs, each its first tile's index and its tiles: at
+    /// most `BAND` tiles, and no more than `BAND_READ_BYTES` of blocks under
+    /// them unless a single tile needs more.
+    fn bands<'t>(&self, tiles: &'t [(u32, u32)]) -> Vec<(usize, &'t [(u32, u32)])> {
+        let mut out = Vec::new();
+        let (mut start, mut bytes) = (0, 0);
+        let mut seen: Vec<usize> = Vec::new();
+        for (k, &(tx, tz)) in tiles.iter().enumerate() {
+            let under = self.tile_under(tx, tz);
+            let add: u64 = (under.iter())
+                .filter(|i| !seen.contains(i))
+                .map(|&i| self.toc.blocks[i].read_len())
+                .sum();
+            if k > start && (k - start == BAND || bytes + add > BAND_READ_BYTES) {
+                out.push((start, &tiles[start..k]));
+                (start, bytes) = (k, 0);
+                seen.clear();
+            }
+            for i in under {
+                if !seen.contains(&i) {
+                    bytes += self.toc.blocks[i].read_len();
+                    seen.push(i);
+                }
+            }
+        }
+        if start < tiles.len() {
+            out.push((start, &tiles[start..]));
+        }
+        out
+    }
+
     /// Blocks `ids`, distinct, in order: those held as they are, the rest
     /// read and prepared on every core when there are enough of them to pay
     /// for it. Each is prepared once, by one thread.
@@ -551,7 +586,7 @@ impl Source for Install {
     /// each tile once, and keeps the blocks the next band shares with it.
     fn tiles(&self, layer: Layer, tiles: &[(u32, u32)], f: &mut EachTile) -> Result<(), Refusal> {
         let mut kept: HashMap<usize, Arc<Prepared>> = HashMap::new();
-        for (n, band) in tiles.chunks(BAND).enumerate() {
+        for (at, band) in self.bands(tiles) {
             let mut got: Vec<Option<Arc<Tile>>> = {
                 let mut held = self.tiles.lock().unwrap();
                 band.iter().map(|t| held.get(t)).collect()
@@ -585,7 +620,7 @@ impl Source for Install {
                 }
             }
             for (k, t) in got.into_iter().flatten().enumerate() {
-                f(n * BAND + k, &t.layer(layer))?;
+                f(at + k, &t.layer(layer))?;
             }
         }
         Ok(())

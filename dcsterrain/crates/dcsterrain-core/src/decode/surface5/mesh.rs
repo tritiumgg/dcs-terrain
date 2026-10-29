@@ -156,6 +156,19 @@ impl BlockInfo {
     pub fn world_box(&self) -> [f64; 4] {
         world_box(self.t, self.bbox)
     }
+
+    /// The bytes reading the block with every subset takes: what a caller
+    /// holding many prepared blocks at once can bound itself by.
+    pub fn read_len(&self) -> u64 {
+        let arrays = [
+            Some(self.tritype),
+            Some(self.tri),
+            Some(self.pbase),
+            self.depth,
+        ];
+        let subsets = self.subsets.iter().map(|s| s.base.size + s.tri.size);
+        arrays.iter().flatten().map(|a| a.size).sum::<u64>() + subsets.sum::<u64>()
+    }
 }
 
 fn world_box(t: [f32; 3], bbox: [f32; 6]) -> [f64; 4] {
