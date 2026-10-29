@@ -134,10 +134,12 @@ pub fn exact(pieces: &[Piece], a: [f64; 3], b: [f64; 3]) -> Sight {
 /// seen from an eye at altitude `eye` at its near end, over the mesh
 /// triangles `pieces` that `Source::along` found under it, or infinity
 /// when the ground at the eye rises over it. Exact, as `exact` is: the
-/// line from the eye clears the ground at `t` when the target stands at or
-/// above `eye + (ground(t) − eye) / t`, which over one triangle's plane is
-/// monotonic in `t`, so its greatest is at a crossing. The ends' own
-/// ground is left to the caller. The world is flat.
+/// line from the eye clears the ground at `t`, as `exact` judges it, when
+/// the target stands at or above `eye + (ground(t) − eye − tolerance) / t`;
+/// half the tolerance is taken, so that rounding never blocks a target at
+/// the floor. Over one triangle's plane the bound is monotonic in `t`, so
+/// its greatest is at a crossing. The ends' own ground is left to the
+/// caller. The world is flat.
 pub fn floor(pieces: &[Piece], eye: f64) -> f64 {
     let mut floor = f64::NEG_INFINITY;
     spans(pieces, |s, e, ground| {
@@ -148,7 +150,7 @@ pub fn floor(pieces: &[Piece], eye: f64) -> f64 {
         // the far end of the span bounds it.
         for t in [s, e] {
             if t > 0.0 {
-                floor = floor.max(eye + (ground(t) - eye) / t);
+                floor = floor.max(eye + (ground(t) - eye - BLOCK_TOLERANCE_M / 2.0) / t);
             }
         }
     });
@@ -228,14 +230,14 @@ mod tests {
         // From 101 m, a line grazing the 100 m crest halfway drops 1 m to
         // it and 2 m in all by the far end.
         let f = floor(&ridge(), 101.0);
-        assert!((f - 99.0).abs() < 1e-9, "{f}");
+        assert!((f - (99.0 - 1e-4)).abs() < 1e-9, "{f}");
         let to = |alt: f64| exact(&ridge(), [0.0, 0.0, 101.0], [1000.0, 0.0, alt]);
         assert_eq!(to(f).blocking, None);
-        assert!(to(f - 0.01).blocking.is_some());
+        assert!(to(f - 2e-4).blocking.is_some());
         // An eye under its own ground sees nothing; one on it sees the slope.
         assert_eq!(floor(&ridge(), -1.0), f64::INFINITY);
         let rising = [piece([0.0, 1.0], [0.0, 10.0], 1)];
-        assert!((floor(&rising, 0.0) - 10.0).abs() < 1e-9);
+        assert!((floor(&rising, 0.0) - (10.0 - 5e-5)).abs() < 1e-9);
         assert_eq!(floor(&[], 5.0), f64::NEG_INFINITY);
     }
 

@@ -16,10 +16,6 @@ use crate::types::{Issue, Point3, RouteSpan, UnmaskProfileRequest, UnmaskProfile
 /// The most samples one route may take: each is its own sightline.
 const SAMPLES_MAX: f64 = 100_000.0;
 
-/// How far under its floor a sample may be and still be seen, as `visible`
-/// lets a line pass that close over the ground.
-const TOLERANCE_M: f64 = 1e-4;
-
 /// A route's point, its altitude as it was given.
 #[derive(Clone, Copy)]
 enum Alt {
@@ -159,7 +155,7 @@ pub fn unmask_profile(
             *at,
             g.unwrap_or(f64::NEG_INFINITY),
         )?;
-        judged.push((*s, *at, alt, alt + TOLERANCE_M >= floor));
+        judged.push((*s, *at, alt, alt >= floor));
     }
 
     let first = judged.iter().find(|j| j.3);
