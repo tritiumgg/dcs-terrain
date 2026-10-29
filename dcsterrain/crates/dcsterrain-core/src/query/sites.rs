@@ -12,16 +12,16 @@
 //!
 //! What the answer is exact for, and what it is not:
 //!
-//! - It is exact on the lattice. Between lattice points nothing is judged,
-//!   so a site passing everywhere but on the lattice is not found, and the
-//!   best site found lies within `step / √2` of every point of its cell
-//!   of the lattice, the best among them included.
+//! - It is exact on the lattice. Between lattice points nothing is judged:
+//!   every point of the region lies within `step / √2` of a lattice point,
+//!   but a site that passes only between them is not found.
 //! - Greedy suppression keeps the best candidate, and every candidate kept
 //!   is the best of those `spacing` or more from all kept before it. It is
 //!   not the set of `limit` spaced candidates with the greatest total
 //!   score; finding that is NP-hard, and greedy reaches at least a fifth of
-//!   it, because no more than five candidates `spacing` apart fit within
-//!   `spacing` of one.
+//!   it, because no more than five candidates `spacing` apart fit nearer
+//!   than `spacing` to one, so each kept one stands in for at most five of
+//!   the best set, none scoring more than it.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
