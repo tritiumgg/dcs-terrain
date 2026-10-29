@@ -230,7 +230,7 @@ opening the install files it was derived from, except once after an update.
 | `roads.graph` | The `.rn4` has no spatial order: a 3.1 s scan on GermanyCW, and the water under 23 M samples | 8.6 MiB (Caucasus) to 137 MiB (GermanyCW) | 0.5 s (Caucasus) to 9.8 s (GermanyCW) |
 | `roads.betweenness` | Betweenness is global | 0.04 MiB (Caucasus) to 1.9 MiB (GermanyCW) | 0.4 s (Caucasus) to 29 s (GermanyCW) on two threads |
 | `places` | Settlements need every building on the terrain (§6.3) | 6–24 k rows, < 2 MiB | a whole objects-pool walk, 3.8 s (Caucasus) to 53 s (GermanyCW), plus 0.2–8 s grouping |
-| `horizon/` | 0.1–0.2 ms per site, 0.9–4 s per 20 × 20 km region on one core | up to 282 MiB (Caucasus) / ~720 MiB (Afghanistan) if every tile were touched | per tile, the first time a query touches it |
+| `horizon/` | 3.4–4.9 s per 20 × 20 km region on one core, 0.24 s for one cell in a new area (Caucasus) | 8.4 KiB a tile; about 290 MiB (Caucasus) / ~740 MiB (Afghanistan) if every tile were touched | per tile, the first time a query touches it; never by `index` |
 | `validation.json` | Written by the live validation sortie, not computed | KiB | — |
 
 ### 4.2 How
@@ -278,6 +278,14 @@ opening the install files it was derived from, except once after an update.
 - Index builds run at low priority on at most two threads; queries on one.
   `--threads` overrides both. The tool must not take the CPU from a DCS server
   beside it.
+- `horizon/` is a directory of one file per tile, named `<tx>-<tz>`, each
+  opening with the entry header and keyed on the surface file alone, so a
+  changed road or scene file leaves it. A tile is checked as an entry is,
+  against one stat of the surface file per process. It is written under a
+  temporary name in the terrain's directory and renamed into `horizon/`.
+  After an update a tile is re-stamped when it is next read, the surface
+  file's header read once for all. `cache list` reports the directory's
+  total size; `clear` deletes it with the rest.
 - **No SQLite.** The road graph beat packed road tables (2.5 ms vs 3.7 ms cold
   on Caucasus, 13 ms vs 47 ms on Germany), the scenery pool carries its own
   loose quadtree, and nothing else is tabular enough to need a database.
@@ -370,12 +378,28 @@ shrinks the region or the radius.
 
 ### 6.2 Horizon
 
-Per 200 m cell, the maximum elevation angle to the terrain in each of 32
-azimuth bins, for an observer 2 m above ground, out to 40 km. Computed per tile
-the first time a query touches it and cached in `horizon/`; `enclosure` is the
-mean over the bins. A first siting query in a new area pays 0.9–4 s on one core
-for a 20 × 20 km region, plus reading the surrounding window cold (not
-measured).
+Per 200 m cell (4 × 4 grid cells), the maximum elevation angle to the
+terrain in each of 32 azimuth bins, the first due north and the rest
+clockwise, for an observer 2 m above the ground at the cell's center, out to
+40 km. Each bin is one ray along its center line, sampled every 25 m,
+bilinear between the four cell centers around the sample; a sample with any
+of the four outside the mesh is passed over. An angle is coded in quarter
+degrees from −10° (0) to 53.5° (254), and 255 marks a cell whose center is
+outside the mesh. A max pyramid over the heights skips any square that cannot
+raise the angle found so far, which leaves the answer exactly what a march of
+every sample gives; a brute-force march on a small grid checks this.
+
+A horizon tile holds the 16 × 16 horizon cells of one grid tile, 8 KiB.
+Tiles are computed the first time a query touches them and cached in
+`horizon/`; up to 8 × 8 tiles share one window of heights, the tiles and
+40 km around them, about 9 MiB as 16-bit heights plus 12 MiB of pyramid. One
+call computes at most 64 tiles, about a 25 km square, and refuses more before
+computing anything, naming the count. `enclosure` is the mean of the bins in
+degrees, undefined where the horizon cell's center is outside the mesh. On
+Caucasus on 2.9.30.28738 a 20 × 20 km region around an airfield (54 tiles)
+first costs 3.4–4.9 s on one core, the low ground the slowest because little
+is skipped. Reading the heights in range cold takes 0.17 s of that. From the
+cache it costs 7–10 ms, and one cell in a new area costs 0.24 s.
 
 ### 6.3 Places
 
@@ -524,7 +548,7 @@ correctness rule: a miss is a decision about the target.
 | `exposure`, 10 sites of 20 km | ~1 s estimated | 3 s |
 | `find_sites` 20 × 20 km, geometric | 15–24 ms | 500 ms |
 | `find_sites` with one LOS criterion, 36 observers | not measured | 10 s |
-| `find_sites` with a horizon criterion, first touch | 0.9–4 s plus a cold window | 5 s, then 500 ms |
+| `find_sites` with a horizon criterion, first touch | 3.4–4.9 s for the horizon of a 20 × 20 km region, 7–10 ms once cached (Caucasus, 2.9.30.28738) | 5 s, then 500 ms |
 | `route` 50 km | 2.5 / 13 ms | 500 ms |
 | `low_level_route` 100 km, 10 sites | not prototyped, 1–3 s estimated | 5 s |
 | `validate_placements`, 1 000 placements | ~2 s cold on Germany estimated | 3 s |
@@ -583,8 +607,9 @@ Each names what settles it.
 4. **`visible` steps the 50 m raster**, 4–8 m off at p99 on steep ground,
    where grazing sightlines are decided; `radar_floor` inherits it. *Settles
    it:* N11, an exact sightline over the mesh.
-5. **Horizon cold cost** and the cache's growth under real use are not
-   measured. *Settles it:* N9.
+5. **The horizon cache's growth under real use** is not measured; every
+   tile of Caucasus would take about 290 MiB. The cold cost is measured
+   (§6.2). *Settles it:* the skill's use, watched through `cache list`.
 6. **One machine, one disk.** A hard disk or network share could be several
    times slower cold. *Settles it:* the opt-in benchmark on a user's disk.
 7. **macOS and Linux need the terrain's files**, 7 GB (Caucasus) to 72 GB
