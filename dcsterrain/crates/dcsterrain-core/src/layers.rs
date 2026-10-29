@@ -61,6 +61,11 @@ pub enum Derived {
     /// holding the cell; undefined where that cell's center is outside the
     /// mesh. Reads the horizon tiles, computing those not yet made.
     Enclosure,
+    /// Degrees, horizon bin `bin` of the horizon cell holding the cell: the
+    /// highest angle to the terrain over that 32nd of the compass, bin 0
+    /// centered on north and the rest clockwise; undefined as `Enclosure`
+    /// is.
+    Horizon { bin: u8 },
 }
 
 /// What a distance is measured to.
@@ -263,7 +268,16 @@ pub fn derive(src: &(impl Source + ?Sized), d: Derived, at: Cells) -> Result<Ras
             raster(share.collect())
         }
         Derived::Distance { to, cap } => distance(src, to, within, cap, at)?,
-        Derived::Enclosure => raster(enclosure(src, at)?),
+        Derived::Enclosure => raster(horizon_cells(src, at, None)?),
+        Derived::Horizon { bin } if usize::from(bin) < horizon::BINS => {
+            raster(horizon_cells(src, at, Some(usize::from(bin)))?)
+        }
+        Derived::Horizon { bin } => {
+            return Err(Refusal(format!(
+                "there are {} horizon bins, numbered from 0, not {bin}",
+                horizon::BINS
+            )));
+        }
     })
 }
 
@@ -282,9 +296,13 @@ fn span(g: &Grid, at: Cells) -> f64 {
     r.hypot(c) * f64::from(g.cell_size)
 }
 
-/// The mean of each cell's horizon bins, from the horizon tiles under the
-/// cells on the grid.
-fn enclosure(src: &(impl Source + ?Sized), at: Cells) -> Result<Vec<f32>, Refusal> {
+/// Each cell's horizon bin `bin`, or the mean of its bins when none is
+/// named, from the horizon tiles under the cells on the grid.
+fn horizon_cells(
+    src: &(impl Source + ?Sized),
+    at: Cells,
+    bin: Option<usize>,
+) -> Result<Vec<f32>, Refusal> {
     let g = src.grid();
     let ts = i64::from(g.tile_size);
     let span = i64::from(horizon::SPAN);
@@ -306,15 +324,18 @@ fn enclosure(src: &(impl Source + ?Sized), at: Cells) -> Result<Vec<f32>, Refusa
     let tiles: Vec<(u32, u32)> = (tx0..=(r1 - 1) / ts)
         .flat_map(|tx| (tz0..tz0 + ntz).map(move |tz| (tx as u32, tz as u32)))
         .collect();
-    // Each horizon cell's mean, once.
+    // Each horizon cell's value, once.
     let means: Vec<Vec<f32>> = src
         .horizon(&tiles)?
         .iter()
         .map(|t| {
             t.chunks(horizon::BINS)
-                .map(|bins| {
-                    let deg: Option<f64> = bins.iter().map(|&b| horizon::degrees(b)).sum();
-                    deg.map_or(f32::NAN, |d| (d / horizon::BINS as f64) as f32)
+                .map(|bins| match bin {
+                    Some(b) => horizon::degrees(bins[b]).map_or(f32::NAN, |d| d as f32),
+                    None => {
+                        let deg: Option<f64> = bins.iter().map(|&b| horizon::degrees(b)).sum();
+                        deg.map_or(f32::NAN, |d| (d / horizon::BINS as f64) as f32)
+                    }
                 })
                 .collect()
         })
@@ -859,6 +880,14 @@ mod tests {
         let span = i64::from(horizon::SPAN);
         let n = i64::from(horizon::tile_cells(&g));
         let ts = i64::from(g.tile_size);
+        let binned: Vec<(u8, Raster)> = [0, 7, 31]
+            .map(|bin| {
+                (
+                    bin,
+                    derive(&s, Derived::Horizon { bin }, col.cells).unwrap(),
+                )
+            })
+            .into();
         let mut tiles = std::collections::HashMap::new();
         for (r, c) in each(col.cells) {
             let tile = ((r / ts) as u32, (c / ts) as u32);
@@ -874,7 +903,12 @@ mod tests {
                 1e-5,
                 &format!("({r}, {c})"),
             );
+            for (bin, one) in &binned {
+                let want = horizon::degrees(bins[usize::from(*bin)]).unwrap();
+                close(one.get(r, c).unwrap(), want, 1e-5, &format!("bin {bin}"));
+            }
         }
+        assert!(derive(&s, Derived::Horizon { bin: 32 }, col.cells).is_err());
 
         // Off the grid, and on it outside the mesh, it is undefined.
         let edge = derive(
