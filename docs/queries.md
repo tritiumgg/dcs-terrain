@@ -19,6 +19,9 @@ struct Observer { x: f64, z: f64, alt_agl: f64 }
 struct Footprint { width: f64, depth: f64, orientations_deg: Vec<f64> }   // default [0, 90]
 ```
 
+- A footprint at an orientation lies `depth` along the bearing it names, from
+  north towards east, and `width` across it: at 0°, depth runs north–south.
+
 - Coordinates are DCS x (north) and z (east) in meters.
 - Every `Region` becomes its bounding `Box` plus a membership test before any
   grid work; cells outside the test are skipped.
@@ -72,12 +75,19 @@ itself.
 
 `sample`, `chokepoints` and the criteria address layers by name: `height`,
 `water` (0 land, 1 lake, 2 sea, 3 river), `surface` (1 land, 3 water, 4 road,
-5 runway), `cover` (`forest`,
-`field`, `town`, `beach`, `runway`, `plain`, or water), `valid`, `slope`,
-`aspect`, `roughness`, `tpi_300`, `tpi_2000`, `dist_road`, `dist_rail`,
-`dist_water`, `dist_builtup`, `count_building`, `count_industrial`,
-`tree_density`, `enclosure`, and the horizon bins. Definitions are in
+5 runway), `cover` (1 plain, 2 field, 3 forest, 4 town, 5 beach, 6 runway,
+7 water), `valid`, `slope`, `aspect`, `roughness`, `tpi_300`, `tpi_2000`,
+`dist_road`, `dist_rail`, `dist_water`, `dist_builtup`, `count_building`,
+`count_industrial`, `tree_density`, `share_<cover>` (the share of a cover
+class, such as `share_forest`), `enclosure`, and the horizon bins
+`horizon_0` (north) to `horizon_31`, clockwise. Definitions are in
 `design.md` §6.
+
+The radius layers are measured within fixed radii: `count_building` and
+`count_industrial` within 1 km, a neighborhood; `tree_density` and the
+`share_<cover>` layers within 300 m, the ground about a site. A distance
+searches 5 km. A criterion that names its own radius or maximum uses it.
+
 
 ## 3. Operations from the original set
 
@@ -85,26 +95,36 @@ itself.
 
 Request: none. Response: the terrain id, build, fingerprint, extent, each terrain
 file with its size, the surface file's class and version (null for the
-others, whose headers opening does not read), the cache state of every
-entry, counts of airdromes, runways, stands, beacons, towns, nodes, road edges
-and scenery objects, and the validation figures if any.
+others, whose headers opening does not read), each cache entry's state
+(`current`, `missing` or `stale` with the reason) and size, counts of
+airdromes, runways, stands, beacons, towns and nodes from the tables, counts of
+road edges and scenery objects once the process has read them (null before,
+because reading them costs more than a `describe` may), and the validation
+figures if any.
 
 ### `sample`
 
 Request: either `region` with `step` (meters, at least the cell size), or
 `points: Vec<Point>`; and `layers`. Response: rows `{x, z, values: {layer:
-number|null}}` at lattice points inside the region, or one row per given point
-in order, capped by the `max_rows` request field (default 10 000; over the
-cap is an error). Regional `height` is bilinear, null where a weighted corner
-is `nodata`; other layers are nearest. Points take point mode. Points are read
-block by block, each mesh block prepared once and each point's results merged
-by rank, and returned in request order.
+number|null}}` at lattice points inside the region, `step` apart from its
+box's minimum corner, or one row per given point in order, capped by the
+`max_rows` request field (default 10 000; over the cap is an error); and
+`distance_capped`, true when a distance read as its cap. Regional `height` is
+bilinear, null where a weighted corner is `nodata`; other layers are nearest.
+At points, the ground layers take point mode and the derived layers the cell
+holding the point. Points, whether scattered or close together, read the mesh
+block by block: each block read once, each point's results merged by rank,
+and the rows returned in request order. A region reads the raster's tiles,
+each rasterized once from the blocks under it. A derived layer over
+scattered points is derived over the box around them all, or around each
+tile's points when that box passes about 50 km square.
 
 ### `geo`
 
 Request: `to_latlon: Vec<Point>` and/or `to_xz: Vec<{lat, lon}>`. Response:
-the converted lists in order, through the terrain's fitted projection, plus MGRS
-for `to_latlon`.
+the converted lists in order, through the terrain's fitted projection;
+`to_latlon` gives each position's MGRS reference to the meter, such as
+`38T KM 56436 80738`, null outside 80° S to 84° N.
 
 ### `score_site`
 
@@ -208,16 +228,21 @@ one edge and look the same to a player.
 
 Request: `kind: "road" | "rail" | "airdrome" | "town" | "node" | "beacon" |
 "scenery" | "place"`, `x, z`, `n` (default 1, max 50), `class` for scenery.
-Response: `Vec<{kind, id, name, x, z, distance}>`. Road and rail return the
-closest point on the nearest edge, its edge id and class.
+Response: `Vec<{kind, id, name, class, x, z, distance}>`, nearest first. Road
+and rail return the closest point on each nearest edge, the edge's index in
+the graph and its class. A node gives its red and blue sides as two results,
+of kind `node_red` and `node_blue`. Scenery returns each object's model as its
+name and its class; without `class` it finds every class but `effect`.
 
 ### `scenery_in`
 
-Request: `region`, or `footprint_at {x, z, footprint, orientation_deg}`.
-Response: `{objects: [{id, model, class, x, z, alt, rotation_deg, obb_w,
-obb_d, height}], counts_by_class}`, exact OBB overlap for the footprint form,
-capped by `max_rows` (default 5 000; over is an error). `effect` objects are
-returned only when asked for by class.
+Request: `region`, or `footprint_at {x, z, footprint, orientation_deg}`;
+`classes`, a filter. Response: `{objects: [{id, model, class, x, z, alt,
+rotation_deg, obb_w, obb_d, height}], counts_by_class}` in id order: in a
+region, each object whose position lies in it; for a footprint, each whose
+turned model box meets it, edges touching included, among the objects within
+500 m of its box. Capped by `max_rows` (default 5 000; over is an error).
+`effect` objects are returned only when `classes` names them.
 
 ### `chokepoints`
 

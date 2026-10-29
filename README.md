@@ -16,8 +16,9 @@ your user cache directory.
 
 > **Not usable yet.** The project was redesigned to read the install directly,
 > and the query engine is being built. `list-terrains`, `check`, `cache`, `schema`
-> and `query ... describe` work today; every other operation is planned, kept
-> here so the shape is visible. Progress is in [docs/STATE.md](docs/STATE.md).
+> and the `query` operations `describe`, `sample`, `geo`, `nearest` and
+> `scenery_in` work today; every other operation is planned, kept here so the
+> shape is visible. Progress is in [docs/STATE.md](docs/STATE.md).
 
 ## Requirements
 
@@ -62,6 +63,19 @@ builds its cache, in about a second; later ones read it:
 dcsterrain query --terrain Caucasus describe
 ```
 
+Ask for layer values at points or on a lattice in a region, convert positions
+to latitude, longitude and MGRS, find the nearest road, airdrome, town, node,
+beacon or scenery object, or list the scenery in a region:
+
+```bash
+dcsterrain query --terrain Caucasus sample '{"points": [{"x": -281782, "z": 647279}], "layers": ["height", "slope", "dist_road"]}'
+```
+
+`dcsterrain schema` names every field, and
+[docs/queries.md](docs/queries.md) every layer. A query refuses a terrain
+whose projection fits its beacons more than 2 m off unless given
+`--allow-crs-residual`.
+
 Check what the tool reads of a terrain, file by file, with its cache, tables
 and scenery classes; it fails naming each file it cannot read:
 
@@ -76,8 +90,8 @@ of it, asking before the live validation figures.
 `dcsterrain index --terrain Caucasus` builds a cache ahead of time. `query`,
 `index` and `list-terrains` take `--cache <dir>` too. `index --hook <dir>`
 merges the airdrome fields only a running DCS knows, such as the ICAO code,
-from the optional hook in `extractor/`; `--allow-crs-residual` accepts a
-terrain whose projection fits its beacons more than 2 m off.
+from the optional hook in `extractor/`; `index` takes `--allow-crs-residual`
+as `query` does.
 
 Ask a siting question the same way, `find_sites` with its JSON (planned, not
 usable yet). The first question on a terrain will build its cache in seconds,
