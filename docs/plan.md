@@ -19,7 +19,8 @@ Kept from before the reset, tested, and not tasks here:
 - The projection table and fit (`crs.rs`), the request and response types
   (`types/`), the synthetic terrain's closed form (`synth/`).
 - The extract reader, kept as the opt-in test oracle.
-- The optional GameGUI hook (`extractor/`) with its offline Lua tests.
+- The optional GameGUI hook (`extractor/`) with its offline Lua tests, which
+  X1 removes (ADR 0005).
 
 ## Components
 
@@ -30,7 +31,7 @@ Kept from before the reset, tested, and not tasks here:
 | Q | Query operations and the command line | any |
 | S | The skill | any |
 | V | Live validation | Windows with DCS |
-| X | The optional hook | Windows with DCS |
+| X | Removing the optional hook | any |
 | R | Release and the user guide | any |
 | C | Scenery catalog review, a terrain at a time | an install, or its files copied |
 
@@ -60,6 +61,7 @@ Kept from before the reset, tested, and not tasks here:
 | N9 | Horizon tiles: lazy per-tile cache, `enclosure` from it | Brute-force ray march on a small grid; closed-form hill angle within 0.25°; first-touch and cached cost recorded on Caucasus | N2, N3 | agent, opt-in |
 | N10 | `dcsterrain check --install --terrain` | Passes on Caucasus; a renamed version field is refused by name | N3–N7 | agent, opt-in |
 | N11 | Exact sightline experiment: `visible` walking mesh triangle edges instead of half-cell raster steps | Cost and agreement against the raster recorded on Caucasus and Germany; whether to adopt it is an ADR | N3, Q2 | agent, opt-in |
+| N12 | Airdrome ids by position (ADR 0005): where `Radio.lua`'s label gives none, the `N` of the `airfieldN_k` beacons nearest the airdrome within 15 km, when all of them agree, then a `Radio.lua` entry's scene object within its extent. `AirdromeBand`'s and `dist_airdrome_band`'s `airdrome_id` becomes `airdrome`, and they and `airfield_info` take a number as an id and a string as a `name_id` or, failing any, an id in digits; the schema and its examples to match | Opt-in on 2.9.30.28738: Nevada at least 6 of 17 ids and PersianGulf 27 of 30, each equal to the `airdromeId` the install's shipped missions give that airdrome, and no id on another terrain changes; a tower join that disagrees with the missions anywhere is dropped; on `Synth`, an id named in digits and a `name_id` resolve to the same airdrome | N5 | agent, opt-in |
 
 ### Q: query operations
 
@@ -92,9 +94,9 @@ a valid RFC 7946 `FeatureCollection` whose features match its JSON response.
 |---|---|---|---|---|
 | S1 | A skill in the repository teaching an assistant with a shell which operation answers which question, by example, with batching, the provenance fields, `dcsterrain schema`, and the metric meanings. Source material: the pre-reset `docs/spec/using-the-data.md` and the worked tasks (commit `4b85bd0`), rewritten for the current operations | The worked tasks, asked as plain prompts of an assistant with the skill, reach the right operations; the FARP answer equals the direct `query` result | Q7 | agent |
 | V1 | `tools/validate/`: the live sortie through the bridge — point heights, `visible` against `terrain.isVisible`, route lengths against `findPathOnRoads`, MGRS against `coord.LLtoMGRS` — written to `validation.json` | Caucasus within the accuracy targets | Q7, N0 | live |
-| X1 | Strip the hook to `identity`, `config` and `tables`: delete the sweeps, the mission-pass transport and their tests; the control window loses the crop, grid and per-sweep controls | Offline Lua tests pass; a live run at the menu writes the tables and nothing else | — | agent, live |
+| X1 | Remove the hook (ADR 0005): `extractor/`, its Lua tests and CI workflow, the Lua 5.1 build and tasks, `index --hook` and the import in `tables.json`, and the `code`, `civilian`, `abandoned` and `class` fields; `tables.json` re-stamped after an update like the other entries; `CLAUDE.md` and the README to match | `mise run check` and `mise run docs` pass; `check` and `describe` answer on Caucasus with no hook field; nothing outside `docs/` names the hook | — | agent |
 | R1 | Release builds: static `dcsterrain` binaries for the three platforms on their own CI runners, attached to tags | The tagged Windows binary answers `query --terrain synth describe` on a machine without a toolchain, and so does the macOS one | Q7 | CI, live |
-| R2 | `docs/guide.md`: point the tool at an install, optionally import the hook's tables, ask a siting question, read the answer, and the failure modes. Written against real output | A newcomer answers one siting question following only the guide | Q7, S1 | live |
+| R2 | `docs/guide.md`: point the tool at an install, ask a siting question, read the answer, and the failure modes. Written against real output | A newcomer answers one siting question following only the guide | Q7, S1 | live |
 
 ### C: catalog review
 
@@ -131,7 +133,7 @@ How to review one terrain:
 
 | Milestone | Contains | Proof |
 |---|---|---|
-| MS1 Engine on the install | A1, N0–N7, N10, X1 | `query --terrain Caucasus describe` and `sample` answer from the install with no step before; every decoder passes its opt-in checks; `Synth` passes every grid test |
+| MS1 Engine on the install | A1, N0–N7, N10, N12, X1 | `query --terrain Caucasus describe` and `sample` answer from the install with no step before; every decoder passes its opt-in checks; `Synth` passes every grid test |
 | MS2 Queries | N8, N9, N11, Q1–Q15 | Every operation tested on `Synth`; opt-in benchmarks within the targets on Caucasus |
 | MS3 Assistant and release | S1, V1, R1, R2, C1 | An assistant with the skill answers the FARP example; live validation within target; release binaries; a guide a newcomer follows |
 
