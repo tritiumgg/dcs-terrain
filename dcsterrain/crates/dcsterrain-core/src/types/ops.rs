@@ -302,9 +302,9 @@ pub struct ViewshedResponse {
     /// The share of the cells within `radius` that have ground which are
     /// seen.
     pub visible_fraction: f64,
-    /// The outlines of the set cells, in DCS x and z, when `as_polygons` was
-    /// asked for: each polygon counterclockwise on a map, then the holes in
-    /// it clockwise.
+    /// The outlines of the set cells as `[x, z]`, north then east, when
+    /// `as_polygons` was asked for: each polygon counterclockwise on a map,
+    /// then the holes in it clockwise, so a hole is told by its winding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rings: Option<Vec<Polygon>>,
     /// The visible area as one `MultiPolygon`, with the observer, when

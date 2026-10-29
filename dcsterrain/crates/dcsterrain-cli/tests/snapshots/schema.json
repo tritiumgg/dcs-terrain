@@ -2932,7 +2932,7 @@
           "type": "number"
         },
         "rings": {
-          "description": "The outlines of the set cells, in DCS x and z, when `as_polygons` was\nasked for: each polygon counterclockwise on a map, then the holes in\nit clockwise.",
+          "description": "The outlines of the set cells as `[x, z]`, north then east, when\n`as_polygons` was asked for: each polygon counterclockwise on a map,\nthen the holes in it clockwise, so a hole is told by its winding.",
           "items": {
             "$ref": "#/$defs/Polygon"
           },

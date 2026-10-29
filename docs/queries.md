@@ -166,7 +166,8 @@ grid's origin, so at the cell size its cells are the grid's; `bits` is row
 major, rows running north, most significant bit first. A cell is set when its
 center lies within `radius` and a target `target_alt_agl` above its raster
 ground is seen; `visible_fraction` is the share of the cells within `radius`
-that have ground.
+that have ground, the cell holding the observer always among them. `rings`
+are `[x, z]`, exteriors counterclockwise on a map and holes clockwise.
 
 Radials are spaced to give one per mask cell on the outer ring, each stepped
 every half cell and keeping the steepest angle to the ground so far. A cell

@@ -91,6 +91,16 @@ pub fn viewshed(terrain: &Terrain, q: ViewshedRequest) -> Result<ViewshedRespons
         return Err(issues);
     }
 
+    // The observer first: on the mesh, its position is bounded, and so is
+    // every index below.
+    let Some(ground) = src.point(o.x, o.z).map_err(refused)? else {
+        return Err(vec![Issue::new(
+            "off_terrain",
+            "no mesh covers this point, so it has no ground to stand on",
+            "observer",
+        )]);
+    };
+
     // The mask, aligned to multiples of its cell from the grid's origin, so
     // at the cell size its cells are the grid's.
     let n = (q.radius / res).ceil();
@@ -111,7 +121,16 @@ pub fn viewshed(terrain: &Terrain, q: ViewshedRequest) -> Result<ViewshedRespons
     );
 
     // The heights out to the radius and a cell beyond, for the bilinear.
+    // Counted before any index is made, so no radius overflows one.
     let reach = q.radius + 2.0 * cell;
+    let span = (2.0 * reach / cell).floor() + 2.0;
+    if span * span > CELLS_MAX as f64 {
+        return Err(too_large(
+            "window of heights",
+            (span * span) as u64,
+            "shrink the radius",
+        ));
+    }
     let index = |v: f64, origin: f64| ((v - origin) / cell).floor() as i64;
     let (r_lo, r_hi) = (
         index(o.x - reach, g.origin_x),
@@ -121,25 +140,9 @@ pub fn viewshed(terrain: &Terrain, q: ViewshedRequest) -> Result<ViewshedRespons
         index(o.z - reach, g.origin_z),
         index(o.z + reach, g.origin_z),
     );
-    let (rows, cols) = ((r_hi - r_lo + 1) as u64, (c_hi - c_lo + 1) as u64);
-    if rows * cols > CELLS_MAX {
-        return Err(too_large(
-            "window of heights",
-            rows * cols,
-            "shrink the radius",
-        ));
-    }
-
-    let Some(ground) = src.point(o.x, o.z).map_err(refused)? else {
-        return Err(vec![Issue::new(
-            "off_terrain",
-            "no mesh covers this point, so it has no ground to stand on",
-            "observer",
-        )]);
-    };
+    let (rows, cols) = ((r_hi - r_lo + 1) as u32, (c_hi - c_lo + 1) as u32);
     let eye = ground.height + o.alt_agl;
-    let w =
-        Window::read(src, Layer::Height, r_lo, c_lo, rows as u32, cols as u32).map_err(refused)?;
+    let w = Window::read(src, Layer::Height, r_lo, c_lo, rows, cols).map_err(refused)?;
     let height = |x: f64, z: f64| w.value_at(&g, x, z);
 
     let step = cell / 2.0;
@@ -162,12 +165,14 @@ pub fn viewshed(terrain: &Terrain, q: ViewshedRequest) -> Result<ViewshedRespons
             let (x, z) = centre(r, c);
             let (dx, dz) = (x - o.x, z - o.z);
             let d = dx.hypot(dz);
-            if d > q.radius || height(x, z).is_none() {
+            // The cell holding the observer counts however small the radius.
+            let own = r == n && c == n;
+            if (d > q.radius && !own) || height(x, z).is_none() {
                 continue;
             }
             let i = r * side + c;
             // Too close for a step between: nothing stands in the way.
-            let last = (d / step).ceil() as u64 - 1;
+            let last = ((d / step).ceil() as u64).max(1) - 1;
             if last == 0 {
                 set(i);
                 seen += 1;
@@ -517,6 +522,26 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(e[0].code, "off_terrain");
+    }
+
+    #[test]
+    fn an_observer_on_a_cell_center_or_with_a_tiny_radius_sees_its_own_cell() {
+        let t = synth();
+        let (x, z) = (
+            f64::from(ORIGIN_X_M) + 20025.0,
+            f64::from(ORIGIN_Z_M) + 30025.0,
+        );
+        let q = |radius: f64, res: f64| {
+            json!({"observer": {"x": x, "z": z, "alt_agl": 2}, "radius": radius,
+                   "target_alt_agl": 2, "resolution": res})
+        };
+        let v = answer(&t, "viewshed", &q(1000.0, 50.0)).unwrap();
+        assert_eq!(v["visible_fraction"], 1.0);
+        let v = answer(&t, "viewshed", &q(10.0, 100.0)).unwrap();
+        assert_eq!(v["visible_fraction"], 1.0);
+        assert_eq!(v["width"], 3);
+        let e = answer(&t, "viewshed", &q(1e300, 1e300)).unwrap_err();
+        assert_eq!(e[0].code, "too_large");
     }
 
     #[test]
