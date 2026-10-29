@@ -73,7 +73,7 @@ fn series() -> Series {
 
 /// Northing and easting from the central meridian and the equator, with no
 /// false offsets.
-fn forward(lat_deg: f64, dlon_deg: f64) -> (f64, f64) {
+pub(crate) fn forward(lat_deg: f64, dlon_deg: f64) -> (f64, f64) {
     let s = series();
     let (phi, lam) = (lat_deg.to_radians(), dlon_deg.to_radians());
     let t = (phi.sin().atanh() - s.e * (s.e * phi.sin()).atanh()).sinh();

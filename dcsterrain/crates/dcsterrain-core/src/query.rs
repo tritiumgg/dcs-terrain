@@ -19,9 +19,13 @@ use crate::synth::Synth;
 use crate::types::{Issue, OPERATIONS, Provenance};
 
 mod describe;
+mod geo;
+mod mgrs;
 mod region;
 
 pub use describe::describe;
+pub use geo::geo;
+pub use mgrs::mgrs;
 pub use region::{Area, resolve};
 
 /// Every answer is on the 50 m grid.
@@ -77,6 +81,7 @@ type Handler = fn(&Terrain, &Value) -> Result<Value, Vec<Issue>>;
 /// The operations built so far, by the name `OPERATIONS` lists each under.
 const HANDLERS: &[(&str, Handler)] = &[
     ("describe", |t, r| run(t, r, describe)),
+    ("geo", |t, r| run(t, r, geo)),
 ];
 
 /// Reads the request as `Q`, answers it with `f`, and writes the answer.
