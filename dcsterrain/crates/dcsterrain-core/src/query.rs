@@ -22,11 +22,13 @@ mod describe;
 mod geo;
 mod mgrs;
 mod region;
+mod sample;
 
 pub use describe::describe;
 pub use geo::geo;
 pub use mgrs::mgrs;
 pub use region::{Area, resolve};
+pub use sample::sample;
 
 /// Every answer is on the 50 m grid.
 pub const CELL_SIZE_M: f64 = 50.0;
@@ -82,6 +84,7 @@ type Handler = fn(&Terrain, &Value) -> Result<Value, Vec<Issue>>;
 const HANDLERS: &[(&str, Handler)] = &[
     ("describe", |t, r| run(t, r, describe)),
     ("geo", |t, r| run(t, r, geo)),
+    ("sample", |t, r| run(t, r, sample)),
 ];
 
 /// Reads the request as `Q`, answers it with `f`, and writes the answer.
