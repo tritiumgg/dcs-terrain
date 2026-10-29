@@ -15,3 +15,9 @@ publish = false
 # time optimization and abort on panic measured within noise on top.
 [profile.release]
 codegen-units = 1
+
+# Line tables keep file and line in backtraces and debugger steps, at about
+# half the disk of full debug info, which per-variable inspection rarely
+# repays here.
+[profile.dev]
+debug = "line-tables-only"
