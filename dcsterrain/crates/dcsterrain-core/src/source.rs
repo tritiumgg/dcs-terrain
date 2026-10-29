@@ -172,6 +172,9 @@ pub struct Object<'a> {
 pub struct Ground {
     /// Meters: the water surface over water, the ground elsewhere.
     pub height: f64,
+    /// Meters of water over the bed: zero on land, and wherever the mesh
+    /// carries no depth.
+    pub depth: f64,
     /// As the `water` layer codes it.
     pub water: u8,
     /// As the `surface` layer codes it.

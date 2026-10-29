@@ -161,6 +161,20 @@ impl Theatre {
         }
     }
 
+    /// The water's depth over its bed, zero on land and on a road strip,
+    /// which wins over the water under it.
+    pub fn depth(&self, north: f64, east: f64) -> f64 {
+        match self.water(north, east) {
+            WATER_SEA => (COAST_M - north - east) / std::f64::consts::SQRT_2 * SEA_SHELF_SLOPE,
+            WATER_LAKE => {
+                let r = (north - LAKE_NORTH_M).hypot(east - LAKE_EAST_M) / LAKE_RADIUS_M;
+                LAKE_DEPTH_M * (1.0 - r * r)
+            }
+            WATER_RIVER => RIVER_DEPTH_M,
+            _ => 0.0,
+        }
+    }
+
     /// A road strip wins over the water under it, as the mesh's road
     /// triangles do, so a cell of the bridge reads as land.
     pub fn water(&self, north: f64, east: f64) -> u8 {
@@ -528,6 +542,19 @@ mod tests {
         assert_eq!(at(LAKE_NORTH_M, LAKE_EAST_M).height, 100);
         assert_eq!(at(30000.0, RIVER_EAST_M + 10.0).water, WATER_RIVER);
         assert_eq!(at(30000.0, 60000.0).water, WATER_LAND);
+    }
+
+    #[test]
+    fn water_has_depth_and_land_none() {
+        let t = t();
+        // 5 km off the coast, measured square to it.
+        let off = COAST_M - 5000.0 * std::f64::consts::SQRT_2;
+        assert!((t.depth(off / 2.0, off / 2.0) - 50.0).abs() < 1e-9);
+        assert_eq!(t.depth(LAKE_NORTH_M, LAKE_EAST_M), LAKE_DEPTH_M);
+        assert_eq!(t.depth(LAKE_NORTH_M + LAKE_RADIUS_M, LAKE_EAST_M), 0.0);
+        assert_eq!(t.depth(30000.0, RIVER_EAST_M + 10.0), RIVER_DEPTH_M);
+        assert_eq!(t.depth(ROAD_EW_NORTH_M, RIVER_EAST_M), 0.0);
+        assert_eq!(t.depth(30000.0, 60000.0), 0.0);
     }
 
     #[test]

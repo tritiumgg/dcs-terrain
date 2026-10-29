@@ -93,6 +93,9 @@ pub fn surface_of(tritype: u32, runway: bool) -> u8 {
 pub struct Ground {
     /// The water surface over water, the ground elsewhere, as interpolated.
     pub h: f64,
+    /// The water's depth over the bed, as interpolated; zero where the
+    /// triangle's corners carry none.
+    pub depth: f64,
     pub tritype: u32,
     /// Whether a runway subset of any block covers the point.
     pub runway: bool,
@@ -161,6 +164,12 @@ fn bin_span(lo: f64, hi: f64, inv: f64) -> (i64, i64) {
         floor_i64((lo - BIN_SLACK) * inv),
         floor_i64((hi + BIN_SLACK) * inv),
     )
+}
+
+/// A value over a triangle from its corners', at `u` of the way to the
+/// second corner and `v` to the third.
+fn lerp(z: [f64; 3], u: f64, v: f64) -> f64 {
+    z[0] + u * (z[1] - z[0]) + v * (z[2] - z[0])
 }
 
 fn span(corners: &[[f64; 2]], k: usize) -> (f64, f64) {
@@ -335,6 +344,9 @@ pub struct Prepared {
     pub index: usize,
     rc: Vec<[f64; 2]>,
     h: Vec<f64>,
+    /// Each vertex's water depth; empty when the block carries none, as
+    /// most land blocks do.
+    depth: Vec<f32>,
     tri: Vec<[u32; 3]>,
     tritype: Vec<u32>,
     bins: Index,
@@ -373,11 +385,17 @@ impl Prepared {
             .filter(|s| s.material == RUNWAY_MATERIAL)
             .flat_map(|s| s.tri.iter().copied())
             .collect();
+        let depth = if b.depth.iter().any(|&d| d != 0.0) {
+            b.depth
+        } else {
+            Vec::new()
+        };
         Prepared {
             index: b.index,
             bins: Index::new(&rc, &b.tri),
             runway_bins: Index::new(&rc, &runway),
             h,
+            depth,
             rc,
             tri: b.tri,
             tritype: b.tritype,
@@ -404,6 +422,7 @@ impl Prepared {
     /// Roughly the bytes it holds, for a cache's budget.
     pub fn bytes(&self) -> usize {
         self.rc.len() * 24
+            + self.depth.len() * 4
             + (self.tri.len() + self.runway.len()) * 12
             + self.tritype.len() * 4
             + self.bins.bytes()
@@ -415,8 +434,14 @@ impl Prepared {
     }
 
     fn height(&self, t: [u32; 3], u: f64, v: f64) -> f64 {
-        let z = t.map(|k| self.h[k as usize]);
-        z[0] + u * (z[1] - z[0]) + v * (z[2] - z[0])
+        lerp(t.map(|k| self.h[k as usize]), u, v)
+    }
+
+    fn depth(&self, t: [u32; 3], u: f64, v: f64) -> f64 {
+        if self.depth.is_empty() {
+            return 0.0;
+        }
+        lerp(t.map(|k| f64::from(self.depth[k as usize])), u, v)
     }
 
     /// Whether a runway subset of this block covers `p`, in grid units.
@@ -451,6 +476,7 @@ impl Prepared {
             };
             let g = Ground {
                 h: self.height(tri, u, v),
+                depth: self.depth(tri, u, v),
                 tritype: self.tritype[t as usize],
                 runway: false,
                 block: self.index,
@@ -649,7 +675,8 @@ pub fn few(b: &Block, g: &Grid, points: &[[f64; 2]]) -> Vec<(Option<Ground>, boo
             };
             let z = tri.map(|k| b.world(k)[1]);
             let g = Ground {
-                h: z[0] + u * (z[1] - z[0]) + v * (z[2] - z[0]),
+                h: lerp(z, u, v),
+                depth: lerp(tri.map(|k| f64::from(b.depth[k as usize])), u, v),
                 tritype: b.tritype[t],
                 runway: false,
                 block: b.index,
@@ -948,7 +975,11 @@ mod tests {
         let b = prepared(&[square([0, LAKE])], &g);
         let p = at(&b, &g, 500.0, 250.0).unwrap();
         assert!((p.h - 150.0).abs() < 1e-9, "{}", p.h);
-        assert_eq!((p.tri, p.runway), (0, false));
+        assert_eq!((p.tri, p.runway, p.depth), (0, false, 0.0));
+        // In the lake, 0.8 of the way to the corner 50 m deep.
+        let w = at(&b, &g, 900.0, 900.0).unwrap();
+        assert_eq!(w.tri, 1);
+        assert!((w.depth - 40.0).abs() < 1e-9, "{}", w.depth);
         assert!(at(&b, &g, 200.0, 200.0).unwrap().runway);
         assert!(at(&b, &g, -1.0, 500.0).is_none());
         assert!(at(&b, &g, 500.0, 1000.5).is_none());
@@ -1305,6 +1336,7 @@ mod tests {
                 };
                 let g = Ground {
                     h: levels.height(tri, u, v),
+                    depth: levels.depth(tri, u, v),
                     tritype: levels.tritype[t],
                     runway: false,
                     block: levels.index,

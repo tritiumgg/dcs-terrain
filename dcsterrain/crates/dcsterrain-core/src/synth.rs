@@ -144,12 +144,18 @@ pub const LAKE_NORTH_M: f64 = 13000.0;
 pub const LAKE_EAST_M: f64 = 52000.0;
 pub const LAKE_RADIUS_M: f64 = 2000.0;
 pub const LAKE_LEVEL_M: f64 = 100.0;
+/// The lake is a bowl: this deep at its center, shoaling to nothing at its
+/// shore.
+pub const LAKE_DEPTH_M: f64 = 12.0;
 
 pub const RIVER_EAST_M: f64 = 45000.0;
 pub const RIVER_WIDTH_M: f64 = 60.0;
+pub const RIVER_DEPTH_M: f64 = 3.0;
 
 pub const COAST_M: f64 = 52000.0;
 pub const SEA_LEVEL_M: f64 = 0.0;
+/// The sea deepens by this many meters per meter out from the coast.
+pub const SEA_SHELF_SLOPE: f64 = 0.01;
 
 // Roads, railway and runway. The east-west road crosses the north-south
 // road at (ROAD_EW_NORTH_M, ROAD_NS_EAST_M), west of the river, and the east

@@ -92,6 +92,7 @@ impl Source for Synth {
         let (n, e) = (x - f64::from(ORIGIN_X_M), z - f64::from(ORIGIN_Z_M));
         Ok(t.covered(n, e).then(|| Ground {
             height: t.height(n, e),
+            depth: t.depth(n, e),
             water: t.water(n, e),
             surface: t.surface(n, e),
             cover: t.cover(n, e),

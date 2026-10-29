@@ -183,6 +183,7 @@ impl<K: Eq + Hash + Copy, V: Clone> Lru<K, V> {
 fn ground_of(g: ground::Ground) -> Ground {
     Ground {
         height: g.h,
+        depth: g.depth,
         water: water_class(g.tritype),
         surface: surface_of(g.tritype, g.runway),
         cover: cover_of(g.tritype),
