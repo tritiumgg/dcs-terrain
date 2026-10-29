@@ -6,13 +6,12 @@
 //! radial of the sweep's own spacing, one per cell on the outer ring, that
 //! stays masked from the radius in to the least masked range.
 
-use std::f64::consts::TAU;
-
 use serde_json::json;
 
-use super::floor::{Floor, check_bands};
+use super::floor::{Floor, check_bands, site};
 use super::geojson::{Features, props};
-use super::spectrum::radial;
+use super::spectrum::{check_min_masked_range, radial};
+use super::viewshed::radials;
 use super::{Terrain, resolve};
 use crate::types::{CoverageBand, CoverageRequest, CoverageResponse, Issue, Polygon};
 
@@ -20,13 +19,7 @@ pub fn coverage(terrain: &Terrain, q: CoverageRequest) -> Result<CoverageRespons
     let mut issues: Vec<Issue> = check_bands(&q.envelope.alt_bands_agl, "envelope.alt_bands_agl")
         .into_iter()
         .collect();
-    if !(q.min_masked_range.is_finite() && q.min_masked_range >= 0.0) {
-        issues.push(Issue::new(
-            "invalid_request",
-            "the least masked range must be finite and at least 0",
-            "min_masked_range",
-        ));
-    }
+    issues.extend(check_min_masked_range(q.min_masked_range));
     let asset = match &q.asset {
         Some(r) => match resolve(terrain.source(), r, "asset") {
             Ok(a) => Some(a),
@@ -61,7 +54,7 @@ pub fn coverage(terrain: &Terrain, q: CoverageRequest) -> Result<CoverageRespons
         }
         v
     });
-    let radials = ((TAU * fl.radius / fl.res).ceil() as u64).max(8);
+    let radials = radials(fl.radius, fl.res);
     let polygons: Vec<_> = q
         .envelope
         .alt_bands_agl
@@ -102,10 +95,7 @@ pub fn coverage(terrain: &Terrain, q: CoverageRequest) -> Result<CoverageRespons
                 props([("alt_agl", json!(h)), ("dead_zone", json!(true))]),
             );
         }
-        f.point(
-            [q.site.x, q.site.z],
-            props([("site", json!(true)), ("alt_agl", json!(q.site.alt_agl))]),
-        );
+        site(&mut f, q.site);
         if let Some(a) = &asset {
             f.polygon(&a.outline(), props([("asset", json!(true))]));
         }

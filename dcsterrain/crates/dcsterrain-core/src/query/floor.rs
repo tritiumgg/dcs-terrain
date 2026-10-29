@@ -19,7 +19,7 @@ use serde_json::json;
 
 use super::geojson::{Features, Ring, props};
 use super::sightline::floor as exact_floor;
-use super::viewshed::{Sweep, base64, prepare};
+use super::viewshed::{Sweep, base64, check_reach, prepare, site_eye};
 use super::{Terrain, outline, refused};
 use crate::types::{
     FloorBand, FloorRaster, Issue, Observer, PointFloor, RadarFloorRequest, RadarFloorResponse,
@@ -246,37 +246,12 @@ pub fn radar_floor(
     }
 }
 
-fn site(f: &mut Features, o: Observer) {
+/// The site as a `Point` feature, its height above ground with it.
+pub(super) fn site(f: &mut Features, o: Observer) {
     f.point(
         [o.x, o.z],
         props([("site", json!(true)), ("alt_agl", json!(o.alt_agl))]),
     );
-}
-
-/// The site's eye, after the checks a sweep would make of it.
-pub(super) fn eye(
-    terrain: &Terrain,
-    o: Observer,
-    path: &str,
-    mut issues: Vec<Issue>,
-) -> Result<f64, Vec<Issue>> {
-    if ![o.x, o.z, o.alt_agl].iter().all(|v| v.is_finite()) {
-        issues.insert(
-            0,
-            Issue::new("invalid_point", "every coordinate must be finite", path),
-        );
-    }
-    if !issues.is_empty() {
-        return Err(issues);
-    }
-    match terrain.source().point(o.x, o.z).map_err(refused)? {
-        Some(g) => Ok(g.height + o.alt_agl),
-        None => Err(vec![Issue::new(
-            "off_terrain",
-            "no mesh covers this point, so it has no ground to stand on",
-            path,
-        )]),
-    }
 }
 
 /// The floor at a point `p` from the eye `[x, z, alt]`, as an altitude,
@@ -300,14 +275,13 @@ fn at_points(
     points: &[crate::types::Point],
     mut issues: Vec<Issue>,
 ) -> Result<Vec<PointFloor>, Vec<Issue>> {
-    if !(q.radius.is_finite() && q.radius > 0.0) {
-        issues.push(Issue::new(
-            "invalid_request",
-            "the radius must be positive",
-            "radius",
-        ));
-    }
-    let eye = eye(terrain, q.site, "site", issues)?;
+    issues.extend(check_reach(
+        terrain.source(),
+        q.radius,
+        q.resolution,
+        "radius",
+    ));
+    let eye = site_eye(terrain, q.site, "site", issues)?;
     let src = terrain.source();
     let xz: Vec<[f64; 2]> = points.iter().map(|p| [p.x, p.z]).collect();
     let grounds = src.points(&xz).map_err(refused)?;
@@ -631,6 +605,12 @@ pub(super) mod tests {
                              "points": many}),
         );
         assert_eq!(e[0].code, "too_large");
+        // A resolution is held to the cell size with points as without.
+        let e = issue(
+            json!({"site": {"x": sx, "z": sz, "alt_agl": 10}, "radius": 100,
+                             "points": [{"x": sx, "z": sz}], "resolution": 10}),
+        );
+        assert_eq!(e[0].path, "resolution");
         let e = issue(json!({"site": {"x": 1e8, "z": 0, "alt_agl": 10}, "radius": 100}));
         assert_eq!(
             (e[0].code.as_str(), e[0].path.as_str()),

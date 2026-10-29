@@ -16,7 +16,7 @@ use serde_json::json;
 use super::geojson::{Features, props};
 use super::{Terrain, outline, refused};
 use crate::grid::{Grid, Window};
-use crate::source::Layer;
+use crate::source::{Layer, Source};
 use crate::types::{Issue, Observer, Polygon, ViewshedRequest, ViewshedResponse};
 
 /// The most cells the mask, or the window of heights under it, may hold:
@@ -123,10 +123,73 @@ pub fn viewshed(terrain: &Terrain, q: ViewshedRequest) -> Result<ViewshedRespons
         geojson,
     })
 }
+
+/// How many radials a sweep out to `radius` at cells of `res` takes: one
+/// per cell on its outer ring.
+pub(super) fn radials(radius: f64, res: f64) -> u64 {
+    ((TAU * radius / res).ceil() as u64).max(8)
+}
+
+/// The issues with a sweep's radius, found at `path` in the request, and
+/// with its resolution, which may be no finer than the cell size.
+pub(super) fn check_reach(
+    src: &dyn Source,
+    radius: f64,
+    resolution: Option<f64>,
+    path: &str,
+) -> Vec<Issue> {
+    let cell = f64::from(src.grid().cell_size);
+    let res = resolution.unwrap_or(cell);
+    let mut issues = Vec::new();
+    if !(radius.is_finite() && radius > 0.0) {
+        issues.push(Issue::new(
+            "invalid_request",
+            "the radius must be positive",
+            path,
+        ));
+    }
+    if !(res.is_finite() && res >= cell) {
+        issues.push(Issue::new(
+            "invalid_request",
+            &format!("the resolution must be at least the cell size, {cell} m"),
+            "resolution",
+        ));
+    }
+    issues
+}
+
+/// The altitude of the eye of the site `o`, found at `path` in the request,
+/// over the mesh triangle's own height under it. `issues` are the others
+/// the request has, returned with any of the site's, the site's first.
+pub(super) fn site_eye(
+    terrain: &Terrain,
+    o: Observer,
+    path: &str,
+    mut issues: Vec<Issue>,
+) -> Result<f64, Vec<Issue>> {
+    if ![o.x, o.z, o.alt_agl].iter().all(|v| v.is_finite()) {
+        issues.insert(
+            0,
+            Issue::new("invalid_point", "every coordinate must be finite", path),
+        );
+    }
+    if !issues.is_empty() {
+        return Err(issues);
+    }
+    match terrain.source().point(o.x, o.z).map_err(refused)? {
+        Some(g) => Ok(g.height + o.alt_agl),
+        None => Err(vec![Issue::new(
+            "off_terrain",
+            "no mesh covers this point, so it has no ground to stand on",
+            path,
+        )]),
+    }
+}
+
 /// Checks a sweep's site and radius, found at `at` in the request, and
 /// its resolution, and reads the heights it stands on. `more` are the
-/// issues the caller found with the rest of its request, returned with these.
-/// the caller found with the rest of its request, returned with these.
+/// issues the caller found with the rest of its request, returned with
+/// these.
 pub(super) fn prepare(
     terrain: &Terrain,
     o: Observer,
@@ -139,42 +202,11 @@ pub(super) fn prepare(
     let g = src.grid();
     let cell = f64::from(g.cell_size);
     let res = resolution.unwrap_or(cell);
-    let mut issues = Vec::new();
-    if ![o.x, o.z, o.alt_agl].iter().all(|v| v.is_finite()) {
-        issues.push(Issue::new(
-            "invalid_point",
-            "every coordinate must be finite",
-            at[0],
-        ));
-    }
-    if !(radius.is_finite() && radius > 0.0) {
-        issues.push(Issue::new(
-            "invalid_request",
-            "the radius must be positive",
-            at[1],
-        ));
-    }
-    if !(res.is_finite() && res >= cell) {
-        issues.push(Issue::new(
-            "invalid_request",
-            &format!("the resolution must be at least the cell size, {cell} m"),
-            "resolution",
-        ));
-    }
+    let mut issues = check_reach(src, radius, resolution, at[1]);
     issues.extend(more);
-    if !issues.is_empty() {
-        return Err(issues);
-    }
-
-    // The observer first: on the mesh, its position is bounded, and so is
+    // The site first: on the mesh, its position is bounded, and so is
     // every index below.
-    let Some(ground) = src.point(o.x, o.z).map_err(refused)? else {
-        return Err(vec![Issue::new(
-            "off_terrain",
-            "no mesh covers this point, so it has no ground to stand on",
-            at[0],
-        )]);
-    };
+    let eye = site_eye(terrain, o, at[0], issues)?;
 
     // The mask, aligned to multiples of its cell from the grid's origin, so
     // at the cell size its cells are the grid's.
@@ -219,12 +251,12 @@ pub(super) fn prepare(
     );
     let (rows, cols) = ((r_hi - r_lo + 1) as u32, (c_hi - c_lo + 1) as u32);
     let w = Window::read(src, Layer::Height, r_lo, c_lo, rows, cols).map_err(refused)?;
-    let radials = ((TAU * radius / res).ceil() as u64).max(8);
+    let radials = radials(radius, res);
     Ok(Sweep {
         w,
         g,
         o: (o.x, o.z),
-        eye: ground.height + o.alt_agl,
+        eye,
         radius,
         res,
         step: cell / 2.0,

@@ -10,12 +10,24 @@
 use serde_json::json;
 
 use super::Terrain;
-use super::floor::{Floor, check_bands};
+use super::floor::{Floor, check_bands, site};
 use super::geojson::{Features, Ring, props};
 use crate::types::{
     ApproachSpectrumRequest, ApproachSpectrumResponse, Issue, Radial, Sector, SpectrumBand,
     SpectrumSummary,
 };
+
+/// The issue with the range a blind radial must stay masked in to, if it
+/// is not finite and at least 0.
+pub(super) fn check_min_masked_range(range: f64) -> Option<Issue> {
+    (!(range.is_finite() && range >= 0.0)).then(|| {
+        Issue::new(
+            "invalid_request",
+            "the least masked range must be finite and at least 0",
+            "min_masked_range",
+        )
+    })
+}
 
 /// One radial at height `h` above the ground, at `bearing` degrees from
 /// north towards east.
@@ -150,20 +162,15 @@ pub fn approach_spectrum(
     let mut issues: Vec<Issue> = check_bands(&q.alt_bands_agl, "alt_bands_agl")
         .into_iter()
         .collect();
-    if !(q.azimuth_step_deg.is_finite() && q.azimuth_step_deg > 0.0 && q.azimuth_step_deg <= 90.0) {
+    if !(q.azimuth_step_deg.is_finite() && q.azimuth_step_deg >= 0.1 && q.azimuth_step_deg <= 90.0)
+    {
         issues.push(Issue::new(
             "invalid_request",
-            "the azimuth step must be over 0 and at most 90 degrees",
+            "the azimuth step must be at least 0.1 and at most 90 degrees",
             "azimuth_step_deg",
         ));
     }
-    if !(q.min_masked_range.is_finite() && q.min_masked_range >= 0.0) {
-        issues.push(Issue::new(
-            "invalid_request",
-            "the least masked range must be finite and at least 0",
-            "min_masked_range",
-        ));
-    }
+    issues.extend(check_min_masked_range(q.min_masked_range));
     if let Some(s) = &q.sector
         && !(s.from_deg.is_finite() && s.to_deg.is_finite())
     {
@@ -234,10 +241,7 @@ pub fn approach_spectrum(
                 );
             }
         }
-        f.point(
-            [q.site.x, q.site.z],
-            props([("site", json!(true)), ("alt_agl", json!(q.site.alt_agl))]),
-        );
+        site(&mut f, q.site);
         Some(f.finish())
     } else {
         None
@@ -342,6 +346,21 @@ mod tests {
         assert_eq!(s["blind_arc_fraction"], 0.0);
         assert_eq!(s["blind_arcs"], json!([]));
         assert!(s["unmask_dist_min"].as_f64().unwrap() <= s["unmask_dist_max"].as_f64().unwrap());
+    }
+
+    #[test]
+    fn refuses_a_step_too_fine_and_a_bad_range() {
+        let t = synth();
+        let (x, z) = site();
+        let e = answer(
+            &t,
+            "approach_spectrum",
+            &json!({"site": {"x": x, "z": z, "alt_agl": 10}, "radius": 5000,
+                    "alt_bands_agl": [30], "azimuth_step_deg": 1e-9, "min_masked_range": -1}),
+        )
+        .unwrap_err();
+        let paths: Vec<_> = e.iter().map(|i| i.path.as_str()).collect();
+        assert_eq!(paths, ["azimuth_step_deg", "min_masked_range"]);
     }
 
     #[test]

@@ -8,8 +8,9 @@
 
 use serde_json::json;
 
-use super::floor::{eye, point_floor};
+use super::floor::{point_floor, site};
 use super::geojson::{Features, props};
+use super::viewshed::site_eye;
 use super::{Terrain, refused};
 use crate::types::{Issue, Point3, RouteSpan, UnmaskProfileRequest, UnmaskProfileResponse};
 
@@ -74,23 +75,23 @@ pub fn unmask_profile(
         ));
     }
     let o = q.site;
-    let eye = eye(terrain, o, "site", issues)?;
+    let eye = site_eye(terrain, o, "site", issues)?;
 
-    // Every sample: where it is, how far along, and its altitude between
-    // the two route points it lies between.
     // Each sample: where it is, how far along, the route point it follows
     // and how far towards the next.
     let mut samples: Vec<([f64; 2], f64, usize, f64)> = Vec::new();
     let mut along = 0.0;
-    let mut next = 0.0;
+    let (mut next, mut k) = (0.0, 0u64);
     for (i, w) in q.route.windows(2).enumerate() {
         let (a, b) = (&w[0], &w[1]);
         let len = (b.x - a.x).hypot(b.z - a.z);
-        while next < along + len || (next == 0.0 && len == 0.0) {
+        // Short of the last point by a hair is the last point, sampled below.
+        while next < along + len && next < length - q.step * 1e-6 {
             let u = if len > 0.0 { (next - along) / len } else { 0.0 };
             let at = [a.x + u * (b.x - a.x), a.z + u * (b.z - a.z)];
             samples.push((at, next, i, u));
-            next += q.step;
+            k += 1;
+            next = k as f64 * q.step;
         }
         along += len;
     }
@@ -201,10 +202,7 @@ pub fn unmask_profile(
                 props([("first_seen", json!(true)), ("alt", json!(j.2))]),
             );
         }
-        f.point(
-            [o.x, o.z],
-            props([("site", json!(true)), ("alt_agl", json!(o.alt_agl))]),
-        );
+        site(&mut f, o);
         Some(f.finish())
     } else {
         None
