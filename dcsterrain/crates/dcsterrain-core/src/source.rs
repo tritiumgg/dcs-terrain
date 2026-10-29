@@ -83,6 +83,13 @@ pub trait Source {
         Err(lacks(self, "mesh triangles"))
     }
 
+    /// `along` for each of `segments`, `[a, b]`, in order. An install
+    /// answers them block by block, each block read once however many
+    /// segments cross it.
+    fn alongs(&self, segments: &[[[f64; 2]; 2]]) -> Result<Vec<Vec<Piece>>, Refusal> {
+        segments.iter().map(|&[a, b]| self.along(a, b)).collect()
+    }
+
     /// The airdromes, runways, stands, beacons, radio, towns, nodes and the
     /// projection.
     fn tables(&self) -> Result<&Tables, Refusal> {

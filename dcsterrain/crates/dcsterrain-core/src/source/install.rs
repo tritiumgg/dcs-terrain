@@ -468,6 +468,33 @@ impl Install {
         ids
     }
 
+    /// The blocks under the segment from `a` to `b`, in block order, found
+    /// a tile's length of it at a time so a long diagonal names only the
+    /// blocks near it; none for a segment not finite.
+    fn along_blocks(&self, a: [f64; 2], b: [f64; 2]) -> Vec<usize> {
+        if !a.iter().chain(&b).all(|v| v.is_finite()) {
+            return Vec::new();
+        }
+        let g = &self.grid;
+        let tm = f64::from(g.tile_size) * f64::from(g.cell_size);
+        let n = ((b[0] - a[0]).hypot(b[1] - a[1]) / tm).ceil().max(1.0) as usize;
+        let mut ids = Vec::new();
+        for k in 0..n {
+            let (s, e) = (k as f64 / n as f64, (k + 1) as f64 / n as f64);
+            let x = [a[0] + s * (b[0] - a[0]), a[0] + e * (b[0] - a[0])];
+            let z = [a[1] + s * (b[1] - a[1]), a[1] + e * (b[1] - a[1])];
+            ids.extend(self.under(
+                x[0].min(x[1]),
+                x[0].max(x[1]),
+                z[0].min(z[1]),
+                z[0].max(z[1]),
+            ));
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+
     /// Block `i`, prepared, read on first use.
     fn block(&self, i: usize) -> Result<Arc<Prepared>, Refusal> {
         if let Some(b) = self.blocks.lock().unwrap().get(&i) {
@@ -730,26 +757,8 @@ impl Source for Install {
     /// asked only about the bins the segment crosses.
     fn along(&self, a: [f64; 2], b: [f64; 2]) -> Result<Vec<Piece>, Refusal> {
         let mut out = Vec::new();
-        if !a.iter().chain(&b).all(|v| v.is_finite()) {
-            return Ok(out);
-        }
+        let ids = self.along_blocks(a, b);
         let g = &self.grid;
-        let tm = f64::from(g.tile_size) * f64::from(g.cell_size);
-        let n = ((b[0] - a[0]).hypot(b[1] - a[1]) / tm).ceil().max(1.0) as usize;
-        let mut ids = Vec::new();
-        for k in 0..n {
-            let (s, e) = (k as f64 / n as f64, (k + 1) as f64 / n as f64);
-            let x = [a[0] + s * (b[0] - a[0]), a[0] + e * (b[0] - a[0])];
-            let z = [a[1] + s * (b[1] - a[1]), a[1] + e * (b[1] - a[1])];
-            ids.extend(self.under(
-                x[0].min(x[1]),
-                x[0].max(x[1]),
-                z[0].min(z[1]),
-                z[0].max(z[1]),
-            ));
-        }
-        ids.sort_unstable();
-        ids.dedup();
         let (ga, gb) = (grid_units(g, a[0], a[1]), grid_units(g, b[0], b[1]));
         // The blocks a request has not read yet are prepared together, a
         // few at a time so a long line holds few at once; the pieces then
@@ -757,6 +766,55 @@ impl Source for Install {
         for ids in ids.chunks(ALONG_BLOCKS) {
             for b in self.blocks_of(ids)? {
                 b.along(ga, gb, &mut out);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Block by block, as `points` answers: each block under any of the
+    /// segments is prepared once and asked about every segment over it, so
+    /// blocks that together outgrow the block budget are not read again
+    /// for each segment.
+    fn alongs(&self, segments: &[[[f64; 2]; 2]]) -> Result<Vec<Vec<Piece>>, Refusal> {
+        let mut on: HashMap<usize, Vec<u32>> = HashMap::new();
+        for (k, &[a, b]) in segments.iter().enumerate() {
+            for i in self.along_blocks(a, b) {
+                on.entry(i).or_default().push(k as u32);
+            }
+        }
+        let mut order: Vec<usize> = on.keys().copied().collect();
+        order.sort_unstable();
+        let g = &self.grid;
+        let answer = |i: &usize| -> Result<Vec<Vec<Piece>>, Refusal> {
+            let b = self.block(*i)?;
+            Ok((on[i].iter())
+                .map(|&k| {
+                    let [a, e] = segments[k as usize];
+                    let mut out = Vec::new();
+                    b.along(
+                        grid_units(g, a[0], a[1]),
+                        grid_units(g, e[0], e[1]),
+                        &mut out,
+                    );
+                    out
+                })
+                .collect())
+        };
+        // Each block on whichever core is free, the pieces then gathered in
+        // block order, so they are the same however the work falls.
+        let answers: Vec<Vec<Vec<Piece>>> = if order.len() < PARALLEL_MIN {
+            order.iter().map(answer).collect::<Result<_, Refusal>>()?
+        } else {
+            (order.par_iter())
+                .map(answer)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .collect::<Result<_, Refusal>>()?
+        };
+        let mut out: Vec<Vec<Piece>> = (0..segments.len()).map(|_| Vec::new()).collect();
+        for (i, answers) in order.iter().zip(answers) {
+            for (&k, pieces) in on[i].iter().zip(answers) {
+                out[k as usize].extend(pieces);
             }
         }
         Ok(out)
@@ -1023,6 +1081,41 @@ mod tests {
         }
         assert!(got.iter().any(|g| g.is_some_and(|g| g.surface == 5)));
         assert!(got.iter().any(|g| g.is_some_and(|g| g.surface == 4)));
+    }
+
+    #[test]
+    fn alongs_block_by_block_are_each_segment_alone_whatever_the_budget() {
+        let mut low = square([ROAD_STRIP, ROAD_STRIP]);
+        low.t[1] = -50.0;
+        let mut far = square([1024, 1024]);
+        far.t = [3000.0, 20.0, 4000.0];
+        let root = install(&file(&[square([1024, LAKE]), low, far], 3));
+        let c = Scratch::new();
+        let t = Install::open(&root.0, "Test", &Cache::new(&c.0))
+            .unwrap()
+            .with_block_budget(1);
+        // A fan of segments from one point, as a radial sweep asks, and one
+        // not finite.
+        let mut segs = vec![[[f64::NAN, 2500.0], [999.0, 2500.0]]];
+        for k in 0..40 {
+            let b = f64::from(k) * std::f64::consts::TAU / 40.0;
+            segs.push([
+                [2000.0, 2500.0],
+                [2000.0 + 2500.0 * b.cos(), 2500.0 + 2500.0 * b.sin()],
+            ]);
+        }
+        let got = t.alongs(&segs).unwrap();
+        assert_eq!(got.len(), segs.len());
+        assert!(got[0].is_empty());
+        let key = |p: &Piece| (p.t[0].to_bits(), p.t[1].to_bits(), p.rank);
+        for (s, g) in segs.iter().zip(&got) {
+            let mut want = t.along(s[0], s[1]).unwrap();
+            let mut g = g.clone();
+            want.sort_by_key(key);
+            g.sort_by_key(key);
+            assert_eq!(g, want, "{s:?}");
+        }
+        assert!(got.iter().filter(|g| g.len() > 1).count() > 20);
     }
 
     /// `square` stretched `s` times about its corner and moved to `t`.
