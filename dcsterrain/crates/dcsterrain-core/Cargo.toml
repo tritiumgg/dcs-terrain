@@ -27,6 +27,7 @@ windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem", "Win
 testing = []
 
 [dev-dependencies]
+miniz_oxide = "0.9.1"
 serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
 
 # The opt-in measurements count the CPU cycles a request takes.
