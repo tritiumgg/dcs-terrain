@@ -10,7 +10,10 @@
 //! raster alone, the mesh near the site, and the mesh all the way, in
 //! milliseconds and, on Windows, CPU cycles. Run it with `--release` and
 //! `--nocapture` for the figures, and `RAYON_NUM_THREADS` to cap the
-//! cores. The install is only read; the cache is a scratch directory.
+//! cores. `exposure` is checked over seven sites about an airdrome: its
+//! least floor and count against each site's own floor at every cell, and
+//! the count at sampled cells against `visible`. The install is only read;
+//! the cache is a scratch directory.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -465,5 +468,202 @@ fn the_radar_floor_and_its_users_on_every_terrain() {
             agree.iter().sum::<usize>() * 100 >= judged.iter().sum::<usize>() * 95,
             "{id}: the raster agrees with visible at {agree:?} of {judged:?}"
         );
+    }
+}
+
+/// A layout of sites about the airdrome nearest the terrain's center: the
+/// airdrome and six points on a ring 12 km out, those on the mesh.
+fn layout(t: &Terrain) -> Vec<(f64, f64)> {
+    let g = t.source().grid();
+    let c = f64::from(g.cell_size);
+    let (x, z) = (
+        g.origin_x + 0.5 * f64::from(g.height) * c,
+        g.origin_z + 0.5 * f64::from(g.width) * c,
+    );
+    let (v, _) = call(t, "nearest", &json!({"kind": "airdrome", "x": x, "z": z}));
+    let a = &v["results"][0];
+    let (ax, az) = (a["x"].as_f64().unwrap(), a["z"].as_f64().unwrap());
+    let mut pts = vec![[ax, az]];
+    for k in 0..6 {
+        let (sin, cos) = (f64::from(k) * 60f64.to_radians()).sin_cos();
+        pts.push([ax + 12_000.0 * cos, az + 12_000.0 * sin]);
+    }
+    let ground = t.source().points(&pts).unwrap();
+    pts.iter()
+        .zip(ground)
+        .filter(|(_, g)| g.is_some())
+        .map(|(p, _)| (p[0], p[1]))
+        .collect()
+}
+
+/// A raster's corner, rows, columns and cell.
+fn lattice(r: &Value) -> (f64, f64, i64, i64, f64) {
+    (
+        r["origin_x"].as_f64().unwrap(),
+        r["origin_z"].as_f64().unwrap(),
+        r["height"].as_i64().unwrap(),
+        r["width"].as_i64().unwrap(),
+        r["cell"].as_f64().unwrap(),
+    )
+}
+
+/// The height above ground `exposure` counts its sites at.
+const TARGET: f64 = 30.0;
+
+#[test]
+fn exposure_over_many_sites_on_every_terrain() {
+    let Some(root) = install_root() else { return };
+    let build = dcsterrain_core::decode::install::read_build(&root).unwrap();
+    let only: Option<Vec<String>> = std::env::var("DCSTERRAIN_TERRAINS")
+        .ok()
+        .map(|s| s.split(',').map(str::to_string).collect());
+    let ids: Vec<String> = dcsterrain_core::decode::install::terrains(&root)
+        .unwrap()
+        .into_iter()
+        .filter_map(|l| l.id)
+        .filter(|id| only.as_ref().is_none_or(|o| o.contains(id)))
+        .collect();
+    eprintln!("build {} ({} terrains)", build.version, ids.len());
+    let mut u = Unit(0x5851_f42d_4c95_7f2d);
+    for id in &ids {
+        let dir = Scratch(
+            std::env::temp_dir().join(format!("dcsterrain-exposure-{}-{id}", std::process::id())),
+        );
+        let cache = Cache::new(&dir.0);
+        let t = Terrain::open(&root, id, &cache, true).unwrap();
+        let sites = layout(&t);
+        let req: Vec<Value> = sites
+            .iter()
+            .map(|&(x, z)| json!({"observer": {"x": x, "z": z, "alt_agl": 10}, "radius": RADIUS}))
+            .collect();
+        let q = json!({"sites": req, "target_alt_agl": TARGET});
+
+        // Timed cold, then warm, then warm with the unseen areas drawn.
+        let timed = |q: &Value| {
+            let (c, s) = (cycles(), Instant::now());
+            let v = answer(&t, "exposure", q).unwrap_or_else(|e| panic!("{id}: {e:?}"));
+            (
+                v,
+                s.elapsed().as_secs_f64() * 1e3,
+                (cycles() - c) as f64 / 1e6,
+            )
+        };
+        let (_, cold_ms, cold_mc) = timed(&q);
+        let (v, warm_ms, warm_mc) = timed(&q);
+        let mut drawn = q.clone();
+        drawn["geojson"] = json!(true);
+        let (d, geojson_ms, geojson_mc) = timed(&drawn);
+        assert_eq!(d["raster"], v["raster"], "{id}");
+        let r = &v["raster"];
+        let (x0, z0, rows, cols, cell) = lattice(r);
+        let agl = floats(r["floor_agl"].as_str().unwrap());
+        let msl = floats(r["floor_msl"].as_str().unwrap());
+        let seen = unbase64(r["seen_count"].as_str().unwrap());
+
+        // Each site's own radar floor at every cell of the region.
+        let (c, s) = (cycles(), Instant::now());
+        let each: Vec<[Vec<f32>; 2]> = req
+            .iter()
+            .map(|s| {
+                let (f, _) = call(
+                    &t,
+                    "radar_floor",
+                    &json!({"site": s["observer"], "radius": RADIUS, "bands_agl": []}),
+                );
+                let (fx, fz, side, _, _) = lattice(&f["raster"]);
+                let dr = ((fx - x0) / cell).round() as i64;
+                let dc = ((fz - z0) / cell).round() as i64;
+                let pick = |layer: &str| -> Vec<f32> {
+                    let l = floats(f["raster"][layer].as_str().unwrap());
+                    (0..rows * cols)
+                        .map(|i| {
+                            let (fr, fc) = (i / cols - dr, i % cols - dc);
+                            if (0..side).contains(&fr) && (0..side).contains(&fc) {
+                                l[(fr * side + fc) as usize]
+                            } else {
+                                f32::NAN
+                            }
+                        })
+                        .collect()
+                };
+                [pick("floor_agl"), pick("floor_msl")]
+            })
+            .collect();
+        let (each_ms, each_mc) = (s.elapsed().as_secs_f64() * 1e3, (cycles() - c) as f64 / 1e6);
+        let (mut reached, mut overlapped, mut unreached, mut wrong) = (0, 0, 0, 0);
+        for i in 0..agl.len() {
+            let floors: Vec<(f32, f32)> = (each.iter())
+                .map(|[a, m]| (a[i], m[i]))
+                .filter(|(a, _)| !a.is_nan())
+                .collect();
+            let ok = if agl[i].is_nan() {
+                floors.is_empty() && msl[i].is_nan() && seen[i] == 0
+            } else if let Some(&(a, m)) = floors.iter().min_by(|a, b| a.0.total_cmp(&b.0)) {
+                reached += 1;
+                overlapped += usize::from(floors.len() > 1);
+                let count = floors.iter().filter(|f| f64::from(f.0) <= TARGET).count();
+                agl[i].to_bits() == a.to_bits()
+                    && msl[i].to_bits() == m.to_bits()
+                    && usize::from(seen[i]) == count
+            } else {
+                unreached += 1;
+                agl[i] == f32::INFINITY && seen[i] == 0
+            };
+            wrong += usize::from(!ok);
+        }
+
+        // 200 cells some site reaches: the sites that see a target there,
+        // line by line, against the count.
+        let (mut judged, mut agree, mut near) = (0, 0, 0);
+        while judged < 200 {
+            let i = ((u.next() * agl.len() as f64) as usize).min(agl.len() - 1);
+            if !agl[i].is_finite() {
+                continue;
+            }
+            let (x, z) = (
+                x0 + ((i as i64 / cols) as f64 + 0.5) * cell,
+                z0 + ((i as i64 % cols) as f64 + 0.5) * cell,
+            );
+            let (mut count, mut close) = (0u8, false);
+            for (s, [a, _]) in req.iter().zip(&each) {
+                if a[i].is_nan() {
+                    continue;
+                }
+                close |= (f64::from(a[i]) - TARGET).abs() < 25.0;
+                let w = answer(
+                    &t,
+                    "visible",
+                    &json!({"a": s["observer"], "b": {"x": x, "z": z, "alt_agl": TARGET}}),
+                )
+                .unwrap();
+                count += u8::from(w["visible"] == true);
+            }
+            judged += 1;
+            if count == seen[i] {
+                agree += 1;
+            } else {
+                near += usize::from(close);
+            }
+        }
+        let unseen: Vec<f64> = (v["bands"].as_array().unwrap().iter())
+            .map(|b| (b["unseen_fraction"].as_f64().unwrap() * 1000.0).round() / 1000.0)
+            .collect();
+        eprintln!(
+            "{id} on {}: {} sites of {RADIUS} m over {rows} x {cols} cells, {reached} reached \
+             ({overlapped} by two or more), {unreached} out of reach; exposure cold \
+             {cold_ms:.0} ms {cold_mc:.0} Mcycles, warm {warm_ms:.0} ms {warm_mc:.0} Mcycles, \
+             with geojson {geojson_ms:.0} ms {geojson_mc:.0} Mcycles; the sites' own floors \
+             {each_ms:.0} ms {each_mc:.0} Mcycles; {wrong} cells differ from them; the count \
+             agrees with visible at {agree} of {judged} cells, {near} of the rest near \
+             {TARGET} m; seen at {TARGET} m {:.3}, unseen at 30/100/300/1000 m {unseen:?}",
+            build.version,
+            sites.len(),
+            v["seen_fraction"].as_f64().unwrap(),
+        );
+        assert_eq!(
+            wrong, 0,
+            "{id}: {wrong} cells differ from the sites' own floors"
+        );
+        assert!(agree * 100 >= judged * 95, "{id}: {agree} of {judged}");
     }
 }
