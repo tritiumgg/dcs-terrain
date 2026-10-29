@@ -168,16 +168,26 @@ pub struct ScoreSiteRequest {
     pub footprint: Footprint,
     #[serde(deserialize_with = "super::criteria::deserialize_criteria")]
     pub criteria: Vec<Criterion>,
+    /// Also return the site and its footprint as GeoJSON.
+    #[serde(default)]
+    pub geojson: bool,
 }
 
-/// The site at its best orientation.
+/// The site at its best orientation: one that passes every hard test if
+/// any does, the highest score among those, the first given on a tie.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ScoreSiteResponse {
     #[serde(flatten)]
     pub provenance: Provenance,
     pub orientation_deg: f64,
+    /// The sum of the term scores, as `find_sites` ranks with every weight
+    /// 1.
+    pub score: f64,
     pub terms: Vec<Term>,
     pub hard_fail: bool,
+    /// The site and its footprint, when `geojson` was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
 }
 
 /// One criterion's contribution: the measured `value`, whether the hard test
@@ -209,6 +219,9 @@ pub struct FindSitesRequest {
     /// Weight per criterion name in the ranking sum; 1 for any not named.
     #[serde(default)]
     pub weights: BTreeMap<String, f64>,
+    /// Also return the candidates and their footprints as GeoJSON.
+    #[serde(default)]
+    pub geojson: bool,
 }
 
 fn default_find_sites_limit() -> u32 {
@@ -222,6 +235,9 @@ pub struct FindSitesResponse {
     /// Best first.
     pub candidates: Vec<Candidate>,
     pub stats: FindSitesStats,
+    /// Each candidate and its footprint, when `geojson` was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

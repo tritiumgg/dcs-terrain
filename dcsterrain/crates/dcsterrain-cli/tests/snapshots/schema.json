@@ -1324,6 +1324,11 @@
         "footprint": {
           "$ref": "#/$defs/Footprint"
         },
+        "geojson": {
+          "default": false,
+          "description": "Also return the candidates and their footprints as GeoJSON.",
+          "type": "boolean"
+        },
         "limit": {
           "default": 20,
           "description": "At most 200.",
@@ -1385,6 +1390,9 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "geojson": {
+          "description": "Each candidate and its footprint, when `geojson` was asked for."
         },
         "stats": {
           "$ref": "#/$defs/FindSitesStats"
@@ -2785,6 +2793,11 @@
         "footprint": {
           "$ref": "#/$defs/Footprint"
         },
+        "geojson": {
+          "default": false,
+          "description": "Also return the site and its footprint as GeoJSON.",
+          "type": "boolean"
+        },
         "x": {
           "format": "double",
           "type": "number"
@@ -2803,7 +2816,7 @@
       "type": "object"
     },
     "ScoreSiteResponse": {
-      "description": "The site at its best orientation.",
+      "description": "The site at its best orientation: one that passes every hard test if\nany does, the highest score among those, the first given on a tie.",
       "properties": {
         "cell_size": {
           "format": "double",
@@ -2817,10 +2830,18 @@
           "minimum": 0,
           "type": "integer"
         },
+        "geojson": {
+          "description": "The site and its footprint, when `geojson` was asked for."
+        },
         "hard_fail": {
           "type": "boolean"
         },
         "orientation_deg": {
+          "format": "double",
+          "type": "number"
+        },
+        "score": {
+          "description": "The sum of the term scores, as `find_sites` ranks with every weight\n1.",
           "format": "double",
           "type": "number"
         },
@@ -2844,6 +2865,7 @@
         "cell_size",
         "elapsed_ms",
         "orientation_deg",
+        "score",
         "terms",
         "hard_fail"
       ],

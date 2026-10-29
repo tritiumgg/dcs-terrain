@@ -528,7 +528,7 @@ fn distance(want: &mut impl FnMut(Derived) -> usize, to: Target, min: f64, max: 
     }
 }
 
-fn name(c: &Criterion) -> String {
+pub(super) fn name(c: &Criterion) -> String {
     let v = serde_json::to_value(c).expect("a criterion serializes");
     v["name"]
         .as_str()
