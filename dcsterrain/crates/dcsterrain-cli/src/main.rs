@@ -589,14 +589,14 @@ fn check(
     as_json: bool,
     cache: CacheDir,
 ) -> ExitCode {
-    let report = cache.open().and_then(|cache| {
-        let root = install_root(install)?;
-        check::check(&root, id, &cache, top, TALLEST).map_err(|e| e.0)
+    let report = cache.open().map_err(|e| ("no_cache", e)).and_then(|cache| {
+        let root = install_root(install).map_err(|e| ("no_install", e))?;
+        check::check(&root, id, &cache, top, TALLEST).map_err(|e| ("terrain_refused", e.0))
     });
     let report = match report {
         Ok(r) => r,
-        Err(e) if as_json => return refuse(vec![Issue::new("terrain_refused", &e, "")]),
-        Err(e) => {
+        Err((code, e)) if as_json => return refuse(vec![Issue::new(code, &e, "")]),
+        Err((_, e)) => {
             tracing::error!("{e}");
             return ExitCode::FAILURE;
         }
@@ -683,7 +683,9 @@ fn check_text(r: &check::Report) -> String {
     for f in &r.files {
         let what = match (&f.class, f.version) {
             (Some(c), Some(v)) => format!("{c} version {v}"),
-            _ => "read as text".into(),
+            // The Lua files and `assets.assets` carry no container header.
+            _ if f.why.is_none() => "read without a header".into(),
+            _ => "no container header".into(),
         };
         if f.why.is_none() && f.role.starts_with("airfield_") {
             let dir = f.path.rsplit_once('/').map_or("", |(d, _)| d);

@@ -185,7 +185,9 @@ pub fn check(
             .iter()
             .any(|f| !f.readable && roles.contains(&f.role.as_str()))
     };
-    let tables_unreadable = unreadable(&["airfield_rn4", "airfield_rn5", "assets", "lua"]);
+    // The Lua files and `assets.assets` have no header to refuse; a fault in
+    // one refuses the tables when they are read.
+    let tables_unreadable = unreadable(&["airfield_rn4", "airfield_rn5"]);
     let scene_unreadable = unreadable(&["scene"]);
 
     if !tables_unreadable {
