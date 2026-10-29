@@ -16,9 +16,6 @@ target/
 .DS_Store
 Thumbs.db
 
-# Tools built locally rather than downloaded (mise run lua51).
-.tools/
-
 # Local agent settings. .claude/settings.json is shared and holds the hooks;
 # this one is per-machine and is not.
 .claude/settings.local.json

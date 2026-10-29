@@ -10,10 +10,6 @@
 #
 # It disables line-ending conversion so scripts checked out on Windows keep
 # LF endings and `sh` can run them. Leave this file alone.
-#
-# Nothing here wants CRLF. The one PowerShell script runs the same either way,
-# and the hook the user copies into Saved Games is read by the sim's own Lua,
-# which does not care.
 * text=auto eol=lf
 
 # Shell scripts need LF whatever an editor does to them.

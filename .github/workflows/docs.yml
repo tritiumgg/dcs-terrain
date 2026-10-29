@@ -1,6 +1,6 @@
 name: docs
 
-# Runs on everything, with no path filter, unlike rust.yml and lua.yml. The
+# Runs on everything, with no path filter, unlike rust.yml. The
 # checks here are about the repository rather than about one language: a
 # citation added to any file, a state file over budget, a hook that stopped
 # guarding. Filtering by path would let

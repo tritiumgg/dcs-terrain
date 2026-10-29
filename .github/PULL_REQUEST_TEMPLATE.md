@@ -46,15 +46,14 @@ Every command the tester runs gets its own fenced code block under its step:
 one command per block, tagged powershell or bash, no prompt character and no
 output inside it. A command named in a sentence is not a step anyone can copy.
 
-Without DCS: builds, unit tests, the offline Lua tests, the document tools,
-the synthetic terrain. Windows steps in PowerShell wherever the command can
+Without DCS: builds, unit tests, the document tools, the synthetic terrain.
+Windows steps in PowerShell wherever the command can
 run there; where a task needs `sh` (the mise tasks that run tools/*.sh), name
 Git Bash and say why. macOS and Linux steps in bash. Where the two are the
 same command, give it once under "All platforms".
 
-With DCS: this needs a Windows machine with DCS installed. Build the
-artifacts, copy the hook into Saved Games (say the exact path and edit), then
-what to do in DCS, with a Verify after each thing the tester should see.
+With DCS: this needs a Windows machine with DCS installed. Build the tool,
+then what to do in DCS, with a Verify after each thing the tester should see.
 Never write into the DCS install.
 
 Not covered: every part of the task's completion condition these steps do not

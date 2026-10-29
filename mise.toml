@@ -2,28 +2,13 @@
 # builds or tests with, so nothing has to be installed system-wide.
 
 [tools]
-# The offline extractor tests. 5.1 is not a preference: it is the version the
-# DCS hook state runs, and the tests exist to catch what 5.1 does differently.
-# mise's plugin builds it from source with make, so Windows is excluded here
-# and served by the `lua51` task below instead.
-lua = { version = "5.1.5", os = ["linux", "macos"] }
-
-# Editor language servers, pinned so every machine reports the same
-# diagnostics. Both ship binaries for all three platforms.
+# The editor language server, pinned so every machine reports the same
+# diagnostics. It ships binaries for all three platforms.
 #
-# The Lua server matters more than it looks: `.luarc.json` sets it to Lua 5.1,
-# so it flags `string.pack`, `bit` and the rest of what the DCS hook state does
-# not have, at the point of writing rather than at the point of loading.
-lua-language-server = "3.19.1"
-
 # This is the standalone editor binary, not a toolchain component, so it does
 # not conflict with rust-toolchain.toml below: that still pins the rustc and
 # cargo this server shells out to.
 rust-analyzer = "2026-08-31"
-
-[env]
-# Where the `lua51` task puts the Windows interpreter. Harmless elsewhere.
-_.path = [".tools/bin"]
 
 [settings]
 # Rust is deliberately absent from [tools]. rustup reads rust-toolchain.toml
@@ -32,13 +17,9 @@ _.path = [".tools/bin"]
 # file, so `mise install` provisions Rust and cargo still works without mise.
 idiomatic_version_file_enable_tools = ["rust"]
 
-[tasks.lua51]
-description = "Build Lua 5.1.5 for Windows with MSVC into .tools/bin"
-run = "pwsh -NoProfile -ExecutionPolicy Bypass -File tools/lua51/Build-Lua51.ps1"
-
 # Tasks. Run project commands through these rather than reaching for the tool
 # directly: a non-interactive shell does not pick up mise's PATH activation, so
-# a bare `cargo` or `lua` is the wrong version or missing.
+# a bare `cargo` is the wrong version or missing.
 #
 # Anything with a loop or a conditional lives in tools/ and is invoked as
 # `sh tools/<name>.sh`. mise runs an inline script through cmd on Windows,
@@ -62,10 +43,6 @@ run = [
   "cargo clippy --workspace --all-targets -- -D warnings",
   "cargo test --workspace",
 ]
-
-[tasks.lua-test]
-description = "Run the offline extractor tests under Lua 5.1"
-run = "sh tools/luatest.sh"
 
 [tasks.docs]
 description = "Check the documents: the state file, the citations, the hooks"
