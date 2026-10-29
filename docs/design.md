@@ -189,14 +189,18 @@ An airdrome is keyed by its `name_id`, the basename of its `.rn4`, across
 every source that names it. Its id is the one `Radio.lua`'s comment labels
 it with; failing that, the `N` of the `airfieldN_k` beacons nearest it
 within 15 km, when every beacon of `N` lies nearest it; failing that, the
-`N` of a `Radio.lua` entry whose scene object lies within its extent. The
-files hold no other source of the id: the game's list is in a `.crypt`
-file and follows no order of the files. On 2.9.30.28738 this leaves 11 of
-Nevada's 17 airdromes, 3 of PersianGulf's 30 and 2 of Syria's 80 with a
-null id, and those are named by `name_id` (ADR 0005). Its beacons, radio
-and display name follow from its id; the
-display name is its first beacon's, which on Caucasus is the game's for 18 of
-21 airdromes. Its reference point is the mean of its runway ends, within
+`N` of a `Radio.lua` entry whose scene object, placed by the `.scn5`, lies
+nearest the box of its runway ends and stands, within 1 km of it, when
+every such object of `N` does, through the scene's cached index; a scene
+no decoder reads costs those ids, not the tables. No join gives an id
+another airdrome or a label holds. The files hold no other source of the
+id: the game's list is in a `.crypt` file and follows no order of the
+files. On 2.9.30.28738 this leaves 8 of Nevada's 17 airdromes, 2 of
+PersianGulf's 30 and 2 of Syria's 80 with a runway with a null id, and
+those are named by `name_id` (ADR 0005; `data/airdrome-ids.md`). Its
+beacons, radio and display name follow from its id; the display name is
+its first beacon's, which on Caucasus is the game's for 18 of 21
+airdromes. Its reference point is the mean of its runway ends, within
 3 mm of the game's on Caucasus, whose airdromes have one runway each.
 `tables.json` does not carry the game's names by language or the scene
 objects it ties to an airdrome: towers, warehouses, fuel depots, shelters.
@@ -233,7 +237,7 @@ opening the install files it was derived from, except once after an update.
 |---|---|---|---|
 | `mesh.toc` | The `.surface5` table of contents can only be pattern-scanned: 21 ms (MarianasWWII) to 0.7 s (GermanyCW) per open | 0.05–1.5 MB, every block's arrays and its runway subsets, the one material read | < 1 s |
 | `scene.nodes` | Parsing the `.scn5` head costs 2 s and 559 MiB on Germany | 0.35 MiB (MarianaIslands) to 24.5 MiB (GermanyCW): each node's array offsets, the model table, the group and the pools | 0.05–1.8 s |
-| `tables.json` | Airfields, stands, Lua tables, and the fitted projection each cost a full decode; together they are small | 0.1 MB (MarianaIslands) to 2.4 MB (GermanyCW), read back in 1–10 ms | 54–560 ms |
+| `tables.json` | Airfields, stands, Lua tables, and the fitted projection each cost a full decode; together they are small | 0.1 MB (MarianaIslands) to 2.4 MB (GermanyCW), read back in 1–10 ms | 47–450 ms, after `scene.nodes`, which it reads to place the towers |
 | `roads.graph` | The `.rn4` has no spatial order: a 3.1 s scan on GermanyCW, and the water under 23 M samples | 8.6 MiB (Caucasus) to 137 MiB (GermanyCW) | 0.5 s (Caucasus) to 9.8 s (GermanyCW) |
 | `roads.betweenness` | Betweenness is global | 0.04 MiB (Caucasus) to 1.9 MiB (GermanyCW) | 0.4 s (Caucasus) to 29 s (GermanyCW) on two threads |
 | `places` | Settlements need every building on the terrain (§6.3) | 6–24 k rows, < 2 MiB | a whole objects-pool walk, 3.8 s (Caucasus) to 53 s (GermanyCW), plus 0.2–8 s grouping |
