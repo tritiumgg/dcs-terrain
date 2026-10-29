@@ -563,8 +563,6 @@ fn clip(c: [[f64; 2]; 3], z: [f64; 3], a: [f64; 2], d: [f64; 2]) -> Option<([f64
 /// than binning them: for a handful of points, binning a block costs more
 /// than it saves. The answers are `Prepared::point` and `on_runway`'s.
 pub fn few(b: &Block, g: &Grid, points: &[[f64; 2]]) -> Vec<(Option<Ground>, bool)> {
-    let world: Vec<[f64; 3]> = (0..b.p.len() as u32).map(|i| b.world(i)).collect();
-    let rc: Vec<[f64; 2]> = world.iter().map(|v| grid_units(g, v[0], v[2])).collect();
     let mut out = vec![(None, false); points.len()];
     // A corner box widened by the bins' slack holds every point `cover`
     // accepts, as a bin does.
@@ -574,16 +572,82 @@ pub fn few(b: &Block, g: &Grid, points: &[[f64; 2]]) -> Vec<(Option<Ground>, boo
             p[k] >= lo - BIN_SLACK && p[k] <= hi + BIN_SLACK
         })
     };
+    // Converting every vertex to grid units costs more than testing the
+    // triangles, so each is first tested in the block's own meters, against
+    // the points taken back there and given a meter more than the slack,
+    // far past any rounding: a triangle that misses a point there misses
+    // it in grid units. Only the few left are converted.
+    let cs = f64::from(g.cell_size);
+    let t0 = b.t.map(f64::from);
+    let reach = BIN_SLACK * cs + 1.0;
+    let local: Vec<[f64; 2]> = points
+        .iter()
+        .map(|p| {
+            [
+                (p[0] + 0.5) * cs + g.origin_x - t0[0],
+                (p[1] + 0.5) * cs + g.origin_z - t0[2],
+            ]
+        })
+        .collect();
+    let all = local.iter().fold(
+        [
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        ],
+        |a, p| {
+            [
+                a[0].min(p[0]),
+                a[1].min(p[1]),
+                a[2].max(p[0]),
+                a[3].max(p[1]),
+            ]
+        },
+    );
+    let local_box = |tri: &[u32; 3]| {
+        let c = tri.map(|k| b.p[k as usize]);
+        let (x0, x1) = (
+            c[0][0].min(c[1][0]).min(c[2][0]),
+            c[0][0].max(c[1][0]).max(c[2][0]),
+        );
+        let (z0, z1) = (
+            c[0][2].min(c[1][2]).min(c[2][2]),
+            c[0][2].max(c[1][2]).max(c[2][2]),
+        );
+        [
+            f64::from(x0) - reach,
+            f64::from(z0) - reach,
+            f64::from(x1) + reach,
+            f64::from(z1) + reach,
+        ]
+    };
+    let misses =
+        |m: &[f64; 4], p: [f64; 2]| p[0] < m[0] || p[1] < m[1] || p[0] > m[2] || p[1] > m[3];
+    let misses_all =
+        |m: &[f64; 4]| all[2] < m[0] || all[3] < m[1] || all[0] > m[2] || all[1] > m[3];
+    let corner = |k: u32| {
+        let v = b.world(k);
+        grid_units(g, v[0], v[2])
+    };
     for (t, tri) in b.tri.iter().enumerate() {
-        let c = tri.map(|k| rc[k as usize]);
-        for (p, o) in points.iter().zip(out.iter_mut()) {
+        let m = local_box(tri);
+        if misses_all(&m) {
+            continue;
+        }
+        let mut c = None;
+        for ((p, l), o) in points.iter().zip(&local).zip(out.iter_mut()) {
+            if misses(&m, *l) {
+                continue;
+            }
+            let c = *c.get_or_insert_with(|| tri.map(corner));
             if !near(&c, *p) {
                 continue;
             }
             let Some((u, v)) = cover(c[0], c[1], c[2], *p) else {
                 continue;
             };
-            let z = tri.map(|k| world[k as usize][1]);
+            let z = tri.map(|k| b.world(k)[1]);
             let g = Ground {
                 h: z[0] + u * (z[1] - z[0]) + v * (z[2] - z[0]),
                 tritype: b.tritype[t],
@@ -598,9 +662,17 @@ pub fn few(b: &Block, g: &Grid, points: &[[f64; 2]]) -> Vec<(Option<Ground>, boo
     }
     let runway = b.subsets.iter().filter(|s| s.material == RUNWAY_MATERIAL);
     for tri in runway.flat_map(|s| s.tri.iter()) {
-        let c = tri.map(|k| rc[k as usize]);
-        for (p, o) in points.iter().zip(out.iter_mut()) {
-            if !o.1 && near(&c, *p) && cover(c[0], c[1], c[2], *p).is_some() {
+        let m = local_box(tri);
+        if misses_all(&m) {
+            continue;
+        }
+        let mut c = None;
+        for ((p, l), o) in points.iter().zip(&local).zip(out.iter_mut()) {
+            if o.1 || misses(&m, *l) {
+                continue;
+            }
+            let c = *c.get_or_insert_with(|| tri.map(corner));
+            if near(&c, *p) && cover(c[0], c[1], c[2], *p).is_some() {
                 o.1 = true;
             }
         }
@@ -1257,6 +1329,41 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_few_points_answer_as_the_prepared_block_does() {
+        let g = grid(810);
+        let f = file(&[mixed()], 1);
+        let raw = Surface5::open(&f[..], "t")
+            .unwrap()
+            .read_block(&f[..], 0, &[RUNWAY_MATERIAL])
+            .unwrap();
+        let b = Prepared::new(raw.clone(), &g);
+        // Every vertex, points over the fine patch and the runway, and
+        // points across the block, a hair either side of grid lines too.
+        let mut pts: Vec<[f64; 2]> = b.rc.clone();
+        for k in 0..6000 {
+            let (a, c) = (f64::from(k % 80), f64::from(k / 80));
+            pts.push([100.0 + a * 0.6, 95.0 + c * 0.7]);
+            pts.push([a * 10.3 - 2.0, c * 10.9 - 2.0]);
+            pts.push([a.round() + 1e-12, c.round() - 1e-12]);
+        }
+        let (mut ground, mut runway) = (0, 0);
+        for n in [1, 8, 32] {
+            for chunk in pts.chunks(n) {
+                for (p, (g, r)) in chunk.iter().zip(few(&raw, &g, chunk)) {
+                    assert_eq!(g, b.point(*p), "{p:?}");
+                    assert_eq!(r, b.on_runway(*p), "{p:?}");
+                    ground += usize::from(g.is_some());
+                    runway += usize::from(r);
+                }
+            }
+        }
+        assert!(
+            ground > 10000 && runway > 1000,
+            "{ground} on ground, {runway} on a runway"
+        );
     }
 
     #[test]
