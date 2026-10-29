@@ -464,7 +464,7 @@ impl Graph {
     }
 
     /// `e` as it is searched: its node `a`, its polyline and its node `b`.
-    fn path(&self, e: &Edge) -> impl Iterator<Item = [f64; 2]> + '_ {
+    pub fn path(&self, e: &Edge) -> impl Iterator<Item = [f64; 2]> + '_ {
         let line = self
             .line(e)
             .iter()
@@ -490,6 +490,69 @@ impl Graph {
             prev = q;
         }
         best
+    }
+
+    /// The point of `e` closest to `p`, as `closest` finds it, and the share
+    /// of the way along `e`'s path from `a` to `b` it lies at, 0 to 1.
+    pub fn locate(&self, e: &Edge, p: [f64; 2]) -> ([f64; 2], f64) {
+        let mut path = self.path(e);
+        let mut prev = path.next().expect("a path has its two nodes");
+        let (mut best, mut best_d, mut best_at) = (prev, f64::INFINITY, 0.0);
+        let mut walked = 0.0;
+        for q in path {
+            let c = closest_on(prev, q, p);
+            let d = (c[0] - p[0]).hypot(c[1] - p[1]);
+            if d < best_d {
+                let into = (c[0] - prev[0]).hypot(c[1] - prev[1]);
+                (best, best_d, best_at) = (c, d, walked + into);
+            }
+            walked += (q[0] - prev[0]).hypot(q[1] - prev[1]);
+            prev = q;
+        }
+        let share = if walked > 0.0 { best_at / walked } else { 0.0 };
+        (best, share.clamp(0.0, 1.0))
+    }
+
+    /// `e`'s path between the shares `from` and `to` of the way along it from
+    /// `a`, each 0 to 1, running from `from` to `to` whichever is larger:
+    /// its two ends and every point of the path between.
+    pub fn piece(&self, e: &Edge, from: f64, to: f64) -> Vec<[f64; 2]> {
+        let path: Vec<[f64; 2]> = self.path(e).collect();
+        let lengths: Vec<f64> = path
+            .windows(2)
+            .map(|s| (s[1][0] - s[0][0]).hypot(s[1][1] - s[0][1]))
+            .collect();
+        let total: f64 = lengths.iter().sum();
+        let (lo, hi) = (from.min(to) * total, from.max(to) * total);
+        let at = |m: f64| {
+            let mut walked = 0.0;
+            for (i, &l) in lengths.iter().enumerate() {
+                if walked + l >= m && l > 0.0 {
+                    let t = ((m - walked) / l).clamp(0.0, 1.0);
+                    let (a, b) = (path[i], path[i + 1]);
+                    return [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
+                }
+                walked += l;
+            }
+            path[path.len() - 1]
+        };
+        let mut out = vec![at(lo)];
+        let mut walked = 0.0;
+        for (i, &l) in lengths.iter().enumerate() {
+            walked += l;
+            if walked > lo && walked < hi {
+                out.push(path[i + 1]);
+            }
+        }
+        out.push(at(hi));
+        out.dedup();
+        if out.len() == 1 {
+            out.push(out[0]);
+        }
+        if from > to {
+            out.reverse();
+        }
+        out
     }
 
     /// The `n` edges of `kind` nearest `p`, nearest first, ties in edge
@@ -864,7 +927,7 @@ impl Index {
 pub fn betweenness(g: &Graph, sources: usize, threads: usize) -> Vec<f32> {
     let mut out = vec![0.0f32; g.edges.len()];
     for kind in [KIND_ROAD, KIND_RAIL] {
-        let net = Network::new(g, kind);
+        let net = Adjacency::new(g, kind);
         let Some(comp) = net.largest() else { continue };
         let picked = spread_sources(&comp, sources);
         let sums = net.brandes(&picked, threads.max(1));
@@ -890,7 +953,7 @@ fn spread_sources(nodes: &[u32], n: usize) -> Vec<u32> {
 
 /// One network's adjacency, compressed: node `v`'s neighbors are
 /// `to[off[v]..off[v + 1]]`, reached along `via` edges of `len`.
-struct Network {
+pub struct Adjacency {
     off: Vec<u32>,
     to: Vec<u32>,
     via: Vec<u32>,
@@ -898,8 +961,8 @@ struct Network {
     edges: usize,
 }
 
-impl Network {
-    fn new(g: &Graph, kind: u8) -> Network {
+impl Adjacency {
+    pub fn new(g: &Graph, kind: u8) -> Adjacency {
         let n = g.nodes.len();
         let mut deg = vec![0u32; n + 1];
         let mine = || g.edges.iter().enumerate().filter(|(_, e)| e.kind == kind);
@@ -923,7 +986,7 @@ impl Network {
                 fill[from as usize] += 1;
             }
         }
-        Network {
+        Adjacency {
             off,
             to,
             via,
@@ -934,6 +997,12 @@ impl Network {
 
     fn around(&self, v: u32) -> std::ops::Range<usize> {
         self.off[v as usize] as usize..self.off[v as usize + 1] as usize
+    }
+
+    /// Each node `v` is joined to, and the index of the edge that joins
+    /// them, once for each edge.
+    pub fn neighbors(&self, v: u32) -> impl Iterator<Item = (u32, u32)> + '_ {
+        self.around(v).map(|i| (self.to[i], self.via[i]))
     }
 
     /// The nodes of the largest connected component with an edge, sorted;
@@ -1020,7 +1089,7 @@ impl Work {
         }
     }
 
-    fn from(&mut self, net: &Network, s: u32) {
+    fn from(&mut self, net: &Adjacency, s: u32) {
         for &v in &self.order {
             let v = v as usize;
             (self.dist[v], self.sigma[v], self.delta[v]) = (f64::INFINITY, 0.0, 0.0);
@@ -1332,6 +1401,37 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn locates_a_point_along_an_edge_and_cuts_the_piece_between_two() {
+        // An L: 100 m east from the node at the origin, then 100 m north,
+        // with a 2 m gap to the node at its far end.
+        let s = vec![stretch(
+            KIND_ROAD,
+            0,
+            1,
+            2,
+            &[[0.0, 0.0], [0.0, 100.0], [98.0, 100.0]],
+        )];
+        let mut g = build(classes(), s, &mut dry).unwrap();
+        g.nodes[1] = [100.0, 100.0];
+        let e = g.edges[0].clone();
+        let (p, at) = g.locate(&e, [-5.0, 50.0]);
+        assert_eq!(p, [0.0, 50.0]);
+        assert!((at - 0.25).abs() < 1e-12, "{at}");
+        let (p, at) = g.locate(&e, [200.0, 300.0]);
+        assert_eq!((p, at), ([100.0, 100.0], 1.0));
+        assert_eq!(
+            g.piece(&e, 0.25, 0.75),
+            [[0.0, 50.0], [0.0, 100.0], [50.0, 100.0]]
+        );
+        assert_eq!(
+            g.piece(&e, 0.75, 0.25),
+            [[50.0, 100.0], [0.0, 100.0], [0.0, 50.0]]
+        );
+        assert_eq!(g.piece(&e, 0.0, 1.0).len(), 4);
+        assert_eq!(g.piece(&e, 0.5, 0.5), [[0.0, 100.0], [0.0, 100.0]]);
+    }
+
+    #[test]
     fn round_trips_and_refuses_a_cut_payload() {
         let s = vec![
             stretch(KIND_ROAD, 0, 1, 2, &[[0.0, 0.0], [100.0, 0.0]]),
@@ -1371,7 +1471,7 @@ pub(crate) mod tests {
     /// Brandes from every node of `kind`'s largest component, summed and
     /// unnormalized, by brute force over every pair's shortest paths.
     fn brute(g: &Graph, kind: u8) -> Vec<f64> {
-        let net = Network::new(g, kind);
+        let net = Adjacency::new(g, kind);
         let comp = net.largest().unwrap();
         let mut w = Work::new(g.nodes.len(), g.edges.len());
         for &s in &comp {
