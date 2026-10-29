@@ -355,7 +355,7 @@ the region's tiles held and the scenery index and road graph built:
 | building and industrial counts | objects of the class within a radius | 5.6–28 ms at 1 km |
 | tree and line density | instances of the trees or lines pool per hectare within a radius | 2.7–224 ms at 300 m, the most on the Marianas' forests |
 | `cover` fractions | share of the covered cells within a radius that are of a class | 3.9–4.0 ms at 300 m |
-| radar floor, exposure | one viewshed sweep per site (`queries.md`) | 89–111 ms per 20 km site cold |
+| radar floor, exposure | one viewshed sweep per site (`queries.md`) | 89–111 ms per 20 km site cold; `exposure` 35–160 ms a site (`data/exposure.md`) |
 
 The first read of a region's scenery costs more: up to 0.56 s for
 Afghanistan's buildings within 5 km of Herat and 0.91 s for the trees
@@ -558,8 +558,8 @@ correctness rule: a miss is a decision about the target.
 | `visible` 10–40 km | over the mesh's triangles, 1–4 ms over 8–38 km on Caucasus in a fresh process, OS cache warm; over 2000 lines of 1–40 km, p50 0.60 / 0.37 ms and p99 9.3 / 30 ms (Caucasus / GermanyCW), 2.9.30.28738; query benchmark over 1–40 km, p50 0.35 / 0.30 ms warm within a batch, 4.3 / 6.5 ms cold in a fresh process | 1 ms within a batch, 20 ms cold |
 | one `query` call end to end, OS cache warm | 42–48 ms for `visible` on Caucasus, 2.9.30.28738; query benchmark 8.5 / 10.6 ms for `visible`, 11.3 / 19.1 ms for `describe` (Caucasus / GermanyCW) | 50 ms for `describe`, `sample`, `visible` |
 | `viewshed`, `radar_floor` 20 km | 89–111 ms; `radar_floor` 20 km 91–303 ms median per terrain over eight terrains at 5 threads, the mesh out to 1 km and GeoJSON bands included, MarianaIslandsWWII 3 ms over the target (`data/radar-floor.md`); `viewshed` 120 ms at 20 km and 644 ms at 50 km on Caucasus, OS cache warm, on 2.9.30.28738; query benchmark `viewshed` 20 km 15 / 12 ms warm, 23 / 14 ms cold (Caucasus / GermanyCW) | 300 ms |
-| `exposure`, 10 sites of 20 km | ~1 s estimated | 3 s |
 | `find_sites` 20 × 20 km, geometric | 15–24 ms; a FARP's ten criteria every 100 m, 57–205 ms over the 8 terrains of 2.9.30.28738, tiles read, 5 threads (`data/find-sites.md`) | 500 ms |
+| `exposure`, 10 sites of 20 km | 7 sites of 20 km 0.24–1.2 s warm, 3.4–9.3 Gcycles, over eight terrains at 5 threads, on 2.9.30.28738 (`data/exposure.md`) | 3 s |
 | `find_sites` with one LOS criterion, 36 observers | not measured | 10 s |
 | `find_sites` with a horizon criterion, first touch | 3.4–4.9 s for the horizon of a 20 × 20 km region, 7–10 ms once cached (Caucasus, 2.9.30.28738) | 5 s, then 500 ms |
 | `route` 50 km | 2.5 / 13 ms; 100 pairs of 2–80 km on each of 8 terrains, the search 0.05–1.6 ms p50 and the whole operation 4.9–43 ms p50, 90 ms p95 at most, on 2.9.30.28738 (`data/route-search.md`) | 500 ms |

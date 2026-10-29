@@ -53,7 +53,7 @@ endpoints also returns them as `Point` features.
 | `coverage` | one `MultiPolygon` per band's dead zones with `alt_agl`; the asset's outline when given |
 | `approach_spectrum` | a `Polygon` wedge per blind arc, out to `radius`, with the band and the arc's bearings |
 | `unmask_profile` | the route as a `LineString`; a `LineString` per masked segment; the first-seen point |
-| `exposure` | the unseen polygons with `alt_agl` |
+| `exposure` | one `MultiPolygon` per band of the area no site sees, lowest first, with `alt_agl` |
 | `score_site`, `find_sites` | a `Point` per candidate with its rank, score and orientation, and its footprint as a `Polygon` |
 | `visible` | the sightline as a `LineString` with `visible` and `clearance_m`, and the blocking point when there is one |
 | `route` | the route as a `LineString`, and each leg as one with its `length`, `ascent`, `descent`, `max_grade_pct`, `exposure` and `class` |
@@ -407,10 +407,29 @@ times the ratio of the ranges: up to p99 41 m at 20 km
 
 ### `exposure`
 
-Request: `sites: Vec<{observer, radius, weight}>`, `region`, and a
-`target_alt_agl` or a band. Response per cell: the lowest floor over all sites
-and how many sites see the target altitude; optionally polygons of "unseen at
-or below h". Geometry only: no clutter, Doppler notch or minimum elevation.
+Request: `sites: Vec<{observer, radius}>` (at most 64), `region` (default
+the box about every site's radius), `target_alt_agl`, `bands_agl` (default
+30, 100, 300, 1 000 m), `resolution` and `geojson`. Response: a raster over
+the cells whose centers lie in the region's box, laid out as `radar_floor`'s,
+with `floor_agl` and `floor_msl` the least floor over the sites, and
+`seen_count` one byte per cell, base64, the sites that see a target
+`target_alt_agl` above the ground; `seen_fraction`, the share of the
+region's cells with ground some site sees at that height; and per band its
+`unseen_fraction`. A floor is NaN off the ground or outside the region and
+infinite where no site's radius reaches. With `geojson`, each band's unseen
+area is a `MultiPolygon` along cell edges, so the area unseen at each band
+lies inside the area unseen at every lower one. Geometry only: no clutter,
+Doppler notch or minimum elevation.
+
+A multiple viewshed: one radar floor sweep per site, a site whose radius
+misses the region never swept, then the least floor and the count reduced
+over the sites. Every site's raster is aligned to the region's lattice, so
+the least floor is one site's floor bit for bit, and the count is exactly
+what the sites' floors say at the target height, in any order of sites or
+threads. The error is the floor's own: the least of floors each within `e`
+is within `e`, and a site is miscounted only where its floor's error passes
+the floor's distance from the target height (`data/exposure.md`). A request
+`weight` per site is left out until a cost raster needs it.
 
 ### `validate_placements`
 
