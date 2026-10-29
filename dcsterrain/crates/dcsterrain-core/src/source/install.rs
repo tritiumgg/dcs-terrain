@@ -25,6 +25,9 @@ use crate::grid::Grid;
 
 /// The bytes of prepared blocks kept between requests.
 pub const BLOCK_BUDGET: usize = 32 << 20;
+/// Up to this many points on a block not held, `points` tests its
+/// triangles directly rather than preparing it.
+const FEW_POINTS: usize = 32;
 /// Rasterized tiles kept between requests, of every layer: about 20 KiB each.
 pub const TILE_COUNT: usize = 256;
 
@@ -150,6 +153,15 @@ impl<K: Eq + Hash + Copy, V: Clone> Lru<K, V> {
             let (_, size, _) = self.items.remove(&oldest).unwrap();
             self.used -= size;
         }
+    }
+}
+
+fn ground_of(g: ground::Ground) -> Ground {
+    Ground {
+        height: g.h,
+        water: water_class(g.tritype),
+        surface: surface_of(g.tritype, g.runway),
+        cover: cover_of(g.tritype),
     }
 }
 
@@ -458,12 +470,67 @@ impl Source for Install {
             .map(|i| self.block(i))
             .collect::<Result<Vec<_>, _>>()?;
         let best = ground::point(blocks.iter().map(|b| b.as_ref()), p);
-        Ok(best.map(|g| Ground {
-            height: g.h,
-            water: water_class(g.tritype),
-            surface: surface_of(g.tritype, g.runway),
-            cover: cover_of(g.tritype),
-        }))
+        Ok(best.map(ground_of))
+    }
+
+    /// Block by block: every point's blocks are found first, then each
+    /// block is read once and asked about each point on it, and each point
+    /// keeps the best answer by rank. Holding one block at a time is
+    /// what keeps a terrain whose blocks under one point outgrow the block
+    /// budget from reading each block again for every point.
+    fn points(&self, points: &[[f64; 2]]) -> Result<Vec<Option<Ground>>, Refusal> {
+        let mut on: HashMap<usize, Vec<u32>> = HashMap::new();
+        for (k, &[x, z]) in points.iter().enumerate() {
+            if x.is_finite() && z.is_finite() {
+                for i in self.under(x, x, z, z) {
+                    on.entry(i).or_default().push(k as u32);
+                }
+            }
+        }
+        let mut order: Vec<usize> = on.keys().copied().collect();
+        order.sort_unstable();
+        let mut best: Vec<Option<ground::Ground>> = vec![None; points.len()];
+        let mut runway = vec![false; points.len()];
+        for i in order {
+            let ks = &on[&i];
+            let ps: Vec<[f64; 2]> = (ks.iter())
+                .map(|&k| grid_units(&self.grid, points[k as usize][0], points[k as usize][1]))
+                .collect();
+            let held = self.blocks.lock().unwrap().get(&i);
+            let answers = match held {
+                // A block few points fall on is answered without binning
+                // it, and not kept: preparing it would cost more than the
+                // points save.
+                None if ks.len() <= FEW_POINTS => {
+                    let raw = (self.toc)
+                        .read_block(&self.file, i, &[RUNWAY_MATERIAL])
+                        .map_err(|e| refusal(&self.path, e))?;
+                    ground::few(&raw, &self.grid, &ps)
+                }
+                held => {
+                    let b = match held {
+                        Some(b) => b,
+                        None => self.block(i)?,
+                    };
+                    ps.iter().map(|&p| (b.point(p), b.on_runway(p))).collect()
+                }
+            };
+            for (&k, (g, r)) in ks.iter().zip(answers) {
+                let k = k as usize;
+                best[k] = ground::merge(best[k], g);
+                runway[k] |= r;
+            }
+        }
+        Ok(best
+            .into_iter()
+            .zip(runway)
+            .map(|(g, r)| {
+                g.map(|mut g| {
+                    g.runway = r;
+                    ground_of(g)
+                })
+            })
+            .collect())
     }
 
     /// Each tile from the cache, the missing ones computed together and
@@ -666,6 +733,37 @@ mod tests {
         let p = t.point(1025.0, 2600.0).unwrap().unwrap();
         assert_eq!(p.surface, 4);
         assert!((p.height - 52.5).abs() < 1e-9, "{}", p.height);
+    }
+
+    #[test]
+    fn points_block_by_block_are_each_point_alone_whatever_the_budget() {
+        // Overlapping blocks, the second a road strip lower down that wins
+        // where it runs, and a third off to the north-east alone.
+        let mut low = square([ROAD_STRIP, ROAD_STRIP]);
+        low.t[1] = -50.0;
+        let mut far = square([1024, 1024]);
+        far.t = [3000.0, 20.0, 4000.0];
+        let root = install(&file(&[square([1024, LAKE]), low, far], 3));
+        let c = Scratch::new();
+        let t = Install::open(&root.0, "Test", &Cache::new(&c.0))
+            .unwrap()
+            .with_block_budget(1);
+        let mut pts = vec![[f64::NAN, 2500.0], [999.0, 2500.0]];
+        for k in 0..400 {
+            let f = f64::from(k);
+            pts.push([1000.0 + (f * 37.0) % 3000.0, 2000.0 + (f * 53.0) % 3000.0]);
+        }
+        // Few points to a block take the direct path, many the prepared one.
+        let few = t.points(&pts[..12]).unwrap();
+        let got = t.points(&pts).unwrap();
+        assert_eq!(few, got[..12]);
+        assert_eq!(got.len(), pts.len());
+        assert!(got.iter().filter(|g| g.is_some()).count() > 50);
+        for (p, g) in pts.iter().zip(&got) {
+            assert_eq!(*g, t.point(p[0], p[1]).unwrap(), "{p:?}");
+        }
+        assert!(got.iter().any(|g| g.is_some_and(|g| g.surface == 5)));
+        assert!(got.iter().any(|g| g.is_some_and(|g| g.surface == 4)));
     }
 
     #[test]

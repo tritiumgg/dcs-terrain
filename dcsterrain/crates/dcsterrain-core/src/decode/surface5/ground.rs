@@ -354,6 +354,56 @@ impl Prepared {
     }
 }
 
+/// For each of `points`, in grid units, block `b`'s winning triangle there
+/// and whether its runway subset covers it, testing every triangle rather
+/// than binning them: for a handful of points, binning a block costs more
+/// than it saves. The answers are `Prepared::point` and `on_runway`'s.
+pub fn few(b: &Block, g: &Grid, points: &[[f64; 2]]) -> Vec<(Option<Ground>, bool)> {
+    let world: Vec<[f64; 3]> = (0..b.p.len() as u32).map(|i| b.world(i)).collect();
+    let rc: Vec<[f64; 2]> = world.iter().map(|v| grid_units(g, v[0], v[2])).collect();
+    let mut out = vec![(None, false); points.len()];
+    // A corner box widened by the bins' slack holds every point `cover`
+    // accepts, as a bin does.
+    let near = |c: &[[f64; 2]; 3], p: [f64; 2]| {
+        (0..2).all(|k| {
+            let (lo, hi) = span(c, k);
+            p[k] >= lo - BIN_SLACK && p[k] <= hi + BIN_SLACK
+        })
+    };
+    for (t, tri) in b.tri.iter().enumerate() {
+        let c = tri.map(|k| rc[k as usize]);
+        for (p, o) in points.iter().zip(out.iter_mut()) {
+            if !near(&c, *p) {
+                continue;
+            }
+            let Some((u, v)) = cover(c[0], c[1], c[2], *p) else {
+                continue;
+            };
+            let z = tri.map(|k| world[k as usize][1]);
+            let g = Ground {
+                h: z[0] + u * (z[1] - z[0]) + v * (z[2] - z[0]),
+                tritype: b.tritype[t],
+                runway: false,
+                block: b.index,
+                tri: t,
+            };
+            if o.0.is_none_or(|cur: Ground| g.rank() > cur.rank()) {
+                o.0 = Some(g);
+            }
+        }
+    }
+    let runway = b.subsets.iter().filter(|s| s.material == RUNWAY_MATERIAL);
+    for tri in runway.flat_map(|s| s.tri.iter()) {
+        let c = tri.map(|k| rc[k as usize]);
+        for (p, o) in points.iter().zip(out.iter_mut()) {
+            if !o.1 && near(&c, *p) && cover(c[0], c[1], c[2], *p).is_some() {
+                o.1 = true;
+            }
+        }
+    }
+    out
+}
+
 /// The ground at `p`, in grid units, from every block that may cover it.
 pub fn point<'a>(blocks: impl IntoIterator<Item = &'a Prepared>, p: [f64; 2]) -> Option<Ground> {
     let mut best: Option<Ground> = None;

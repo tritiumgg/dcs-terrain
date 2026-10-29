@@ -52,6 +52,13 @@ pub trait Source {
     /// nothing covers the point.
     fn point(&self, x: f64, z: f64) -> Result<Option<Ground>, Refusal>;
 
+    /// `point` at each of `points`, `[x, z]`, in order. An install answers
+    /// them block by block, each block read once however many points lie on
+    /// it, so the points need not be near one another.
+    fn points(&self, points: &[[f64; 2]]) -> Result<Vec<Option<Ground>>, Refusal> {
+        points.iter().map(|p| self.point(p[0], p[1])).collect()
+    }
+
     /// The horizon tiles `tiles`, in order, as `horizon::compute` makes
     /// them. An install keeps each in its cache once computed.
     fn horizon(&self, tiles: &[(u32, u32)]) -> Result<Vec<Vec<u8>>, Refusal> {
