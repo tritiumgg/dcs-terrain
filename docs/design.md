@@ -275,9 +275,13 @@ opening the install files it was derived from, except once after an update.
 - Betweenness and `places` are built at low priority in the background. Until
   they exist, `chokepoints` and `towns` return an error saying they are still
   being built.
-- Index builds run at low priority on at most two threads; queries on one.
-  `--threads` overrides both. The tool must not take the CPU from a DCS server
-  beside it.
+- Index builds run at low priority on at most two threads. A query spreads
+  its large work (a viewshed's radials, a horizon batch, the tiles under a
+  window, the blocks under scattered points or a sightline) over every core,
+  below normal CPU priority, and keeps small work on the calling thread;
+  results merge in a fixed order, so they do not depend on how the work
+  falls. `--threads N` caps both. The tool must not take the CPU from a DCS
+  server beside it, and below normal priority it yields to one (ADR 0004).
 - `horizon/` is a directory of one file per tile, named `<tx>-<tz>`, each
   opening with the entry header and keyed on the surface file alone, so a
   changed road or scene file leaves it. A tile is checked as an entry is,

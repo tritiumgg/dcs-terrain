@@ -83,7 +83,9 @@ dcsterrain query --terrain Caucasus viewshed '{"observer": {"x": -260000, "z": 6
 `dcsterrain schema` names every field, and
 [docs/queries.md](docs/queries.md) every layer. A query refuses a terrain
 whose projection fits its beacons more than 2 m off unless given
-`--allow-crs-residual`.
+`--allow-crs-residual`. A large request spreads its work over every core,
+below normal priority so a DCS server beside it keeps the CPU;
+`--threads <n>` caps how many it takes.
 
 Check what the tool reads of a terrain, file by file, with its cache, tables
 and scenery classes; it fails naming each file it cannot read:

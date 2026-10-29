@@ -34,3 +34,4 @@ are in git at commit `4b85bd0`.
 | [0001](0001-read-file-headers-per-role-when-first-needed.md) | Accepted | 2026-10-27 | Read a terrain's file headers per role, when the role is first needed |
 | [0002](0002-keep-one-cache-directory-per-terrain.md) | Accepted | 2026-10-28 | Keep one cache directory per terrain, and re-stamp an entry whose files survive an update |
 | [0003](0003-judge-visible-over-the-mesh-triangles.md) | Accepted | 2026-10-29 | Judge `visible` over the mesh's triangles, not the raster |
+| [0004](0004-spread-query-work-over-every-core-below-normal-priority.md) | Accepted | 2026-10-29 | Spread a query's work over every core, below normal priority |
