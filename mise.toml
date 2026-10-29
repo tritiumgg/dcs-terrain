@@ -24,6 +24,11 @@ rust-analyzer = "2026-08-31"
 [env]
 # Where the `lua51` task puts the Windows interpreter. Harmless elsewhere.
 _.path = [".tools/bin"]
+# Every worktree builds into the main checkout's target directory, found
+# through git's common directory, so a worktree reuses the dependencies the
+# others compiled instead of growing its own multi-gigabyte copy. In the main
+# checkout this is the default location anyway.
+CARGO_TARGET_DIR = "{{ exec(command='git rev-parse --path-format=absolute --git-common-dir') }}/../dcsterrain/target"
 
 [settings]
 # Rust is deliberately absent from [tools]. rustup reads rust-toolchain.toml
