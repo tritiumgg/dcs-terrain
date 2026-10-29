@@ -79,20 +79,18 @@ refuse_bash 'mv a.lua \"/c/DCS World/b.lua\"'
 allow_bash 'ls \"C:/Program Files/Eagle Dynamics/DCS World\"'
 allow_bash 'cat \"C:/Program Files/Eagle Dynamics/DCS World/autoupdate.cfg\"'
 allow_bash 'grep -rn Terrain \"C:/Program Files/Eagle Dynamics/DCS World/Scripts\"'
-# Saved Games is not the install: the hook is copied there by hand.
-allow_bash 'cp extractor/DcsTerrainExtract.lua \"C:/Users/x/Saved Games/DCS/Scripts/Hooks/\"'
+# Saved Games is not the install.
+allow_bash 'cp notes.txt \"C:/Users/x/Saved Games/DCS/Logs/\"'
 
 # --- guard-bash: the toolchain ---------------------------------------------
 
 refuse_bash 'cargo test --workspace'
 refuse_bash 'cargo fmt --all'
-refuse_bash 'lua extractor/test/grid.lua'
 refuse_bash 'rustc --version'
 refuse_bash 'rustup update'
 refuse_bash 'mise use rust@1.99'
 allow_bash 'mise exec -- cargo test'
 allow_bash 'mise run check'
-allow_bash 'mise run lua-test'
 allow_bash 'mise install'
 
 # --- guard-bash: version control -------------------------------------------

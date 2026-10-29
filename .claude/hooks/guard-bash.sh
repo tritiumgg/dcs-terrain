@@ -10,7 +10,7 @@
 #
 # Refused:
 #   a write into the DCS install       it is read-only, always
-#   cargo, lua, rustc, rustfmt bare    run through mise exec -- or mise run
+#   cargo, rustc, rustfmt bare         run through mise exec -- or mise run
 #   rustup, mise use rust              the toolchain lives in rust-toolchain.toml
 #   git merge without --ff-only        history is linear
 #   git push --force                   --force-with-lease, on a topic branch
@@ -75,26 +75,26 @@ writes_to() {
 
 # The DCS install is read-only. This is the rule with the worst failure mode
 # in the project, so it is checked before anything else. Saved Games is not
-# the install and stays writable: the hook is copied there by hand, and its
-# directory is named DCS or DCS.openbeta rather than "DCS World".
+# the install and stays writable: its directory is named DCS or DCS.openbeta
+# rather than "DCS World".
 INSTALL='(Eagle Dynamics|DCS World|autoupdate\.cfg)'
 if writes_to "$INSTALL"; then
     refuse "a write into the DCS install." \
 "The install is read-only. Nothing in this project writes to it, and a probe
 that does can leave a terrain unloadable.
 
-Read from it freely. What the hook needs goes in the Saved Games write
-directory, which lfs.writedir() reports and which is not the install."
+Read from it freely. Anything written for a running DCS goes in the Saved
+Games write directory, which lfs.writedir() reports and which is not the
+install."
 fi
 
-if has "${START}(cargo|lua5\\.1|lua|luac|rustc|rustfmt)([[:space:]]|$)"; then
+if has "${START}(cargo|rustc|rustfmt)([[:space:]]|$)"; then
     refuse "a toolchain command outside mise." \
 "A non-interactive shell does not pick up mise's PATH activation, so the tool
-is the wrong version or missing. On Windows lua is the interpreter mise run
-lua51 builds into .tools/bin, which only mise puts on PATH.
+is the wrong version or missing.
 
 Run it as mise exec -- <command>, or as one of the tasks in mise.toml:
-mise run check, mise run test, mise run lua-test, mise run docs."
+mise run check, mise run test, mise run docs."
 fi
 
 if has "${START}rustup([[:space:]]|$)|${START}mise[[:space:]]+use[[:space:]]+rust"; then
