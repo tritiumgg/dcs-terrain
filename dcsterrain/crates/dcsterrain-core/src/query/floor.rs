@@ -179,7 +179,7 @@ pub(super) fn check_bands(bands: &[f64], path: &str) -> Option<Issue> {
 }
 
 /// Little-endian `f32`s, base64 encoded.
-fn floats(v: impl Iterator<Item = f64>) -> String {
+pub(super) fn floats(v: impl Iterator<Item = f64>) -> String {
     let bytes: Vec<u8> = v.flat_map(|f| (f as f32).to_le_bytes()).collect();
     base64(&bytes)
 }
@@ -379,7 +379,7 @@ pub(super) mod tests {
         answer(t, "radar_floor", &q).unwrap()
     }
 
-    fn floats(s: &str) -> Vec<f32> {
+    pub fn floats(s: &str) -> Vec<f32> {
         unbase64(s)
             .chunks(4)
             .map(|b| f32::from_le_bytes(b.try_into().unwrap()))

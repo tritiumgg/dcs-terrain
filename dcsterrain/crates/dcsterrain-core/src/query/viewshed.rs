@@ -23,12 +23,12 @@ use crate::types::{Issue, Observer, Polygon, ViewshedRequest, ViewshedResponse};
 
 /// The most cells the mask, or the window of heights under it, may hold:
 /// a radius of about 50 km at 50 m, under a second of sweep.
-const CELLS_MAX: u64 = 4 << 20;
+pub(super) const CELLS_MAX: u64 = 4 << 20;
 
 /// A mask of `cells`, or a window of heights of `cells` under it, over the
 /// most one may hold. Only a coarser mask makes a smaller mask; the window
 /// is of terrain cells whatever the mask's.
-fn too_large(what: &str, cells: u64, hint: &str, path: &str) -> Vec<Issue> {
+pub(super) fn too_large(what: &str, cells: u64, hint: &str, path: &str) -> Vec<Issue> {
     vec![Issue::new(
         "too_large",
         &format!("this sweep's {what} holds {cells} cells, over the {CELLS_MAX} one may; {hint}"),
@@ -140,8 +140,6 @@ pub(super) fn check_reach(
     resolution: Option<f64>,
     path: &str,
 ) -> Vec<Issue> {
-    let cell = f64::from(src.grid().cell_size);
-    let res = resolution.unwrap_or(cell);
     let mut issues = Vec::new();
     if !(radius.is_finite() && radius > 0.0) {
         issues.push(Issue::new(
@@ -150,14 +148,21 @@ pub(super) fn check_reach(
             path,
         ));
     }
-    if !(res.is_finite() && res >= cell) {
-        issues.push(Issue::new(
+    issues.extend(check_resolution(src, resolution));
+    issues
+}
+
+/// The issue with a resolution, which may be no finer than the cell size.
+pub(super) fn check_resolution(src: &dyn Source, resolution: Option<f64>) -> Option<Issue> {
+    let cell = f64::from(src.grid().cell_size);
+    let res = resolution.unwrap_or(cell);
+    (!(res.is_finite() && res >= cell)).then(|| {
+        Issue::new(
             "invalid_request",
             &format!("the resolution must be at least the cell size, {cell} m"),
             "resolution",
-        ));
-    }
-    issues
+        )
+    })
 }
 
 /// The altitude of the eye of the site `o`, found at `path` in the request,
