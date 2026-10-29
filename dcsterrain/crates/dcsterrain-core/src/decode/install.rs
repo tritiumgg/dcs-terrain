@@ -380,7 +380,14 @@ pub fn read_map(install: &Path, map: &str) -> Result<Map, Refusal> {
     let text = String::from_utf8_lossy(&bytes);
     let theatre =
         entry_id(&text).ok_or_else(|| Refusal(format!("{rel_root}/{entry} declares no id")))?;
+    read_files(install, build, dir, theatre)
+}
 
+/// The map in `dir`, spelled as the disk spells it, whose `entry.lua`
+/// declares `theatre`: its files located and its surface classified.
+fn read_files(install: &Path, build: Build, dir: String, theatre: String) -> Result<Map, Refusal> {
+    let root = install.join(TERRAINS_DIR).join(&dir);
+    let rel_root = format!("{TERRAINS_DIR}/{dir}");
     let mut ls = Listings::default();
     let mut files = Vec::new();
     for (role, find, _) in &ROLES {
@@ -420,23 +427,35 @@ pub fn terrains(install: &Path) -> Result<Vec<Listed>, Refusal> {
     })?;
     let mut out = Vec::new();
     for e in entries.flatten() {
-        let path = e.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let Some(entry) = child(&path, ENTRY_FILE) else {
-            continue;
+        // The listing gives an entry's type without a stat; only a link is
+        // followed to see what it names.
+        let dir = match e.file_type() {
+            Ok(t) if !t.is_symlink() => t.is_dir(),
+            _ => e.path().is_dir(),
         };
-        let id = fs::read(path.join(entry))
-            .ok()
-            .and_then(|b| entry_id(&String::from_utf8_lossy(&b)));
-        out.push(Listed {
-            dir: e.file_name().to_string_lossy().into_owned(),
-            id,
-        });
+        if dir {
+            out.extend(listed(
+                e.file_name().to_string_lossy().into_owned(),
+                &e.path(),
+            ));
+        }
     }
     out.sort_by(|a, b| a.dir.cmp(&b.dir));
     Ok(out)
+}
+
+/// The terrain in the directory `path`, named `dir`, if it holds an
+/// `entry.lua`. The file is opened by ED's spelling first, which every
+/// install uses, and looked for in a listing only when that is not there:
+/// on Windows each open or listing in the install costs tens of
+/// microseconds, and this runs for every terrain on every call.
+fn listed(dir: String, path: &Path) -> Option<Listed> {
+    let bytes = match fs::read(path.join(ENTRY_FILE)) {
+        Ok(b) => Some(b),
+        Err(_) => fs::read(path.join(child(path, ENTRY_FILE)?)).ok(),
+    };
+    let id = bytes.and_then(|b| entry_id(&String::from_utf8_lossy(&b)));
+    Some(Listed { dir, id })
 }
 
 /// The folder of the terrain whose `entry.lua` declares `id`, which is not
@@ -471,7 +490,12 @@ pub fn find(install: &Path, id: &str) -> Result<String, Refusal> {
 
 /// Opens the terrain whose `entry.lua` declares `id`.
 pub fn open(install: &Path, id: &str) -> Result<Map, Refusal> {
-    read_map(install, &find(install, id)?)
+    let dir = find(install, id)?;
+    // Finding it listed the terrains and read each `entry.lua`, so the
+    // folder is spelled as the disk spells it and declares `id`: neither is
+    // looked up again.
+    let build = read_build(install)?;
+    read_files(install, build, dir, id.to_string())
 }
 
 /// One of a terrain's files, and whether a decoder reads it.
