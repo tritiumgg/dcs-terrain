@@ -375,7 +375,7 @@ fn valid_is_applied_unasked_and_once() {
         synth(),
         &[plain()],
         &square(20.0),
-        &[c.clone()],
+        std::slice::from_ref(&c),
         Mode::Every,
     )
     .unwrap();
@@ -393,13 +393,30 @@ fn valid_is_applied_unasked_and_once() {
     assert_eq!(names, ["slope_max", "valid"]);
 }
 
+/// The lattice points of the box `b`, `step` apart from its minimum corner.
+fn box_lattice(b: [f64; 4], step: f64) -> Vec<[f64; 2]> {
+    let area = crate::query::resolve(
+        synth(),
+        &crate::types::Region::Box(crate::types::BoundingBox {
+            min_x: b[0],
+            min_z: b[1],
+            max_x: b[2],
+            max_z: b[3],
+        }),
+        "region",
+    )
+    .unwrap();
+    crate::query::lattice(&area, step, u32::MAX).unwrap()
+}
+
 /// A lattice `step` meters apart over the middle of the synthetic terrain:
 /// the coast, the river, the roads, the hills, the town, the forest and the
 /// field.
 fn middle_lattice(step: f64) -> Vec<[f64; 2]> {
-    let [x0, z0] = at(18_000.0, 18_000.0);
+    // Off the cell corners, so sites fall inside their cells.
+    let [x0, z0] = at(18_013.0, 18_029.0);
     let [x1, z1] = at(60_000.0, 62_000.0);
-    lattice([x0, z0, x1, z1], step, |_, _| true)
+    box_lattice([x0, z0, x1, z1], step)
 }
 
 fn criteria(v: serde_json::Value) -> Vec<Criterion> {
@@ -480,7 +497,7 @@ fn pruning_changes_no_answer_with_horizon_and_sightlines() {
     let (n, e) = (synth::HILL_A_NORTH_M, synth::HILL_A_EAST_M);
     let [x0, z0] = at(n - 3000.0, e - 6000.0);
     let [x1, z1] = at(n + 3000.0, e + 6000.0);
-    let cands = lattice([x0, z0, x1, z1], 500.0, |_, _| true);
+    let cands = box_lattice([x0, z0, x1, z1], 500.0);
     let [ox, oz] = west_of_hill();
     let cs = criteria(json!([
         {"name": "masked_from",
@@ -628,10 +645,9 @@ fn the_evaluator_agrees_with_a_brute_force_oracle() {
         (26_000.0, 26_000.0),
     ] {
         let [x, z] = at(n, e);
-        cands.extend(lattice(
+        cands.extend(box_lattice(
             [x - 1500.0, z - 1500.0, x + 1500.0, z + 1500.0],
             437.0,
-            |_, _| true,
         ));
     }
     let cs = criteria(json!([

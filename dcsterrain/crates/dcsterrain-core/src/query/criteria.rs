@@ -27,8 +27,10 @@
 use std::collections::{BTreeMap, HashSet};
 
 use super::refused;
-use super::scenery::{Rect, footprint as object_rect};
+use super::region::airdromes;
+use super::scenery::{OBJECT_REACH_M, Rect, footprint as object_rect};
 use super::sightline::exact;
+use super::visible::altitude;
 use crate::classes::Class;
 use crate::grid::{Grid, Window};
 use crate::horizon;
@@ -41,9 +43,6 @@ use crate::types::{Criterion, Footprint, Issue, Point3, Term, TpiClass, WaterCla
 const SAMPLE: usize = 256;
 /// The mean margin over a masked sector's floor that scores 1.
 pub const MASK_MARGIN_FULL_DEG: f64 = 10.0;
-/// How far past a footprint or radius an object may stand and still reach
-/// in: the largest model footprint likely, as `scenery_in` widens by.
-const OBJECT_REACH_M: f64 = 500.0;
 /// The side of a bucket of the objects' index.
 const BUCKET_M: f64 = 250.0;
 
@@ -87,22 +86,6 @@ pub struct Evaluation {
     /// In candidate order, then orientation order.
     pub sites: Vec<Site>,
     pub stats: Stats,
-}
-
-/// The lattice points of `bbox`, `step` apart from its minimum corner, that
-/// `inside` admits.
-pub fn lattice(bbox: [f64; 4], step: f64, inside: impl Fn(f64, f64) -> bool) -> Vec<[f64; 2]> {
-    let n = |lo: f64, hi: f64| ((hi - lo) / step + 1e-9).floor().max(-1.0) as i64 + 1;
-    let mut out = Vec::new();
-    for i in 0..n(bbox[0], bbox[2]) {
-        for j in 0..n(bbox[1], bbox[3]) {
-            let (x, z) = (bbox[0] + i as f64 * step, bbox[1] + j as f64 * step);
-            if inside(x, z) {
-                out.push([x, z]);
-            }
-        }
-    }
-    out
 }
 
 /// What a criterion tests, compiled against the terrain.
@@ -383,8 +366,8 @@ fn compile(
                 band(min, max, &mut issues);
                 match airdromes(src, airdrome_id, &at("airdrome_id")) {
                     Ok(at) => Kind::Airdrome { at, min, max },
-                    Err(i) => {
-                        issues.push(i);
+                    Err(mut i) => {
+                        issues.append(&mut i);
                         continue;
                     }
                 }
@@ -590,64 +573,24 @@ fn sector(bearing: f64, half: f64) -> Vec<usize> {
     }
 }
 
-/// The reference points of the airdrome `id`, or of every airdrome placed.
-fn airdromes(src: &dyn Source, id: Option<i64>, path: &str) -> Result<Vec<[f64; 2]>, Issue> {
-    let tables = src
-        .tables()
-        .map_err(|e| Issue::new("refused", &e.0, path))?;
-    let at: Vec<[f64; 2]> = tables
-        .airdromes
-        .iter()
-        .filter(|a| id.is_none() || a.id == id)
-        .filter_map(|a| Some([a.x?, a.z?]))
-        .collect();
-    if at.is_empty() {
-        let what = match id {
-            Some(id) => format!("no airdrome with the id {id} has a runway to place it"),
-            None => "no airdrome on this terrain has a runway to place it".to_string(),
-        };
-        return Err(Issue::new("unknown_airdrome", &what, path));
-    }
-    Ok(at)
-}
-
-/// Each point's x, z and altitude, standing on the mesh's own height.
+/// Each point's x, z and altitude, standing on the mesh's own height, as
+/// `visible` places its ends.
 fn ends(src: &dyn Source, points: &[Point3], path: &str) -> Result<Vec<[f64; 3]>, Vec<Issue>> {
-    let mut issues: Vec<Issue> = points
-        .iter()
-        .enumerate()
-        .filter_map(|(i, p)| p.check(&format!("{path}.{i}")))
+    // Only a finite point has ground to ask for; the rest are refused below.
+    let finite: Vec<usize> = (0..points.len())
+        .filter(|&i| points[i].x.is_finite() && points[i].z.is_finite())
         .collect();
-    let finite = |p: &Point3| {
-        [Some(p.x), Some(p.z), p.alt, p.alt_agl]
-            .into_iter()
-            .flatten()
-            .all(f64::is_finite)
-    };
-    for (i, p) in points.iter().enumerate() {
-        if !finite(p) {
-            issues.push(Issue::new(
-                "invalid_point",
-                "every coordinate must be finite",
-                &format!("{path}.{i}"),
-            ));
-        }
+    let xz: Vec<[f64; 2]> = finite.iter().map(|&i| [points[i].x, points[i].z]).collect();
+    let mut ground = vec![None; points.len()];
+    for (&i, g) in finite.iter().zip(src.points(&xz).map_err(refused)?) {
+        ground[i] = g.map(|g| g.height);
     }
-    if !issues.is_empty() {
-        return Err(issues);
-    }
-    let xz: Vec<[f64; 2]> = points.iter().map(|p| [p.x, p.z]).collect();
-    let ground = src.points(&xz).map_err(refused)?;
     let mut out = Vec::with_capacity(points.len());
+    let mut issues = Vec::new();
     for (i, (p, g)) in points.iter().zip(ground).enumerate() {
-        match (p.alt, g) {
-            (Some(alt), _) => out.push([p.x, p.z, alt]),
-            (None, Some(g)) => out.push([p.x, p.z, g.height + p.alt_agl.unwrap_or(0.0)]),
-            (None, None) => issues.push(Issue::new(
-                "off_terrain",
-                "no mesh covers this point, so it has no ground to stand on",
-                &format!("{path}.{i}"),
-            )),
+        match altitude(p, g, &format!("{path}.{i}")) {
+            Ok((alt, _)) => out.push([p.x, p.z, alt]),
+            Err(e) => issues.push(e),
         }
     }
     if issues.is_empty() {
