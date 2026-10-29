@@ -27,8 +27,10 @@ _.path = [".tools/bin"]
 # Every worktree builds into the main checkout's target directory, found
 # through git's common directory, so a worktree reuses the dependencies the
 # others compiled instead of growing its own multi-gigabyte copy. In the main
-# checkout this is the default location anyway.
-CARGO_TARGET_DIR = "{{ exec(command='git rev-parse --path-format=absolute --git-common-dir') }}/../dcsterrain/target"
+# checkout this is the default location anyway, and outside git it falls back
+# to this file's directory. The binaries are shared too: the last worktree to
+# build wins, and builds in two worktrees wait on each other's lock.
+CARGO_TARGET_DIR = "{{ exec(command='git rev-parse --path-format=absolute --git-common-dir || echo ' ~ config_root ~ '/.git') }}/../dcsterrain/target"
 
 [settings]
 # Rust is deliberately absent from [tools]. rustup reads rust-toolchain.toml
