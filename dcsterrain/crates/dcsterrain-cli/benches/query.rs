@@ -629,6 +629,8 @@ fn sizes(dir: &Path) -> BTreeMap<String, (u64, u64)> {
 }
 
 fn main() {
+    // The pool the binary starts, so a case times what a call of it does.
+    dcsterrain_core::threads::init(None);
     let args: Vec<String> = std::env::args()
         .skip(1)
         .filter(|a| !a.starts_with("--"))

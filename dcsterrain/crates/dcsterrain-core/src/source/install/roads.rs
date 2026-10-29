@@ -210,7 +210,7 @@ impl Entry for RoadsBetweenness {
     fn build(&self, cache: &TerrainCache, _: &[FileEntry]) -> Result<Vec<u8>, Refusal> {
         let g = graph(cache)?;
         // At most two threads, so a build beside a DCS server leaves it room.
-        let threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(2));
+        let threads = crate::threads::cap().min(2);
         let b = roads::betweenness(&g, roads::SOURCES, threads);
         let mut out = Vec::with_capacity(4 + 4 * b.len());
         out.extend_from_slice(&(b.len() as u32).to_le_bytes());

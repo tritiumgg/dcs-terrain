@@ -17,6 +17,7 @@ pub mod query;
 pub mod roads;
 pub mod source;
 pub mod synth;
+pub mod threads;
 pub mod types;
 
 #[cfg(test)]

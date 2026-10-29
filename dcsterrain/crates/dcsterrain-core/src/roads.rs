@@ -639,18 +639,24 @@ impl Seen {
 }
 
 /// `f` over `0..n` cut into a run per thread, its answers in order: on one
-/// thread below `parallel_from`, on up to 8 above.
+/// thread below `parallel_from`, on up to 8 above, below normal priority as
+/// the query pool's threads are.
 fn split<T: Send>(n: usize, parallel_from: usize, f: impl Fn(Range<usize>) -> T + Sync) -> Vec<T> {
     let threads = if n < parallel_from {
         1
     } else {
-        std::thread::available_parallelism().map_or(1, |t| t.get().min(8))
+        crate::threads::cap().min(8)
     };
     let per = n.div_ceil(threads).max(1);
     std::thread::scope(|s| {
         let f = &f;
         let runs: Vec<_> = (0..n.div_ceil(per).max(1))
-            .map(|t| s.spawn(move || f(t * per..((t + 1) * per).min(n))))
+            .map(|t| {
+                s.spawn(move || {
+                    crate::threads::below_normal();
+                    f(t * per..((t + 1) * per).min(n))
+                })
+            })
             .collect();
         runs.into_iter()
             .map(|r| r.join().expect("an index thread panicked"))
@@ -850,23 +856,6 @@ impl Index {
     }
 }
 
-/// Lowers the calling thread's CPU and I/O priority, so a cache build does
-/// not take the CPU from a DCS server beside it. DCS runs only on Windows,
-/// so elsewhere nothing is lowered.
-pub fn low_priority() {
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::System::Threading::{
-            GetCurrentThread, SetThreadPriority, THREAD_MODE_BACKGROUND_BEGIN,
-        };
-        // SAFETY: the pseudo-handle names the calling thread, and failing
-        // only leaves its priority as it was.
-        unsafe {
-            SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
-        }
-    }
-}
-
 /// Each edge's betweenness in its network, 0..1: Brandes's shortest-path
 /// count over the largest connected component of each network, from every
 /// node or from `sources` spread through it, on `threads` threads at low
@@ -987,7 +976,7 @@ impl Network {
         std::thread::scope(|s| {
             for _ in 0..threads {
                 s.spawn(|| {
-                    low_priority();
+                    crate::threads::low_priority();
                     let mut w = Work::new(self.off.len() - 1, self.edges);
                     loop {
                         let k = next.fetch_add(1, Ordering::Relaxed);

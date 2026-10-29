@@ -31,6 +31,11 @@ struct Cli {
     #[arg(long, global = true)]
     verbose: bool,
 
+    /// The most threads a request or a cache build spreads its work over;
+    /// every core when omitted. They run below normal priority either way.
+    #[arg(long, global = true, value_name = "N", value_parser = clap::value_parser!(u16).range(1..))]
+    threads: Option<u16>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -196,6 +201,7 @@ fn main() -> ExitCode {
         .with_target(false)
         .without_time()
         .init();
+    dcsterrain_core::threads::init(cli.threads.map(usize::from));
 
     match cli.command {
         Command::Query {
