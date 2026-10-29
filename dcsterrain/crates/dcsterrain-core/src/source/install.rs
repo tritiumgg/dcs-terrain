@@ -45,6 +45,8 @@ const PARALLEL_MIN: usize = 2;
 /// thread: a block a point or two falls on reads only what they need, in
 /// less time than waking the other threads takes.
 const POINTS_PARALLEL_MIN: usize = 8;
+/// Blocks under a line held at once: one for each core of a desktop.
+const ALONG_BLOCKS: usize = 16;
 
 mod roads;
 mod scenery;
@@ -682,8 +684,13 @@ impl Source for Install {
         ids.sort_unstable();
         ids.dedup();
         let (ga, gb) = (grid_units(g, a[0], a[1]), grid_units(g, b[0], b[1]));
-        for i in ids {
-            self.block(i)?.along(ga, gb, &mut out);
+        // The blocks a request has not read yet are prepared together, a
+        // few at a time so a long line holds few at once; the pieces then
+        // follow in block order.
+        for ids in ids.chunks(ALONG_BLOCKS) {
+            for b in self.blocks_of(ids)? {
+                b.along(ga, gb, &mut out);
+            }
         }
         Ok(out)
     }
