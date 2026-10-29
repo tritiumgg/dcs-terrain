@@ -270,7 +270,7 @@ fn compare(extract: &Path, t: &Tables) {
         Compare {
             key: &["name_id"],
             skip: &skip,
-            ours_only: &[],
+            ours_only: &["id_by"],
         },
     );
 

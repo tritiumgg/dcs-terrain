@@ -4,20 +4,28 @@
 //!
 //! An airdrome is keyed by its `name_id`, the basename of its taxiway file,
 //! across every source that names it. Its numeric id is the one `Radio.lua`
-//! labels it with; its beacons, radio and display name follow from that id.
+//! labels it with or, failing that, one joined by position; its beacons,
+//! radio and display name follow from that id.
 
+use std::collections::BTreeSet;
+use std::fs::File;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
 use crate::cache::{Entry, Opened, TerrainCache};
 use crate::decode::airfield::{self, Airfields, RunwayRow, StandRow};
-use crate::decode::install::Map;
+use crate::decode::install::{self, Map};
 use crate::decode::lua::tables::{
     self as lua, BeaconRow, Crs, LuaTables, NodeRow, RadioRow, TownRow,
 };
+use crate::decode::scn5::Index;
 use crate::extract::FileEntry;
+use crate::grid::box_distance;
 use crate::source::Refusal;
+
+use super::SCENE_NODES;
+use super::airdrome_ids::{BEACON_REACH_M, TOWER_REACH_M, nearest, unanimous};
 
 /// A fitted projection whose worst kept beacon is further off than this
 /// refuses the terrain unless the caller accepts it: every measured terrain
@@ -38,9 +46,10 @@ impl Entry for TablesJson {
     }
 
     /// 3 dropped four airdrome fields and the record of an import, so an
-    /// entry of 2 is rebuilt rather than read with them.
+    /// entry of 2 is rebuilt rather than read with them. 4 joins ids by
+    /// position where `Radio.lua` labels none.
     fn version(&self) -> u32 {
-        3
+        4
     }
 
     fn roles(&self) -> &[&str] {
@@ -49,7 +58,25 @@ impl Entry for TablesJson {
 
     fn build(&self, cache: &TerrainCache, files: &[FileEntry]) -> Result<Vec<u8>, Refusal> {
         let (root, map) = (cache.install(), cache.map());
-        let t = Tables::decode(root, map, files)?;
+        // The towers are placed through the scene's cached index: parsing
+        // the scene file's head for a few ids would cost hundreds of MiB.
+        // The scene is not one of the roles: a scene no decoder reads
+        // refuses scenery, not the tables, and costs only the ids its towers
+        // give. Nor is the entry rebuilt when the scene alone changes, which
+        // moves a tower too little to change the airdrome nearest it.
+        let index = || {
+            let Some(scene) = map.files.iter().find(|f| f.role == "scene") else {
+                return Ok(None);
+            };
+            if install::classify(root, std::slice::from_ref(scene)).is_err() {
+                return Ok(None);
+            }
+            let opened = cache.get(&SCENE_NODES)?;
+            let bytes = (opened.payload()).map_err(|e| unreadable(cache, &opened, &e))?;
+            let index = Index::decode(&bytes).map_err(|e| unreadable(cache, &opened, &e))?;
+            Ok(Some((index, scene.path.clone())))
+        };
+        let t = Tables::decode(root, map, files, &index)?;
         let bytes = serde_json::to_vec(&t).expect("the tables serialize");
         // JSON has no NaN or infinity, which it writes as null: a file that
         // gave one is refused now rather than read back as something else.
@@ -67,10 +94,30 @@ impl Entry for TablesJson {
     }
 }
 
+/// The scene's index and the scene file's path, relative to the install;
+/// `None` where the terrain has no scene a decoder reads.
+pub type SceneIndex = Option<(Index, String)>;
+
+/// A radio station's scene object: the `N` of its `airfieldN_k`, and where
+/// the scene places it, x and z; `None` where it does not.
+pub type Tower = (i64, Option<[f64; 2]>);
+
+/// What gave an airdrome its id: `Radio.lua`'s label, the beacons nearest
+/// it, or a station's scene object within its extent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IdBy {
+    Label,
+    Beacons,
+    Tower,
+}
+
 /// One airdrome. Its `display_name` is the name of its first beacon.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AirdromeRow {
     pub id: Option<i64>,
+    /// What gave the id; null with none.
+    pub id_by: Option<IdBy>,
     pub name_id: String,
     pub display_name: Option<String>,
     /// The mean of its runway ends: within 3 mm of the game's reference
@@ -179,14 +226,23 @@ impl Tables {
         }
     }
 
-    /// Decodes the airfield and Lua files among `files`, relative to `root`.
-    pub fn decode(root: &Path, map: &Map, files: &[FileEntry]) -> Result<Tables, Refusal> {
+    /// Decodes the airfield and Lua files among `files`, relative to `root`,
+    /// with `index` giving the scene's index when a station names an object.
+    pub fn decode(
+        root: &Path,
+        map: &Map,
+        files: &[FileEntry],
+        index: &dyn Fn() -> Result<SceneIndex, Refusal>,
+    ) -> Result<Tables, Refusal> {
         let air = airfield::decode(root, files)?;
         let lua = lua::decode(root, &map.theatre, files)?;
-        Ok(Tables::assemble(files, air, lua))
+        let towers = Tables::towers(root, &lua.radio, index)?;
+        Ok(Tables::assemble(files, air, lua, &towers))
     }
 
-    fn assemble(files: &[FileEntry], air: Airfields, lua: LuaTables) -> Tables {
+    /// `towers` are each `Radio.lua` station's scene objects, by the `N` of
+    /// its `airfieldN_k`, where the scene places them.
+    fn assemble(files: &[FileEntry], air: Airfields, lua: LuaTables, towers: &[Tower]) -> Tables {
         let role = |r: &'static str| files.iter().filter(move |f| f.role == r);
         let tmerc = lua.crs.tmerc();
         let mut airdromes: Vec<AirdromeRow> = role("airfield_rn4")
@@ -209,6 +265,7 @@ impl Tables {
                 };
                 AirdromeRow {
                     id: None,
+                    id_by: None,
                     name_id: name_id.to_string(),
                     display_name: None,
                     x,
@@ -228,6 +285,7 @@ impl Tables {
             .collect();
         for a in &mut airdromes {
             a.id = lua.airdrome_id(&a.name_id);
+            a.id_by = a.id.map(|_| IdBy::Label);
         }
         let mut t = Tables {
             airdromes,
@@ -241,6 +299,16 @@ impl Tables {
             lua_included: lua.included.into_iter().map(|f| f.path).collect(),
             lua_unresolved: lua.unresolved,
         };
+        // Where the label gives none, an id joined by position: never one a
+        // label gives, even a label that names no taxiway file.
+        let mut taken: BTreeSet<i64> = t.airdromes.iter().filter_map(|a| a.id).collect();
+        taken.extend(lua.airdrome_ids.values());
+        let joined = t.joined(towers, &taken);
+        for (a, j) in t.airdromes.iter_mut().zip(joined) {
+            if let (None, Some((id, by))) = (a.id, j) {
+                (a.id, a.id_by) = (Some(id), Some(by));
+            }
+        }
         t.follow_ids();
         t
     }
@@ -292,6 +360,99 @@ impl Tables {
     pub fn check_crs(&self, terrain: &str, allow: bool) -> Result<(), Refusal> {
         check_crs(&self.crs, terrain, allow)
     }
+
+    /// The id each airdrome takes by position, and what gave it: the `N` of
+    /// the beacons nearest it, then of a tower, one of `towers`, nearest its
+    /// extent. No id in `taken`, or that the beacons give another airdrome,
+    /// is given. A tower the scene does not place votes for none.
+    ///
+    /// With `taken` empty, it joins the airdromes `Radio.lua` labels as well,
+    /// which is how the joins are checked against the labels.
+    pub fn joined(&self, towers: &[Tower], taken: &BTreeSet<i64>) -> Vec<Option<(i64, IdBy)>> {
+        let n = self.airdromes.len();
+        let mut taken = taken.clone();
+        let sites: Vec<Option<[f64; 2]>> = (self.airdromes.iter())
+            .map(|a| Some([a.x?, a.z?]))
+            .collect();
+        let beacons = self.beacons.iter().filter_map(|b| {
+            let id = lua::airdrome_of(b.beacon_id.as_deref()?)?;
+            let p = [b.x?, b.z?];
+            let d = sites
+                .iter()
+                .map(|s| s.map(|s| (s[0] - p[0]).hypot(s[1] - p[1])));
+            Some((id, nearest(d, BEACON_REACH_M)))
+        });
+        let by_beacons = unanimous(n, beacons, &taken);
+        taken.extend(by_beacons.iter().flatten());
+        let extents: Vec<Option<[f64; 4]>> = (self.airdromes.iter())
+            .map(|a| extent(&a.name_id, &self.runways, &self.stands))
+            .collect();
+        let towers = towers.iter().map(|&(id, p)| {
+            let site = p.and_then(|p| {
+                let d = extents.iter().map(|e| e.map(|e| box_distance(e, p)));
+                nearest(d, TOWER_REACH_M)
+            });
+            (id, site)
+        });
+        let by_tower = unanimous(n, towers, &taken);
+        (by_beacons.into_iter().zip(by_tower))
+            .map(|(b, t)| {
+                (b.map(|id| (id, IdBy::Beacons))).or_else(|| t.map(|id| (id, IdBy::Tower)))
+            })
+            .collect()
+    }
+
+    /// Each scene object a `Radio.lua` station names, `t:<id>`, by the `N`
+    /// of the station's `airfieldN_k`, where the terrain's scene places it.
+    /// `index` gives the scene's index, asked for only when a station names
+    /// an object; with none, there are no towers. An object the scene does
+    /// not place, or not named as `t:<id>`, has no position.
+    pub fn towers(
+        root: &Path,
+        radio: &[RadioRow],
+        index: &dyn Fn() -> Result<SceneIndex, Refusal>,
+    ) -> Result<Vec<Tower>, Refusal> {
+        let named: Vec<(i64, Option<u64>)> = radio
+            .iter()
+            .filter_map(|row| Some((lua::airdrome_of(row.radio_id.as_deref()?)?, row)))
+            .flat_map(|(n, row)| {
+                let ids = row.scene_objects.iter();
+                ids.map(move |o| (n, o.strip_prefix("t:").and_then(|s| s.parse().ok())))
+            })
+            .collect();
+        if named.is_empty() {
+            return Ok(Vec::new());
+        }
+        let Some((index, path)) = index()? else {
+            return Ok(Vec::new());
+        };
+        let refuse = |e: &dyn std::fmt::Display| Refusal(format!("{path}: {e}"));
+        let file = File::open(root.join(&path)).map_err(|e| refuse(&e))?;
+        let mut out = Vec::new();
+        for (n, id) in named {
+            let at = match id {
+                Some(id) => index.position(&file, id).map_err(|e| refuse(&e))?,
+                None => None,
+            };
+            out.push((n, at.map(|[x, _, z]| [x, z])));
+        }
+        Ok(out)
+    }
+}
+
+/// The box around an airdrome's runway ends and stands, `[min_x, min_z,
+/// max_x, max_z]`; `None` with neither.
+fn extent(name_id: &str, runways: &[RunwayRow], stands: &[StandRow]) -> Option<[f64; 4]> {
+    let ends = (runways.iter())
+        .filter(|r| r.airdrome_name_id == name_id)
+        .flat_map(|r| [[r.edge1_x, r.edge1_z], [r.edge2_x, r.edge2_z]]);
+    let stands = (stands.iter())
+        .filter(|s| s.airdrome_name_id == name_id)
+        .map(|s| [s.x, s.z]);
+    ends.chain(stands).fold(None, |b, [x, z]| {
+        let [x0, z0, x1, z1] = b.unwrap_or([x, z, x, z]);
+        Some([x0.min(x), z0.min(z), x1.max(x), z1.max(z)])
+    })
 }
 
 /// The mean of the runway ends; `None` with no runway.
@@ -481,6 +642,68 @@ mod tests {
     }
 
     #[test]
+    fn an_airdrome_no_label_names_takes_the_id_its_beacons_then_tower_give() {
+        let root = install();
+        // A beacon of airdrome 7 beside Nowhere, which no label names.
+        let path = root.0.join(format!("{MAP}/Beacons.lua"));
+        let text = fs::read_to_string(&path).unwrap();
+        let text = text.replacen(
+            "}\n",
+            &format!("{}}}\n", beacon("airfield7_0", -1000.0, 2400.0)),
+            1,
+        );
+        fs::write(&path, text).unwrap();
+        let c = Scratch::new();
+        let t = Tables::open(&terrain(&root.0, &c.0)).unwrap();
+        let ids: Vec<_> = (t.airdromes.iter())
+            .map(|a| (a.name_id.as_str(), a.id, a.id_by))
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                ("Nowhere", Some(7), Some(IdBy::Beacons)),
+                ("Anapa", Some(12), Some(IdBy::Label))
+            ]
+        );
+        // What follows from the id follows from a joined one too.
+        assert_eq!(t.airdromes[0].beacon_ids, ["airfield7_0"]);
+
+        // Held out, Anapa takes no id from its beacons: one lies 450 km off,
+        // so they disagree, and that costs the id rather than gives a wrong one.
+        let blind = t.joined(&[], &BTreeSet::new());
+        assert_eq!(blind, [Some((7, IdBy::Beacons)), None]);
+        // A tower within reach of Nowhere's runway names it, where the
+        // beacons give it none; one further out names nothing.
+        let held = [7, 12].into();
+        let near = [(9, Some([-1500.0, 2000.0]))];
+        assert_eq!(t.joined(&near, &held), [Some((9, IdBy::Tower)), None]);
+        let far = [(9, Some([-3000.0, 2000.0]))];
+        assert_eq!(t.joined(&far, &held), [None, None]);
+        // A tower of 9 the scene does not place spoils the other's vote.
+        let unplaced = [(9, Some([-1500.0, 2000.0])), (9, None)];
+        assert_eq!(t.joined(&unplaced, &held), [None, None]);
+        // An id taken already, by a label even of no airdrome, is not given.
+        let labeled = [7, 12, 9].into();
+        assert_eq!(t.joined(&near, &labeled), [None, None]);
+    }
+
+    #[test]
+    fn a_scene_no_decoder_reads_costs_the_towers_not_the_tables() {
+        let root = install();
+        let radio = "radio = {\n\t{\n\t\t-- Anapa\n\t\tradioId = \"airfield12_0\";\n\t};\n\
+                     \t{\n\t\tradioId = \"airfield7_0\";\n\t\tsceneObjects = {'t:5'};\n\t};\n}\n";
+        put(&root.0, &format!("{MAP}/Radio.lua"), radio.as_bytes());
+        let scene = container::build("landscape5::Scene5File", 99, 0);
+        put(&root.0, &format!("{MAP}/Scenes/Test.scn5"), &scene);
+        let c = Scratch::new();
+        let t = Tables::open(&terrain(&root.0, &c.0)).unwrap();
+        let ids: Vec<_> = (t.airdromes.iter())
+            .map(|a| (a.name_id.as_str(), a.id))
+            .collect();
+        assert_eq!(ids, [("Anapa", Some(12)), ("Nowhere", None)]);
+    }
+
+    #[test]
     fn the_projection_is_read_alone_as_the_whole_reads_it() {
         let root = install();
         let c = Scratch::new();
@@ -528,7 +751,7 @@ mod tests {
         // An entry as version 2 wrote it, with a field 3 dropped on a row.
         let path = c.0.join("Test/tables.json");
         let text = fs::read_to_string(&path).unwrap();
-        let old = text.replacen("\"version\":3", "\"version\":2", 1).replacen(
+        let old = text.replacen("\"version\":4", "\"version\":2", 1).replacen(
             "\"name_id\":",
             "\"code\":\"URKA\",\"name_id\":",
             1,
@@ -538,7 +761,7 @@ mod tests {
         assert!(terrain.get(&TABLES_JSON).unwrap().built);
         assert_eq!(Tables::open(&terrain).unwrap(), built);
         let doc: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        assert_eq!(doc["version"], 3);
+        assert_eq!(doc["version"], 4);
         assert!(doc["payload"]["airdromes"][0].get("code").is_none());
     }
 

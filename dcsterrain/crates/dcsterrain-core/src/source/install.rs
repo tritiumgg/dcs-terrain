@@ -52,12 +52,15 @@ const POINTS_PARALLEL_MIN: usize = 8;
 /// Blocks under a line held at once: one for each core of a desktop.
 const ALONG_BLOCKS: usize = 16;
 
+mod airdrome_ids;
 mod roads;
 mod scenery;
 mod tables;
 pub use roads::{ROADS_BETWEENNESS, ROADS_GRAPH, RoadsBetweenness, RoadsGraph};
 pub use scenery::{SCENE_NODES, SceneNodes, Scenery};
-pub use tables::{AirdromeRow, MAX_CRS_RESIDUAL_M, TABLES_JSON, Tables, TablesJson};
+pub use tables::{
+    AirdromeRow, IdBy, MAX_CRS_RESIDUAL_M, SceneIndex, TABLES_JSON, Tables, TablesJson, Tower,
+};
 
 /// How far past its stated box a block is read for a point or tile. Its
 /// vertices lie inside the box to within a centimeter.

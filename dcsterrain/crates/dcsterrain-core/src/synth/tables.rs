@@ -63,6 +63,7 @@ impl Theatre {
         let (rlat, rlon) = latlon((rx, rz));
         let airdrome = crate::source::install::AirdromeRow {
             id: Some(AIRDROME_ID.into()),
+            id_by: Some(crate::source::install::IdBy::Label),
             name_id: AIRDROME_NAME_ID.into(),
             display_name: Some(AIRDROME_DISPLAY_NAME.into()),
             x: Some(rx),
