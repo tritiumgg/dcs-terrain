@@ -12,7 +12,7 @@ Not frozen: edit it in the pull request that changes an operation.
 ```rust
 struct Box { min_x: f64, min_z: f64, max_x: f64, max_z: f64 }
 enum Region { Box(Box), Circle { x, z, radius }, Polygon { points: Vec<[f64; 2]> },
-              AirdromeBand { airdrome_id, min_dist, max_dist } }
+              AirdromeBand { airdrome, min_dist, max_dist } }  // airdrome: its id or name_id
 struct Point { x: f64, z: f64 }
 struct Point3 { x: f64, z: f64, alt: Option<f64>, alt_agl: Option<f64> }  // exactly one is set
 struct Observer { x: f64, z: f64, alt_agl: f64 }
@@ -254,7 +254,11 @@ Response: `Vec<{kind, id, name, class, x, z, distance}>`, nearest first. Road
 and rail return the closest point on each nearest edge, the edge's index in
 the graph and its class. A node gives its red and blue sides as two results,
 of kind `node_red` and `node_blue`. Scenery returns each object's model as its
-name and its class; without `class` it finds every class but `effect`.
+name and its class; without `class` it finds every class but `effect`. An
+airdrome returns as `id` its numeric id in digits, or its `name_id` where the
+files give none, and as `name` its display name, or its `name_id`. Wherever a
+request names an airdrome, a number is an id, and a string is a `name_id` or,
+failing any, an id in digits, so an `id` from here can be passed back as is.
 
 ### `scenery_in`
 
@@ -289,7 +293,7 @@ road with its class and distance, the nearest airfield, lat/lon and MGRS.
 
 ### `airfield_info`
 
-Request: an airdrome id or name, and optionally `fits {width, length, height,
+Request: an airdrome id or `name_id`, and optionally `fits {width, length, height,
 helicopter}`. Response: runways (designator, true course, length, width,
 and each threshold's position and height), elevation, navaids (TACAN channel,
 ILS, VOR and NDB frequencies), radio frequencies, and stands, each with its
@@ -385,7 +389,7 @@ a soft score. `valid` is always applied.
 | `dist_cover_band` | `class, min, max` | distance to `class` in band | 1 at min, 0 at max |
 | `dist_road_band`, `dist_rail_band` | `min, max` | distance in band | 1 at min, 0 at max |
 | `dist_water_min` | `m` | `dist_water` ≥ m | min(1, dist_water / (2 × m)) |
-| `dist_airdrome_band` | `min, max, airdrome_id?` | to the nearest airdrome, or the one given | 1 at min, 0 at max |
+| `dist_airdrome_band` | `min, max, airdrome?` | to the nearest airdrome, or the one given by id or `name_id` | 1 at min, 0 at max |
 | `scenery_max` | `class, radius, max` | count within radius ≤ max | 1 − count/max |
 | `scenery_in_footprint_max` | `max` | OBB overlap count ≤ max | 1 − count/max |
 | `clearing_max` | `radius` (default 150), `max` | objects within radius ≤ max: what a heliport static removes at spawn | 1 − count/max |
