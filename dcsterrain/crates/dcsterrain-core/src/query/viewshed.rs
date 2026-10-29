@@ -14,6 +14,7 @@ use rayon::prelude::*;
 use serde_json::json;
 
 use super::geojson::{Features, props};
+use super::sightline::horizon;
 use super::{Terrain, outline, refused};
 use crate::grid::{Grid, Window};
 use crate::source::{Layer, Source};
@@ -189,7 +190,7 @@ pub(super) fn site_eye(
 /// Checks a sweep's site and radius, found at `at` in the request, and
 /// its resolution, and reads the heights it stands on. `more` are the
 /// issues the caller found with the rest of its request, returned with
-/// these.
+/// these. Each radial crosses the mesh's triangles out to `MESH_REACH_M`.
 pub(super) fn prepare(
     terrain: &Terrain,
     o: Observer,
@@ -197,6 +198,25 @@ pub(super) fn prepare(
     radius: f64,
     resolution: Option<f64>,
     more: Vec<Issue>,
+) -> Result<Sweep, Vec<Issue>> {
+    prepare_reaching(terrain, o, at, radius, resolution, more, MESH_REACH_M)
+}
+
+/// How far out from the site a sweep's radials cross the mesh's own
+/// triangles: past it a meter of error in the ground moves a line
+/// at most a twentieth of a meter for each kilometer beyond (ADR 0006).
+pub(super) const MESH_REACH_M: f64 = 1000.0;
+
+/// `prepare`, the radials crossing the mesh out to `mesh_reach`: 0 for the
+/// raster alone, infinity for the mesh all the way.
+pub(super) fn prepare_reaching(
+    terrain: &Terrain,
+    o: Observer,
+    at: [&str; 2],
+    radius: f64,
+    resolution: Option<f64>,
+    more: Vec<Issue>,
+    mesh_reach: f64,
 ) -> Result<Sweep, Vec<Issue>> {
     let src = terrain.source();
     let g = src.grid();
@@ -252,6 +272,28 @@ pub(super) fn prepare(
     let (rows, cols) = ((r_hi - r_lo + 1) as u32, (c_hi - c_lo + 1) as u32);
     let w = Window::read(src, Layer::Height, r_lo, c_lo, rows, cols).map_err(refused)?;
     let radials = radials(radius, res);
+    let bearing = TAU / radials as f64;
+    let step = cell / 2.0;
+    // Near the site the raster's heights, rounded to the meter, would tilt
+    // every line beyond by their error times the ratio of the ranges, so
+    // there each radial crosses the mesh's own triangles (ADR 0006).
+    let steps = (mesh_reach.min(radius) / step).floor() as u64;
+    let near = if steps == 0 {
+        vec![Vec::new(); radials as usize]
+    } else {
+        let length = steps as f64 * step;
+        let segments: Vec<[[f64; 2]; 2]> = (0..radials)
+            .map(|k| {
+                let (sin, cos) = (k as f64 * bearing).sin_cos();
+                [[o.x, o.z], [o.x + length * cos, o.z + length * sin]]
+            })
+            .collect();
+        let pieces = src.alongs(&segments).map_err(refused)?;
+        pieces
+            .into_par_iter()
+            .map(|p| horizon(&p, eye, length, step))
+            .collect()
+    };
     Ok(Sweep {
         w,
         g,
@@ -259,13 +301,14 @@ pub(super) fn prepare(
         eye,
         radius,
         res,
-        step: cell / 2.0,
+        step,
         n,
         side,
         origin: (origin_x, origin_z),
         radials,
-        bearing: TAU / radials as f64,
+        bearing,
         parallel: side * side >= PARALLEL_CELLS,
+        near,
     })
 }
 
@@ -296,6 +339,10 @@ pub(super) struct Sweep {
     /// The bearing between two radials.
     bearing: f64,
     parallel: bool,
+    /// Each radial's steepest slope over the mesh's own triangles out to
+    /// each of its first steps, as `sightline::horizon` finds it; the
+    /// raster beyond.
+    near: Vec<Vec<f64>>,
 }
 
 /// What a cell of the mask asks of the sweep.
@@ -312,6 +359,19 @@ enum Ask {
 impl Sweep {
     fn height(&self, x: f64, z: f64) -> Option<f64> {
         self.w.value_at(&self.g, x, z)
+    }
+
+    /// The slope from the eye to radial `k`'s ground at its step `done`,
+    /// the radial running `cos` north and `sin` east: within the mesh's
+    /// reach the steepest over the triangles out to there, beyond it the
+    /// raster at that step; minus infinity where there is no ground.
+    fn slope(&self, k: u64, done: u64, cos: f64, sin: f64) -> f64 {
+        if let Some(&s) = self.near[k as usize].get(done as usize - 1) {
+            return s;
+        }
+        let d = done as f64 * self.step;
+        self.height(self.o.0 + d * cos, self.o.1 + d * sin)
+            .map_or(f64::NEG_INFINITY, |h| (h - self.eye) / d)
     }
 
     pub fn centre(&self, r: i64, c: i64) -> (f64, f64) {
@@ -358,16 +418,13 @@ impl Sweep {
     {
         cells.sort_unstable();
         let (sin, cos) = (k as f64 * self.bearing).sin_cos();
-        let (o, eye) = (self.o, self.eye);
+        let o = self.o;
         let (mut steepest, mut done, mut yes) = (f64::NEG_INFINITY, 0u64, 0u64);
         for &key in cells.iter() {
             let (last, i) = (key >> 24, (key & 0xFFFFFF) as i64);
             while done < last {
                 done += 1;
-                let d = done as f64 * self.step;
-                if let Some(h) = self.height(o.0 + d * cos, o.1 + d * sin) {
-                    steepest = steepest.max((h - eye) / d);
-                }
+                steepest = steepest.max(self.slope(k, done, cos, sin));
             }
             let (x, z) = self.centre(i / self.side, i % self.side);
             let d = (x - o.0).hypot(z - o.1);
@@ -500,10 +557,7 @@ impl Sweep {
                 let (last, i) = ((cells[at] >> 24) & 0xFFFFF, (cells[at] & 0xFFFFFF) as i64);
                 while done < last {
                     done += 1;
-                    let d = done as f64 * self.step;
-                    if let Some(h) = self.height(o.0 + d * cos, o.1 + d * sin) {
-                        steepest = steepest.max((h - eye) / d);
-                    }
+                    steepest = steepest.max(self.slope(k, done, cos, sin));
                 }
                 let (x, z) = self.centre(i / side, i % side);
                 let d = (x - o.0).hypot(z - o.1);

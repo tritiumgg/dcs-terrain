@@ -19,7 +19,7 @@ use serde_json::json;
 
 use super::geojson::{Features, Ring, props};
 use super::sightline::floor as exact_floor;
-use super::viewshed::{Sweep, base64, check_reach, prepare, site_eye};
+use super::viewshed::{MESH_REACH_M, Sweep, base64, check_reach, prepare_reaching, site_eye};
 use super::{Terrain, outline, refused};
 use crate::types::{
     FloorBand, FloorRaster, Issue, Observer, PointFloor, RadarFloorRequest, RadarFloorResponse,
@@ -55,7 +55,21 @@ impl Floor {
         resolution: Option<f64>,
         more: Vec<Issue>,
     ) -> Result<Floor, Vec<Issue>> {
-        let s: Sweep = prepare(terrain, o, at, radius, resolution, more)?;
+        Floor::sweep_reaching(terrain, o, at, radius, resolution, more, MESH_REACH_M)
+    }
+
+    /// `sweep`, its radials crossing the mesh's triangles out to
+    /// `mesh_reach` and the raster beyond.
+    pub fn sweep_reaching(
+        terrain: &Terrain,
+        o: Observer,
+        at: [&str; 2],
+        radius: f64,
+        resolution: Option<f64>,
+        more: Vec<Issue>,
+        mesh_reach: f64,
+    ) -> Result<Floor, Vec<Issue>> {
+        let s: Sweep = prepare_reaching(terrain, o, at, radius, resolution, more, mesh_reach)?;
         let n = (s.side * s.side) as usize;
         let nan = f64::NAN.to_bits();
         let agl: Vec<AtomicU64> = (0..n).map(|_| AtomicU64::new(nan)).collect();
@@ -344,11 +358,10 @@ pub(super) mod tests {
 
     /// The floor at `(x, z)` from the closed-form ground, the steepest
     /// slope to it found every 5 m: the geometry the floor must match.
-    fn closed_form(t: &Terrain, eye: f64, x: f64, z: f64) -> f64 {
+    fn closed_form(t: &Terrain, (ox, oz): (f64, f64), eye: f64, x: f64, z: f64) -> f64 {
         let Terrain::Synth(s) = t else { panic!() };
         let f = s.form();
         let h = |x: f64, z: f64| f.height(x - f64::from(ORIGIN_X_M), z - f64::from(ORIGIN_Z_M));
-        let (ox, oz) = site();
         let d = (x - ox).hypot(z - oz);
         let n = (d / 5.0).ceil() as u64;
         let mut steepest = f64::NEG_INFINITY;
@@ -409,7 +422,7 @@ pub(super) mod tests {
                     assert!(agl[i].is_nan() && msl[i].is_nan());
                     continue;
                 }
-                let want = closed_form(&t, eye, x, z);
+                let want = closed_form(&t, site(), eye, x, z);
                 behind += usize::from(want > 50.0);
                 errors.push((f64::from(agl[i]) - want).abs());
                 assert!(agl[i] >= 0.0 && msl[i] >= agl[i] - 1000.0);
@@ -428,6 +441,51 @@ pub(super) mod tests {
             p(0.95),
             p(1.0)
         );
+    }
+
+    /// The floor's errors from a site on the big hill's top, where the
+    /// ground near the site is nearly level and the raster's meter of
+    /// rounding there tilts every line beyond: p50, p95 and max over the
+    /// cells, against the closed form, with the mesh out to `reach`.
+    fn summit_errors(t: &Terrain, reach: f64) -> [f64; 3] {
+        let site = at(HILL_A_NORTH_M, HILL_A_EAST_M);
+        let o = crate::types::Observer {
+            x: site.0,
+            z: site.1,
+            alt_agl: 10.0,
+        };
+        let fl =
+            super::Floor::sweep_reaching(t, o, ["site", "radius"], 8000.0, None, vec![], reach)
+                .unwrap();
+        let eye = t.source().point(site.0, site.1).unwrap().unwrap().height + 10.0;
+        let mut errors = Vec::new();
+        for r in (0..fl.side).step_by(5) {
+            for c in (0..fl.side).step_by(5) {
+                if let Some(f) = fl.get(r, c) {
+                    let (x, z) = (
+                        fl.origin.0 + (r as f64 + 0.5) * fl.res,
+                        fl.origin.1 + (c as f64 + 0.5) * fl.res,
+                    );
+                    errors.push((f - closed_form(t, site, eye, x, z)).abs());
+                }
+            }
+        }
+        errors.sort_unstable_by(f64::total_cmp);
+        let p = |q: f64| errors[((errors.len() - 1) as f64 * q) as usize];
+        [p(0.5), p(0.95), p(1.0)]
+    }
+
+    #[test]
+    fn the_mesh_near_the_site_takes_out_the_rasters_rounding() {
+        let t = synth();
+        let raster = summit_errors(&t, 0.0);
+        let near = summit_errors(&t, super::MESH_REACH_M);
+        let all = summit_errors(&t, f64::INFINITY);
+        // The raster alone is off by tens of meters at the tail; the mesh
+        // out to a kilometer brings it to a few, and all the way no better.
+        assert!(raster[2] > 3.0 * near[2], "{raster:?} against {near:?}");
+        assert!(near[1] < 2.0 && near[2] < 6.0, "{near:?}");
+        assert!((all[2] - near[2]).abs() < 3.0, "{all:?} against {near:?}");
     }
 
     #[test]
