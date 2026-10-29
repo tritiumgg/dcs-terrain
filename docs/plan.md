@@ -19,8 +19,6 @@ Kept from before the reset, tested, and not tasks here:
 - The projection table and fit (`crs.rs`), the request and response types
   (`types/`), the synthetic terrain's closed form (`synth/`).
 - The extract reader, kept as the opt-in test oracle.
-- The optional GameGUI hook (`extractor/`) with its offline Lua tests, which
-  X1 removes (ADR 0005).
 
 ## Components
 
