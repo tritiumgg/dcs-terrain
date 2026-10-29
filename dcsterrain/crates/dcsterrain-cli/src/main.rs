@@ -60,6 +60,10 @@ enum Command {
         op: String,
         /// The request as JSON; `{}` when omitted.
         request: Option<String>,
+        /// Accept a projection fitted to the terrain's beacons that misses one
+        /// by more than 2 m.
+        #[arg(long)]
+        allow_crs_residual: bool,
         #[command(flatten)]
         cache: CacheDir,
     },
@@ -202,6 +206,7 @@ fn main() -> ExitCode {
             cell,
             op,
             request,
+            allow_crs_residual,
             cache,
         } => run_query(
             install,
@@ -209,6 +214,7 @@ fn main() -> ExitCode {
             (seed, size_km, cell),
             &op,
             request,
+            allow_crs_residual,
             cache,
         ),
         Command::ListTerrains {
@@ -300,6 +306,7 @@ fn run_query(
     (seed, size_km, cell): (u32, u32, u32),
     op: &str,
     request: Option<String>,
+    allow_crs_residual: bool,
     cache: CacheDir,
 ) -> ExitCode {
     let refused = |code: &str, message: String| refuse(vec![Issue::new(code, &message, "")]);
@@ -332,7 +339,7 @@ fn run_query(
             Ok(c) => c,
             Err(e) => return refused("no_cache", e),
         };
-        match Terrain::open(&root, id, &cache) {
+        match Terrain::open(&root, id, &cache, allow_crs_residual) {
             Ok(t) => t,
             Err(e) => return refused("terrain_refused", e.0),
         }

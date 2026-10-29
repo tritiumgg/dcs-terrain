@@ -675,6 +675,43 @@ fn index_refuses_a_projection_fitted_over_two_meters_off_unless_allowed() {
 }
 
 #[test]
+fn query_refuses_a_projection_fitted_over_two_meters_off_unless_allowed() {
+    let t = install(false);
+    beacons_off_by_4_m(&t.0);
+    let root = t.0.to_str().unwrap();
+    let c = scratch();
+    let cache = c.0.to_str().unwrap();
+    let query = |extra: &[&str]| {
+        let mut args = vec!["query", "--install", root, "--terrain", "GermanyCW"];
+        args.extend(["--cache", cache]);
+        args.extend(extra);
+        args.push("describe");
+        run(&args)
+    };
+    let out = query(&[]);
+    assert_eq!(out.status.code(), Some(1));
+    let issue = &stdout_json(&out)["issues"][0];
+    assert_eq!(issue["code"], "terrain_refused");
+    let message = issue["message"].as_str().unwrap();
+    assert!(message.contains("misses one by 2.67 m"), "{message}");
+    let out = query(&["--allow-crs-residual"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = stdout_json(&out);
+    assert_eq!(v["counts"]["beacons"].as_u64().map(|n| n >= 3), Some(true));
+    let entries: Vec<&str> = v["cache"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["name"].as_str().unwrap())
+        .collect();
+    assert!(entries.contains(&"tables.json"), "{entries:?}");
+}
+
+#[test]
 fn check_reports_a_terrain_every_decoder_reads_and_passes() {
     let t = install(false);
     let c = scratch();

@@ -1,20 +1,28 @@
 //! One request against one terrain: the terrain opened, the operation found,
 //! the request read, the answer stamped.
+//!
+//! An operation is a function from the terrain and its request struct to
+//! its response struct or a list of issues, listed in `HANDLERS` under the
+//! name `types::OPERATIONS` gives it.
 
 use std::path::Path;
 use std::time::Instant;
 
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::cache::Cache;
-use crate::grid::Grid;
 use crate::source::install::Install;
 use crate::source::{Refusal, Source};
-use crate::synth::{self, Synth};
-use crate::types::{
-    BoundingBox, Counts, DescribeRequest, DescribeResponse, Issue, OPERATIONS, Provenance,
-    TerrainFile,
-};
+use crate::synth::Synth;
+use crate::types::{Issue, OPERATIONS, Provenance};
+
+mod describe;
+mod region;
+
+pub use describe::describe;
+pub use region::{Area, resolve};
 
 /// Every answer is on the 50 m grid.
 pub const CELL_SIZE_M: f64 = 50.0;
@@ -29,11 +37,19 @@ pub enum Terrain {
 
 impl Terrain {
     /// The install terrain whose `entry.lua` declares `id`, its cache
-    /// entries in `cache`.
-    pub fn open(install: &Path, id: &str, cache: &Cache) -> Result<Terrain, Refusal> {
-        Ok(Terrain::Install(Box::new(Install::open(
-            install, id, cache,
-        )?)))
+    /// entries in `cache`. A terrain whose projection misses a beacon it
+    /// was fitted to by more than the residual allowed is refused unless
+    /// `allow_crs_residual`, as `index` refuses it.
+    pub fn open(
+        install: &Path,
+        id: &str,
+        cache: &Cache,
+        allow_crs_residual: bool,
+    ) -> Result<Terrain, Refusal> {
+        let i = Install::open(install, id, cache)?;
+        i.tables()?
+            .check_crs(&i.identity().terrain, allow_crs_residual)?;
+        Ok(Terrain::Install(Box::new(i)))
     }
 
     pub fn source(&self) -> &dyn Source {
@@ -43,7 +59,8 @@ impl Terrain {
         }
     }
 
-    fn provenance(&self) -> Provenance {
+    /// What answered, with no time taken yet: `answer` stamps that.
+    pub fn provenance(&self) -> Provenance {
         let i = self.source().identity();
         Provenance {
             terrain: i.terrain.clone(),
@@ -55,15 +72,27 @@ impl Terrain {
     }
 }
 
-/// The grid's extent: whole cells around everything the mesh covers.
-fn extent(g: &Grid) -> BoundingBox {
-    let c = f64::from(g.cell_size);
-    BoundingBox {
-        min_x: g.origin_x,
-        min_z: g.origin_z,
-        max_x: g.origin_x + f64::from(g.height) * c,
-        max_z: g.origin_z + f64::from(g.width) * c,
-    }
+type Handler = fn(&Terrain, &Value) -> Result<Value, Vec<Issue>>;
+
+/// The operations built so far, by the name `OPERATIONS` lists each under.
+const HANDLERS: &[(&str, Handler)] = &[
+    ("describe", |t, r| run(t, r, describe)),
+];
+
+/// Reads the request as `Q`, answers it with `f`, and writes the answer.
+fn run<Q: DeserializeOwned, A: Serialize>(
+    terrain: &Terrain,
+    request: &Value,
+    f: fn(&Terrain, Q) -> Result<A, Vec<Issue>>,
+) -> Result<Value, Vec<Issue>> {
+    let q = serde_json::from_value(request.clone())
+        .map_err(|e| vec![Issue::new("invalid_request", &e.to_string(), "")])?;
+    Ok(serde_json::to_value(f(terrain, q)?).expect("a response serializes"))
+}
+
+/// A refusal from the terrain, as the issue an operation returns.
+pub(crate) fn refused(e: Refusal) -> Vec<Issue> {
+    vec![Issue::new("refused", &e.0, "")]
 }
 
 /// Answers one request, `op` with its JSON, timing it from here.
@@ -80,113 +109,40 @@ pub fn answer(terrain: &Terrain, op: &str, request: &Value) -> Result<Value, Vec
             "",
         )]);
     }
-    let mut out = match op {
-        "describe" => {
-            read::<DescribeRequest>(request)?;
-            to_value(describe(terrain))
-        }
-        _ => {
-            return Err(vec![Issue::new(
-                "not_built",
-                &format!("`{op}` is planned and not built yet"),
-                "",
-            )]);
-        }
+    let Some((_, handler)) = HANDLERS.iter().find(|(name, _)| *name == op) else {
+        return Err(vec![Issue::new(
+            "not_built",
+            &format!("`{op}` is planned and not built yet"),
+            "",
+        )]);
     };
+    let mut out = handler(terrain, request)?;
     out["elapsed_ms"] = (started.elapsed().as_millis() as u64).into();
     Ok(out)
 }
 
-fn read<T: serde::de::DeserializeOwned>(request: &Value) -> Result<T, Vec<Issue>> {
-    serde_json::from_value(request.clone())
-        .map_err(|e| vec![Issue::new("invalid_request", &e.to_string(), "")])
-}
-
-fn to_value(r: impl serde::Serialize) -> Value {
-    serde_json::to_value(r).expect("a response serializes")
-}
-
-/// What the terrain is and what is known of it. An install terrain's counts
-/// are null until its tables have been read.
-pub fn describe(terrain: &Terrain) -> DescribeResponse {
-    let provenance = terrain.provenance();
-    match terrain {
-        Terrain::Synth(s) => {
-            let form = s.form();
-            DescribeResponse {
-                provenance,
-                dcs_build_timestamp: synth::DCS_BUILD_TIMESTAMP.to_string(),
-                extent: Some(extent(&s.grid())),
-                files: Vec::new(),
-                counts: Counts {
-                    airdromes: Some(1),
-                    runways: Some(1),
-                    stands: Some(synth::STAND_COUNT.into()),
-                    beacons: Some(synth::BEACON_COUNT.into()),
-                    towns: Some(synth::TOWNS_COUNT.into()),
-                    nodes: Some(synth::NODES_COUNT.into()),
-                    road_edges: Some(form.roads().len() as u64),
-                    scenery_objects: Some(form.scenery().len() as u64),
-                },
-                validation: None,
-            }
-        }
-        Terrain::Install(i) => DescribeResponse {
-            provenance,
-            dcs_build_timestamp: i.map().build.timestamp.clone(),
-            extent: Some(extent(&i.grid())),
-            files: i
-                .map()
-                .files
-                .iter()
-                .map(|f| {
-                    // Only the surface file's header is read to open a
-                    // terrain; the others are read by what needs them.
-                    let s = &i.map().surface;
-                    let read = s.path == f.path;
-                    TerrainFile {
-                        role: f.role.clone(),
-                        path: f.path.clone(),
-                        class: s.class.clone().filter(|_| read),
-                        version: s.version.filter(|_| read),
-                        size: f.size,
-                    }
-                })
-                .collect(),
-            counts: Counts::default(),
-            validation: None,
-        },
-    }
-}
-
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use crate::synth;
     use serde_json::json;
 
-    fn synth() -> Terrain {
+    pub fn synth() -> Terrain {
         Terrain::Synth(Box::new(
-            Synth::new(synth::DEFAULT_SEED, synth::DEFAULT_SIZE_KM, 50).unwrap(),
+            Synth::new(
+                synth::DEFAULT_SEED,
+                synth::DEFAULT_SIZE_KM,
+                synth::CELL_SIZE_M,
+            )
+            .unwrap(),
         ))
     }
 
     #[test]
-    fn describes_the_synthetic_terrain() {
-        let v = answer(&synth(), "describe", &json!({})).unwrap();
-        assert_eq!(v["terrain"], "synth");
-        assert_eq!(v["dcs_build"], synth::DCS_BUILD);
-        assert_eq!(v["terrain_fingerprint"], "synth-1-70-50");
-        assert_eq!(v["cell_size"], 50.0);
-        assert!(v["elapsed_ms"].is_u64());
-        assert_eq!(
-            v["extent"],
-            json!({"min_x": -30000.0, "min_z": -45000.0, "max_x": 40000.0, "max_z": 25000.0})
-        );
-        assert_eq!(v["counts"]["road_edges"], 9);
-        assert_eq!(v["counts"]["scenery_objects"], synth::SCENERY_COUNT);
-        assert_eq!(v["validation"], Value::Null);
-        let back: DescribeResponse = serde_json::from_value(v).unwrap();
-        assert!(back.files.is_empty());
+    fn every_handler_is_a_listed_operation() {
+        for (name, _) in HANDLERS {
+            assert!(OPERATIONS.iter().any(|o| o.name == *name), "{name}");
+        }
     }
 
     #[test]

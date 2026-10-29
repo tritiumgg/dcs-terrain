@@ -33,6 +33,9 @@ pub struct DescribeResponse {
     pub extent: Option<BoundingBox>,
     /// Each terrain file a decoder reads, as its header states it.
     pub files: Vec<TerrainFile>,
+    /// Each cache entry as it stands; empty for the synthetic terrain,
+    /// which has no cache.
+    pub cache: Vec<CacheEntry>,
     pub counts: Counts,
     /// The last live validation's figures; null when none has run.
     pub validation: Option<Validation>,
@@ -50,8 +53,19 @@ pub struct TerrainFile {
     pub size: u64,
 }
 
-/// How many of each thing the terrain holds. A count is null until what it
-/// is counted from has been read.
+/// One cache entry: `current`, `missing`, or `stale` with the reason.
+/// `size` is its file's bytes, null when there is none.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CacheEntry {
+    pub name: String,
+    pub state: String,
+    pub why: Option<String>,
+    pub size: Option<u64>,
+}
+
+/// How many of each thing the terrain holds. The tables' counts are always
+/// given; road edges and scenery objects are null until a request in the
+/// same process has read the road graph or the scenery.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Counts {
     pub airdromes: Option<u64>,
@@ -102,10 +116,14 @@ pub struct SampleResponse {
     #[serde(flatten)]
     pub provenance: Provenance,
     pub rows: Vec<SampleRow>,
+    /// Some distance found nothing within its cap and reads as the cap.
+    pub distance_capped: bool,
 }
 
-/// `height` is sampled bilinearly, every other layer at the nearest cell.
-/// A value is null where the layer is nodata.
+/// Over a region, `height` is bilinear between cell centers and every other
+/// layer the cell holding the point; at given points, the ground layers are
+/// the mesh triangle's own and the derived layers the cell's. A value is
+/// null where the layer is undefined.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SampleRow {
     pub x: f64,
@@ -128,8 +146,17 @@ pub struct GeoRequest {
 pub struct GeoResponse {
     #[serde(flatten)]
     pub provenance: Provenance,
-    pub to_latlon: Vec<LatLon>,
+    pub to_latlon: Vec<GeoPoint>,
     pub to_xz: Vec<Point>,
+}
+
+/// A position in WGS84 degrees, with its MGRS reference to the meter; the
+/// reference is null outside 80° S to 84° N, where MGRS uses polar grids.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GeoPoint {
+    pub lat: f64,
+    pub lon: f64,
+    pub mgrs: Option<String>,
 }
 
 // score_site
@@ -546,7 +573,8 @@ pub struct NearestRequest {
     /// At most 50.
     #[serde(default = "default_nearest_n")]
     pub n: u32,
-    /// Scenery class filter, for `kind` `scenery`.
+    /// For `kind` `scenery`, only objects of this class; `effect` objects
+    /// are found only when named here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub class: Option<String>,
 }
@@ -576,13 +604,17 @@ pub struct NearestResponse {
     pub results: Vec<Nearby>,
 }
 
-/// For road and rail, the closest point on the nearest edge, and `id` is the
-/// edge's.
+/// For road and rail, the closest point on each of the nearest edges, `id`
+/// being the edge's index in the graph and `class` its road class. A node
+/// result's `kind` is `node_red` or `node_blue`, the side whose position it
+/// gives. A scenery object's `class` is its scenery class and `name` its
+/// model.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Nearby {
     pub kind: String,
     pub id: String,
     pub name: Option<String>,
+    pub class: Option<String>,
     pub x: f64,
     pub z: f64,
     pub distance: f64,
@@ -598,6 +630,17 @@ pub struct SceneryInRequest {
     pub region: Option<Region>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub footprint_at: Option<FootprintAt>,
+    /// Only objects of these classes; every class but `effect` when
+    /// omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classes: Option<Vec<String>>,
+    /// More objects than this is an error, never a truncated answer.
+    #[serde(default = "default_scenery_max_rows")]
+    pub max_rows: u32,
+}
+
+fn default_scenery_max_rows() -> u32 {
+    5_000
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -608,7 +651,7 @@ pub struct FootprintAt {
     pub orientation_deg: f64,
 }
 
-/// More than 5 000 objects is an error, never a truncated answer.
+/// The objects in id order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SceneryInResponse {
     #[serde(flatten)]
@@ -617,17 +660,22 @@ pub struct SceneryInResponse {
     pub counts_by_class: BTreeMap<String, u64>,
 }
 
-/// `obb_w` and `obb_d` are null for a model with no footprint.
+/// An object's box is `obb_w` across its local x axis, which points
+/// `rotation_deg` from north towards east, and `obb_d` across its local z;
+/// both are null for a model with no footprint. `alt` is its base and
+/// `height` its model's top above that.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SceneryObject {
-    pub id: i64,
+    pub id: u64,
     pub model: String,
     pub class: String,
     pub x: f64,
     pub z: f64,
+    pub alt: f64,
     pub rotation_deg: f64,
     pub obb_w: Option<f64>,
     pub obb_d: Option<f64>,
+    pub height: f64,
 }
 
 // chokepoints

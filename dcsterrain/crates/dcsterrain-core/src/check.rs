@@ -256,7 +256,7 @@ fn tables_report(t: Tables) -> TablesReport {
 }
 
 /// The state of each entry `index` builds, and the horizon tiles so far.
-fn cache_report(terrain: &TerrainCache, problems: &mut Vec<String>) -> CacheReport {
+pub(crate) fn cache_report(terrain: &TerrainCache, problems: &mut Vec<String>) -> CacheReport {
     let dir = terrain.dir();
     let entries = cache::entries()
         .into_iter()
@@ -295,7 +295,7 @@ fn cache_report(terrain: &TerrainCache, problems: &mut Vec<String>) -> CacheRepo
 
 /// The validation figures, `None` when there are none; one that cannot be
 /// read is a problem, since nothing can rebuild it.
-fn read_validation(dir: &Path, problems: &mut Vec<String>) -> Option<Value> {
+pub(crate) fn read_validation(dir: &Path, problems: &mut Vec<String>) -> Option<Value> {
     let path = dir.join(cache::VALIDATION_FILE);
     let bytes = match fs::read(&path) {
         Ok(b) => b,

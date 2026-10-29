@@ -381,6 +381,21 @@ impl Install {
         &self.map
     }
 
+    /// The terrain's cache directory.
+    pub fn cache(&self) -> &TerrainCache {
+        &self.cache
+    }
+
+    /// The road graph if a request has read it, without reading it.
+    pub fn roads_read(&self) -> Option<&crate::roads::Graph> {
+        self.roads.get()
+    }
+
+    /// The scenery if a request has opened it, without opening it.
+    pub fn scenery_read(&self) -> Option<&Scenery> {
+        self.scenery.get()
+    }
+
     /// The blocks whose box, padded, overlaps `[x0, x1] × [z0, z1]`, in
     /// block order, found through the tiles the rectangle touches.
     fn under(&self, x0: f64, x1: f64, z0: f64, z1: f64) -> Vec<usize> {

@@ -204,6 +204,36 @@
       ],
       "type": "object"
     },
+    "CacheEntry": {
+      "description": "One cache entry: `current`, `missing`, or `stale` with the reason.\n`size` is its file's bytes, null when there is none.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "size": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "state": {
+          "type": "string"
+        },
+        "why": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "state"
+      ],
+      "type": "object"
+    },
     "Candidate": {
       "properties": {
         "orientation_deg": {
@@ -329,7 +359,7 @@
       "type": "object"
     },
     "Counts": {
-      "description": "How many of each thing the terrain holds. A count is null until what it\nis counted from has been read.",
+      "description": "How many of each thing the terrain holds. The tables' counts are always\ngiven; road edges and scenery objects are null until a request in the\nsame process has read the road graph or the scenery.",
       "properties": {
         "airdromes": {
           "format": "uint64",
@@ -1026,6 +1056,13 @@
     "DescribeResponse": {
       "description": "What a terrain is, which files answer for it, and how much of it is known.",
       "properties": {
+        "cache": {
+          "description": "Each cache entry as it stands; empty for the synthetic terrain,\nwhich has no cache.",
+          "items": {
+            "$ref": "#/$defs/CacheEntry"
+          },
+          "type": "array"
+        },
         "cell_size": {
           "format": "double",
           "type": "number"
@@ -1089,6 +1126,7 @@
         "elapsed_ms",
         "dcs_build_timestamp",
         "files",
+        "cache",
         "counts"
       ],
       "type": "object"
@@ -1287,6 +1325,30 @@
       ],
       "type": "object"
     },
+    "GeoPoint": {
+      "description": "A position in WGS84 degrees, with its MGRS reference to the meter; the\nreference is null outside 80° S to 84° N, where MGRS uses polar grids.",
+      "properties": {
+        "lat": {
+          "format": "double",
+          "type": "number"
+        },
+        "lon": {
+          "format": "double",
+          "type": "number"
+        },
+        "mgrs": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "lat",
+        "lon"
+      ],
+      "type": "object"
+    },
     "GeoRequest": {
       "properties": {
         "to_latlon": {
@@ -1329,7 +1391,7 @@
         },
         "to_latlon": {
           "items": {
-            "$ref": "#/$defs/LatLon"
+            "$ref": "#/$defs/GeoPoint"
           },
           "type": "array"
         },
@@ -1432,8 +1494,14 @@
       "type": "object"
     },
     "Nearby": {
-      "description": "For road and rail, the closest point on the nearest edge, and `id` is the\nedge's.",
+      "description": "For road and rail, the closest point on each of the nearest edges, `id`\nbeing the edge's index in the graph and `class` its road class. A node\nresult's `kind` is `node_red` or `node_blue`, the side whose position it\ngives. A scenery object's `class` is its scenery class and `name` its\nmodel.",
       "properties": {
+        "class": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "distance": {
           "format": "double",
           "type": "number"
@@ -1484,7 +1552,7 @@
     "NearestRequest": {
       "properties": {
         "class": {
-          "description": "Scenery class filter, for `kind` `scenery`.",
+          "description": "For `kind` `scenery`, only objects of this class; `effect` objects\nare found only when named here.",
           "type": [
             "string",
             "null"
@@ -2088,6 +2156,10 @@
         "dcs_build": {
           "type": "string"
         },
+        "distance_capped": {
+          "description": "Some distance found nothing within its cap and reads as the cap.",
+          "type": "boolean"
+        },
         "elapsed_ms": {
           "format": "uint64",
           "minimum": 0,
@@ -2112,12 +2184,13 @@
         "terrain_fingerprint",
         "cell_size",
         "elapsed_ms",
-        "rows"
+        "rows",
+        "distance_capped"
       ],
       "type": "object"
     },
     "SampleRow": {
-      "description": "`height` is sampled bilinearly, every other layer at the nearest cell.\nA value is null where the layer is nodata.",
+      "description": "Over a region, `height` is bilinear between cell centers and every other\nlayer the cell holding the point; at given points, the ground layers are\nthe mesh triangle's own and the derived layers the cell's. A value is\nnull where the layer is undefined.",
       "properties": {
         "values": {
           "additionalProperties": {
@@ -2148,6 +2221,16 @@
     "SceneryInRequest": {
       "description": "Either `region`, or `footprint_at` for exact overlap with a placed\nfootprint.",
       "properties": {
+        "classes": {
+          "description": "Only objects of these classes; every class but `effect` when\nomitted.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "footprint_at": {
           "anyOf": [
             {
@@ -2157,6 +2240,13 @@
               "type": "null"
             }
           ]
+        },
+        "max_rows": {
+          "default": 5000,
+          "description": "More objects than this is an error, never a truncated answer.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
         },
         "region": {
           "anyOf": [
@@ -2172,7 +2262,7 @@
       "type": "object"
     },
     "SceneryInResponse": {
-      "description": "More than 5 000 objects is an error, never a truncated answer.",
+      "description": "The objects in id order.",
       "properties": {
         "cell_size": {
           "format": "double",
@@ -2219,13 +2309,22 @@
       "type": "object"
     },
     "SceneryObject": {
-      "description": "`obb_w` and `obb_d` are null for a model with no footprint.",
+      "description": "An object's box is `obb_w` across its local x axis, which points\n`rotation_deg` from north towards east, and `obb_d` across its local z;\nboth are null for a model with no footprint. `alt` is its base and\n`height` its model's top above that.",
       "properties": {
+        "alt": {
+          "format": "double",
+          "type": "number"
+        },
         "class": {
           "type": "string"
         },
+        "height": {
+          "format": "double",
+          "type": "number"
+        },
         "id": {
-          "format": "int64",
+          "format": "uint64",
+          "minimum": 0,
           "type": "integer"
         },
         "model": {
@@ -2264,7 +2363,9 @@
         "class",
         "x",
         "z",
-        "rotation_deg"
+        "alt",
+        "rotation_deg",
+        "height"
       ],
       "type": "object"
     },
