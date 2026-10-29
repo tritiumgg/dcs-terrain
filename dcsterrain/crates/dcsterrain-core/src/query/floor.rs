@@ -30,6 +30,8 @@ const POINTS_MAX: usize = 10_000;
 
 /// The floor over a raster about a site, as one sweep finds it.
 pub(super) struct Floor {
+    pub site: (f64, f64),
+    pub radius: f64,
     pub res: f64,
     pub side: i64,
     pub origin: (f64, f64),
@@ -43,17 +45,17 @@ pub(super) struct Floor {
 }
 
 impl Floor {
-    /// The floor about the site `o`, found at `path` in the request, out to
-    /// `radius`, with the caller's own issues `more`.
+    /// The floor about the site `o` out to `radius`, the two found at `at`
+    /// in the request, with the caller's own issues `more`.
     pub fn sweep(
         terrain: &Terrain,
         o: Observer,
-        path: &str,
+        at: [&str; 2],
         radius: f64,
         resolution: Option<f64>,
         more: Vec<Issue>,
     ) -> Result<Floor, Vec<Issue>> {
-        let s: Sweep = prepare(terrain, o, path, radius, resolution, more)?;
+        let s: Sweep = prepare(terrain, o, at, radius, resolution, more)?;
         let n = (s.side * s.side) as usize;
         let nan = f64::NAN.to_bits();
         let agl: Vec<AtomicU64> = (0..n).map(|_| AtomicU64::new(nan)).collect();
@@ -73,6 +75,8 @@ impl Floor {
                 .collect()
         };
         Ok(Floor {
+            site: s.o,
+            radius: s.radius,
             res: s.res,
             side: s.side,
             origin: s.origin,
@@ -90,6 +94,14 @@ impl Floor {
         }
         let v = self.agl[(r * self.side + c) as usize];
         (!v.is_nan()).then_some(v)
+    }
+
+    /// The floor of the cell holding `(x, z)`.
+    pub fn at(&self, x: f64, z: f64) -> Option<f64> {
+        self.get(
+            ((x - self.origin.0) / self.res).floor() as i64,
+            ((z - self.origin.1) / self.res).floor() as i64,
+        )
     }
 
     /// The share of the counted cells `keep` holds.
@@ -110,6 +122,18 @@ impl Floor {
     }
 }
 
+/// The issue with heights above ground to judge at, found at `path`, if
+/// any is not a finite height of 0 or more.
+pub(super) fn check_bands(bands: &[f64], path: &str) -> Option<Issue> {
+    (!bands.iter().all(|h| h.is_finite() && *h >= 0.0)).then(|| {
+        Issue::new(
+            "invalid_request",
+            "every band's height must be finite and at least 0",
+            path,
+        )
+    })
+}
+
 /// Little-endian `f32`s, base64 encoded.
 fn floats(v: impl Iterator<Item = f64>) -> String {
     let bytes: Vec<u8> = v.flat_map(|f| (f as f32).to_le_bytes()).collect();
@@ -121,13 +145,7 @@ pub fn radar_floor(
     q: RadarFloorRequest,
 ) -> Result<RadarFloorResponse, Vec<Issue>> {
     let mut issues = Vec::new();
-    if !q.bands_agl.iter().all(|h| h.is_finite() && *h >= 0.0) {
-        issues.push(Issue::new(
-            "invalid_request",
-            "every band's height must be finite and at least 0",
-            "bands_agl",
-        ));
-    }
+    issues.extend(check_bands(&q.bands_agl, "bands_agl"));
     if let Some(p) = &q.points {
         if p.len() > POINTS_MAX {
             issues.push(Issue::new(
@@ -175,7 +193,14 @@ pub fn radar_floor(
             })
         }
         None => {
-            let fl = Floor::sweep(terrain, q.site, "site", q.radius, q.resolution, issues)?;
+            let fl = Floor::sweep(
+                terrain,
+                q.site,
+                ["site", "radius"],
+                q.radius,
+                q.resolution,
+                issues,
+            )?;
             let mut heights = q.bands_agl.clone();
             heights.sort_unstable_by(f64::total_cmp);
             heights.dedup();
@@ -307,7 +332,7 @@ fn at_points(
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::super::geojson::tests::assert_valid;
     use super::super::tests::synth;
     use super::super::viewshed::tests::{crosses, rings_back, unbase64};
@@ -317,13 +342,13 @@ mod tests {
 
     /// DCS x and z of a point given north and east of the synthetic grid's
     /// origin.
-    fn at(north: f64, east: f64) -> (f64, f64) {
+    pub fn at(north: f64, east: f64) -> (f64, f64) {
         (north + f64::from(ORIGIN_X_M), east + f64::from(ORIGIN_Z_M))
     }
 
     /// Six kilometers west of the big hill's top, so the hill shades the
     /// east.
-    fn site() -> (f64, f64) {
+    pub fn site() -> (f64, f64) {
         at(HILL_A_NORTH_M, HILL_A_EAST_M - 6000.0)
     }
 
@@ -358,6 +383,28 @@ mod tests {
             steepest = steepest.max((h(ox + u * (x - ox), oz + u * (z - oz)) - eye) / (u * d));
         }
         (eye + steepest * d - h(x, z)).max(0.0)
+    }
+
+    /// The closed-form floor along the radial at `bearing_deg` from the
+    /// site, the steepest slope kept every 5 m, at each range a multiple of
+    /// 25 m out to `radius`.
+    pub fn profile(t: &Terrain, bearing_deg: f64, radius: f64) -> Vec<(f64, f64)> {
+        let Terrain::Synth(s) = t else { panic!() };
+        let f = s.form();
+        let h = |x: f64, z: f64| f.height(x - f64::from(ORIGIN_X_M), z - f64::from(ORIGIN_Z_M));
+        let (ox, oz) = site();
+        let eye = t.source().point(ox, oz).unwrap().unwrap().height + 10.0;
+        let (sin, cos) = bearing_deg.to_radians().sin_cos();
+        let (mut steepest, mut out) = (f64::NEG_INFINITY, Vec::new());
+        for k in 1..=(radius / 5.0) as u64 {
+            let d = k as f64 * 5.0;
+            let g = h(ox + d * cos, oz + d * sin);
+            if k % 5 == 0 {
+                out.push((d, (eye + steepest * d - g).max(0.0)));
+            }
+            steepest = steepest.max((g - eye) / d);
+        }
+        out
     }
 
     #[test]

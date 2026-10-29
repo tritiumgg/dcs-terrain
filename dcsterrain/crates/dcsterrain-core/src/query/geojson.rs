@@ -85,6 +85,16 @@ impl Features {
         );
     }
 
+    /// One `Polygon`, its exterior ring then its holes.
+    pub fn polygon(&mut self, rings: &[Ring], properties: Map<String, Value>) {
+        let c: Vec<_> = rings
+            .iter()
+            .enumerate()
+            .map(|(i, r)| self.ring(r, i == 0))
+            .collect();
+        self.push(json!({"type": "Polygon", "coordinates": c}), properties);
+    }
+
     pub fn finish(self) -> Value {
         json!({"type": "FeatureCollection", "features": self.features})
     }
@@ -126,6 +136,15 @@ pub(crate) mod tests {
             assert!((-180.0..=180.0).contains(&lon) && (-90.0..=90.0).contains(&lat));
             [lon, lat]
         };
+        let polygon = |poly: &Value| {
+            for (i, ring) in poly.as_array().unwrap().iter().enumerate() {
+                let r: Vec<_> = ring.as_array().unwrap().iter().map(position).collect();
+                assert!(r.len() >= 4);
+                assert_eq!(r[0], r[r.len() - 1], "a ring is closed");
+                let a = signed_area(&r[..r.len() - 1]);
+                assert_eq!(a > 0.0, i == 0, "exterior ccw, holes cw");
+            }
+        };
         for f in v["features"].as_array().unwrap() {
             assert_eq!(f["type"], "Feature");
             assert!(f["properties"].is_object());
@@ -142,17 +161,8 @@ pub(crate) mod tests {
                         position(p);
                     });
                 }
-                "MultiPolygon" => {
-                    for poly in c.as_array().unwrap() {
-                        for (i, ring) in poly.as_array().unwrap().iter().enumerate() {
-                            let r: Vec<_> = ring.as_array().unwrap().iter().map(position).collect();
-                            assert!(r.len() >= 4);
-                            assert_eq!(r[0], r[r.len() - 1], "a ring is closed");
-                            let a = signed_area(&r[..r.len() - 1]);
-                            assert_eq!(a > 0.0, i == 0, "exterior ccw, holes cw");
-                        }
-                    }
-                }
+                "Polygon" => polygon(c),
+                "MultiPolygon" => c.as_array().unwrap().iter().for_each(polygon),
                 t => panic!("geometry {t}"),
             }
         }

@@ -30,6 +30,7 @@ mod region;
 mod sample;
 mod scenery;
 pub mod sightline;
+mod spectrum;
 mod viewshed;
 mod visible;
 
@@ -41,6 +42,7 @@ pub use nearest::nearest;
 pub use region::{Area, resolve};
 pub use sample::{lattice, sample};
 pub use scenery::scenery_in;
+pub use spectrum::approach_spectrum;
 pub use viewshed::viewshed;
 pub use visible::visible;
 
@@ -103,6 +105,7 @@ const HANDLERS: &[(&str, Handler)] = &[
     ("visible", |t, r| run(t, r, visible)),
     ("viewshed", |t, r| run(t, r, viewshed)),
     ("radar_floor", |t, r| run(t, r, radar_floor)),
+    ("approach_spectrum", |t, r| run(t, r, approach_spectrum)),
 ];
 
 /// Reads the request as `Q`, answers it with `f`, and writes the answer.

@@ -26,11 +26,11 @@ const CELLS_MAX: u64 = 4 << 20;
 /// A mask of `cells`, or a window of heights of `cells` under it, over the
 /// most one may hold. Only a coarser mask makes a smaller mask; the window
 /// is of terrain cells whatever the mask's.
-fn too_large(what: &str, cells: u64, hint: &str) -> Vec<Issue> {
+fn too_large(what: &str, cells: u64, hint: &str, path: &str) -> Vec<Issue> {
     vec![Issue::new(
         "too_large",
         &format!("this sweep's {what} holds {cells} cells, over the {CELLS_MAX} one may; {hint}"),
-        "radius",
+        path,
     )]
 }
 
@@ -64,7 +64,7 @@ pub fn viewshed(terrain: &Terrain, q: ViewshedRequest) -> Result<ViewshedRespons
     let s = prepare(
         terrain,
         q.observer,
-        "observer",
+        ["observer", "radius"],
         q.radius,
         q.resolution,
         target.into_iter().collect(),
@@ -123,14 +123,14 @@ pub fn viewshed(terrain: &Terrain, q: ViewshedRequest) -> Result<ViewshedRespons
         geojson,
     })
 }
-
-/// Checks a sweep's site, found at `path` in the request, its radius and
-/// resolution, and reads the heights it stands on. `more` are the issues
+/// Checks a sweep's site and radius, found at `at` in the request, and
+/// its resolution, and reads the heights it stands on. `more` are the
+/// issues the caller found with the rest of its request, returned with these.
 /// the caller found with the rest of its request, returned with these.
 pub(super) fn prepare(
     terrain: &Terrain,
     o: Observer,
-    path: &str,
+    at: [&str; 2],
     radius: f64,
     resolution: Option<f64>,
     more: Vec<Issue>,
@@ -144,14 +144,14 @@ pub(super) fn prepare(
         issues.push(Issue::new(
             "invalid_point",
             "every coordinate must be finite",
-            path,
+            at[0],
         ));
     }
     if !(radius.is_finite() && radius > 0.0) {
         issues.push(Issue::new(
             "invalid_request",
             "the radius must be positive",
-            "radius",
+            at[1],
         ));
     }
     if !(res.is_finite() && res >= cell) {
@@ -172,7 +172,7 @@ pub(super) fn prepare(
         return Err(vec![Issue::new(
             "off_terrain",
             "no mesh covers this point, so it has no ground to stand on",
-            path,
+            at[0],
         )]);
     };
 
@@ -185,6 +185,7 @@ pub(super) fn prepare(
             "mask",
             (side * side) as u64,
             "shrink the radius or coarsen the resolution",
+            at[1],
         ));
     }
     let (n, side) = (n as i64, side as i64);
@@ -204,6 +205,7 @@ pub(super) fn prepare(
             "window of heights",
             (span * span) as u64,
             "shrink the radius",
+            at[1],
         ));
     }
     let index = |v: f64, origin: f64| ((v - origin) / cell).floor() as i64;
@@ -802,8 +804,15 @@ pub(super) mod tests {
                 "resolution": res,
             }))
             .unwrap();
-            let mut s =
-                super::prepare(&t, q.observer, "observer", q.radius, q.resolution, vec![]).unwrap();
+            let mut s = super::prepare(
+                &t,
+                q.observer,
+                ["observer", "radius"],
+                q.radius,
+                q.resolution,
+                vec![],
+            )
+            .unwrap();
             let want = s.run_serial(target);
             assert!(want.1 > 0, "{x} {z}");
             hidden += usize::from(want.1 < want.2);
