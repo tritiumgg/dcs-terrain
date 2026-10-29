@@ -20,6 +20,7 @@ use crate::types::{Issue, OPERATIONS, Provenance};
 
 pub mod criteria;
 mod describe;
+mod floor;
 mod geo;
 mod geojson;
 mod mgrs;
@@ -33,6 +34,7 @@ mod viewshed;
 mod visible;
 
 pub use describe::describe;
+pub use floor::radar_floor;
 pub use geo::geo;
 pub use mgrs::mgrs;
 pub use nearest::nearest;
@@ -100,6 +102,7 @@ const HANDLERS: &[(&str, Handler)] = &[
     ("sample", |t, r| run(t, r, sample)),
     ("visible", |t, r| run(t, r, visible)),
     ("viewshed", |t, r| run(t, r, viewshed)),
+    ("radar_floor", |t, r| run(t, r, radar_floor)),
 ];
 
 /// Reads the request as `Q`, answers it with `f`, and writes the answer.

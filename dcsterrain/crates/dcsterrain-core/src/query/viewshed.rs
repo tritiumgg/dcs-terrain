@@ -35,7 +35,7 @@ fn too_large(what: &str, cells: u64, hint: &str) -> Vec<Issue> {
 }
 
 /// Standard base64 with padding.
-fn base64(bytes: &[u8]) -> String {
+pub(super) fn base64(bytes: &[u8]) -> String {
     const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut s = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for c in bytes.chunks(3) {
@@ -490,7 +490,7 @@ fn set(bits: &[AtomicU8], i: i64) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::super::geojson::signed_area;
     use super::super::geojson::tests::assert_valid;
     use super::super::sightline::{Heights, walk};
@@ -520,7 +520,7 @@ mod tests {
         answer(t, "viewshed", &q).unwrap()
     }
 
-    fn unbase64(s: &str) -> Vec<u8> {
+    pub fn unbase64(s: &str) -> Vec<u8> {
         let a = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
         let mut out = Vec::new();
         for c in s.as_bytes().chunks(4) {
@@ -610,7 +610,7 @@ mod tests {
 
     /// Each ring of a `MultiPolygon` back in DCS x and z, open, with
     /// whether it is a hole.
-    fn rings_back(t: &Terrain, poly: &Value) -> Vec<(bool, Vec<[f64; 2]>)> {
+    pub fn rings_back(t: &Terrain, poly: &Value) -> Vec<(bool, Vec<[f64; 2]>)> {
         let tm = t.source().tables().unwrap().crs.tmerc();
         let mut rings = Vec::new();
         for p in poly["coordinates"].as_array().unwrap() {
@@ -631,7 +631,7 @@ mod tests {
         rings
     }
 
-    fn crosses(r: &[[f64; 2]], x: f64, z: f64) -> bool {
+    pub fn crosses(r: &[[f64; 2]], x: f64, z: f64) -> bool {
         let mut odd = false;
         for i in 0..r.len() {
             let (a, b) = (r[i], r[(i + 1) % r.len()]);
