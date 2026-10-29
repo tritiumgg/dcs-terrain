@@ -29,8 +29,7 @@ another. On macOS or Linux it needs a copy of the terrain's files and
 `--install <dir>`. No GPU.
 
 Building needs [mise](https://mise.jdx.dev), which installs the Rust pinned in
-`rust-toolchain.toml`. The optional hook's tests also need Lua 5.1; on Windows,
-`mise run lua51` builds it and needs Visual Studio Build Tools.
+`rust-toolchain.toml`.
 
 ## Get it
 
@@ -99,10 +98,8 @@ the DCS build each terrain's entries were made on; after a DCS update, an
 entry whose terrain files did not change is kept. `cache clear` deletes all
 of it, asking before the live validation figures.
 `dcsterrain index --terrain Caucasus` builds a cache ahead of time. `query`,
-`index` and `list-terrains` take `--cache <dir>` too. `index --hook <dir>`
-merges the airdrome fields only a running DCS knows, such as the ICAO code,
-from the optional hook in `extractor/`; `index` takes `--allow-crs-residual`
-as `query` does.
+`index` and `list-terrains` take `--cache <dir>` too, and `index` takes
+`--allow-crs-residual` as `query` does.
 
 Ask a siting question the same way, `find_sites` with its JSON (planned, not
 usable yet). The first question on a terrain will build its cache in seconds,

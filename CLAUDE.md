@@ -18,15 +18,13 @@ docs/plan.md           the task graph. Tasks have ids
 docs/decisions/        ADRs: decisions that change the design
 docs/data/             measured reference data and a model census
 dcsterrain/            Cargo workspace: core, cli                    (partial)
-extractor/             the optional Lua GameGUI hook (tables pass) and its tests
 skill/                 the skill an assistant loads                  (planned)
 tools/                 statecheck.sh, nospecrefs.sh, readmeopen.sh,
-                       hooktest.sh, luatest.sh
-tools/lua51/           builds Lua 5.1.5 for Windows with MSVC
+                       hooktest.sh
 tools/validate/        the live validation sortie                    (empty)
 .claude/hooks/         the shell guard, the commit checks, the session start,
                        the stop check
-.github/workflows/     rust, lua, docs
+.github/workflows/     rust, docs
 ```
 
 `docs/README.md` is the index to `docs/`. The project was reset on 2026-10-27;
@@ -37,8 +35,8 @@ the documents before it are in git at commit `4b85bd0`.
 Developed on Windows, macOS and Linux from one checkout. Windows is
 distinguished by one thing only: **DCS runs there**.
 
-- **Windows, with DCS installed.** The optional hook, the live validation
-  sortie through the bridge, and the live steps of tasks marked *live* in
+- **Windows, with DCS installed.** The live validation sortie through the
+  bridge, and the live steps of tasks marked *live* in
   `docs/plan.md`. The install's terrain files are here too, so the opt-in
   checks against a real install run here unless the files are copied.
 - **macOS and Linux.** Everything else — the Rust workspace, the decoders, the
@@ -157,11 +155,10 @@ through mise, because a non-interactive shell does not pick up its PATH:
 ```sh
 mise exec -- cargo test
 mise run check      # fmt, clippy, test
-mise run lua-test   # the hook's offline tests under Lua 5.1
 mise run docs       # the state file, the citations, the hooks
 ```
 
-`guard-bash.sh` refuses a bare `cargo`, `lua`, `rustc` or `rustfmt`. Anything
+`guard-bash.sh` refuses a bare `cargo`, `rustc` or `rustfmt`. Anything
 with a loop or a conditional lives in `tools/` and is invoked as
 `sh tools/<name>.sh`: mise runs an inline script through `cmd` on Windows.
 
@@ -172,9 +169,7 @@ it** by writing a second version into `mise.toml`. Edit `channel`, then
 On a fresh checkout, run `mise trust` and then `mise install` first.
 
 **On Windows, run mise tasks from Git Bash**: a task body is `sh tools/...`,
-and `cmd` finds `sh` only on a PATH Git Bash has set. `mise run lua51` builds
-the Lua 5.1.5 interpreter into `.tools/bin` and needs Visual Studio Build
-Tools with the C++ workload.
+and `cmd` finds `sh` only on a PATH Git Bash has set.
 
 ## Portability
 
@@ -185,8 +180,7 @@ on all three platforms — on Windows through Git-for-Windows `sh`, which is why
 No bash arrays, no `[[`, no `local`. No `sed -i`, no `grep -P`, no
 `readlink -f`. Avoid `sed` for tabs. Assume nothing beyond a stock machine: no
 `jq`, no `python`, no `gawk`. Detect `sha256sum` versus `shasum`.
-`tools/lua51/Build-Lua51.ps1` is the one PowerShell exception, because it
-drives MSVC. `guard-bash.sh` and `precommit.sh` check this.
+`guard-bash.sh` and `precommit.sh` check this.
 
 Leave `.gitattributes` alone: it disables line-ending conversion, without
 which a script checked out on Windows gains carriage returns and `sh` fails on
@@ -207,8 +201,6 @@ it.
   opt-in group gated on `DCSTERRAIN_INSTALL` that reads a real install,
   comparing against the live Caucasus extract when `DCSTERRAIN_EXTRACT` names
   it. Both are skipped in CI.
-- **The hook is verified live**, with offline Lua tests for its encoders and
-  driver. Nothing named `StubHarness.lua` is vendored.
 
 ## Version control
 
@@ -238,7 +230,7 @@ a feature, and an unrelated fix each take their own commit.
 
 **Review the branch locally, then push.** One adversarial reviewer, on Sonnet,
 read-only, told the claim the branch makes and asked to break it; every
-finding fixed; then `mise run check`, `mise run lua-test` and `mise run docs`.
+finding fixed; then `mise run check` and `mise run docs`.
 Only then push and open the pull request.
 
 `docs/STATE.md` is updated in the task's own pull request, in whichever session
