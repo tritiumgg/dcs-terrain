@@ -24,3 +24,9 @@ dcsterrain-core = { path = "../dcsterrain-core", features = ["testing"] }
 
 [target."cfg(windows)".dependencies]
 winreg = "0.56.0"
+
+# The query benchmark times its cases itself and counts allocations, so it
+# runs without a bench harness.
+[[bench]]
+name = "query"
+harness = false
