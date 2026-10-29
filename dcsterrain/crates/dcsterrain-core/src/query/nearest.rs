@@ -114,35 +114,56 @@ fn scenery(
     }
 }
 
+/// The indices of the `n` positions nearest `from`, nearest first, ties in
+/// the order given; a position that is `None` is never one. Only distances
+/// are compared, so a caller builds its answer for the winners alone.
+fn nearest_indices(
+    positions: impl Iterator<Item = Option<(f64, f64)>>,
+    from: (f64, f64),
+    n: usize,
+) -> Vec<usize> {
+    let mut d: Vec<(f64, usize)> = positions
+        .enumerate()
+        .filter_map(|(k, p)| p.map(|(x, z)| ((x - from.0).hypot(z - from.1), k)))
+        .collect();
+    let by = |a: &(f64, usize), b: &(f64, usize)| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1));
+    if n < d.len() {
+        d.select_nth_unstable_by(n, by);
+        d.truncate(n);
+    }
+    d.sort_unstable_by(by);
+    d.into_iter().map(|(_, k)| k).collect()
+}
+
 /// The `n` airdromes of the tables nearest `from`, nearest first, ties in
 /// table order; an airdrome with no position is never one.
 pub(super) fn airdromes(tables: &Tables, from: (f64, f64), n: usize) -> Vec<Nearby> {
-    let found = tables
-        .airdromes
-        .iter()
-        .filter_map(|a| {
+    let all = &tables.airdromes;
+    let near = nearest_indices(all.iter().map(|a| Some((a.x?, a.z?))), from, n);
+    near.into_iter()
+        .map(|k| {
+            let a = &all[k];
             let id = a.id.map_or_else(|| a.name_id.clone(), |id| id.to_string());
             let name = a.display_name.clone().or_else(|| Some(a.name_id.clone()));
-            Some(at("airdrome", id, name, (a.x?, a.z?), from))
+            at("airdrome", id, name, (a.x.unwrap(), a.z.unwrap()), from)
         })
-        .collect();
-    nearest_of(found, n)
+        .collect()
 }
 
 /// The `n` towns of the tables nearest `from`, nearest first, ties in table
-/// order, each by its display name where it has one. Every town is measured:
-/// the tables hold a few thousand at most, microseconds' work.
+/// order, each by its display name where it has one. Every town is measured,
+/// a linear scan: the tables hold under two thousand, a few microseconds'
+/// work, where an index would save little.
 pub(super) fn towns(tables: &Tables, from: (f64, f64), n: usize) -> Vec<Nearby> {
-    let found = tables
-        .towns
-        .iter()
-        .enumerate()
-        .map(|(k, t)| {
+    let all = &tables.towns;
+    let near = nearest_indices(all.iter().map(|t| Some((t.x, t.z))), from, n);
+    near.into_iter()
+        .map(|k| {
+            let t = &all[k];
             let name = t.display_name.clone().unwrap_or_else(|| t.name.clone());
             at("town", k.to_string(), Some(name), (t.x, t.z), from)
         })
-        .collect();
-    nearest_of(found, n)
+        .collect()
 }
 
 pub fn nearest(terrain: &Terrain, q: NearestRequest) -> Result<NearestResponse, Vec<Issue>> {
@@ -344,6 +365,22 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn indices_rank_by_distance_then_order_given() {
+        let p = [
+            Some((3.0, 0.0)),
+            None,
+            Some((0.0, 1.0)),
+            Some((-1.0, 0.0)),
+            Some((0.0, 3.0)),
+        ];
+        let rank = |n| nearest_indices(p.into_iter(), (0.0, 0.0), n);
+        assert_eq!(rank(1), [2]);
+        assert_eq!(rank(2), [2, 3]);
+        assert_eq!(rank(3), [2, 3, 0]);
+        assert_eq!(rank(9), [2, 3, 0, 4]);
     }
 
     #[test]
