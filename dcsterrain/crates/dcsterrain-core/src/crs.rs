@@ -130,9 +130,7 @@ impl Tmerc {
             negated(self.northing)
         )
     }
-}
 
-impl Tmerc {
     /// The bearing from `a` to `b`, each DCS `[x, z]`, in degrees clockwise
     /// from true north at `a`, 0 when they coincide: the azimuth of the
     /// normal section, the plane holding the ellipsoid's normal at `a` and
@@ -512,19 +510,16 @@ pub(crate) mod tests {
 
     #[test]
     fn the_true_bearing_is_the_geodesic_azimuth_within_its_bound() {
-        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
-        let mut unit = || {
-            seed ^= seed << 13;
-            seed ^= seed >> 7;
-            seed ^= seed << 17;
-            (seed >> 11) as f64 / (1u64 << 53) as f64
-        };
+        let mut u = crate::roads::tests::Unit(0x9e37_79b9_7f4a_7c15);
         // The worst within 100 km, and within 500 km.
         let mut worst = [0.0f64; 2];
         for (_, t) in TABLE {
             for _ in 0..2000 {
-                let a = [(unit() - 0.5) * 1.2e6, (unit() - 0.5) * 1.2e6];
-                let (r, th) = (unit().powi(2) * 500e3 + 1.0, unit() * std::f64::consts::TAU);
+                let a = [(u.next() - 0.5) * 1.2e6, (u.next() - 0.5) * 1.2e6];
+                let (r, th) = (
+                    u.next().powi(2) * 500e3 + 1.0,
+                    u.next() * std::f64::consts::TAU,
+                );
                 let b = [a[0] + r * th.cos(), a[1] + r * th.sin()];
                 let (lat1, lon1) = t.to_latlon(a[0], a[1]);
                 let (lat2, lon2) = t.to_latlon(b[0], b[1]);
