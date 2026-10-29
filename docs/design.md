@@ -550,17 +550,19 @@ needs one.
 
 ## 8. Targets
 
-Single thread, NVMe, cold OS cache unless marked. Each is a benchmark, not a
+NVMe, cold OS cache unless marked; on one thread unless a figure says it is
+from the query benchmark, which spreads large work over every core of an
+8-core machine (ADR 0004, `data/query-bench.md`). Each is a benchmark, not a
 correctness rule: a miss is a decision about the target.
 
 | Operation | Measured | Target |
 |---|---|---|
-| open / `describe` | open 2.6 / 4.2 / 5.4 ms (Caucasus / GermanyCW / Afghanistan) and 4.9 ms on Syria from the cache, OS cache warm, on 2.9.30.28738; on GermanyCW finding the files and reading the surface header take 2 ms, and reading and decoding `mesh.toc` 1 ms | 20 ms |
+| open / `describe` | open 2.6 / 4.2 / 5.4 ms (Caucasus / GermanyCW / Afghanistan) and 4.9 ms on Syria from the cache, OS cache warm, on 2.9.30.28738; on GermanyCW finding the files and reading the surface header take 2 ms, and reading and decoding `mesh.toc` 1 ms; query benchmark, OS cache warm, open 1.9 / 3.5 ms (Caucasus / GermanyCW) | 20 ms |
 | `sample` 10 k lattice | 10–12 ms; over the block with the most runway triangles, OS cache warm, blocks held: 4.3 / 13.0 / 11.9 ms (Caucasus / GermanyCW / Afghanistan) against 2.8 / 5.1 / 3.0 ms over a block of like size with no runway, the gap the airfield's denser ground, its runway test 0.2–1.1 ms | 100 ms |
-| `sample` 10 k scattered over a whole terrain | 8.5 / 25.9 / 2.7 s at the 32 MiB block budget, 0.7 / 13.5 / 1.2 s sorted by tile Z-order, 0.7 / 2.9 / 1.3 s with each block prepared once (Caucasus / GermanyCW / Afghanistan); block by block, a block holding 32 points or fewer tested triangle by triangle rather than binned, 0.33 / 1.4–1.6 s (Caucasus / GermanyCW, OS cache warm, 2.9.30.28738), and 10 k points over 2 km on MarianaIslands 74 ms | 3 s on GermanyCW |
-| `visible` 10–40 km | over the mesh's triangles, 1–4 ms over 8–38 km on Caucasus in a fresh process, OS cache warm; over 2000 lines of 1–40 km, p50 0.60 / 0.37 ms and p99 9.3 / 30 ms (Caucasus / GermanyCW), 2.9.30.28738 | 1 ms within a batch, 20 ms cold |
-| one `query` call end to end, OS cache warm | 42–48 ms for `visible` on Caucasus, 2.9.30.28738 | 50 ms for `describe`, `sample`, `visible` |
-| `viewshed`, `radar_floor` 20 km | 89–111 ms; `viewshed` 120 ms at 20 km and 644 ms at 50 km on Caucasus, OS cache warm, on 2.9.30.28738 | 300 ms |
+| `sample` 10 k scattered over a whole terrain | 8.5 / 25.9 / 2.7 s at the 32 MiB block budget, 0.7 / 13.5 / 1.2 s sorted by tile Z-order, 0.7 / 2.9 / 1.3 s with each block prepared once (Caucasus / GermanyCW / Afghanistan); block by block, a block holding 32 points or fewer tested triangle by triangle rather than binned, 0.33 / 1.4–1.6 s (Caucasus / GermanyCW, OS cache warm, 2.9.30.28738), and 10 k points over 2 km on MarianaIslands 74 ms; query benchmark 0.075 / 0.18 s warm, 1.0 / 1.7 s cold (Caucasus / GermanyCW) | 3 s on GermanyCW |
+| `visible` 10–40 km | over the mesh's triangles, 1–4 ms over 8–38 km on Caucasus in a fresh process, OS cache warm; over 2000 lines of 1–40 km, p50 0.60 / 0.37 ms and p99 9.3 / 30 ms (Caucasus / GermanyCW), 2.9.30.28738; query benchmark over 1–40 km, p50 0.35 / 0.30 ms warm within a batch, 4.3 / 6.5 ms cold in a fresh process | 1 ms within a batch, 20 ms cold |
+| one `query` call end to end, OS cache warm | 42–48 ms for `visible` on Caucasus, 2.9.30.28738; query benchmark 8.5 / 10.6 ms for `visible`, 11.3 / 19.1 ms for `describe` (Caucasus / GermanyCW) | 50 ms for `describe`, `sample`, `visible` |
+| `viewshed`, `radar_floor` 20 km | 89–111 ms; `viewshed` 120 ms at 20 km and 644 ms at 50 km on Caucasus, OS cache warm, on 2.9.30.28738; query benchmark `viewshed` 20 km 15 / 12 ms warm, 23 / 14 ms cold (Caucasus / GermanyCW) | 300 ms |
 | `exposure`, 10 sites of 20 km | ~1 s estimated | 3 s |
 | `find_sites` 20 × 20 km, geometric | 15–24 ms | 500 ms |
 | `find_sites` with one LOS criterion, 36 observers | not measured | 10 s |
