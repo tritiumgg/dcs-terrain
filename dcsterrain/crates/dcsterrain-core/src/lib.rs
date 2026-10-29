@@ -5,6 +5,7 @@
 //! The modules this crate exposes arrive with the tasks that fill them.
 
 pub mod cache;
+pub mod check;
 pub mod classes;
 pub mod crs;
 pub mod decode;
