@@ -12,9 +12,11 @@
 //!
 //! What the answer is exact for, and what it is not:
 //!
-//! - It is exact on the lattice. Between lattice points nothing is judged:
-//!   every point of the region lies within `step / √2` of a lattice point,
-//!   but a site that passes only between them is not found.
+//! - It is exact on the lattice. Between lattice points nothing is judged,
+//!   so a site that passes only between them is not found. The lattice
+//!   starts at the region box's minimum corner, so a point of the box lies
+//!   less than `step` from a lattice point along each axis; the lattice
+//!   holds only the points inside the region.
 //! - Greedy suppression keeps the best candidate, and every candidate kept
 //!   is the best of those `spacing` or more from all kept before it. It is
 //!   not the set of `limit` spaced candidates with the greatest total
@@ -39,10 +41,13 @@ use crate::types::{
 
 /// The most candidates `find_sites` returns.
 pub const LIMIT_MAX: u32 = 200;
-/// The most grid cells a region's box may span: the layers a criterion
-/// reads are derived over all of it at once, and this is about 100 km
-/// square at 50 m.
-pub const REGION_CELLS_MAX: f64 = (4u64 << 20) as f64;
+/// The most sites, positions times orientations, a search weighs: about
+/// 36 km square at the default step and two orientations. Each site that
+/// passes is held with its terms until ranked, a few hundred bytes.
+pub const SITES_MAX: usize = 1 << 18;
+/// The greatest weight: twenty terms each scoring 1 at it sum far inside
+/// the range of a finite score.
+pub const WEIGHT_MAX: f64 = 1000.0;
 
 /// The weighted sum of the term scores, each weight 1 unless named.
 fn weighted(terms: &[Term], weights: &BTreeMap<String, f64>) -> f64 {
@@ -167,7 +172,7 @@ pub fn find_sites(terrain: &Terrain, q: FindSitesRequest) -> Result<FindSitesRes
             "step",
         ));
     }
-    if !spacing_ok(q.spacing) {
+    if !(q.spacing.is_finite() && q.spacing >= 0.0) {
         return Err(invalid(
             "spacing must be a finite length, 0 or more",
             "spacing",
@@ -181,22 +186,25 @@ pub fn find_sites(terrain: &Terrain, q: FindSitesRequest) -> Result<FindSitesRes
     }
     check_weights(&q.criteria, &q.weights)?;
     let area = resolve(src, &q.region, "region")?;
-    let [x0, z0, x1, z1] = area.bbox;
-    let cells =
-        ((x1 - x0) / CELL_SIZE_M).ceil().max(1.0) * ((z1 - z0) / CELL_SIZE_M).ceil().max(1.0);
-    if cells > REGION_CELLS_MAX {
-        return Err(vec![Issue::new(
-            "too_large",
-            &format!(
-                "the region's box spans {cells:.0} cells, over the {REGION_CELLS_MAX:.0} a search \
-                 may, about 100 km square; split the region"
-            ),
-            "region",
-        )]);
-    }
-    // Under the cap on cells, and a step of at least a cell, the lattice
-    // holds fewer points than the cap on its rows.
-    let cands = lattice(&area, step, u32::MAX)?;
+    // Every site that passes is held with its terms until ranked, so the
+    // cap is on sites, positions times orientations.
+    let per = SITES_MAX / q.footprint.orientations_deg.len().max(1);
+    let cands = lattice(&area, step, per as u32).map_err(|e| {
+        if e.iter().any(|i| i.code == "too_many_rows") {
+            vec![Issue::new(
+                "too_large",
+                &format!(
+                    "the region holds more than {per} lattice points at this step, over the \
+                     {SITES_MAX} sites a search may weigh at {} orientations; widen the step or \
+                     split the region",
+                    q.footprint.orientations_deg.len()
+                ),
+                "region",
+            )]
+        } else {
+            e
+        }
+    })?;
     let e = evaluate(src, &cands, &q.footprint, &q.criteria, Mode::Prune)?;
 
     // Each position's best orientation; its sites lie together.
@@ -255,12 +263,8 @@ pub fn find_sites(terrain: &Terrain, q: FindSitesRequest) -> Result<FindSitesRes
     })
 }
 
-fn spacing_ok(s: f64) -> bool {
-    s.is_finite() && s >= 0.0
-}
-
-/// Each weight finite and 0 or more, and naming a criterion asked for or
-/// `valid`, which is always applied.
+/// Each weight from 0 to `WEIGHT_MAX`, naming a criterion asked for or
+/// `valid`, which is always applied; a name asked for twice weighs both.
 fn check_weights(
     criteria: &[Criterion],
     weights: &BTreeMap<String, f64>,
@@ -268,10 +272,10 @@ fn check_weights(
     let mut issues = Vec::new();
     for (k, &w) in weights {
         let path = format!("weights.{k}");
-        if !(w.is_finite() && w >= 0.0) {
+        if !(0.0..=WEIGHT_MAX).contains(&w) {
             issues.push(Issue::new(
                 "invalid_request",
-                "a weight must be finite, 0 or more",
+                &format!("a weight must be from 0 to {WEIGHT_MAX}"),
                 &path,
             ));
         }

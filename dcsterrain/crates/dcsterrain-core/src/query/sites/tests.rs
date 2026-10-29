@@ -357,6 +357,11 @@ fn refuses_what_it_cannot_answer() {
         with("weights", json!({"slope_max": -1})).path,
         "weights.slope_max"
     );
+    assert_eq!(with("weights", json!({"valid": -1})).path, "weights.valid");
+    assert_eq!(
+        with("weights", json!({"slope_max": 1001})).path,
+        "weights.slope_max"
+    );
     let big = with("region", around(30_000.0, 40_000.0, 60_000.0));
     assert_eq!(
         (big.code.as_str(), big.path.as_str()),
@@ -404,4 +409,36 @@ fn answers_as_geojson_through_the_operation_list() {
     assert_valid(&v["geojson"]);
     assert_eq!(v["geojson"]["features"].as_array().unwrap().len(), 2);
     assert_eq!(v["score"], c[0]["score"]);
+}
+
+#[test]
+fn the_best_orientation_passes_then_scores_most_by_the_weights() {
+    let t = |name: &str, score: f64| Term {
+        name: name.to_string(),
+        value: score,
+        pass: true,
+        score,
+    };
+    let site = |deg: f64, a: f64, b: f64, pass: bool| Site {
+        x: 0.0,
+        z: 0.0,
+        orientation_deg: deg,
+        terms: vec![t("a", a), t("b", b)],
+        pass,
+    };
+    let sites = [
+        site(0.0, 1.0, 1.0, false),
+        site(45.0, 0.9, 0.2, true),
+        site(90.0, 0.3, 0.7, true),
+        site(135.0, 0.3, 0.7, true),
+    ];
+    let w = |a: f64, b: f64| BTreeMap::from([("a".to_string(), a), ("b".to_string(), b)]);
+    // Unweighted, 45° sums 1.1 against 1.0; the failing 0° never wins.
+    assert_eq!(best(&sites, &BTreeMap::new()).0.orientation_deg, 45.0);
+    // Weighting b three times turns it to 90°, ahead of 135° on the tie.
+    let (s, v) = best(&sites, &w(1.0, 3.0));
+    assert_eq!(s.orientation_deg, 90.0);
+    assert!((v - 2.4).abs() < 1e-12, "{v}");
+    // Only failing sites: the best of them.
+    assert_eq!(best(&sites[..1], &w(1.0, 1.0)).0.orientation_deg, 0.0);
 }
