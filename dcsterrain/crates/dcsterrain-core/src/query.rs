@@ -22,6 +22,7 @@ mod chokepoints;
 mod coverage;
 pub mod criteria;
 mod describe;
+mod exposure;
 mod floor;
 mod geo;
 mod geojson;
@@ -43,6 +44,7 @@ mod visible;
 pub use chokepoints::chokepoints;
 pub use coverage::coverage;
 pub use describe::describe;
+pub use exposure::exposure;
 pub use floor::{floor_msl_reaching, radar_floor};
 pub use geo::geo;
 pub use mgrs::mgrs;
@@ -118,6 +120,7 @@ const HANDLERS: &[(&str, Handler)] = &[
     ("viewshed", |t, r| run(t, r, viewshed)),
     ("radar_floor", |t, r| run(t, r, radar_floor)),
     ("coverage", |t, r| run(t, r, coverage)),
+    ("exposure", |t, r| run(t, r, exposure)),
     ("approach_spectrum", |t, r| run(t, r, approach_spectrum)),
     ("unmask_profile", |t, r| run(t, r, unmask_profile)),
     ("route", |t, r| run(t, r, route)),

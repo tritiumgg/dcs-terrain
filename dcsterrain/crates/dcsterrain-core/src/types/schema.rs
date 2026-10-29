@@ -37,6 +37,7 @@ pub const OPERATIONS: &[Operation] = &[
     op::<ViewshedRequest, ViewshedResponse>("viewshed"),
     op::<RadarFloorRequest, RadarFloorResponse>("radar_floor"),
     op::<CoverageRequest, CoverageResponse>("coverage"),
+    op::<ExposureRequest, ExposureResponse>("exposure"),
     op::<ApproachSpectrumRequest, ApproachSpectrumResponse>("approach_spectrum"),
     op::<UnmaskProfileRequest, UnmaskProfileResponse>("unmask_profile"),
     op::<RouteRequest, RouteResponse>("route"),

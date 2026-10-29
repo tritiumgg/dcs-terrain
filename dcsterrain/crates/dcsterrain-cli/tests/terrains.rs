@@ -184,7 +184,7 @@ fn describes_the_synthetic_terrain_with_no_install() {
 
 #[test]
 fn refuses_an_unknown_operation_and_a_flag_for_another_terrain() {
-    let out = run(&["query", "--terrain", "synth", "exposure", "{}"]);
+    let out = run(&["query", "--terrain", "synth", "nope", "{}"]);
     assert_eq!(out.status.code(), Some(1));
     assert_eq!(stdout_json(&out)["issues"][0]["code"], "unknown_operation");
 

@@ -1328,6 +1328,205 @@
       ],
       "type": "object"
     },
+    "ExposureBand": {
+      "properties": {
+        "alt_agl": {
+          "format": "double",
+          "type": "number"
+        },
+        "unseen_fraction": {
+          "description": "The share of the region's cells with ground that no site sees at\n`alt_agl`.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "alt_agl",
+        "unseen_fraction"
+      ],
+      "type": "object"
+    },
+    "ExposureRaster": {
+      "description": "Laid out as `radar_floor`'s raster, over the region's box. The floors\nare NaN off the ground or outside the region, and infinite where no\nsite's radius reaches.",
+      "properties": {
+        "cell": {
+          "format": "double",
+          "type": "number"
+        },
+        "floor_agl": {
+          "description": "The lowest height above the cell's ground at which any site sees a\ntarget: the least of the sites' floors.",
+          "type": "string"
+        },
+        "floor_msl": {
+          "description": "The same as an altitude above sea level.",
+          "type": "string"
+        },
+        "height": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "origin_x": {
+          "format": "double",
+          "type": "number"
+        },
+        "origin_z": {
+          "format": "double",
+          "type": "number"
+        },
+        "seen_count": {
+          "description": "How many sites see a target `target_alt_agl` above the cell's\nground, one byte per cell, base64.",
+          "type": "string"
+        },
+        "width": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "origin_x",
+        "origin_z",
+        "cell",
+        "width",
+        "height",
+        "floor_agl",
+        "floor_msl",
+        "seen_count"
+      ],
+      "type": "object"
+    },
+    "ExposureRequest": {
+      "properties": {
+        "bands_agl": {
+          "default": [
+            30.0,
+            100.0,
+            300.0,
+            1000.0
+          ],
+          "description": "The heights above ground the unseen areas are drawn at.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "geojson": {
+          "default": false,
+          "description": "Also return the unseen areas as GeoJSON.",
+          "type": "boolean"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Region"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The area answered over; the box about every site's radius when\nomitted."
+        },
+        "resolution": {
+          "description": "Raster cell size; the file's cell size when omitted, and may be\ncoarser.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "sites": {
+          "description": "The sites looking, each out to its own radius.",
+          "items": {
+            "$ref": "#/$defs/ExposureSite"
+          },
+          "type": "array"
+        },
+        "target_alt_agl": {
+          "description": "The height above ground at which each cell's sites are counted.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "sites",
+        "target_alt_agl"
+      ],
+      "type": "object"
+    },
+    "ExposureResponse": {
+      "properties": {
+        "bands": {
+          "description": "The share unseen at each band, lowest first.",
+          "items": {
+            "$ref": "#/$defs/ExposureBand"
+          },
+          "type": "array"
+        },
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "geojson": {
+          "description": "One `MultiPolygon` per band of the area unseen at it, lowest first,\nwith the sites, when `geojson` was asked for."
+        },
+        "raster": {
+          "$ref": "#/$defs/ExposureRaster"
+        },
+        "seen_fraction": {
+          "description": "The share of the region's cells with ground that some site sees at\n`target_alt_agl`.",
+          "format": "double",
+          "type": "number"
+        },
+        "target_alt_agl": {
+          "format": "double",
+          "type": "number"
+        },
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "terrain",
+        "dcs_build",
+        "terrain_fingerprint",
+        "cell_size",
+        "elapsed_ms",
+        "raster",
+        "target_alt_agl",
+        "seen_fraction",
+        "bands"
+      ],
+      "type": "object"
+    },
+    "ExposureSite": {
+      "properties": {
+        "observer": {
+          "$ref": "#/$defs/Observer"
+        },
+        "radius": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "observer",
+        "radius"
+      ],
+      "type": "object"
+    },
     "FindSitesRequest": {
       "properties": {
         "criteria": {
@@ -3593,6 +3792,21 @@
           ],
           "type": "object"
         },
+        "exposure": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/ExposureRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/ExposureResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
         "find_sites": {
           "properties": {
             "request": {
@@ -3799,6 +4013,7 @@
         "viewshed",
         "radar_floor",
         "coverage",
+        "exposure",
         "approach_spectrum",
         "unmask_profile",
         "route",

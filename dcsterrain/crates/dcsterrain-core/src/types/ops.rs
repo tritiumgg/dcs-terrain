@@ -581,6 +581,81 @@ pub struct RouteSpan {
     pub to: f64,
 }
 
+// exposure
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ExposureRequest {
+    /// The sites looking, each out to its own radius.
+    pub sites: Vec<ExposureSite>,
+    /// The area answered over; the box about every site's radius when
+    /// omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<Region>,
+    /// The height above ground at which each cell's sites are counted.
+    pub target_alt_agl: f64,
+    /// The heights above ground the unseen areas are drawn at.
+    #[serde(default = "default_floor_bands")]
+    pub bands_agl: Vec<f64>,
+    /// Raster cell size; the file's cell size when omitted, and may be
+    /// coarser.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<f64>,
+    /// Also return the unseen areas as GeoJSON.
+    #[serde(default)]
+    pub geojson: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ExposureSite {
+    pub observer: Observer,
+    pub radius: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ExposureResponse {
+    #[serde(flatten)]
+    pub provenance: Provenance,
+    pub raster: ExposureRaster,
+    pub target_alt_agl: f64,
+    /// The share of the region's cells with ground that some site sees at
+    /// `target_alt_agl`.
+    pub seen_fraction: f64,
+    /// The share unseen at each band, lowest first.
+    pub bands: Vec<ExposureBand>,
+    /// One `MultiPolygon` per band of the area unseen at it, lowest first,
+    /// with the sites, when `geojson` was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
+}
+
+/// Laid out as `radar_floor`'s raster, over the region's box. The floors
+/// are NaN off the ground or outside the region, and infinite where no
+/// site's radius reaches.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ExposureRaster {
+    pub origin_x: f64,
+    pub origin_z: f64,
+    pub cell: f64,
+    pub width: u32,
+    pub height: u32,
+    /// The lowest height above the cell's ground at which any site sees a
+    /// target: the least of the sites' floors.
+    pub floor_agl: String,
+    /// The same as an altitude above sea level.
+    pub floor_msl: String,
+    /// How many sites see a target `target_alt_agl` above the cell's
+    /// ground, one byte per cell, base64.
+    pub seen_count: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ExposureBand {
+    pub alt_agl: f64,
+    /// The share of the region's cells with ground that no site sees at
+    /// `alt_agl`.
+    pub unseen_fraction: f64,
+}
+
 // route
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
