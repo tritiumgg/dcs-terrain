@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::cache::{Entry, TerrainCache};
+use crate::cache::{Entry, Opened, TerrainCache};
 use crate::decode::airfield::{self, Airfields, RunwayRow, StandRow};
 use crate::decode::install::Map;
 use crate::decode::lua::tables::{
@@ -64,7 +64,7 @@ impl Entry for TablesJson {
     }
 
     fn version(&self) -> u32 {
-        1
+        2
     }
 
     fn roles(&self) -> &[&str] {
@@ -140,6 +140,9 @@ pub struct AirdromeRow {
 /// Everything `tables.json` holds.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Tables {
+    /// First, so it is the first field written, and opening a terrain reads
+    /// it without the rows.
+    pub crs: Crs,
     pub airdromes: Vec<AirdromeRow>,
     pub runways: Vec<RunwayRow>,
     pub stands: Vec<StandRow>,
@@ -147,13 +150,47 @@ pub struct Tables {
     pub radio: Vec<RadioRow>,
     pub towns: Vec<TownRow>,
     pub nodes: Vec<NodeRow>,
-    pub crs: Crs,
     /// The shared scripts the Lua files ran for their constants.
     pub lua_included: Vec<String>,
     /// Each name a Lua file read that nothing assigned, as `<path>: <name>`.
     pub lua_unresolved: Vec<String>,
     /// The hook's tables merged in, if any were.
     pub hook: Option<HookImport>,
+}
+
+/// How the payload opens: the projection is its first field.
+const CRS_FIELD: &[u8] = b"{\"crs\":";
+
+/// How much of the payload is read for the projection, which takes a few
+/// hundred bytes.
+const CRS_HEAD: u64 = 4096;
+
+/// The projection from the first bytes of a payload, `None` when they stop
+/// inside it. The value is parsed and what follows it is not looked at.
+fn crs_from(head: &[u8]) -> Option<Crs> {
+    let rest = head.strip_prefix(CRS_FIELD)?;
+    Crs::deserialize(&mut serde_json::Deserializer::from_slice(rest)).ok()
+}
+
+fn unreadable(cache: &TerrainCache, opened: &Opened, e: &dyn std::fmt::Display) -> Refusal {
+    Refusal(format!(
+        "{} cannot be read ({e}); `dcsterrain cache clear --terrain {}` rebuilds it",
+        opened.path.display(),
+        cache.map().theatre
+    ))
+}
+
+/// Refuses a projection fitted with a residual over `MAX_CRS_RESIDUAL_M`
+/// unless `allow` accepts it.
+pub fn check_crs(crs: &Crs, terrain: &str, allow: bool) -> Result<(), Refusal> {
+    match crs.max_m {
+        Some(m) if m > MAX_CRS_RESIDUAL_M && !allow => Err(Refusal(format!(
+            "{terrain}: the projection fitted to {} beacons misses one by {m:.2} m, over \
+             the {MAX_CRS_RESIDUAL_M} m allowed; --allow-crs-residual accepts it",
+            crs.n.unwrap_or(0)
+        ))),
+        _ => Ok(()),
+    }
 }
 
 /// The basename of a path relative to the install, without its extension.
@@ -165,16 +202,30 @@ fn stem(path: &str) -> &str {
 impl Tables {
     /// The tables from the cache, built there first if missing or stale.
     pub fn open(cache: &TerrainCache) -> Result<Tables, Refusal> {
-        let opened = cache.get(&TABLES_JSON)?;
-        let unreadable = |e: &dyn std::fmt::Display| {
-            Refusal(format!(
-                "{} cannot be read ({e}); `dcsterrain cache clear --terrain {}` rebuilds it",
-                opened.path.display(),
-                cache.map().theatre
-            ))
-        };
-        let bytes = opened.payload().map_err(|e| unreadable(&e))?;
-        serde_json::from_slice(&bytes).map_err(|e| unreadable(&e))
+        Tables::read(cache, &cache.get(&TABLES_JSON)?)
+    }
+
+    /// The tables from `opened`, the cache's `tables.json`.
+    pub fn read(cache: &TerrainCache, opened: &Opened) -> Result<Tables, Refusal> {
+        let bytes = opened
+            .payload()
+            .map_err(|e| unreadable(cache, opened, &e))?;
+        serde_json::from_slice(&bytes).map_err(|e| unreadable(cache, opened, &e))
+    }
+
+    /// The projection alone from `opened`, the cache's `tables.json`, read
+    /// from the payload's first bytes, since it is the first field: a call
+    /// that only checks the projection then never parses the megabytes of
+    /// rows after it.
+    pub fn read_crs(cache: &TerrainCache, opened: &Opened) -> Result<Crs, Refusal> {
+        let head = opened
+            .head(CRS_HEAD)
+            .map_err(|e| unreadable(cache, opened, &e))?;
+        match crs_from(&head) {
+            Some(crs) => Ok(crs),
+            // A projection longer than the head is read with the rest.
+            None => Ok(Tables::read(cache, opened)?.crs),
+        }
     }
 
     /// Decodes the airfield and Lua files among `files`, relative to `root`.
@@ -293,14 +344,7 @@ impl Tables {
     /// Refuses a projection fitted with a residual over
     /// `MAX_CRS_RESIDUAL_M` unless `allow` accepts it.
     pub fn check_crs(&self, terrain: &str, allow: bool) -> Result<(), Refusal> {
-        match self.crs.max_m {
-            Some(m) if m > MAX_CRS_RESIDUAL_M && !allow => Err(Refusal(format!(
-                "{terrain}: the projection fitted to {} beacons misses one by {m:.2} m, over \
-                 the {MAX_CRS_RESIDUAL_M} m allowed; --allow-crs-residual accepts it",
-                self.crs.n.unwrap_or(0)
-            ))),
-            _ => Ok(()),
-        }
+        check_crs(&self.crs, terrain, allow)
     }
 }
 
@@ -683,6 +727,24 @@ mod tests {
         assert_eq!((t.crs.source.as_str(), t.crs.lon_0), ("beacons", 33));
         assert_eq!(t.beacons.len(), 3);
         assert!(t.lua_unresolved.is_empty());
+    }
+
+    #[test]
+    fn the_projection_is_read_alone_as_the_whole_reads_it() {
+        let root = install();
+        let c = Scratch::new();
+        let terrain = terrain(&root.0, &c.0);
+        let opened = terrain.get(&TABLES_JSON).unwrap();
+        assert!(opened.payload().unwrap().starts_with(CRS_FIELD));
+        let whole = Tables::read(&terrain, &opened).unwrap();
+        assert_eq!(Tables::read_crs(&terrain, &opened).unwrap(), whole.crs);
+        // A head that stops inside the projection gives none, and the whole
+        // payload is read instead.
+        let bytes = opened.payload().unwrap();
+        let n = CRS_FIELD.len() + serde_json::to_vec(&whole.crs).unwrap().len();
+        assert!((n as u64) < CRS_HEAD, "{n}");
+        assert_eq!(crs_from(&bytes[..n]), Some(whole.crs.clone()));
+        assert_eq!(crs_from(&bytes[..n - 1]), None);
     }
 
     #[test]

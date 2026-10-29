@@ -64,8 +64,7 @@ impl Terrain {
         allow_crs_residual: bool,
     ) -> Result<Terrain, Refusal> {
         let i = Install::open(install, id, cache)?;
-        i.tables()?
-            .check_crs(&i.identity().terrain, allow_crs_residual)?;
+        i.check_crs(allow_crs_residual)?;
         Ok(Terrain::Install(Box::new(i)))
     }
 

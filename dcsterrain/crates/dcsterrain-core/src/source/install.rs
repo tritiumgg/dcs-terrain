@@ -18,7 +18,7 @@ use rayon::prelude::*;
 use super::{
     CELL_SIZE, EachTile, Ground, Identity, Layer, Object, Piece, Refusal, Source, TILE_SIZE,
 };
-use crate::cache::{Cache, Entry, Parts, TerrainCache};
+use crate::cache::{Cache, Entry, Opened, Parts, TerrainCache};
 use crate::classes::Class;
 use crate::decode::install::{self, Map};
 use crate::decode::scn5::Pool;
@@ -266,6 +266,9 @@ pub struct Install {
     scenery: OnceLock<Scenery>,
     /// Read the first time a table is asked for, likewise.
     tables: OnceLock<Tables>,
+    /// `tables.json` as checking the projection opened it, kept for the
+    /// first table asked for.
+    tables_entry: Mutex<Option<Opened>>,
     /// Read the first time a route or a road distance asks, likewise.
     roads: OnceLock<crate::roads::Graph>,
     betweenness: OnceLock<Vec<f32>>,
@@ -336,6 +339,7 @@ impl Install {
             cache: terrain,
             scenery: OnceLock::new(),
             tables: OnceLock::new(),
+            tables_entry: Mutex::new(None),
             roads: OnceLock::new(),
             betweenness: OnceLock::new(),
             horizon: OnceLock::new(),
@@ -369,8 +373,26 @@ impl Install {
         if let Some(t) = self.tables.get() {
             return Ok(t);
         }
-        let t = Tables::open(&self.cache)?;
+        let opened = self.tables_entry.lock().unwrap().take();
+        let t = match opened {
+            Some(o) => Tables::read(&self.cache, &o)?,
+            None => Tables::open(&self.cache)?,
+        };
         Ok(self.tables.get_or_init(|| t))
+    }
+
+    /// Refuses a projection fitted with a residual over
+    /// `MAX_CRS_RESIDUAL_M` unless `allow` accepts it. Reads the projection
+    /// alone, leaving the tables to the first request that asks for one.
+    pub fn check_crs(&self, allow: bool) -> Result<(), Refusal> {
+        let terrain = &self.identity.terrain;
+        if let Some(t) = self.tables.get() {
+            return t.check_crs(terrain, allow);
+        }
+        let opened = self.cache.get(&TABLES_JSON)?;
+        tables::check_crs(&Tables::read_crs(&self.cache, &opened)?, terrain, allow)?;
+        *self.tables_entry.lock().unwrap() = Some(opened);
+        Ok(())
     }
 
     /// The terrain's road and rail graph, read from the cache, built there

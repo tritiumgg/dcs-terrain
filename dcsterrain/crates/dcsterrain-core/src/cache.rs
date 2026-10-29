@@ -518,10 +518,17 @@ pub struct Opened {
 
 impl Opened {
     pub fn payload(&self) -> io::Result<Vec<u8>> {
+        self.head(self.len)
+    }
+
+    /// The payload's first `n` bytes, or all of it when it is shorter.
+    pub fn head(&self, n: u64) -> io::Result<Vec<u8>> {
         let mut f = &self.file;
         f.seek(SeekFrom::Start(self.offset))?;
-        let mut out = Vec::new();
-        f.take(self.len).read_to_end(&mut out)?;
+        let n = n.min(self.len);
+        // Sized once, so a payload of megabytes is not copied as it grows.
+        let mut out = Vec::with_capacity(usize::try_from(n).unwrap_or(0));
+        f.take(n).read_to_end(&mut out)?;
         Ok(out)
     }
 }
