@@ -4,7 +4,7 @@
 use super::{Terrain, refused};
 use crate::classes::Class;
 use crate::decode::rn4::{KIND_RAIL, KIND_ROAD};
-use crate::source::Source;
+use crate::source::{Source, Tables};
 use crate::types::{Issue, Nearby, NearestKind, NearestRequest, NearestResponse};
 
 /// The most results one request returns.
@@ -41,7 +41,7 @@ fn at(
 /// The `n` edges of the network nearest `from`, nearest first, ties in edge
 /// order, each at its point closest to `from`: along its polyline and the
 /// gaps from its ends to its nodes.
-fn edges(
+pub(super) fn edges(
     src: &dyn Source,
     kind: u8,
     from: (f64, f64),
@@ -114,6 +114,37 @@ fn scenery(
     }
 }
 
+/// The `n` airdromes of the tables nearest `from`, nearest first, ties in
+/// table order; an airdrome with no position is never one.
+pub(super) fn airdromes(tables: &Tables, from: (f64, f64), n: usize) -> Vec<Nearby> {
+    let found = tables
+        .airdromes
+        .iter()
+        .filter_map(|a| {
+            let id = a.id.map_or_else(|| a.name_id.clone(), |id| id.to_string());
+            let name = a.display_name.clone().or_else(|| Some(a.name_id.clone()));
+            Some(at("airdrome", id, name, (a.x?, a.z?), from))
+        })
+        .collect();
+    nearest_of(found, n)
+}
+
+/// The `n` towns of the tables nearest `from`, nearest first, ties in table
+/// order, each by its display name where it has one. Every town is measured:
+/// the tables hold a few thousand at most, microseconds' work.
+pub(super) fn towns(tables: &Tables, from: (f64, f64), n: usize) -> Vec<Nearby> {
+    let found = tables
+        .towns
+        .iter()
+        .enumerate()
+        .map(|(k, t)| {
+            let name = t.display_name.clone().unwrap_or_else(|| t.name.clone());
+            at("town", k.to_string(), Some(name), (t.x, t.z), from)
+        })
+        .collect();
+    nearest_of(found, n)
+}
+
 pub fn nearest(terrain: &Terrain, q: NearestRequest) -> Result<NearestResponse, Vec<Issue>> {
     let src = terrain.source();
     if !(1..=N_MAX).contains(&q.n) {
@@ -143,30 +174,8 @@ pub fn nearest(terrain: &Terrain, q: NearestRequest) -> Result<NearestResponse, 
     let results = match q.kind {
         NearestKind::Road => edges(src, KIND_ROAD, from, n)?,
         NearestKind::Rail => edges(src, KIND_RAIL, from, n)?,
-        NearestKind::Airdrome => {
-            let found = tables()?
-                .airdromes
-                .iter()
-                .filter_map(|a| {
-                    let id = a.id.map_or_else(|| a.name_id.clone(), |id| id.to_string());
-                    let name = a.display_name.clone().or_else(|| Some(a.name_id.clone()));
-                    Some(at("airdrome", id, name, (a.x?, a.z?), from))
-                })
-                .collect();
-            nearest_of(found, n)
-        }
-        NearestKind::Town => {
-            let found = tables()?
-                .towns
-                .iter()
-                .enumerate()
-                .map(|(k, t)| {
-                    let name = t.display_name.clone().unwrap_or_else(|| t.name.clone());
-                    at("town", k.to_string(), Some(name), (t.x, t.z), from)
-                })
-                .collect();
-            nearest_of(found, n)
-        }
+        NearestKind::Airdrome => airdromes(tables()?, from, n),
+        NearestKind::Town => towns(tables()?, from, n),
         NearestKind::Node => {
             let mut found = Vec::new();
             for (k, node) in tables()?.nodes.iter().enumerate() {

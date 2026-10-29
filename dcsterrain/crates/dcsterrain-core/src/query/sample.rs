@@ -178,7 +178,7 @@ fn raster_values(
 /// Each point's value of a derived layer at the cell holding it, computed
 /// over the box around all the cells, or around each tile's when that box
 /// is too large, so scattered points do not derive a whole terrain.
-fn derived_values(
+pub(super) fn derived_values(
     src: &dyn Source,
     d: Derived,
     pts: &[[f64; 2]],
