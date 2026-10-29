@@ -17,7 +17,8 @@ your user cache directory.
 > **Not usable yet.** The project was redesigned to read the install directly,
 > and the query engine is being built. `list-terrains`, `check`, `cache`, `schema`
 > and the `query` operations `describe`, `sample`, `geo`, `nearest`,
-> `scenery_in`, `visible` and `viewshed` work today; every other operation is
+> `scenery_in`, `visible`, `viewshed`, `radar_floor`, `coverage`,
+> `approach_spectrum` and `unmask_profile` work today; every other operation is
 > planned, kept here so the shape is visible. Progress is in
 > [docs/STATE.md](docs/STATE.md).
 
