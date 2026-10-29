@@ -601,9 +601,10 @@ fn crossed(src: &(impl Source + ?Sized), kind: u8, win: Cells) -> Result<Vec<boo
     let g = src.grid();
     let [x0, z0, x1, z1] = win.bounds(&g);
     let mut seeds = vec![false; win.len()];
-    for e in src.road_graph()?.edges.iter().filter(|e| e.kind == kind) {
-        let meets = e
-            .points
+    let graph = src.road_graph()?;
+    for e in graph.edges.iter().filter(|e| e.kind == kind) {
+        let line = graph.line(e);
+        let meets = line
             .iter()
             .fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| {
                 let (x, z) = (f64::from(p[0]), f64::from(p[1]));
@@ -625,11 +626,11 @@ fn crossed(src: &(impl Source + ?Sized), kind: u8, win: Cells) -> Result<Vec<boo
                 seeds[r as usize * win.cols as usize + k as usize] = true;
             }
         };
-        if let [p] = e.points.as_slice() {
+        if let [p] = line {
             let [r, k] = at(p);
             mark(r.floor() as i64, k.floor() as i64);
         }
-        for s in e.points.windows(2) {
+        for s in line.windows(2) {
             walk(at(&s[0]), at(&s[1]), &mut mark);
         }
     }
@@ -1131,11 +1132,7 @@ mod tests {
             .iter()
             .map(|&(n, e)| synth.form().abs(n, e))
             .collect();
-        let roads = Graph {
-            classes: Vec::new(),
-            nodes: Vec::new(),
-            edges: Vec::new(),
-        };
+        let roads = Graph::default();
         Placed {
             synth,
             buildings,
@@ -1388,6 +1385,8 @@ mod tests {
         let t = *p.synth.form();
         let (a, b) = (t.abs(20_000.3, 30_000.7), t.abs(21_234.5, 31_777.1));
         let points = vec![[a.0 as f32, a.1 as f32], [b.0 as f32, b.1 as f32]];
+        p.roads.nodes = vec![[a.0, a.1], [b.0, b.1]];
+        p.roads.points = points.clone();
         p.roads.edges.push(Edge {
             kind: KIND_ROAD,
             class: 0,
@@ -1395,7 +1394,7 @@ mod tests {
             b: 1,
             length: 0.0,
             crosses_water: false,
-            points: points.clone(),
+            points: 0..2,
         });
         let g = p.grid();
         let units = |q: [f32; 2]| {

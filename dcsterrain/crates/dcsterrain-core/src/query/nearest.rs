@@ -58,9 +58,9 @@ fn edges(src: &dyn Source, kind: u8, from: (f64, f64)) -> Result<Vec<Nearby>, Ve
     let label = if kind == KIND_ROAD { "road" } else { "rail" };
     let mut out = Vec::new();
     for (i, e) in g.edges.iter().enumerate().filter(|(_, e)| e.kind == kind) {
-        let mut path = Vec::with_capacity(e.points.len() + 2);
+        let mut path = Vec::with_capacity(g.line(e).len() + 2);
         path.push(g.nodes[e.a as usize]);
-        path.extend(e.points.iter().map(|q| [f64::from(q[0]), f64::from(q[1])]));
+        path.extend(g.line(e).iter().map(|q| [f64::from(q[0]), f64::from(q[1])]));
         path.push(g.nodes[e.b as usize]);
         let mut best = path[0];
         let mut best_d = f64::INFINITY;

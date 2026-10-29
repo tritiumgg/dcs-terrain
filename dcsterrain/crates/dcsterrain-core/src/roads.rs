@@ -11,6 +11,7 @@
 
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
+use std::ops::Range;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -51,16 +52,23 @@ pub struct Edge {
     /// the straight line between two nodes is never longer than a path.
     pub length: f64,
     pub crosses_water: bool,
-    /// `[x, z]`, from `a`'s end to `b`'s; through each contracted node.
-    pub points: Vec<[f32; 2]>,
+    /// Where its polyline lies in the graph's `points`: `[x, z]`, from `a`'s
+    /// end to `b`'s, through each contracted node.
+    pub points: Range<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+/// The graph. Its edges are not changed once a search has run over it, since
+/// the index the search builds would no longer match them.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Graph {
     pub classes: Vec<String>,
     /// `[x, z]` of each node.
     pub nodes: Vec<[f64; 2]>,
     pub edges: Vec<Edge>,
+    /// Every edge's polyline, one after another in edge order: one buffer
+    /// rather than one per edge, so a graph of half a million edges decodes
+    /// and frees in a few allocations.
+    pub points: Vec<[f32; 2]>,
 }
 
 /// Tells which points lie on water.
@@ -172,7 +180,7 @@ pub fn build(
         }
         renumber[n]
     };
-    let mut built: Vec<Building> = edges.into_iter().flatten().collect();
+    let built: Vec<Building> = edges.into_iter().flatten().collect();
     let ends: Vec<(u32, u32)> = built.iter().map(|e| (number(e.a), number(e.b))).collect();
 
     let (samples, owner) = water_samples(&built);
@@ -188,29 +196,33 @@ pub fn build(
     for (k, w) in wet.into_iter().enumerate() {
         crosses[owner[k] as usize] |= w;
     }
-    let edges = built
-        .iter_mut()
-        .zip(ends)
-        .zip(crosses)
-        .map(|((e, (a, b)), crosses_water)| Edge {
+    let mut points = Vec::new();
+    let mut edges = Vec::with_capacity(built.len());
+    for ((e, (a, b)), crosses_water) in built.iter().zip(ends).zip(crosses) {
+        let start = run_start(points.len())?;
+        points.extend(e.points.iter().map(|p| [p[0] as f32, p[1] as f32]));
+        edges.push(Edge {
             kind: e.kind,
             class: e.class,
             a,
             b,
             length: e.length,
             crosses_water,
-            points: e
-                .points
-                .iter()
-                .map(|p| [p[0] as f32, p[1] as f32])
-                .collect(),
-        })
-        .collect();
+            points: start..run_start(points.len())?,
+        });
+    }
     Ok(Graph {
         classes,
         nodes: kept_nodes,
         edges,
+        points,
     })
+}
+
+/// Where a polyline starts in the graph's points, refused past what an
+/// edge can name.
+fn run_start(n: usize) -> Result<u32, Refusal> {
+    u32::try_from(n).map_err(|_| Refusal("the road graph has too many points".into()))
 }
 
 /// Joins the two edges at each node where exactly two of one kind and class
@@ -321,14 +333,8 @@ impl Reader<'_> {
         self.at += n;
         Ok(s)
     }
-    fn u8(&mut self, what: &str) -> Result<u8, Refusal> {
-        Ok(self.take(1, what)?[0])
-    }
     fn u32(&mut self, what: &str) -> Result<u32, Refusal> {
         Ok(u32::from_le_bytes(self.take(4, what)?.try_into().unwrap()))
-    }
-    fn f32(&mut self, what: &str) -> Result<f32, Refusal> {
-        Ok(f32::from_le_bytes(self.take(4, what)?.try_into().unwrap()))
     }
     fn f64(&mut self, what: &str) -> Result<f64, Refusal> {
         Ok(f64::from_le_bytes(self.take(8, what)?.try_into().unwrap()))
@@ -358,8 +364,9 @@ impl Graph {
             b.extend_from_slice(&e.a.to_le_bytes());
             b.extend_from_slice(&e.b.to_le_bytes());
             b.extend_from_slice(&e.length.to_le_bytes());
-            b.extend_from_slice(&(e.points.len() as u32).to_le_bytes());
-            for p in &e.points {
+            let line = self.line(e);
+            b.extend_from_slice(&(line.len() as u32).to_le_bytes());
+            for p in line {
                 b.extend_from_slice(&p[0].to_le_bytes());
                 b.extend_from_slice(&p[1].to_le_bytes());
             }
@@ -391,22 +398,29 @@ impl Graph {
             return Err(short("edges"));
         }
         let mut edges = Vec::with_capacity(n);
+        // At most every byte left is a point's, and capacity reserved past
+        // the points there are is never touched.
+        let mut points: Vec<[f32; 2]> = Vec::with_capacity((b.len() - r.at) / 8);
+        let f32_at = |c: &[u8]| f32::from_le_bytes(c.try_into().unwrap());
         for _ in 0..n {
-            let (kind, class, wet, _) = (
-                r.u8("edges")?,
-                r.u8("edges")?,
-                r.u8("edges")?,
-                r.u8("edges")?,
-            );
-            let (a, b_, length) = (r.u32("edges")?, r.u32("edges")?, r.f64("edges")?);
-            let m = r.u32("edges")? as usize;
+            let h = r.take(24, "edges")?;
+            let (kind, class, wet) = (h[0], h[1], h[2]);
+            let u32_at = |k: usize| u32::from_le_bytes(h[k..k + 4].try_into().unwrap());
+            let (a, b_) = (u32_at(4), u32_at(8));
+            let length = f64::from_le_bytes(h[12..20].try_into().unwrap());
+            let m = u32_at(20) as usize;
             if m > (b.len() - r.at) / 8 {
                 return Err(short("edges"));
             }
-            let mut points = Vec::with_capacity(m);
-            for _ in 0..m {
-                points.push([r.f32("edges")?, r.f32("edges")?]);
-            }
+            let run = r.take(m * 8, "edges")?;
+            let start = run_start(points.len())?;
+            points.extend(
+                run.as_chunks::<8>()
+                    .0
+                    .iter()
+                    .map(|c| [f32_at(&c[..4]), f32_at(&c[4..])]),
+            );
+            let points = start..run_start(points.len())?;
             if a as usize >= nodes.len() || b_ as usize >= nodes.len() {
                 return Err(Refusal("a road graph edge names no node".into()));
             }
@@ -433,11 +447,17 @@ impl Graph {
             classes,
             nodes,
             edges,
+            points,
         })
     }
 
     pub fn class(&self, e: &Edge) -> &str {
         &self.classes[usize::from(e.class)]
+    }
+
+    /// `e`'s polyline, `[x, z]`, from `a`'s end to `b`'s.
+    pub fn line(&self, e: &Edge) -> &[[f32; 2]] {
+        &self.points[e.points.start as usize..e.points.end as usize]
     }
 }
 
@@ -736,7 +756,7 @@ mod tests {
         assert_eq!(ends, [(0, 1, 0), (1, 2, 0), (2, 3, 1)]);
         assert_eq!(g.edges[0].length, 200.0);
         assert_eq!(
-            g.edges[0].points,
+            g.line(&g.edges[0]),
             [
                 [0.0, 0.0],
                 [100.0, 0.0],
