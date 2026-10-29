@@ -23,10 +23,12 @@ mod geo;
 mod geojson;
 mod mgrs;
 mod nearest;
+mod outline;
 mod region;
 mod sample;
 mod scenery;
 mod sightline;
+mod viewshed;
 mod visible;
 
 pub use describe::describe;
@@ -36,6 +38,7 @@ pub use nearest::nearest;
 pub use region::{Area, resolve};
 pub use sample::sample;
 pub use scenery::scenery_in;
+pub use viewshed::viewshed;
 pub use visible::visible;
 
 /// Every answer is on the 50 m grid.
@@ -96,6 +99,7 @@ const HANDLERS: &[(&str, Handler)] = &[
     ("nearest", |t, r| run(t, r, nearest)),
     ("sample", |t, r| run(t, r, sample)),
     ("visible", |t, r| run(t, r, visible)),
+    ("viewshed", |t, r| run(t, r, viewshed)),
 ];
 
 /// Reads the request as `Q`, answers it with `f`, and writes the answer.

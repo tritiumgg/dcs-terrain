@@ -2861,6 +2861,11 @@
           "default": false,
           "type": "boolean"
         },
+        "geojson": {
+          "default": false,
+          "description": "Also return the visible area as GeoJSON.",
+          "type": "boolean"
+        },
         "observer": {
           "$ref": "#/$defs/Observer"
         },
@@ -2889,7 +2894,7 @@
       "type": "object"
     },
     "ViewshedResponse": {
-      "description": "The mask is `width` × `height` bits, row-major from the origin corner,\nbase64-encoded.",
+      "description": "The mask is `height` rows running north, each `width` cells running\neast, from the corner at `origin_x`, `origin_z`; cell `(row, col)` is bit\n`row × width + col`, most significant first within each byte, base64\nencoded. A set bit is a cell whose center lies within `radius` and at\nwhich a target `target_alt_agl` above the ground is seen.",
       "properties": {
         "bits": {
           "type": "string"
@@ -2910,6 +2915,9 @@
           "minimum": 0,
           "type": "integer"
         },
+        "geojson": {
+          "description": "The visible area as one `MultiPolygon`, with the observer, when\n`geojson` was asked for."
+        },
         "height": {
           "format": "uint32",
           "minimum": 0,
@@ -2924,7 +2932,7 @@
           "type": "number"
         },
         "rings": {
-          "description": "The mask's outlines, when `as_polygons` was asked for.",
+          "description": "The outlines of the set cells, in DCS x and z, when `as_polygons` was\nasked for: each polygon counterclockwise on a map, then the holes in\nit clockwise.",
           "items": {
             "$ref": "#/$defs/Polygon"
           },
@@ -2940,6 +2948,7 @@
           "type": "string"
         },
         "visible_fraction": {
+          "description": "The share of the cells within `radius` that have ground which are\nseen.",
           "format": "double",
           "type": "number"
         },

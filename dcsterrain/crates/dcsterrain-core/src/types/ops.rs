@@ -279,10 +279,16 @@ pub struct ViewshedRequest {
     pub resolution: Option<f64>,
     #[serde(default)]
     pub as_polygons: bool,
+    /// Also return the visible area as GeoJSON.
+    #[serde(default)]
+    pub geojson: bool,
 }
 
-/// The mask is `width` × `height` bits, row-major from the origin corner,
-/// base64-encoded.
+/// The mask is `height` rows running north, each `width` cells running
+/// east, from the corner at `origin_x`, `origin_z`; cell `(row, col)` is bit
+/// `row × width + col`, most significant first within each byte, base64
+/// encoded. A set bit is a cell whose center lies within `radius` and at
+/// which a target `target_alt_agl` above the ground is seen.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ViewshedResponse {
     #[serde(flatten)]
@@ -293,10 +299,18 @@ pub struct ViewshedResponse {
     pub width: u32,
     pub height: u32,
     pub bits: String,
+    /// The share of the cells within `radius` that have ground which are
+    /// seen.
     pub visible_fraction: f64,
-    /// The mask's outlines, when `as_polygons` was asked for.
+    /// The outlines of the set cells, in DCS x and z, when `as_polygons` was
+    /// asked for: each polygon counterclockwise on a map, then the holes in
+    /// it clockwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rings: Option<Vec<Polygon>>,
+    /// The visible area as one `MultiPolygon`, with the observer, when
+    /// `geojson` was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
 }
 
 // coverage

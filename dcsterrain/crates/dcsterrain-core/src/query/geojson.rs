@@ -8,6 +8,10 @@ use super::{Terrain, refused};
 use crate::crs::Tmerc;
 use crate::types::Issue;
 
+/// A ring of DCS `[x, z]` vertices, closed by its first point, which is not
+/// repeated at its end.
+pub type Ring = Vec<[f64; 2]>;
+
 /// The features of one answer, in the order they are added.
 pub struct Features {
     tm: Tmerc,
@@ -33,6 +37,17 @@ impl Features {
         [round(lon), round(lat)]
     }
 
+    /// A ring as positions, closed, counterclockwise when `outer` and
+    /// clockwise when not, as RFC 7946 asks of an exterior ring and a hole.
+    fn ring(&self, ring: &[[f64; 2]], outer: bool) -> Vec<[f64; 2]> {
+        let mut p: Vec<_> = ring.iter().map(|&v| self.position(v)).collect();
+        if (signed_area(&p) > 0.0) != outer {
+            p.reverse();
+        }
+        p.push(p[0]);
+        p
+    }
+
     fn push(&mut self, geometry: Value, properties: Map<String, Value>) {
         self.features.push(json!({
             "type": "Feature",
@@ -51,9 +66,40 @@ impl Features {
         self.push(json!({"type": "LineString", "coordinates": c}), properties);
     }
 
+    /// One `MultiPolygon`, each polygon its exterior ring then its holes,
+    /// whichever way each ring runs.
+    pub fn polygons(&mut self, polygons: &[Vec<Ring>], properties: Map<String, Value>) {
+        let c: Vec<Vec<_>> = polygons
+            .iter()
+            .map(|rings| {
+                rings
+                    .iter()
+                    .enumerate()
+                    .map(|(i, r)| self.ring(r, i == 0))
+                    .collect()
+            })
+            .collect();
+        self.push(
+            json!({"type": "MultiPolygon", "coordinates": c}),
+            properties,
+        );
+    }
+
     pub fn finish(self) -> Value {
         json!({"type": "FeatureCollection", "features": self.features})
     }
+}
+
+/// Twice the signed area of an open ring in its own plane, positive
+/// counterclockwise with the first axis to the right of the second.
+pub fn signed_area(ring: &[[f64; 2]]) -> f64 {
+    let n = ring.len();
+    (0..n)
+        .map(|i| {
+            let ([a0, a1], [b0, b1]) = (ring[i], ring[(i + 1) % n]);
+            a0 * b1 - b0 * a1
+        })
+        .sum()
 }
 
 /// Properties from pairs, in order.
@@ -65,18 +111,6 @@ pub fn props<const N: usize>(pairs: [(&str, Value); N]) -> Map<String, Value> {
 pub(crate) mod tests {
     use super::super::tests::synth;
     use super::*;
-
-    /// Twice the signed area of an open ring in its own plane, positive
-    /// counterclockwise with the first axis to the right of the second.
-    fn signed_area(ring: &[[f64; 2]]) -> f64 {
-        let n = ring.len();
-        (0..n)
-            .map(|i| {
-                let ([a0, a1], [b0, b1]) = (ring[i], ring[(i + 1) % n]);
-                a0 * b1 - b0 * a1
-            })
-            .sum()
-    }
 
     /// Every structural rule of RFC 7946 an answer here can break: the
     /// collection, each feature's members, positions as longitude and
@@ -130,6 +164,16 @@ pub(crate) mod tests {
         let mut f = Features::new(&t).unwrap();
         f.point([1000.0, 2000.0], props([("name", json!("a"))]));
         f.line(&[[0.0, 0.0], [500.0, 500.0]], Map::new());
+        // A square with a square hole, both given clockwise in (lon, lat).
+        let outer = vec![[0.0, 0.0], [0.0, 1000.0], [1000.0, 1000.0], [1000.0, 0.0]];
+        let hole = vec![
+            [250.0, 250.0],
+            [250.0, 750.0],
+            [750.0, 750.0],
+            [750.0, 250.0],
+        ];
+        f.polygons(&[vec![outer.clone(), hole.clone()]], Map::new());
+        f.polygons(&[vec![outer.into_iter().rev().collect(), hole]], Map::new());
         let v = f.finish();
         assert_valid(&v);
         assert_eq!(v["features"][0]["properties"]["name"], "a");
