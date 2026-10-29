@@ -157,6 +157,55 @@ pub fn floor(pieces: &[Piece], eye: f64) -> f64 {
     floor
 }
 
+/// The steepest slope from an eye at altitude `eye` to the ground of a
+/// segment `length` long, over the mesh triangles `pieces` under it, out to
+/// each multiple of `step` along it: entry `k` is the steepest out to
+/// `(k + 1) × step`, each judged as `floor` judges, so a target beyond the
+/// segment is seen over it when the line to it is at least as steep.
+/// Infinity throughout when the ground at the eye rises over it.
+pub fn horizon(pieces: &[Piece], eye: f64, length: f64, step: f64) -> Vec<f64> {
+    let n = (length / step).floor() as usize;
+    let mut best = vec![f64::NEG_INFINITY; n];
+    // Each crossing and each step's end, with the slope to the ground
+    // there: over one triangle's plane the slope is monotonic, so the
+    // steepest out to a step's end is at one of these.
+    let mut marks: Vec<(f64, f64)> = Vec::new();
+    let mut under = false;
+    spans(pieces, |s, e, ground| {
+        if s <= 0.0 && ground(0.0) - eye > BLOCK_TOLERANCE_M {
+            under = true;
+        }
+        let slope = |t: f64| (ground(t) - eye - BLOCK_TOLERANCE_M / 2.0) / (t * length);
+        let first = (s * length / step).floor() as usize + 1;
+        let last = ((e * length / step).ceil() as usize).min(n + 1);
+        for t in [s, e] {
+            if t > 0.0 {
+                marks.push((t * length, slope(t)));
+            }
+        }
+        for k in first..last {
+            let t = k as f64 * step / length;
+            if t > s && t < e {
+                marks.push((t * length, slope(t)));
+            }
+        }
+    });
+    if under {
+        return vec![f64::INFINITY; n];
+    }
+    marks.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+    let (mut at, mut steepest) = (0, f64::NEG_INFINITY);
+    for (k, b) in best.iter_mut().enumerate() {
+        let end = (k + 1) as f64 * step;
+        while at < marks.len() && marks[at].0 <= end * (1.0 + 1e-12) {
+            steepest = steepest.max(marks[at].1);
+            at += 1;
+        }
+        *b = steepest;
+    }
+    best
+}
+
 /// Calls `f` with each stretch `[s, e]` between consecutive crossings of
 /// the pieces, and the ground over it, the plane of the piece of highest
 /// rank that covers it; stretches no piece covers are skipped.
@@ -239,6 +288,27 @@ mod tests {
         let rising = [piece([0.0, 1.0], [0.0, 10.0], 1)];
         assert!((floor(&rising, 0.0) - (10.0 - 5e-5)).abs() < 1e-9);
         assert_eq!(floor(&[], 5.0), f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn the_horizon_out_to_each_step_is_the_steepest_slope_short_of_it() {
+        let h = horizon(&ridge(), 101.0, 1000.0, 100.0);
+        assert_eq!(h.len(), 10);
+        let tol = BLOCK_TOLERANCE_M / 2.0;
+        // Flat ground at 0 m, then up the ridge to its crest at 500 m, and
+        // the crest's slope beyond it.
+        assert!((h[0] - (-101.0 - tol) / 100.0).abs() < 1e-12, "{}", h[0]);
+        assert!((h[3] - (-101.0 - tol) / 400.0).abs() < 1e-12, "{}", h[3]);
+        assert!((h[4] - (-1.0 - tol) / 500.0).abs() < 1e-12, "{}", h[4]);
+        assert!(h.windows(2).all(|w| w[0] <= w[1]));
+        assert_eq!(h[9], h[4]);
+        // Out to the far end, it is the floor there.
+        assert!((101.0 + h[9] * 1000.0 - floor(&ridge(), 101.0)).abs() < 1e-9);
+        assert!(
+            horizon(&ridge(), -1.0, 1000.0, 100.0)
+                .iter()
+                .all(|v| v.is_infinite())
+        );
     }
 
     #[test]
