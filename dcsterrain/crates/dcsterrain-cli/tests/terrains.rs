@@ -669,3 +669,150 @@ fn index_refuses_a_projection_fitted_over_two_meters_off_unless_allowed() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+#[test]
+fn check_reports_a_terrain_every_decoder_reads_and_passes() {
+    let t = install(false);
+    let c = scratch();
+    let check = |json: bool| {
+        let mut args = vec!["check", "--install", t.0.to_str().unwrap()];
+        args.extend(["--terrain", "GermanyCW", "--cache", c.0.to_str().unwrap()]);
+        if json {
+            args.push("--json");
+        }
+        run(&args)
+    };
+
+    let out = check(false);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{text}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        text.starts_with("GermanyCW in GermanyColdWar on DCS 0.0.0.1"),
+        "{text}"
+    );
+    let scene = "scene Mods/terrains/GermanyColdWar/Scenes/GermanyColdWar.scn5 \
+                 landscape5::Scene5File version 9";
+    assert!(
+        text.lines()
+            .any(|l| l.split_whitespace().collect::<Vec<_>>().join(" ") == scene),
+        "{text}"
+    );
+    assert!(text.contains("  mesh.toc          missing"), "{text}");
+    assert!(text.contains("scenery: 2 models, 1 objects"), "{text}");
+    assert!(text.contains("overrides naming no model: none"), "{text}");
+    assert!(text.ends_with("\nno problems\n"), "{text}");
+
+    // Asked again, the entries reading the tables and the scenery built are
+    // current, and the road graph was never built.
+    let v = stdout_json(&check(true));
+    let states: Vec<(&str, &str)> = v["cache"]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| (e["name"].as_str().unwrap(), e["state"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        states,
+        [
+            ("mesh.toc", "current"),
+            ("scene.nodes", "current"),
+            ("tables.json", "current"),
+            ("roads.graph", "missing"),
+            ("roads.betweenness", "missing"),
+        ]
+    );
+    assert_eq!(v["files"].as_array().unwrap().len(), 3);
+    assert_eq!(v["catalog"]["most_placed"][0]["model"], "house");
+    assert_eq!(v["tables"]["lua_unresolved"], json!([]));
+    assert_eq!(v["validation"], Value::Null);
+    assert_eq!(v["problems"], json!([]));
+}
+
+#[test]
+fn check_fails_naming_each_file_no_decoder_reads_and_reports_the_rest() {
+    let t = install(true);
+    // The road file's class renamed, beside the scene file's version.
+    put(
+        &t.0,
+        "Mods/terrains/GermanyColdWar/roads/GermanyColdWar.rn4",
+        &header("landscape4::lRoadNetwork6", 5),
+    );
+    let c = scratch();
+    let check = |json: bool| {
+        let mut args = vec!["check", "--install", t.0.to_str().unwrap()];
+        args.extend(["--terrain", "GermanyCW", "--cache", c.0.to_str().unwrap()]);
+        if json {
+            args.push("--json");
+        }
+        run(&args)
+    };
+
+    let out = check(false);
+    assert_eq!(out.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&out.stdout);
+    let scene = "Mods/terrains/GermanyColdWar/Scenes/GermanyColdWar.scn5: \
+                 landscape5::Scene5File version 10 has no decoder; this build reads version 8, 9";
+    let roads = "Mods/terrains/GermanyColdWar/roads/GermanyColdWar.rn4: \
+                 no decoder reads landscape4::lRoadNetwork6 (version 5)";
+    assert!(
+        text.contains(&format!("problems\n  {roads}\n  {scene}\n")),
+        "{text}"
+    );
+    assert!(text.contains("version 10, NO DECODER READS IT"), "{text}");
+    // Each refuses only what reads its role: the tables are still read.
+    assert!(text.contains("\ntables\n"), "{text}");
+    assert!(!text.contains("scenery:"), "{text}");
+
+    let v = stdout_json(&check(true));
+    assert_eq!(v["problems"], json!([roads, scene]));
+    assert_eq!(v["files"][2]["why"], scene);
+    assert_eq!(v["catalog"], Value::Null);
+    assert!(v["tables"].is_object());
+
+    // A surface file no decoder reads refuses the terrain, and is said once.
+    put(
+        &t.0,
+        "Mods/terrains/GermanyColdWar/Surface/GermanyColdWar.surface5",
+        &header("landscape5::Surface5File", 6),
+    );
+    let out = check(true);
+    assert_eq!(out.status.code(), Some(1));
+    let v = stdout_json(&out);
+    let problems = v["problems"].as_array().unwrap();
+    assert_eq!(problems.len(), 3, "{problems:?}");
+    assert!(
+        problems[2]
+            .as_str()
+            .unwrap()
+            .contains("Surface5File version 6"),
+        "{problems:?}"
+    );
+    assert_eq!((&v["cache"], &v["tables"]), (&Value::Null, &Value::Null));
+}
+
+#[test]
+fn check_refuses_an_id_the_install_lacks_naming_those_it_holds() {
+    let t = install(false);
+    let c = scratch();
+    let out = run(&[
+        "check",
+        "--install",
+        t.0.to_str().unwrap(),
+        "--terrain",
+        "Nowhere",
+        "--cache",
+        c.0.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains(
+            "no terrain Nowhere in this install; the ids it holds are Caucasus, GermanyCW"
+        ),
+        "{err}"
+    );
+}

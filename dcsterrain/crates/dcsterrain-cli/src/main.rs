@@ -10,6 +10,8 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use dcsterrain_core::cache::{self, Cache, Entry, Stored};
+use dcsterrain_core::check;
+use dcsterrain_core::classes;
 use dcsterrain_core::decode::install;
 use dcsterrain_core::query::{self, Terrain};
 use dcsterrain_core::source::install::{Tables, TablesJson};
@@ -92,6 +94,26 @@ enum Command {
         /// by more than 2 m.
         #[arg(long)]
         allow_crs_residual: bool,
+        #[command(flatten)]
+        cache: CacheDir,
+    },
+    /// Report a terrain's files and which decoder reads each, what the cache
+    /// holds, its tables, its scenery classes and its last validation
+    /// figures. Fails naming each file no decoder reads.
+    Check {
+        /// The DCS install root. On Windows it defaults to the one the
+        /// registry names.
+        #[arg(long)]
+        install: Option<PathBuf>,
+        /// The terrain's id, as `list-terrains` shows it.
+        #[arg(long)]
+        terrain: String,
+        /// How many of the models placed most to list.
+        #[arg(long, default_value_t = 25)]
+        top: usize,
+        /// Print one JSON document rather than a report.
+        #[arg(long)]
+        json: bool,
         #[command(flatten)]
         cache: CacheDir,
     },
@@ -201,6 +223,13 @@ fn main() -> ExitCode {
             allow_crs_residual,
             cache,
         } => index(install, &terrain, hook, allow_crs_residual, cache),
+        Command::Check {
+            install,
+            terrain,
+            top,
+            json,
+            cache,
+        } => check(install, &terrain, top, json, cache),
         Command::Cache { action } => match action {
             CacheAction::List {
                 install,
@@ -548,6 +577,247 @@ fn index(
             .check_crs(&map.theatre, allow_crs_residual)
             .map_err(|e| e.0)
     })())
+}
+
+/// How many of the tallest models `check` lists.
+const TALLEST: usize = 10;
+
+fn check(
+    install: Option<PathBuf>,
+    id: &str,
+    top: usize,
+    as_json: bool,
+    cache: CacheDir,
+) -> ExitCode {
+    let report = cache.open().and_then(|cache| {
+        let root = install_root(install)?;
+        check::check(&root, id, &cache, top, TALLEST).map_err(|e| e.0)
+    });
+    let report = match report {
+        Ok(r) => r,
+        Err(e) if as_json => return refuse(vec![Issue::new("terrain_refused", &e, "")]),
+        Err(e) => {
+            tracing::error!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if as_json {
+        println!(
+            "{}",
+            serde_json::to_string(&report).expect("a report serializes")
+        );
+    } else {
+        print!("{}", check_text(&report));
+    }
+    // The report names each problem; a JSON reader gets them on stderr too.
+    if as_json {
+        for p in &report.problems {
+            tracing::error!("{p}");
+        }
+    }
+    if report.problems.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+/// A family as its JSON spells it.
+fn spelled(f: classes::Family) -> String {
+    match serde_json::to_value(f) {
+        Ok(Value::String(s)) => s,
+        Ok(v) => v.to_string(),
+        Err(_) => "?".into(),
+    }
+}
+
+fn decided_by(s: &classes::Source) -> String {
+    match s {
+        classes::Source::Override { file, reason } => format!("{file} override: {reason}"),
+        classes::Source::Rule(r) => r.clone(),
+    }
+}
+
+/// One catalog row: count, model, class, family, box and what decided it.
+fn model_line(r: &classes::Row) -> String {
+    let a = &r.assignment;
+    let family = a.family.map_or_else(|| "-".into(), spelled);
+    let mut by = format!("class: {}", decided_by(&a.class_by));
+    if a.family.is_some() {
+        by.push_str(&format!("; family: {}", decided_by(&a.family_by)));
+    }
+    format!(
+        "  {:>9}  {:<34} {:<10} {:<11} {:>6.1} x {:>6.1} x {:>6.1} m  {by}\n",
+        r.count,
+        r.model,
+        a.class.name(),
+        family,
+        r.obb_w,
+        r.obb_d,
+        r.height,
+    )
+}
+
+fn list_or_none(items: &[String]) -> String {
+    if items.is_empty() {
+        "none".into()
+    } else {
+        items.join(", ")
+    }
+}
+
+fn check_text(r: &check::Report) -> String {
+    let build = match (&r.dcs_build, &r.dcs_build_timestamp) {
+        (Some(v), Some(t)) => format!("DCS {v} ({t})"),
+        _ => "an unknown DCS build".into(),
+    };
+    let mut out = format!(
+        "{} in {} on {build} at {}\n\nfiles\n",
+        r.terrain, r.folder, r.install
+    );
+    // An airfield role holds a file per airfield, 450 on GermanyCW: those a
+    // decoder reads are one line per role, class and version, and each file
+    // none reads has its own.
+    // (role, path, what it is, files grouped into the row)
+    let mut rows: Vec<(&str, String, String, usize)> = Vec::new();
+    for f in &r.files {
+        let what = match (&f.class, f.version) {
+            (Some(c), Some(v)) => format!("{c} version {v}"),
+            _ => "read as text".into(),
+        };
+        if f.why.is_none() && f.role.starts_with("airfield_") {
+            let dir = f.path.rsplit_once('/').map_or("", |(d, _)| d);
+            let same = |row: &&mut (&str, String, String, usize)| {
+                row.3 > 0 && row.0 == f.role && row.1 == dir && row.2 == what
+            };
+            match rows.iter_mut().find(same) {
+                Some(row) => row.3 += 1,
+                None => rows.push((&f.role, dir.to_string(), what, 1)),
+            }
+            continue;
+        }
+        let what = match &f.why {
+            None => what,
+            Some(_) => format!("{what}, NO DECODER READS IT"),
+        };
+        rows.push((&f.role, f.path.clone(), what, 0));
+    }
+    let rows: Vec<(&str, String, String)> = rows
+        .into_iter()
+        .map(|(role, path, what, n)| match n {
+            0 => (role, path, what),
+            1 => (role, format!("{path}/ (1 file)"), what),
+            n => (role, format!("{path}/ ({n} files)"), what),
+        })
+        .collect();
+    let wrole = rows.iter().map(|r| r.0.len()).max().unwrap_or(0);
+    let wpath = rows.iter().map(|r| r.1.len()).max().unwrap_or(0);
+    for (role, path, what) in &rows {
+        out.push_str(&format!("  {role:wrole$}  {path:wpath$}  {what}\n"));
+    }
+
+    if let Some(c) = &r.cache {
+        out.push_str(&format!("\ncache at {}\n", c.dir));
+        for e in &c.entries {
+            let size = e
+                .size
+                .map(|s| format!(", {}", bytes(s)))
+                .unwrap_or_default();
+            let why = e.why.as_ref().map(|w| format!(": {w}")).unwrap_or_default();
+            out.push_str(&format!("  {:<17} {}{size}{why}\n", e.name, e.state));
+        }
+        out.push_str(&format!(
+            "  {:<17} {} tiles, {}\n",
+            "horizon",
+            c.horizon_tiles,
+            bytes(c.horizon_size)
+        ));
+    }
+
+    if let Some(t) = &r.tables {
+        out.push_str(&format!(
+            "\ntables\n  {} airdromes, {} runways, {} stands, {} beacons, {} radio, {} towns, \
+             {} nodes\n",
+            t.airdromes, t.runways, t.stands, t.beacons, t.radio, t.towns, t.nodes
+        ));
+        let fit = match (t.crs.n, t.crs.rms_m, t.crs.max_m) {
+            (Some(n), Some(rms), Some(max)) => {
+                format!("fitted to {n} beacons, rms {rms:.2} m, worst {max:.2} m")
+            }
+            _ => format!("from the table ({})", t.crs.source),
+        };
+        out.push_str(&format!("  projection {}, {fit}\n", t.crs.proj4));
+        out.push_str(&format!(
+            "  Lua included: {}\n",
+            list_or_none(&t.lua_included)
+        ));
+        out.push_str(&format!(
+            "  Lua unresolved: {}\n",
+            list_or_none(&t.lua_unresolved)
+        ));
+        let hook = match &t.hook {
+            None => "none imported".into(),
+            Some(h) => match &h.dropped {
+                Some(why) => format!("from {} dropped: {why}", h.dir),
+                None => format!(
+                    "from {}: {} airdromes, {} it names that no taxiway file does",
+                    h.dir,
+                    h.airdromes,
+                    h.unmatched.len()
+                ),
+            },
+        };
+        out.push_str(&format!("  the hook's tables: {hook}\n"));
+    }
+
+    if let Some(c) = &r.catalog {
+        out.push_str(&format!(
+            "\nscenery: {} models, {} objects\n",
+            c.models, c.objects
+        ));
+        let by_class: Vec<String> = c
+            .counts_by_class
+            .iter()
+            .map(|(class, n)| format!("{} {n}", class.name()))
+            .collect();
+        out.push_str(&format!("  objects by class: {}\n", by_class.join(", ")));
+        let unmatched: Vec<String> = c
+            .unmatched
+            .iter()
+            .map(|(file, key)| format!("{key} ({file})"))
+            .collect();
+        out.push_str(&format!(
+            "  overrides naming no model: {}\n",
+            list_or_none(&unmatched)
+        ));
+        out.push_str(&format!("  the {} placed most:\n", c.most_placed.len()));
+        for row in &c.most_placed {
+            out.push_str(&model_line(row));
+        }
+        out.push_str(&format!("  the {} tallest:\n", c.tallest.len()));
+        for row in &c.tallest {
+            out.push_str(&model_line(row));
+        }
+    }
+
+    let validation = match &r.validation {
+        None => "none".into(),
+        Some(v) => match v.get("dcs_build").and_then(Value::as_str) {
+            Some(b) => format!("measured on {b}"),
+            None => "present, its build unrecorded".into(),
+        },
+    };
+    out.push_str(&format!("\nvalidation figures: {validation}\n"));
+
+    if r.problems.is_empty() {
+        out.push_str("\nno problems\n");
+    } else {
+        out.push_str("\nproblems\n");
+        for p in &r.problems {
+            out.push_str(&format!("  {p}\n"));
+        }
+    }
+    out
 }
 
 fn cache_list(install: Option<PathBuf>, as_json: bool, cache: CacheDir) -> ExitCode {
