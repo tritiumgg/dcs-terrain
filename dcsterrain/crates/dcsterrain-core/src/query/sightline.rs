@@ -3,10 +3,10 @@
 //! `walk` is the only place a sightline is stepped, so an exact walk over the
 //! mesh's own triangles can replace it without touching what calls it.
 
-use std::collections::HashMap;
+use std::collections::{BinaryHeap, HashMap};
 
 use crate::grid::{Grid, Window};
-use crate::source::{Layer, Refusal, Source};
+use crate::source::{Layer, Piece, Refusal, Source};
 
 /// The ground's height at any point, read a tile at a time as a walk
 /// reaches it, so a long sightline reads only the tiles it crosses.
@@ -91,4 +91,129 @@ pub fn walk(h: &mut Heights, a: [f64; 3], b: [f64; 3], step: f64) -> Result<Sigh
         }
     }
     Ok(sight)
+}
+
+/// How far below the line the ground must reach before it blocks: the
+/// ends' heights and the pieces' are interpolated in different frames, and
+/// a line ending on the ground would otherwise be blocked by rounding.
+const BLOCK_TOLERANCE_M: f64 = 1e-4;
+
+/// The sightline from `a` to `b`, each x, z and an absolute altitude, over
+/// the mesh triangles `pieces` that `Source::along` found under it: exact,
+/// since between two edge crossings the ground is one triangle's plane and
+/// the gap to the line is linear. Where pieces overlap the one of higher
+/// rank is the ground; stretches no piece covers do not block. The
+/// clearance is the least gap anywhere between the ends, which tends to
+/// each end's height above its ground. The world is flat.
+pub fn exact(pieces: &[Piece], a: [f64; 3], b: [f64; 3]) -> Sight {
+    let mut sight = Sight {
+        clearance: None,
+        blocking: None,
+    };
+    let mut ts: Vec<f64> = pieces.iter().flat_map(|p| p.t).collect();
+    ts.sort_unstable_by(f64::total_cmp);
+    ts.dedup();
+    let mut order: Vec<usize> = (0..pieces.len()).collect();
+    order.sort_unstable_by(|&i, &j| pieces[i].t[0].total_cmp(&pieces[j].t[0]));
+    let mut next = order.into_iter().peekable();
+    // The pieces begun so far, highest rank on top; one that has ended is
+    // dropped when it reaches the top, since the sweep never goes back.
+    let mut live: BinaryHeap<(u64, usize)> = BinaryHeap::new();
+    let line = |t: f64| a[2] + t * (b[2] - a[2]);
+    for w in ts.windows(2) {
+        let (s, e) = (w[0], w[1]);
+        let m = 0.5 * (s + e);
+        while let Some(i) = next.next_if(|&i| pieces[i].t[0] <= m) {
+            live.push((pieces[i].rank, i));
+        }
+        while live.peek().is_some_and(|&(_, i)| pieces[i].t[1] < m) {
+            live.pop();
+        }
+        let Some(&(_, i)) = live.peek() else {
+            continue;
+        };
+        let p = &pieces[i];
+        let ground = |t: f64| p.h[0] + (t - p.t[0]) / (p.t[1] - p.t[0]) * (p.h[1] - p.h[0]);
+        let (gs, ge) = (line(s) - ground(s), line(e) - ground(e));
+        let least = gs.min(ge);
+        sight.clearance = Some(sight.clearance.map_or(least, |c: f64| c.min(least)));
+        if sight.blocking.is_none() && least < -BLOCK_TOLERANCE_M {
+            // Where the gap first falls past the tolerance.
+            let t = if gs < -BLOCK_TOLERANCE_M {
+                s
+            } else {
+                s + (e - s) * (gs + BLOCK_TOLERANCE_M) / (gs - ge)
+            };
+            let (x, z) = (a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]));
+            sight.blocking = Some([x, z, ground(t)]);
+        }
+    }
+    sight
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn piece(t: [f64; 2], h: [f64; 2], rank: u64) -> Piece {
+        Piece { t, h, rank }
+    }
+
+    /// A ridge 100 m high halfway along a kilometer, on flat ground at 0 m.
+    fn ridge() -> Vec<Piece> {
+        vec![
+            piece([0.0, 0.4], [0.0, 0.0], 1),
+            piece([0.4, 0.5], [0.0, 100.0], 2),
+            piece([0.5, 0.6], [100.0, 0.0], 3),
+            piece([0.6, 1.0], [0.0, 0.0], 4),
+        ]
+    }
+
+    #[test]
+    fn a_line_over_the_ridge_clears_it_by_the_gap_at_its_crest() {
+        let s = exact(&ridge(), [0.0, 0.0, 101.0], [1000.0, 0.0, 101.0]);
+        assert_eq!(s.blocking, None);
+        assert!((s.clearance.unwrap() - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_line_into_the_ridge_is_blocked_where_it_meets_the_slope() {
+        let s = exact(&ridge(), [0.0, 0.0, 50.0], [1000.0, 0.0, 50.0]);
+        let [x, z, g] = s.blocking.unwrap();
+        // The slope reaches 50 m a quarter of the way up from 400 m to 500 m.
+        assert!(
+            (x - 450.0).abs() < 0.01 && z == 0.0 && (g - 50.0).abs() < 0.01,
+            "{x} {g}"
+        );
+        assert!((s.clearance.unwrap() + 50.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_higher_rank_is_the_ground_where_pieces_overlap() {
+        // A road strip laid at 0 m through a mountain: the strip wins.
+        let mut p = vec![piece([0.0, 1.0], [500.0, 500.0], 1)];
+        p.push(piece([0.0, 1.0], [0.0, 0.0], 1 << 63));
+        let s = exact(&p, [0.0, 0.0, 2.0], [1000.0, 0.0, 2.0]);
+        assert_eq!(s.blocking, None);
+        assert!((s.clearance.unwrap() - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_stretch_no_triangle_covers_does_not_block() {
+        let p = [
+            piece([0.0, 0.3], [0.0, 0.0], 1),
+            piece([0.7, 1.0], [0.0, 0.0], 2),
+        ];
+        let s = exact(&p, [0.0, 0.0, 1.0], [1000.0, 0.0, 1.0]);
+        assert_eq!((s.blocking, s.clearance), (None, Some(1.0)));
+        assert_eq!(exact(&[], [0.0; 3], [1.0, 0.0, 0.0]).clearance, None);
+    }
+
+    #[test]
+    fn a_line_ending_on_the_ground_is_not_blocked_by_rounding() {
+        // Down a slope to a point on it, a hair below the plane.
+        let p = [piece([0.0, 1.0], [100.0, 0.0], 1)];
+        let s = exact(&p, [0.0, 0.0, 110.0], [1000.0, 0.0, -1e-6]);
+        assert_eq!(s.blocking, None);
+    }
 }

@@ -27,7 +27,7 @@ mod outline;
 mod region;
 mod sample;
 mod scenery;
-mod sightline;
+pub mod sightline;
 mod viewshed;
 mod visible;
 
