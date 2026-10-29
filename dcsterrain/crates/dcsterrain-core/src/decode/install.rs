@@ -482,6 +482,8 @@ pub struct Surveyed {
     pub class: Option<String>,
     pub version: Option<u32>,
     pub readable: bool,
+    /// Why no decoder reads it, naming the file, its class and its version.
+    pub why: Option<String>,
 }
 
 /// A terrain as a listing shows it: every file a decoder would read, each
@@ -522,6 +524,7 @@ pub fn survey(install: &Path, listed: &Listed) -> Survey {
                 class: None,
                 version: None,
                 readable: decoder.is_none(),
+                why: None,
             };
             if let Some(want) = *decoder {
                 let read = header(install, &f.path).and_then(|h| {
@@ -530,6 +533,7 @@ pub fn survey(install: &Path, listed: &Listed) -> Survey {
                     expect(&f.path, role, &h, want)
                 });
                 s.readable = read.is_ok();
+                s.why = read.as_ref().err().map(|e| e.0.clone());
                 if *role == "surface" {
                     surface = read.err();
                 }
@@ -1126,6 +1130,12 @@ mod tests {
                 ("scene", Some(10), false)
             ]
         );
+        let why = germany.files[2].why.as_deref().unwrap();
+        assert!(
+            why.contains("GermanyCW.scn5: landscape5::Scene5File version 10 has no decoder"),
+            "{why}"
+        );
+        assert!(germany.files[..2].iter().all(|f| f.why.is_none()));
         // Opening reads the surface alone, so the scene file refuses only
         // what reads scenery.
         assert_eq!(germany.refusal, None);

@@ -393,7 +393,7 @@ fn listing_json(l: &Listing) -> Value {
                 .map(|f| {
                     json!({
                         "role": f.role, "path": f.path, "class": f.class,
-                        "version": f.version, "readable": f.readable,
+                        "version": f.version, "readable": f.readable, "why": f.why,
                     })
                 })
                 .collect();
