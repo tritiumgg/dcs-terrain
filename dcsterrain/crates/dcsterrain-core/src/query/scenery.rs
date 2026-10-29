@@ -95,6 +95,11 @@ pub(super) fn footprint(o: &Object) -> Rect {
     Rect::new(c, o.rotation, x1 - x0, z1 - z0)
 }
 
+/// How far past a footprint an object may stand and still reach into it:
+/// the largest model footprint likely. Objects are found by position, so a
+/// search for those meeting a footprint is widened this far.
+pub(super) const OBJECT_REACH_M: f64 = 500.0;
+
 /// Whether an object found in the search box is in the answer.
 type Test = Box<dyn Fn(&Object) -> bool>;
 
@@ -176,9 +181,13 @@ pub fn scenery_in(terrain: &Terrain, q: SceneryInRequest) -> Result<SceneryInRes
             // outside is found by widening the search by the largest model
             // footprint likely, then tested exactly.
             let [x0, z0, x1, z1] = rect.bbox();
-            const REACH_M: f64 = 500.0;
             (
-                [x0 - REACH_M, z0 - REACH_M, x1 + REACH_M, z1 + REACH_M],
+                [
+                    x0 - OBJECT_REACH_M,
+                    z0 - OBJECT_REACH_M,
+                    x1 + OBJECT_REACH_M,
+                    z1 + OBJECT_REACH_M,
+                ],
                 Box::new(move |o| rect.meets(&footprint(o))),
             )
         }

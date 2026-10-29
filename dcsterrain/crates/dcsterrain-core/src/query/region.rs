@@ -114,25 +114,7 @@ pub fn resolve(src: &dyn Source, r: &Region, path: &str) -> Result<Area, Vec<Iss
                     "a band needs 0 <= min_dist <= max_dist, both finite",
                 ));
             }
-            let tables = src.tables().map_err(refused)?;
-            let a = tables
-                .airdromes
-                .iter()
-                .find(|a| a.id == Some(airdrome_id))
-                .ok_or_else(|| {
-                    vec![Issue::new(
-                        "unknown_airdrome",
-                        &format!("no airdrome has the id {airdrome_id}"),
-                        &format!("{path}.airdrome_id"),
-                    )]
-                })?;
-            let (Some(x), Some(z)) = (a.x, a.z) else {
-                return Err(vec![Issue::new(
-                    "unknown_airdrome",
-                    &format!("airdrome {airdrome_id} has no runway to place it"),
-                    &format!("{path}.airdrome_id"),
-                )]);
-            };
+            let [x, z] = airdromes(src, Some(airdrome_id), &format!("{path}.airdrome_id"))?[0];
             Ok(Area {
                 bbox: [x - max_dist, z - max_dist, x + max_dist, z + max_dist],
                 shape: Shape::Ring {
@@ -143,6 +125,39 @@ pub fn resolve(src: &dyn Source, r: &Region, path: &str) -> Result<Area, Vec<Iss
                 },
             })
         }
+    }
+}
+
+/// The reference point of the airdrome `id`, or of every airdrome placed
+/// when none is named; the issue, at `path`, when there is none to give.
+pub(super) fn airdromes(
+    src: &dyn Source,
+    id: Option<i64>,
+    path: &str,
+) -> Result<Vec<[f64; 2]>, Vec<Issue>> {
+    let tables = src.tables().map_err(refused)?;
+    let none = |message: String| vec![Issue::new("unknown_airdrome", &message, path)];
+    let Some(id) = id else {
+        let at: Vec<[f64; 2]> = tables
+            .airdromes
+            .iter()
+            .filter_map(|a| Some([a.x?, a.z?]))
+            .collect();
+        if at.is_empty() {
+            return Err(none(
+                "no airdrome on this terrain has a runway to place it".to_string(),
+            ));
+        }
+        return Ok(at);
+    };
+    let a = tables
+        .airdromes
+        .iter()
+        .find(|a| a.id == Some(id))
+        .ok_or_else(|| none(format!("no airdrome has the id {id}")))?;
+    match (a.x, a.z) {
+        (Some(x), Some(z)) => Ok(vec![[x, z]]),
+        _ => Err(none(format!("airdrome {id} has no runway to place it"))),
     }
 }
 

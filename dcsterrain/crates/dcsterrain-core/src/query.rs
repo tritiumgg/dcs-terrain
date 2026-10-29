@@ -37,7 +37,7 @@ pub use geo::geo;
 pub use mgrs::mgrs;
 pub use nearest::nearest;
 pub use region::{Area, resolve};
-pub use sample::sample;
+pub use sample::{lattice, sample};
 pub use scenery::scenery_in;
 pub use viewshed::viewshed;
 pub use visible::visible;

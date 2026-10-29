@@ -101,7 +101,7 @@ fn too_many(n: usize, max: u32) -> Vec<Issue> {
 
 /// The lattice points inside the region, `step` apart from its box's
 /// minimum corner, or too many rows.
-fn lattice(area: &super::Area, step: f64, max_rows: u32) -> Result<Vec<[f64; 2]>, Vec<Issue>> {
+pub fn lattice(area: &super::Area, step: f64, max_rows: u32) -> Result<Vec<[f64; 2]>, Vec<Issue>> {
     let [x0, z0, x1, z1] = area.bbox;
     let (fx, fz) = (
         ((x1 - x0) / step).floor() + 1.0,

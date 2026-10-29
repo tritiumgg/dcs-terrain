@@ -9,7 +9,7 @@ use crate::types::{Issue, Point3, VisibleRequest, VisibleResponse};
 
 /// A point's absolute altitude over the ground under it, or the issue with
 /// it. `path` names it in the request.
-fn altitude(p: &Point3, ground: Option<f64>, path: &str) -> Result<(f64, f64), Issue> {
+pub(super) fn altitude(p: &Point3, ground: Option<f64>, path: &str) -> Result<(f64, f64), Issue> {
     if let Some(i) = p.check(path) {
         return Err(i);
     }
