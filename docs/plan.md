@@ -103,12 +103,9 @@ a valid RFC 7946 `FeatureCollection` whose features match its JSON response.
 
 How to review one terrain:
 
-1. Print the catalog with `dcsterrain check --install --terrain <id>` once
-   N10 lands. Until then, set `DCSTERRAIN_INSTALL` to the registry value
-   `HKCU\Software\Eagle Dynamics\DCS World\Path` and run
-   `mise exec -- cargo test --manifest-path dcsterrain/Cargo.toml --release -p dcsterrain-core --test classes -- --nocapture --test-threads 1 every_terrain`.
-   It prints the 25 models placed most and the 10 tallest, each with its
-   count, class, family, box and the source that decided it.
+1. Print the catalog with `dcsterrain check --terrain <id> --top 100`. It
+   lists the 100 models placed most and the 10 tallest structures, each with
+   its count, class, family, box and the source that decided it.
 2. Read the models placed most first: the top 50 to 100 hold most objects.
    Look for four faults:
    - a large box that is not a building — a bridge, pier, pitch or parked

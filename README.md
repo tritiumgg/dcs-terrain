@@ -15,8 +15,8 @@ place and never writes to it. It keeps a small, rebuildable cache beside it in
 your user cache directory.
 
 > **Not usable yet.** The project was redesigned to read the install directly,
-> and the query engine is being built. `list-terrains`, `cache`, `schema` and
-> `query ... describe` work today; every other operation is planned, kept
+> and the query engine is being built. `list-terrains`, `check`, `cache`, `schema`
+> and `query ... describe` work today; every other operation is planned, kept
 > here so the shape is visible. Progress is in [docs/STATE.md](docs/STATE.md).
 
 ## Requirements
@@ -62,6 +62,13 @@ builds its cache, in about a second; later ones read it:
 dcsterrain query --terrain Caucasus describe
 ```
 
+Check what the tool reads of a terrain, file by file, with its cache, tables
+and scenery classes; it fails naming each file it cannot read:
+
+```bash
+dcsterrain check --terrain Caucasus
+```
+
 `dcsterrain cache list` shows the cache (`--cache <dir>` names another) and
 the DCS build each terrain's entries were made on; after a DCS update, an
 entry whose terrain files did not change is kept. `cache clear` deletes all
@@ -76,9 +83,8 @@ Ask a siting question the same way, `find_sites` with its JSON (planned, not
 usable yet). The first question on a terrain will build its cache in seconds,
 later ones start warm, and many can go in one call as JSON lines on stdin
 (planned).
-`dcsterrain check --terrain Caucasus` will report what the tool can read and
-the cache's state (planned). `dcsterrain schema` prints every operation's
-request and response as JSON Schema.
+`dcsterrain schema` prints every operation's request and response as JSON
+Schema.
 
 ## Documentation
 

@@ -521,9 +521,19 @@ edges, and its road and rail graph has 357 k nodes.
   finds the id `--terrain` takes.
 - `dcsterrain schema` prints every operation's request and response schema.
 - `dcsterrain index`, `dcsterrain cache`, as §4.
-- `dcsterrain check [--install <dir>] --terrain <Terrain>` reports each terrain file's
-  class, version and decoder, the cache state, the class catalog and the last
-  validation figures, and exits 1 naming any file no decoder reads.
+- `dcsterrain check [--install <dir>] --terrain <Terrain> [--top <n>] [--json]`
+  reports each terrain file's class and version and why no decoder reads it
+  when none does, each cache entry's state as found and the horizon tiles
+  computed so far, the tables with the shared scripts the Lua files ran and
+  the names they left unresolved, the hook import and the projection's fit,
+  the class catalog's totals, its `n` models placed most (25 by default) and
+  its 10 tallest structures, and the last validation figures. It reads the
+  tables and the scenery as a query would, building `tables.json` and the
+  scene index if the cache lacks them, and never the road graph. A file no
+  decoder reads refuses only what reads its role, so the rest is still
+  reported. It exits 1 naming each problem: a file no decoder reads, a part
+  that cannot be read, a fit over 2 m, a dropped hook import. 0.4 s on
+  Caucasus with an empty cache on 2.9.30.28738.
 
 A skill in this repository teaches an assistant with a shell which operation
 answers which question, by example, with `dcsterrain schema` as the reference
