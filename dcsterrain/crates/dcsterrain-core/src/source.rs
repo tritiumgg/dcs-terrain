@@ -52,6 +52,12 @@ pub trait Source {
     /// nothing covers the point.
     fn point(&self, x: f64, z: f64) -> Result<Option<Ground>, Refusal>;
 
+    /// The horizon tiles `tiles`, in order, as `horizon::compute` makes
+    /// them. An install keeps each in its cache once computed.
+    fn horizon(&self, tiles: &[(u32, u32)]) -> Result<Vec<Vec<u8>>, Refusal> {
+        crate::horizon::compute(self, tiles)
+    }
+
     /// The road and rail graph.
     fn road_graph(&self) -> Result<&Graph, Refusal> {
         Err(lacks(self, "roads"))
