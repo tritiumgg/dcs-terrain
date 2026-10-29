@@ -106,6 +106,11 @@
           "format": "double",
           "type": "number"
         },
+        "geojson": {
+          "default": false,
+          "description": "Also return each blind arc as a wedge in GeoJSON.",
+          "type": "boolean"
+        },
         "min_masked_range": {
           "default": 8000.0,
           "format": "double",
@@ -115,6 +120,14 @@
           "description": "The engagement or search radius each radial is marched in from.",
           "format": "double",
           "type": "number"
+        },
+        "resolution": {
+          "description": "Raster cell size; the file's cell size when omitted, and may be\ncoarser.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "sector": {
           "anyOf": [
@@ -158,6 +171,9 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "geojson": {
+          "description": "A wedge per blind arc out to `radius`, with the site, when `geojson`\nwas asked for."
         },
         "terrain": {
           "type": "string"
@@ -494,10 +510,23 @@
         "envelope": {
           "$ref": "#/$defs/Envelope"
         },
+        "geojson": {
+          "default": false,
+          "description": "Also return the dead zones as GeoJSON.",
+          "type": "boolean"
+        },
         "min_masked_range": {
           "default": 8000.0,
           "format": "double",
           "type": "number"
+        },
+        "resolution": {
+          "description": "Mask cell size; the file's cell size when omitted, and may be coarser.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "site": {
           "$ref": "#/$defs/Observer"
@@ -529,6 +558,9 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "geojson": {
+          "description": "Each band's dead zones as one `MultiPolygon`, the site, and the\nasset's outline when given, when `geojson` was asked for."
         },
         "terrain": {
           "type": "string"
@@ -1381,6 +1413,69 @@
       ],
       "type": "object"
     },
+    "FloorBand": {
+      "properties": {
+        "alt_agl": {
+          "format": "double",
+          "type": "number"
+        },
+        "seen_fraction": {
+          "description": "The share of the cells within `radius` with ground whose floor is at\nor below `alt_agl`.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "alt_agl",
+        "seen_fraction"
+      ],
+      "type": "object"
+    },
+    "FloorRaster": {
+      "description": "Laid out as `viewshed`'s mask: `height` rows running north, each\n`width` cells running east, from the corner at `origin_x`, `origin_z`.\nEach layer is one little-endian `f32` per cell, base64 encoded, NaN\nwhere a cell's center lies beyond `radius` or has no ground.",
+      "properties": {
+        "cell": {
+          "format": "double",
+          "type": "number"
+        },
+        "floor_agl": {
+          "description": "The lowest height above the cell's ground at which the site sees a\ntarget.",
+          "type": "string"
+        },
+        "floor_msl": {
+          "description": "The same as an altitude above sea level.",
+          "type": "string"
+        },
+        "height": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "origin_x": {
+          "format": "double",
+          "type": "number"
+        },
+        "origin_z": {
+          "format": "double",
+          "type": "number"
+        },
+        "width": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "origin_x",
+        "origin_z",
+        "cell",
+        "width",
+        "height",
+        "floor_agl",
+        "floor_msl"
+      ],
+      "type": "object"
+    },
     "Footprint": {
       "description": "A rectangle to be placed, tried at each of its orientations.",
       "properties": {
@@ -1813,6 +1908,45 @@
       ],
       "type": "object"
     },
+    "PointFloor": {
+      "description": "A point's floor; the floors are null beyond `radius` or off the mesh.",
+      "properties": {
+        "floor_agl": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "floor_msl": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "ground": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "z"
+      ],
+      "type": "object"
+    },
     "Polygon": {
       "description": "A simple polygon as `[x, z]` vertices, closed by its first point.",
       "properties": {
@@ -1831,6 +1965,119 @@
       },
       "required": [
         "points"
+      ],
+      "type": "object"
+    },
+    "RadarFloorRequest": {
+      "properties": {
+        "bands_agl": {
+          "default": [
+            30.0,
+            100.0,
+            300.0,
+            1000.0
+          ],
+          "description": "The heights above ground the bands are drawn at.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "geojson": {
+          "default": false,
+          "description": "Also return the bands, or the points, as GeoJSON.",
+          "type": "boolean"
+        },
+        "points": {
+          "description": "Answer at these points instead of over a raster.",
+          "items": {
+            "$ref": "#/$defs/Point"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "radius": {
+          "format": "double",
+          "type": "number"
+        },
+        "resolution": {
+          "description": "Raster cell size; the file's cell size when omitted, and may be\ncoarser.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "site": {
+          "$ref": "#/$defs/Observer"
+        }
+      },
+      "required": [
+        "site",
+        "radius"
+      ],
+      "type": "object"
+    },
+    "RadarFloorResponse": {
+      "description": "The floor is a raster without `points`, and one row per point with them.",
+      "properties": {
+        "bands": {
+          "description": "The share of the raster's cells seen at each band, lowest first.",
+          "items": {
+            "$ref": "#/$defs/FloorBand"
+          },
+          "type": "array"
+        },
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "geojson": {
+          "description": "One `MultiPolygon` per band, lowest first, or a `Point` per point,\nwith the site, when `geojson` was asked for."
+        },
+        "points": {
+          "items": {
+            "$ref": "#/$defs/PointFloor"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "raster": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FloorRaster"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "terrain",
+        "dcs_build",
+        "terrain_fingerprint",
+        "cell_size",
+        "elapsed_ms"
       ],
       "type": "object"
     },
@@ -2849,6 +3096,11 @@
     },
     "UnmaskProfileRequest": {
       "properties": {
+        "geojson": {
+          "default": false,
+          "description": "Also return the route, its masked stretches and the first-seen\npoint as GeoJSON.",
+          "type": "boolean"
+        },
         "route": {
           "items": {
             "$ref": "#/$defs/Point3"
@@ -2893,7 +3145,7 @@
               "type": "null"
             }
           ],
-          "description": "Where along the route the site first sees it; null when never."
+          "description": "Where along the route the site first sees it, with an absolute\n`alt`; null when never."
         },
         "first_seen_dist_along_route": {
           "format": "double",
@@ -2909,6 +3161,7 @@
             "null"
           ]
         },
+        "geojson": true,
         "masked_segments": {
           "items": {
             "$ref": "#/$defs/RouteSpan"
@@ -3285,6 +3538,21 @@
           ],
           "type": "object"
         },
+        "radar_floor": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/RadarFloorRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/RadarFloorResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
         "route": {
           "properties": {
             "request": {
@@ -3429,6 +3697,7 @@
         "find_sites",
         "visible",
         "viewshed",
+        "radar_floor",
         "coverage",
         "approach_spectrum",
         "unmask_profile",

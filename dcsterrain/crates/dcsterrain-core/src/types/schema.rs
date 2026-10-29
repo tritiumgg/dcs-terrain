@@ -35,6 +35,7 @@ pub const OPERATIONS: &[Operation] = &[
     op::<FindSitesRequest, FindSitesResponse>("find_sites"),
     op::<VisibleRequest, VisibleResponse>("visible"),
     op::<ViewshedRequest, ViewshedResponse>("viewshed"),
+    op::<RadarFloorRequest, RadarFloorResponse>("radar_floor"),
     op::<CoverageRequest, CoverageResponse>("coverage"),
     op::<ApproachSpectrumRequest, ApproachSpectrumResponse>("approach_spectrum"),
     op::<UnmaskProfileRequest, UnmaskProfileResponse>("unmask_profile"),

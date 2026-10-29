@@ -313,6 +313,85 @@ pub struct ViewshedResponse {
     pub geojson: Option<serde_json::Value>,
 }
 
+// radar_floor
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RadarFloorRequest {
+    pub site: Observer,
+    pub radius: f64,
+    /// Raster cell size; the file's cell size when omitted, and may be
+    /// coarser.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<f64>,
+    /// Answer at these points instead of over a raster.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub points: Option<Vec<Point>>,
+    /// The heights above ground the bands are drawn at.
+    #[serde(default = "default_floor_bands")]
+    pub bands_agl: Vec<f64>,
+    /// Also return the bands, or the points, as GeoJSON.
+    #[serde(default)]
+    pub geojson: bool,
+}
+
+fn default_floor_bands() -> Vec<f64> {
+    vec![30.0, 100.0, 300.0, 1000.0]
+}
+
+/// The floor is a raster without `points`, and one row per point with them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RadarFloorResponse {
+    #[serde(flatten)]
+    pub provenance: Provenance,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raster: Option<FloorRaster>,
+    /// The share of the raster's cells seen at each band, lowest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bands: Vec<FloorBand>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub points: Option<Vec<PointFloor>>,
+    /// One `MultiPolygon` per band, lowest first, or a `Point` per point,
+    /// with the site, when `geojson` was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
+}
+
+/// Laid out as `viewshed`'s mask: `height` rows running north, each
+/// `width` cells running east, from the corner at `origin_x`, `origin_z`.
+/// Each layer is one little-endian `f32` per cell, base64 encoded, NaN
+/// where a cell's center lies beyond `radius` or has no ground.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FloorRaster {
+    pub origin_x: f64,
+    pub origin_z: f64,
+    pub cell: f64,
+    pub width: u32,
+    pub height: u32,
+    /// The lowest height above the cell's ground at which the site sees a
+    /// target.
+    pub floor_agl: String,
+    /// The same as an altitude above sea level.
+    pub floor_msl: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FloorBand {
+    pub alt_agl: f64,
+    /// The share of the cells within `radius` with ground whose floor is at
+    /// or below `alt_agl`.
+    pub seen_fraction: f64,
+}
+
+/// A point's floor; the floors are null beyond `radius` or off the mesh.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PointFloor {
+    pub x: f64,
+    pub z: f64,
+    pub ground: Option<f64>,
+    pub floor_agl: Option<f64>,
+    pub floor_msl: Option<f64>,
+}
+
 // coverage
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -324,6 +403,12 @@ pub struct CoverageRequest {
     pub asset: Option<Region>,
     #[serde(default = "default_min_masked_range")]
     pub min_masked_range: f64,
+    /// Mask cell size; the file's cell size when omitted, and may be coarser.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<f64>,
+    /// Also return the dead zones as GeoJSON.
+    #[serde(default)]
+    pub geojson: bool,
 }
 
 fn default_min_masked_range() -> f64 {
@@ -342,6 +427,10 @@ pub struct CoverageResponse {
     pub provenance: Provenance,
     /// One per requested band, in order.
     pub bands: Vec<CoverageBand>,
+    /// Each band's dead zones as one `MultiPolygon`, the site, and the
+    /// asset's outline when given, when `geojson` was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -372,6 +461,13 @@ pub struct ApproachSpectrumRequest {
     /// Summaries are also returned restricted to this sector.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sector: Option<Sector>,
+    /// Raster cell size; the file's cell size when omitted, and may be
+    /// coarser.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<f64>,
+    /// Also return each blind arc as a wedge in GeoJSON.
+    #[serde(default)]
+    pub geojson: bool,
 }
 
 fn default_azimuth_step() -> f64 {
@@ -391,6 +487,10 @@ pub struct ApproachSpectrumResponse {
     pub provenance: Provenance,
     /// One per requested band, in order.
     pub bands: Vec<SpectrumBand>,
+    /// A wedge per blind arc out to `radius`, with the site, when `geojson`
+    /// was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -433,6 +533,10 @@ pub struct UnmaskProfileRequest {
     pub route: Vec<Point3>,
     #[serde(default = "default_unmask_step")]
     pub step: f64,
+    /// Also return the route, its masked stretches and the first-seen
+    /// point as GeoJSON.
+    #[serde(default)]
+    pub geojson: bool,
 }
 
 fn default_unmask_step() -> f64 {
@@ -443,12 +547,15 @@ fn default_unmask_step() -> f64 {
 pub struct UnmaskProfileResponse {
     #[serde(flatten)]
     pub provenance: Provenance,
-    /// Where along the route the site first sees it; null when never.
+    /// Where along the route the site first sees it, with an absolute
+    /// `alt`; null when never.
     pub first_seen: Option<Point3>,
     pub first_seen_dist_from_site: Option<f64>,
     pub first_seen_dist_along_route: Option<f64>,
     pub masked_segments: Vec<RouteSpan>,
     pub visible_fraction: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
 }
 
 /// A stretch of a route, as distances along it from its first point.
