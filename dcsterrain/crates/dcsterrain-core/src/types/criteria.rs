@@ -5,6 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{Observer, Point3};
+use crate::source::Cover;
 
 /// One criterion, written `{"name": "slope_max", "params": {"deg": 8}}`.
 /// `valid` takes no params and is applied whether asked for or not.
@@ -27,6 +28,23 @@ pub enum Criterion {
     /// Every footprint cell's `surface` code is one of `values`.
     SurfaceEnumIn {
         values: Vec<u8>,
+    },
+    /// Every footprint cell's ground cover is one of `classes`.
+    CoverIn {
+        classes: Vec<CoverClass>,
+    },
+    /// The share of the covered cells within `radius` that are of `class`,
+    /// at least `min`.
+    CoverFractionMin {
+        class: CoverClass,
+        radius: f64,
+        min: f64,
+    },
+    /// Distance to the nearest cell of `class`, from `min` to `max`.
+    DistCoverBand {
+        class: CoverClass,
+        min: f64,
+        max: f64,
     },
     DistRoadBand {
         min: f64,
@@ -146,6 +164,33 @@ pub enum WaterClass {
     River,
 }
 
+/// The `cover` layer's classes by name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CoverClass {
+    Plain,
+    Field,
+    Forest,
+    Town,
+    Beach,
+    Runway,
+    Water,
+}
+
+impl CoverClass {
+    pub fn cover(self) -> Cover {
+        match self {
+            CoverClass::Plain => Cover::Plain,
+            CoverClass::Field => Cover::Field,
+            CoverClass::Forest => Cover::Forest,
+            CoverClass::Town => Cover::Town,
+            CoverClass::Beach => Cover::Beach,
+            CoverClass::Runway => Cover::Runway,
+            CoverClass::Water => Cover::Water,
+        }
+    }
+}
+
 /// A landform class from local relief, then regional relief, then slope:
 /// the first that holds of `ridge`, `valley`, `upper`, `lower`, `mid`, and
 /// `flat` otherwise.
@@ -209,6 +254,26 @@ mod tests {
         }))
         .unwrap();
         assert!(matches!(c, Criterion::NotVisibleFrom { own_alt_agl, .. } if own_alt_agl == 2.0));
+    }
+
+    #[test]
+    fn the_cover_criteria_name_cover_classes() {
+        let c: Criterion = serde_json::from_value(json!({
+            "name": "dist_cover_band", "params": {"class": "forest", "min": 50, "max": 500}
+        }))
+        .unwrap();
+        assert_eq!(
+            c,
+            Criterion::DistCoverBand {
+                class: CoverClass::Forest,
+                min: 50.0,
+                max: 500.0
+            }
+        );
+        let r = serde_json::from_value::<Criterion>(json!({
+            "name": "cover_in", "params": {"classes": ["jungle"]}
+        }));
+        assert!(r.is_err());
     }
 
     #[test]

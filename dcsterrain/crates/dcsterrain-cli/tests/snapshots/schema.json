@@ -428,6 +428,19 @@
       },
       "type": "object"
     },
+    "CoverClass": {
+      "description": "The `cover` layer's classes by name.",
+      "enum": [
+        "plain",
+        "field",
+        "forest",
+        "town",
+        "beach",
+        "runway",
+        "water"
+      ],
+      "type": "string"
+    },
     "CoverageBand": {
       "properties": {
         "alt_agl": {
@@ -638,6 +651,104 @@
               },
               "required": [
                 "values"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Every footprint cell's ground cover is one of `classes`.",
+          "properties": {
+            "name": {
+              "const": "cover_in",
+              "type": "string"
+            },
+            "params": {
+              "properties": {
+                "classes": {
+                  "items": {
+                    "$ref": "#/$defs/CoverClass"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "classes"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The share of the covered cells within `radius` that are of `class`,\nat least `min`.",
+          "properties": {
+            "name": {
+              "const": "cover_fraction_min",
+              "type": "string"
+            },
+            "params": {
+              "properties": {
+                "class": {
+                  "$ref": "#/$defs/CoverClass"
+                },
+                "min": {
+                  "format": "double",
+                  "type": "number"
+                },
+                "radius": {
+                  "format": "double",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "class",
+                "radius",
+                "min"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Distance to the nearest cell of `class`, from `min` to `max`.",
+          "properties": {
+            "name": {
+              "const": "dist_cover_band",
+              "type": "string"
+            },
+            "params": {
+              "properties": {
+                "class": {
+                  "$ref": "#/$defs/CoverClass"
+                },
+                "max": {
+                  "format": "double",
+                  "type": "number"
+                },
+                "min": {
+                  "format": "double",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "class",
+                "min",
+                "max"
               ],
               "type": "object"
             }
