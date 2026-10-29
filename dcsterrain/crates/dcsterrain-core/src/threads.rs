@@ -68,43 +68,6 @@ pub fn low_priority() {
     }
 }
 
-/// Seconds of CPU the process has used, user and kernel, over every thread:
-/// set beside the wall clock, how much of the machine a measured step took.
-/// Only Windows is measured; elsewhere `None`.
-#[cfg(test)]
-pub(crate) fn cpu_seconds() -> Option<f64> {
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::Foundation::FILETIME;
-        use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
-        let zero = FILETIME {
-            dwLowDateTime: 0,
-            dwHighDateTime: 0,
-        };
-        let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
-        // SAFETY: the pseudo-handle names this process, and each pointer is
-        // to a FILETIME of this frame.
-        let ok = unsafe {
-            GetProcessTimes(
-                GetCurrentProcess(),
-                &mut created,
-                &mut exited,
-                &mut kernel,
-                &mut user,
-            )
-        };
-        // A FILETIME counts 100 ns ticks.
-        let s = |t: FILETIME| {
-            ((u64::from(t.dwHighDateTime) << 32) | u64::from(t.dwLowDateTime)) as f64 * 1e-7
-        };
-        (ok != 0).then(|| s(kernel) + s(user))
-    }
-    #[cfg(not(windows))]
-    {
-        None
-    }
-}
-
 /// The CPU cycles this process has spent, over all its threads: set beside
 /// the wall clock, how much of the machine a measured step took. 0 where
 /// the platform does not count them.

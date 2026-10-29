@@ -390,20 +390,17 @@ mod install_tests {
     use crate::query::route::install_tests::percentile;
     use crate::roads::tests::Unit;
     use crate::scratch::Scratch;
-    use crate::threads::cpu_seconds;
+    use crate::threads::cpu_cycles;
     use crate::types::Point;
 
-    /// Wall and CPU milliseconds since `since`.
-    fn spent(since: (Instant, Option<f64>)) -> (f64, f64) {
-        let cpu = match (since.1, cpu_seconds()) {
-            (Some(a), Some(b)) => (b - a) * 1000.0,
-            _ => f64::NAN,
-        };
-        (since.0.elapsed().as_secs_f64() * 1000.0, cpu)
+    /// Wall milliseconds and millions of CPU cycles since `since`.
+    fn spent(since: (Instant, u64)) -> (f64, f64) {
+        let cycles = cpu_cycles().saturating_sub(since.1) as f64 / 1e6;
+        (since.0.elapsed().as_secs_f64() * 1000.0, cycles)
     }
 
-    fn now() -> (Instant, Option<f64>) {
-        (Instant::now(), cpu_seconds())
+    fn now() -> (Instant, u64) {
+        (Instant::now(), cpu_cycles())
     }
 
     #[test]
@@ -419,9 +416,10 @@ mod install_tests {
             .and_then(|v| v.parse().ok())
             .unwrap_or(3000);
         println!(
-            "| terrain | build | towns | on mesh | in water | tables + roads wall / CPU ms | cold wall / CPU ms | warm wall / CPU ms | warm µs per point | town scan µs per point | town km p50 / max | convergence max ° | true bearing off geodesic, max ° |"
+            "| terrain | build | towns | on mesh | in water | water with depth | depth p50 / max m | tables + roads ms / Mcycles | cold ms / Mcycles | warm ms / Mcycles | warm µs per point | town scan µs per point | town km p50 / max | convergence max ° | true bearing off geodesic, max ° within 500 km / beyond |"
         );
-        println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+        println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+        let mut steps = Vec::new();
         let scratch = Scratch::new();
         let cache = Cache::new(&scratch.0);
         let mut u = Unit(0x2545_f491_4f6c_dd1d);
@@ -462,18 +460,65 @@ mod install_tests {
                 "{id}: the answer is the same twice"
             );
 
-            let clock = Instant::now();
-            for p in &pts {
-                std::hint::black_box(towns(tables, (p.x, p.z), 1));
-            }
-            let scan_us = clock.elapsed().as_secs_f64() * 1e6 / n as f64;
+            // Each step of a warm request alone, over the same points.
+            let xz: Vec<[f64; 2]> = pts.iter().map(|p| [p.x, p.z]).collect();
+            let mut capped = false;
+            let step = |f: &mut dyn FnMut()| {
+                let clock = now();
+                f();
+                spent(clock)
+            };
+            let ground = step(&mut || {
+                src.points(&xz).unwrap();
+            });
+            let slope = step(&mut || {
+                derived_values(src, Derived::Slope, &xz, &mut capped).unwrap();
+            });
+            let aspect = step(&mut || {
+                derived_values(src, Derived::Aspect, &xz, &mut capped).unwrap();
+            });
+            let road = step(&mut || {
+                for p in &xz {
+                    std::hint::black_box(edges(src, KIND_ROAD, (p[0], p[1]), 1).unwrap());
+                }
+            });
+            let town = step(&mut || {
+                for p in &xz {
+                    std::hint::black_box(towns(tables, (p[0], p[1]), 1));
+                }
+            });
+            let field = step(&mut || {
+                for p in &xz {
+                    std::hint::black_box(airdromes(tables, (p[0], p[1]), 1));
+                }
+            });
+            let ms = |s: (f64, f64)| format!("{:.0} / {:.0}", s.0, s.1);
+            steps.push(format!(
+                "| {id} | {} | {} | {} | {} | {} | {} |",
+                ms(ground),
+                ms(slope),
+                ms(aspect),
+                ms(road),
+                ms(town),
+                ms(field)
+            ));
 
             let tm = tables.crs.tmerc();
-            let (mut dist, mut convergence, mut off) = (vec![], 0.0f64, 0.0f64);
+            let (mut dist, mut depth, mut convergence) = (vec![], vec![], 0.0f64);
+            let (mut near_off, mut far_off) = (0.0f64, 0.0f64);
             let (mut on_mesh, mut water) = (0, 0);
             for (info, p) in warm.points.iter().zip(&pts) {
                 on_mesh += usize::from(info.height.is_some());
-                water += usize::from(info.water.is_some_and(|w| w != WaterClass::Land));
+                if info.water.is_some_and(|w| w != WaterClass::Land) {
+                    water += 1;
+                    let d = info.depth.expect("water has a depth");
+                    assert!(d >= 0.0, "{id}: {p:?} {d} m deep");
+                    if d > 0.0 {
+                        depth.push(d);
+                    }
+                } else {
+                    assert_eq!(info.depth, None, "{id}: {p:?}");
+                }
                 // Every town measured, the first of the nearest kept.
                 let (mut best, mut best_d) = (0, f64::INFINITY);
                 for (k, town) in tables.towns.iter().enumerate() {
@@ -497,28 +542,39 @@ mod install_tests {
                     let (lat2, lon2) = tm.to_latlon(p.x, p.z);
                     let az = geodesic_azimuth(lat1, lon1, lat2, lon2);
                     let e = turn(fix.bearing_true_deg, az);
-                    let bound = if best_d <= 100e3 { 1e-5 } else { 2.5e-4 };
                     if best_d <= 500e3 {
+                        let bound = if best_d <= 100e3 { 1e-5 } else { 2.5e-4 };
                         assert!(e < bound, "{id}: {p:?} {e}° at {best_d} m");
+                        near_off = near_off.max(e);
+                    } else {
+                        far_off = far_off.max(e);
                     }
-                    off = off.max(e);
                     convergence = convergence.max(turn(fix.bearing_grid_deg, fix.bearing_true_deg));
                 }
             }
             println!(
-                "| {id} | {} | {} | {on_mesh} of {n} | {water} | {:.0} / {:.0} | {:.0} / {:.0} | {:.0} / {:.0} | {:.0} | {scan_us:.1} | {:.1} / {:.1} | {convergence:.2} | {off:.1e} |",
+                "| {id} | {} | {} | {on_mesh} of {n} | {water} | {} | {:.1} / {:.1} | {} | {} | {} | {:.0} | {:.1} | {:.1} / {:.1} | {convergence:.2} | {near_off:.1e} / {far_off:.1e} |",
                 t.provenance().dcs_build,
                 tables.towns.len(),
-                prime.0,
-                prime.1,
-                cold_t.0,
-                cold_t.1,
-                warm_t.0,
-                warm_t.1,
+                depth.len(),
+                percentile(&depth, 0.5),
+                percentile(&depth, 1.0),
+                ms(prime),
+                ms(cold_t),
+                ms(warm_t),
                 warm_t.0 * 1000.0 / n as f64,
+                town.0 * 1000.0 / n as f64,
                 percentile(&dist, 0.5),
                 percentile(&dist, 1.0),
             );
+        }
+        println!();
+        println!(
+            "| terrain | ground ms / Mcycles | slope | aspect | nearest road | nearest town | nearest airdrome |"
+        );
+        println!("|---|---|---|---|---|---|---|");
+        for s in steps {
+            println!("{s}");
         }
     }
 }
