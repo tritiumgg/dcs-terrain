@@ -187,7 +187,11 @@ impl Theatre {
             && (ROAD_NS_SOUTH_NORTH_M..=ROAD_NS_NORTH_NORTH_M).contains(&north);
         let east_road = (east - ROAD_EAST_EAST_M).abs() <= half
             && (ROAD_EAST_SOUTH_NORTH_M..=ROAD_EAST_NORTH_NORTH_M).contains(&north);
-        ew || ns || east_road
+        let loop_north = (north - ROAD_LOOP_NORTH_M).abs() <= half
+            && (ROAD_NS_EAST_M..=ROAD_LOOP_EAST_M).contains(&east);
+        let loop_east = (east - ROAD_LOOP_EAST_M).abs() <= half
+            && (ROAD_EW_NORTH_M..=ROAD_LOOP_NORTH_M).contains(&north);
+        ew || ns || east_road || loop_north || loop_east
     }
 
     pub fn on_runway(&self, north: f64, east: f64) -> bool {
@@ -326,6 +330,7 @@ impl Theatre {
         let (s, n) = (node(5), node(6));
         let (rw, re) = (node(7), node(8));
         let (j2, s2, n2) = (node(9), node(10), node(11));
+        let (k, j3, c) = (node(12), node(13), node(14));
         let bridge_w = RIVER_EAST_M - BRIDGE_LENGTH_M / 2.0;
         let bridge_e = RIVER_EAST_M + BRIDGE_LENGTH_M / 2.0;
         let ew = |from, to| self.polyline(ROAD_EW_NORTH_M, from, to, false);
@@ -334,7 +339,8 @@ impl Theatre {
         let rail_north = ROAD_EW_NORTH_M - RAIL_SOUTH_OFFSET_M;
         let parts = [
             (ROAD_EW_CLASS, w, j, ew(ROAD_EW_WEST_EAST_M, ROAD_NS_EAST_M)),
-            (ROAD_EW_CLASS, j, bw, ew(ROAD_NS_EAST_M, bridge_w)),
+            (ROAD_EW_CLASS, j, k, ew(ROAD_NS_EAST_M, ROAD_LOOP_EAST_M)),
+            (ROAD_EW_CLASS, k, bw, ew(ROAD_LOOP_EAST_M, bridge_w)),
             (ROAD_EW_CLASS, bw, be, ew(bridge_w, bridge_e)),
             (ROAD_EW_CLASS, be, j2, ew(bridge_e, ROAD_EAST_EAST_M)),
             (
@@ -349,11 +355,12 @@ impl Theatre {
                 j,
                 ns(ROAD_NS_SOUTH_NORTH_M, ROAD_EW_NORTH_M),
             ),
+            (ROAD_NS_CLASS, j, j3, ns(ROAD_EW_NORTH_M, ROAD_LOOP_NORTH_M)),
             (
                 ROAD_NS_CLASS,
-                j,
+                j3,
                 n,
-                ns(ROAD_EW_NORTH_M, ROAD_NS_NORTH_NORTH_M),
+                ns(ROAD_LOOP_NORTH_M, ROAD_NS_NORTH_NORTH_M),
             ),
             (
                 ROAD_NS_CLASS,
@@ -366,6 +373,18 @@ impl Theatre {
                 j2,
                 n2,
                 east(ROAD_EW_NORTH_M, ROAD_EAST_NORTH_NORTH_M),
+            ),
+            (
+                ROAD_EW_CLASS,
+                j3,
+                c,
+                self.polyline(ROAD_LOOP_NORTH_M, ROAD_NS_EAST_M, ROAD_LOOP_EAST_M, false),
+            ),
+            (
+                ROAD_EW_CLASS,
+                k,
+                c,
+                self.polyline(ROAD_LOOP_EAST_M, ROAD_EW_NORTH_M, ROAD_LOOP_NORTH_M, true),
             ),
         ];
         let mut roads: Vec<Edge> = Vec::new();
@@ -540,8 +559,10 @@ mod tests {
         let road: Vec<usize> = (0..g.edges.len())
             .filter(|&i| g.edges[i].kind == KIND_ROAD)
             .collect();
-        // Contracted, the four arms of each junction and the link between.
-        assert_eq!(road.len(), 7);
+        // Contracted, the four arms of each junction, the north-south road
+        // cut where the loop leaves it, the loop's two sides, and the
+        // east-west road cut where the loop meets it.
+        assert_eq!(road.len(), 11);
         let wet: Vec<usize> = road
             .iter()
             .copied()
@@ -551,14 +572,14 @@ mod tests {
         let bridge = &g.edges[wet[0]];
         let mut ends = [bridge.a, bridge.b].map(|n| g.nodes[n as usize]);
         ends.sort_by(|p, q| p[1].total_cmp(&q[1]));
-        let junctions = [ROAD_NS_EAST_M, ROAD_EAST_EAST_M].map(|east| {
+        let junctions = [ROAD_LOOP_EAST_M, ROAD_EAST_EAST_M].map(|east| {
             let (x, z) = t().abs(ROAD_EW_NORTH_M, east);
             [x, z]
         });
         assert_eq!(ends, junctions);
         assert_eq!(
             bridge.length,
-            ROAD_EAST_EAST_M - ROAD_NS_EAST_M,
+            ROAD_EAST_EAST_M - ROAD_LOOP_EAST_M,
             "the bridge's whole length and the road either side"
         );
 
@@ -566,7 +587,7 @@ mod tests {
         assert_eq!(b[wet[0]], 1.0);
         for &i in &road {
             if i != wet[0] {
-                assert_eq!(b[i], 7.0 / 16.0, "edge {i}");
+                assert!(b[i] > 0.0 && b[i] < 0.9, "edge {i}: {}", b[i]);
             }
         }
     }
@@ -625,16 +646,20 @@ mod tests {
                 "node {node}: {points:?}"
             );
         }
-        // Each junction joins four edges, every other node one or two.
+        // Each crossing joins four edges, where the loop meets a road three,
+        // every other node one or two.
         assert_eq!(ends[&(ROAD_FIRST_NODE_ID + 1)].len(), 4);
         assert_eq!(ends[&(ROAD_FIRST_NODE_ID + 9)].len(), 4);
+        assert_eq!(ends[&(ROAD_FIRST_NODE_ID + 12)].len(), 3);
+        assert_eq!(ends[&(ROAD_FIRST_NODE_ID + 13)].len(), 3);
+        assert_eq!(ends[&(ROAD_FIRST_NODE_ID + 14)].len(), 2);
         let ids: Vec<u32> = t()
             .roads()
             .iter()
             .chain(t().railroads().iter())
             .map(|e| e.id)
             .collect();
-        assert_eq!(ids, (0..10).collect::<Vec<_>>());
+        assert_eq!(ids, (0..14).collect::<Vec<_>>());
     }
 
     #[test]

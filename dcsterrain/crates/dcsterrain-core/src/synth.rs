@@ -156,12 +156,15 @@ pub const SEA_LEVEL_M: f64 = 0.0;
 // road at (ROAD_EW_NORTH_M, ROAD_EAST_EAST_M), east of it; only the east-west
 // road meets the river, on the bridge. The north-south road runs over the col
 // between the two hills. The railway is not in the road graph and crosses the
-// river without a bridge.
+// river without a bridge. A loop road leaves the north-south road at
+// ROAD_LOOP_NORTH_M, runs east to ROAD_LOOP_EAST_M and south to the
+// east-west road, west of the river, so two roads join the west of the
+// terrain to the bridge: a route has an alternative, and both cross it.
 //
-// The road network is a tree. Once nodes of degree two are contracted, the
-// bridge lies on the one edge between the two junctions, with four nodes on
-// each side of it: it joins 16 pairs of nodes, and every other edge 7, so it
-// carries the most betweenness.
+// Once nodes of degree two are contracted, the bridge lies on the one edge
+// between the loop's south corner and the east road's junction, with seven
+// nodes west of it and four east: every one of their 28 pairs crosses it,
+// and no other edge carries as many, so it carries the most betweenness.
 //
 // Every road, the railway and the runway's centre line run along cell
 // centres, which sit a half cell off every multiple of CELL_SIZE_M. A strip
@@ -171,9 +174,10 @@ pub const SEA_LEVEL_M: f64 = 0.0;
 //
 // Each network is cut into edges where it meets another or changes, as the
 // map's road file is: the east-west road at both junctions and at both ends
-// of the bridge, which is its own edge, each north-south road at its
-// junction, and the railway not at all. Node ids count up from
-// ROAD_FIRST_NODE_ID and each edge carries a vertex every
+// of the bridge, which is its own edge, and where the loop meets it, each
+// north-south road at its junction, the north-south road where the loop
+// leaves it, the loop at its corner, and the railway not at all. Node ids
+// count up from ROAD_FIRST_NODE_ID and each edge carries a vertex every
 // ROAD_VERTEX_SPACING_M. The classes are Caucasus's spellings.
 
 pub const ROAD_EW_NORTH_M: f64 = 55025.0;
@@ -190,6 +194,8 @@ pub const ROAD_NS_NORTH_NORTH_M: f64 = 65000.0;
 pub const ROAD_EAST_EAST_M: f64 = 55025.0;
 pub const ROAD_EAST_SOUTH_NORTH_M: f64 = 50000.0;
 pub const ROAD_EAST_NORTH_NORTH_M: f64 = 60000.0;
+pub const ROAD_LOOP_NORTH_M: f64 = 57025.0;
+pub const ROAD_LOOP_EAST_M: f64 = 40525.0;
 pub const ROAD_EW_CLASS: &str = "road";
 pub const ROAD_NS_CLASS: &str = "rdb";
 pub const RAIL_CLASS: &str = "rw";
