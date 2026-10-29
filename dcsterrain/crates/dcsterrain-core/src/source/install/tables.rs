@@ -520,6 +520,29 @@ mod tests {
     }
 
     #[test]
+    fn an_entry_of_version_2_is_rebuilt_without_its_dropped_fields() {
+        let root = install();
+        let c = Scratch::new();
+        let terrain = terrain(&root.0, &c.0);
+        let built = Tables::open(&terrain).unwrap();
+        // An entry as version 2 wrote it, with a field 3 dropped on a row.
+        let path = c.0.join("Test/tables.json");
+        let text = fs::read_to_string(&path).unwrap();
+        let old = text.replacen("\"version\":3", "\"version\":2", 1).replacen(
+            "\"name_id\":",
+            "\"code\":\"URKA\",\"name_id\":",
+            1,
+        );
+        assert_ne!(old, text);
+        fs::write(&path, old).unwrap();
+        assert!(terrain.get(&TABLES_JSON).unwrap().built);
+        assert_eq!(Tables::open(&terrain).unwrap(), built);
+        let doc: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(doc["version"], 3);
+        assert!(doc["payload"]["airdromes"][0].get("code").is_none());
+    }
+
+    #[test]
     fn a_taxiway_file_no_decoder_reads_refuses_the_tables_by_name() {
         let root = install();
         let bad = container::build("t5::rn5file", 99, 0);
