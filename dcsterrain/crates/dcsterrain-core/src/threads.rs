@@ -104,3 +104,20 @@ pub(crate) fn cpu_seconds() -> Option<f64> {
         None
     }
 }
+
+/// The CPU cycles this process has spent, over all its threads: set beside
+/// the wall clock, how much of the machine a measured step took. 0 where
+/// the platform does not count them.
+pub fn cpu_cycles() -> u64 {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+        use windows_sys::Win32::System::WindowsProgramming::QueryProcessCycleTime;
+        let mut c = 0u64;
+        // SAFETY: the pseudo-handle of this process, and a u64 to write to.
+        unsafe { QueryProcessCycleTime(GetCurrentProcess(), &mut c) };
+        c
+    }
+    #[cfg(not(windows))]
+    0
+}

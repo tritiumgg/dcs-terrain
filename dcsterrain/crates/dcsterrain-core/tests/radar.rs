@@ -22,6 +22,7 @@ use serde_json::{Value, json};
 
 use dcsterrain_core::cache::Cache;
 use dcsterrain_core::query::{Terrain, answer, floor_msl_reaching};
+use dcsterrain_core::threads::cpu_cycles;
 use dcsterrain_core::types::Observer;
 
 fn install_root() -> Option<PathBuf> {
@@ -61,22 +62,6 @@ const BANDS: [f64; 4] = [30.0, 100.0, 300.0, 1000.0];
 /// The raster alone, the mesh out to the reach a sweep takes, and the mesh
 /// all the way.
 const REACHES: [f64; 3] = [0.0, 1000.0, f64::INFINITY];
-
-/// The CPU cycles this process has spent, over all its threads; 0 where
-/// the platform does not count them.
-fn cycles() -> u64 {
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::System::Threading::GetCurrentProcess;
-        use windows_sys::Win32::System::WindowsProgramming::QueryProcessCycleTime;
-        let mut c = 0u64;
-        // SAFETY: the pseudo-handle of this process, and a u64 to write to.
-        unsafe { QueryProcessCycleTime(GetCurrentProcess(), &mut c) };
-        c
-    }
-    #[cfg(not(windows))]
-    0
-}
 
 /// `op` with `q`, and the milliseconds it took.
 fn call(t: &Terrain, op: &str, q: &Value) -> (Value, f64) {
@@ -339,7 +324,7 @@ fn the_radar_floor_and_its_users_on_every_terrain() {
                 .map(|r| r["floor_msl"].as_f64())
                 .collect();
             for (j, reach) in REACHES.iter().enumerate() {
-                let (c, s) = (cycles(), Instant::now());
+                let (c, s) = (cpu_cycles(), Instant::now());
                 let o = Observer {
                     x: sx,
                     z: sz,
@@ -347,7 +332,7 @@ fn the_radar_floor_and_its_users_on_every_terrain() {
                 };
                 let (m, (rx, rz), rside) = floor_msl_reaching(&t, o, RADIUS, *reach).unwrap();
                 reach_ms[j].push(s.elapsed().as_secs_f64() * 1e3);
-                reach_mc[j].push((cycles() - c) as f64 / 1e6);
+                reach_mc[j].push((cpu_cycles() - c) as f64 / 1e6);
                 for (&(x, z, _, _), e) in cells.iter().zip(&exacts) {
                     let Some(e) = e else { continue };
                     let i =
@@ -540,12 +525,12 @@ fn exposure_over_many_sites_on_every_terrain() {
 
         // Timed cold, then warm, then warm with the unseen areas drawn.
         let timed = |q: &Value| {
-            let (c, s) = (cycles(), Instant::now());
+            let (c, s) = (cpu_cycles(), Instant::now());
             let v = answer(&t, "exposure", q).unwrap_or_else(|e| panic!("{id}: {e:?}"));
             (
                 v,
                 s.elapsed().as_secs_f64() * 1e3,
-                (cycles() - c) as f64 / 1e6,
+                (cpu_cycles() - c) as f64 / 1e6,
             )
         };
         let (_, cold_ms, cold_mc) = timed(&q);
@@ -561,7 +546,7 @@ fn exposure_over_many_sites_on_every_terrain() {
         let seen = unbase64(r["seen_count"].as_str().unwrap());
 
         // Each site's own radar floor at every cell of the region.
-        let (c, s) = (cycles(), Instant::now());
+        let (c, s) = (cpu_cycles(), Instant::now());
         let each: Vec<[Vec<f32>; 2]> = req
             .iter()
             .map(|s| {
@@ -589,7 +574,10 @@ fn exposure_over_many_sites_on_every_terrain() {
                 [pick("floor_agl"), pick("floor_msl")]
             })
             .collect();
-        let (each_ms, each_mc) = (s.elapsed().as_secs_f64() * 1e3, (cycles() - c) as f64 / 1e6);
+        let (each_ms, each_mc) = (
+            s.elapsed().as_secs_f64() * 1e3,
+            (cpu_cycles() - c) as f64 / 1e6,
+        );
         let (mut reached, mut overlapped, mut unreached, mut wrong) = (0, 0, 0, 0);
         for i in 0..agl.len() {
             let floors: Vec<(f32, f32)> = (each.iter())
