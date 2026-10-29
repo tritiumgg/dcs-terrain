@@ -9,3 +9,9 @@ rust-version = "1.88"
 license = "MIT"
 repository = "https://github.com/tritiumgg/dcs-terrain"
 publish = false
+
+# One codegen unit lets the optimizer see each crate whole: 10 to 20 % off
+# the point sampling and horizon loops, for a slower release build. Link
+# time optimization and abort on panic measured within noise on top.
+[profile.release]
+codegen-units = 1
