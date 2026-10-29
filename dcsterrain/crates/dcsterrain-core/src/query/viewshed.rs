@@ -17,7 +17,7 @@ use super::geojson::{Features, props};
 use super::{Terrain, outline, refused};
 use crate::grid::{Grid, Window};
 use crate::source::Layer;
-use crate::types::{Issue, Polygon, ViewshedRequest, ViewshedResponse};
+use crate::types::{Issue, Observer, Polygon, ViewshedRequest, ViewshedResponse};
 
 /// The most cells the mask, or the window of heights under it, may hold:
 /// a radius of about 50 km at 50 m, under a second of sweep.
@@ -29,9 +29,7 @@ const CELLS_MAX: u64 = 4 << 20;
 fn too_large(what: &str, cells: u64, hint: &str) -> Vec<Issue> {
     vec![Issue::new(
         "too_large",
-        &format!(
-            "this viewshed's {what} holds {cells} cells, over the {CELLS_MAX} one may; {hint}"
-        ),
+        &format!("this sweep's {what} holds {cells} cells, over the {CELLS_MAX} one may; {hint}"),
         "radius",
     )]
 }
@@ -56,8 +54,22 @@ fn base64(bytes: &[u8]) -> String {
 }
 
 pub fn viewshed(terrain: &Terrain, q: ViewshedRequest) -> Result<ViewshedResponse, Vec<Issue>> {
-    let s = prepare(terrain, &q)?;
-    let (bits, seen, total) = s.run();
+    let target = (!q.target_alt_agl.is_finite()).then(|| {
+        Issue::new(
+            "invalid_request",
+            "the target height must be finite",
+            "target_alt_agl",
+        )
+    });
+    let s = prepare(
+        terrain,
+        q.observer,
+        "observer",
+        q.radius,
+        q.resolution,
+        target.into_iter().collect(),
+    )?;
+    let (bits, seen, total) = s.run(q.target_alt_agl);
     let (side, res, (origin_x, origin_z), o) = (s.side, s.res, s.origin, q.observer);
 
     let polygons = (q.as_polygons || q.geojson).then(|| {
@@ -112,33 +124,34 @@ pub fn viewshed(terrain: &Terrain, q: ViewshedRequest) -> Result<ViewshedRespons
     })
 }
 
-/// Checks the request, and reads the heights its sweep stands on.
-fn prepare(terrain: &Terrain, q: &ViewshedRequest) -> Result<Sweep, Vec<Issue>> {
+/// Checks a sweep's site, found at `path` in the request, its radius and
+/// resolution, and reads the heights it stands on. `more` are the issues
+/// the caller found with the rest of its request, returned with these.
+pub(super) fn prepare(
+    terrain: &Terrain,
+    o: Observer,
+    path: &str,
+    radius: f64,
+    resolution: Option<f64>,
+    more: Vec<Issue>,
+) -> Result<Sweep, Vec<Issue>> {
     let src = terrain.source();
     let g = src.grid();
     let cell = f64::from(g.cell_size);
-    let o = q.observer;
-    let res = q.resolution.unwrap_or(cell);
+    let res = resolution.unwrap_or(cell);
     let mut issues = Vec::new();
     if ![o.x, o.z, o.alt_agl].iter().all(|v| v.is_finite()) {
         issues.push(Issue::new(
             "invalid_point",
             "every coordinate must be finite",
-            "observer",
+            path,
         ));
     }
-    if !(q.radius.is_finite() && q.radius > 0.0) {
+    if !(radius.is_finite() && radius > 0.0) {
         issues.push(Issue::new(
             "invalid_request",
             "the radius must be positive",
             "radius",
-        ));
-    }
-    if !q.target_alt_agl.is_finite() {
-        issues.push(Issue::new(
-            "invalid_request",
-            "the target height must be finite",
-            "target_alt_agl",
         ));
     }
     if !(res.is_finite() && res >= cell) {
@@ -148,6 +161,7 @@ fn prepare(terrain: &Terrain, q: &ViewshedRequest) -> Result<Sweep, Vec<Issue>> 
             "resolution",
         ));
     }
+    issues.extend(more);
     if !issues.is_empty() {
         return Err(issues);
     }
@@ -158,13 +172,13 @@ fn prepare(terrain: &Terrain, q: &ViewshedRequest) -> Result<Sweep, Vec<Issue>> 
         return Err(vec![Issue::new(
             "off_terrain",
             "no mesh covers this point, so it has no ground to stand on",
-            "observer",
+            path,
         )]);
     };
 
     // The mask, aligned to multiples of its cell from the grid's origin, so
     // at the cell size its cells are the grid's.
-    let n = (q.radius / res).ceil();
+    let n = (radius / res).ceil();
     let side = 2.0 * n + 1.0;
     if side * side > CELLS_MAX as f64 {
         return Err(too_large(
@@ -183,7 +197,7 @@ fn prepare(terrain: &Terrain, q: &ViewshedRequest) -> Result<Sweep, Vec<Issue>> 
 
     // The heights out to the radius and a cell beyond, for the bilinear.
     // Counted before any index is made, so no radius overflows one.
-    let reach = q.radius + 2.0 * cell;
+    let reach = radius + 2.0 * cell;
     let span = (2.0 * reach / cell).floor() + 2.0;
     if span * span > CELLS_MAX as f64 {
         return Err(too_large(
@@ -203,14 +217,13 @@ fn prepare(terrain: &Terrain, q: &ViewshedRequest) -> Result<Sweep, Vec<Issue>> 
     );
     let (rows, cols) = ((r_hi - r_lo + 1) as u32, (c_hi - c_lo + 1) as u32);
     let w = Window::read(src, Layer::Height, r_lo, c_lo, rows, cols).map_err(refused)?;
-    let radials = ((TAU * q.radius / res).ceil() as u64).max(8);
+    let radials = ((TAU * radius / res).ceil() as u64).max(8);
     Ok(Sweep {
         w,
         g,
         o: (o.x, o.z),
         eye: ground.height + o.alt_agl,
-        radius: q.radius,
-        target_alt_agl: q.target_alt_agl,
+        radius,
         res,
         step: cell / 2.0,
         n,
@@ -229,21 +242,22 @@ const PARALLEL_CELLS: i64 = 1 << 16;
 /// The low bits of a cell's key: the last step short of it, then its index.
 const LAST_AND_INDEX: u64 = (1 << 44) - 1;
 
-/// One viewshed's mask, observer and heights.
-struct Sweep {
+/// One sweep's mask, site and heights: what `viewshed` and the radar floor
+/// share.
+pub(super) struct Sweep {
     w: Window,
     g: Grid,
-    o: (f64, f64),
-    eye: f64,
-    radius: f64,
-    target_alt_agl: f64,
-    res: f64,
+    pub o: (f64, f64),
+    /// The site's altitude.
+    pub eye: f64,
+    pub radius: f64,
+    pub res: f64,
     /// The distance between two samples of a radial.
     step: f64,
     /// The mask's cells from its edge to the observer's, and along a side.
-    n: i64,
-    side: i64,
-    origin: (f64, f64),
+    pub n: i64,
+    pub side: i64,
+    pub origin: (f64, f64),
     radials: u64,
     /// The bearing between two radials.
     bearing: f64,
@@ -266,7 +280,7 @@ impl Sweep {
         self.w.value_at(&self.g, x, z)
     }
 
-    fn centre(&self, r: i64, c: i64) -> (f64, f64) {
+    pub fn centre(&self, r: i64, c: i64) -> (f64, f64) {
         (
             self.origin.0 + (r as f64 + 0.5) * self.res,
             self.origin.1 + (c as f64 + 0.5) * self.res,
@@ -300,13 +314,18 @@ impl Sweep {
         }
     }
 
-    /// Sweeps one radial over its cells, keyed without the radial, and sets
-    /// each cell seen; returns how many it set.
-    fn radial(&self, k: u64, cells: &mut [u64], bits: &[AtomicU8]) -> u64 {
+    /// Sweeps one radial over its cells, keyed without the radial, calling
+    /// `far` with each cell's index, range and ground, and the steepest
+    /// slope from the site to the ground short of it; returns how many
+    /// cells `far` said yes to.
+    fn radial<F>(&self, k: u64, cells: &mut [u64], far: &F) -> u64
+    where
+        F: Fn(i64, f64, f64, f64) -> bool,
+    {
         cells.sort_unstable();
         let (sin, cos) = (k as f64 * self.bearing).sin_cos();
         let (o, eye) = (self.o, self.eye);
-        let (mut steepest, mut done, mut seen) = (f64::NEG_INFINITY, 0u64, 0u64);
+        let (mut steepest, mut done, mut yes) = (f64::NEG_INFINITY, 0u64, 0u64);
         for &key in cells.iter() {
             let (last, i) = (key >> 24, (key & 0xFFFFFF) as i64);
             while done < last {
@@ -318,39 +337,44 @@ impl Sweep {
             }
             let (x, z) = self.centre(i / self.side, i % self.side);
             let d = (x - o.0).hypot(z - o.1);
-            let target = self.height(x, z).expect("kept for its ground") + self.target_alt_agl;
-            if (target - eye) / d >= steepest {
-                set(bits, i);
-                seen += 1;
-            }
+            let ground = self.height(x, z).expect("kept for its ground");
+            yes += u64::from(far(i, d, ground, steepest));
         }
-        seen
+        yes
     }
 
-    /// The mask's bits, the cells set and the cells counted.
+    /// Calls `near` with each counted cell too close for a step between it
+    /// and the site, with its index and ground, and `far` as `radial` does
+    /// with every other; returns how many cells are near or `far` said yes
+    /// to, and how many are counted.
     ///
     /// Each radial is swept on its own, so the radials go to any core in any
-    /// order and the mask is the same: a bit is only ever set, and each by
-    /// the one radial its cell takes.
-    fn run(&self) -> (Vec<u8>, u64, u64) {
+    /// order and the answer is the same, as long as `near` and `far` write
+    /// only the cell they are given: each cell is given once.
+    pub fn sweep<N, F>(&self, near: &N, far: &F) -> (u64, u64)
+    where
+        N: Fn(i64, f64) + Sync,
+        F: Fn(i64, f64, f64, f64) -> bool + Sync,
+    {
         let side = self.side;
-        let bits: Vec<AtomicU8> = (0..((side * side) as usize).div_ceil(8))
-            .map(|_| AtomicU8::new(0))
-            .collect();
         // Each row's swept keys, and how many of its cells are near.
         let rows = self.map((0..side).collect(), |r| {
-            let (mut keys, mut near) = (Vec::new(), 0u64);
+            let (mut keys, mut near_count) = (Vec::new(), 0u64);
             for c in 0..side {
                 match self.ask(r, c) {
                     Ask::Out => {}
                     Ask::Near => {
-                        set(&bits, r * side + c);
-                        near += 1;
+                        let (x, z) = self.centre(r, c);
+                        near(
+                            r * side + c,
+                            self.height(x, z).expect("kept for its ground"),
+                        );
+                        near_count += 1;
                     }
                     Ask::Swept(key) => keys.push(key),
                 }
             }
-            (keys, near)
+            (keys, near_count)
         });
         // The keys bucketed by radial, in place of a sort of them all.
         let mut start = vec![0usize; self.radials as usize + 1];
@@ -380,10 +404,29 @@ impl Sweep {
             }
             rest = more;
         }
-        let swept = self.map(radials, |(k, cells)| self.radial(k, cells, &bits));
-        let near: u64 = rows.iter().map(|r| r.1).sum();
-        let seen = near + swept.iter().sum::<u64>();
-        let total = near + start[self.radials as usize] as u64;
+        let swept = self.map(radials, |(k, cells)| self.radial(k, cells, far));
+        let near_count: u64 = rows.iter().map(|r| r.1).sum();
+        (
+            near_count + swept.iter().sum::<u64>(),
+            near_count + start[self.radials as usize] as u64,
+        )
+    }
+
+    /// The mask's bits for a target `target` above the ground, the cells
+    /// set and the cells counted.
+    fn run(&self, target: f64) -> (Vec<u8>, u64, u64) {
+        let side = self.side;
+        let bits: Vec<AtomicU8> = (0..((side * side) as usize).div_ceil(8))
+            .map(|_| AtomicU8::new(0))
+            .collect();
+        let eye = self.eye;
+        let (seen, total) = self.sweep(&|i, _| set(&bits, i), &|i, d, ground, steepest| {
+            let seen = (ground + target - eye) / d >= steepest;
+            if seen {
+                set(&bits, i);
+            }
+            seen
+        });
         (
             bits.into_iter().map(AtomicU8::into_inner).collect(),
             seen,
@@ -394,7 +437,7 @@ impl Sweep {
     /// The sweep as one thread does it, every cell's key in one sort: what
     /// `run` must give, bit for bit.
     #[cfg(test)]
-    fn run_serial(&self) -> (Vec<u8>, u64, u64) {
+    fn run_serial(&self, target: f64) -> (Vec<u8>, u64, u64) {
         let side = self.side;
         let mut bits = vec![0u8; ((side * side) as usize).div_ceil(8)];
         let mut set = |i: i64| bits[(i / 8) as usize] |= 0x80 >> (i % 8);
@@ -430,7 +473,7 @@ impl Sweep {
                 }
                 let (x, z) = self.centre(i / side, i % side);
                 let d = (x - o.0).hypot(z - o.1);
-                let target = self.height(x, z).expect("kept for its ground") + self.target_alt_agl;
+                let target = self.height(x, z).expect("kept for its ground") + target;
                 if (target - eye) / d >= steepest {
                     set(i);
                     seen += 1;
@@ -759,13 +802,14 @@ mod tests {
                 "resolution": res,
             }))
             .unwrap();
-            let mut s = super::prepare(&t, &q).unwrap();
-            let want = s.run_serial();
+            let mut s =
+                super::prepare(&t, q.observer, "observer", q.radius, q.resolution, vec![]).unwrap();
+            let want = s.run_serial(target);
             assert!(want.1 > 0, "{x} {z}");
             hidden += usize::from(want.1 < want.2);
             for parallel in [false, true] {
                 s.parallel = parallel;
-                assert!(s.run() == want, "{x} {z} {radius} {res} {parallel}");
+                assert!(s.run(target) == want, "{x} {z} {radius} {res} {parallel}");
             }
         }
         // Most see some of their ground hidden.
