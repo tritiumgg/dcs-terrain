@@ -78,6 +78,15 @@ Mcycles:
 - Every water point but one carries a depth above zero; the one, on Syria,
   reads 0 m. The Marianas' sea reads up to 8.2 km deep, Caucasus's Black Sea
   stops at 100 m.
+- Afghanistan's 283 water points are sea, though the country has none. The
+  grid runs south to 22.5° N, and they lie at 22.5–25° N, 59–69° E: the
+  Gulf of Oman and the Arabian Sea off Oman and Pakistan. Read in the mesh
+  at four of them, every triangle under the point is in ED's own
+  `Sea5.1/Sea` material subset and carries the sea bit. The blocks there
+  are coarse, 37–146 km across, and their depth stops at 251 m, a seabed ED
+  caps rather than the sea's own depth. They are the terrain's water as
+  authored, neither filler nor a misread, so `point_info` reports them as
+  sea.
 - The nearest road dominates where points lie far from any road: the road
   index widens ring by ring over empty sea. Over land it is a fraction of a
   millisecond a point. A full request of 10 000 points over open sea takes
