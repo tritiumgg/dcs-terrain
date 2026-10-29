@@ -134,6 +134,7 @@ mod tests {
     use super::super::tests::synth;
     use super::*;
     use crate::crs::tests::{geodesic_azimuth, turn};
+    use crate::roads::tests::Unit;
     use crate::synth::*;
     use serde_json::json;
 
@@ -236,15 +237,9 @@ mod tests {
         let size = f.size_m();
         let tables = t.source().tables().unwrap();
         let tm = tables.crs.tmerc();
-        let mut seed = 0x2545_f491_4f6c_dd1du64;
-        let mut unit = || {
-            seed ^= seed << 13;
-            seed ^= seed >> 7;
-            seed ^= seed << 17;
-            (seed >> 11) as f64 / (1u64 << 53) as f64
-        };
+        let mut u = Unit(0x2545_f491_4f6c_dd1d);
         let mut pts: Vec<(f64, f64)> = (0..2000)
-            .map(|_| f.abs((unit() * 1.4 - 0.2) * size, (unit() * 1.4 - 0.2) * size))
+            .map(|_| f.abs((u.next() * 1.4 - 0.2) * size, (u.next() * 1.4 - 0.2) * size))
             .collect();
         // Halfway between two towns, where they tie and the first listed
         // wins, and on a town itself.
@@ -354,5 +349,157 @@ mod tests {
             (bad.code.as_str(), bad.path.as_str()),
             ("invalid_point", "points.1")
         );
+    }
+}
+
+/// Opt-in: `point_info` at random points on every terrain of a real
+/// install, each nearest town checked against every town and each true
+/// bearing against the geodesic's. Set `DCSTERRAIN_INSTALL` to the install
+/// root, and `DCSTERRAIN_POINTS` to the points per terrain if not 3 000;
+/// without the install this passes reading nothing, which is what CI does.
+/// Run it with `--release` and `--nocapture` for the figures. The install
+/// is only read; the cache is a scratch directory.
+#[cfg(test)]
+mod install_tests {
+    use std::path::PathBuf;
+    use std::time::Instant;
+
+    use super::*;
+    use crate::cache::Cache;
+    use crate::crs::tests::{geodesic_azimuth, turn};
+    use crate::decode::install::terrains;
+    use crate::query::route::install_tests::percentile;
+    use crate::roads::tests::Unit;
+    use crate::scratch::Scratch;
+    use crate::threads::cpu_seconds;
+    use crate::types::Point;
+
+    /// Wall and CPU milliseconds since `since`.
+    fn spent(since: (Instant, Option<f64>)) -> (f64, f64) {
+        let cpu = match (since.1, cpu_seconds()) {
+            (Some(a), Some(b)) => (b - a) * 1000.0,
+            _ => f64::NAN,
+        };
+        (since.0.elapsed().as_secs_f64() * 1000.0, cpu)
+    }
+
+    fn now() -> (Instant, Option<f64>) {
+        (Instant::now(), cpu_seconds())
+    }
+
+    #[test]
+    fn nearest_towns_are_every_towns_first_on_every_installed_terrain() {
+        let Some(root) = std::env::var_os("DCSTERRAIN_INSTALL").map(PathBuf::from) else {
+            eprintln!("DCSTERRAIN_INSTALL is not set; skipped");
+            return;
+        };
+        // Five threads, so the runs beside this one keep their share.
+        crate::threads::init(Some(5));
+        let n: usize = std::env::var("DCSTERRAIN_POINTS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(3000);
+        println!(
+            "| terrain | build | towns | on mesh | in water | tables + roads wall / CPU ms | cold wall / CPU ms | warm wall / CPU ms | warm µs per point | town scan µs per point | town km p50 / max | convergence max ° | true bearing off geodesic, max ° |"
+        );
+        println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+        let scratch = Scratch::new();
+        let cache = Cache::new(&scratch.0);
+        let mut u = Unit(0x2545_f491_4f6c_dd1d);
+        for listed in terrains(&root).unwrap() {
+            let Some(id) = listed.id else { continue };
+            let t = match Terrain::open(&root, &id, &cache, true) {
+                Ok(t) => t,
+                Err(e) => {
+                    println!("| {id} | refused: {} |", e.0);
+                    continue;
+                }
+            };
+            let src = t.source();
+            let g = src.grid();
+            let c = f64::from(g.cell_size);
+            let pts: Vec<Point> = (0..n)
+                .map(|_| Point {
+                    x: g.origin_x + u.next() * f64::from(g.height) * c,
+                    z: g.origin_z + u.next() * f64::from(g.width) * c,
+                })
+                .collect();
+            let clock = now();
+            let tables = src.tables().unwrap();
+            src.road_graph().unwrap();
+            let prime = spent(clock);
+            let q = PointInfoRequest {
+                points: pts.clone(),
+                geojson: false,
+            };
+            let clock = now();
+            let cold = point_info(&t, q.clone()).unwrap();
+            let cold_t = spent(clock);
+            let clock = now();
+            let warm = point_info(&t, q).unwrap();
+            let warm_t = spent(clock);
+            assert_eq!(
+                cold.points, warm.points,
+                "{id}: the answer is the same twice"
+            );
+
+            let clock = Instant::now();
+            for p in &pts {
+                std::hint::black_box(towns(tables, (p.x, p.z), 1));
+            }
+            let scan_us = clock.elapsed().as_secs_f64() * 1e6 / n as f64;
+
+            let tm = tables.crs.tmerc();
+            let (mut dist, mut convergence, mut off) = (vec![], 0.0f64, 0.0f64);
+            let (mut on_mesh, mut water) = (0, 0);
+            for (info, p) in warm.points.iter().zip(&pts) {
+                on_mesh += usize::from(info.height.is_some());
+                water += usize::from(info.water.is_some_and(|w| w != WaterClass::Land));
+                // Every town measured, the first of the nearest kept.
+                let (mut best, mut best_d) = (0, f64::INFINITY);
+                for (k, town) in tables.towns.iter().enumerate() {
+                    let d = (town.x - p.x).hypot(town.z - p.z);
+                    if d < best_d {
+                        (best, best_d) = (k, d);
+                    }
+                }
+                let want = &tables.towns[best];
+                let fix = info.town.as_ref().expect("every terrain lists towns");
+                assert_eq!(
+                    (fix.x, fix.z, fix.distance),
+                    (want.x, want.z, best_d),
+                    "{id}: {p:?}"
+                );
+                let grid = (p.z - want.z).atan2(p.x - want.x).to_degrees();
+                assert!(turn(fix.bearing_grid_deg, grid) < 1e-9, "{id}: {p:?}");
+                dist.push(best_d / 1000.0);
+                if best_d > 1.0 {
+                    let (lat1, lon1) = tm.to_latlon(want.x, want.z);
+                    let (lat2, lon2) = tm.to_latlon(p.x, p.z);
+                    let az = geodesic_azimuth(lat1, lon1, lat2, lon2);
+                    let e = turn(fix.bearing_true_deg, az);
+                    let bound = if best_d <= 100e3 { 1e-5 } else { 2.5e-4 };
+                    if best_d <= 500e3 {
+                        assert!(e < bound, "{id}: {p:?} {e}° at {best_d} m");
+                    }
+                    off = off.max(e);
+                    convergence = convergence.max(turn(fix.bearing_grid_deg, fix.bearing_true_deg));
+                }
+            }
+            println!(
+                "| {id} | {} | {} | {on_mesh} of {n} | {water} | {:.0} / {:.0} | {:.0} / {:.0} | {:.0} / {:.0} | {:.0} | {scan_us:.1} | {:.1} / {:.1} | {convergence:.2} | {off:.1e} |",
+                t.provenance().dcs_build,
+                tables.towns.len(),
+                prime.0,
+                prime.1,
+                cold_t.0,
+                cold_t.1,
+                warm_t.0,
+                warm_t.1,
+                warm_t.0 * 1000.0 / n as f64,
+                percentile(&dist, 0.5),
+                percentile(&dist, 1.0),
+            );
+        }
     }
 }

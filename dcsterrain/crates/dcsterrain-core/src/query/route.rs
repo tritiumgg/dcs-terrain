@@ -1341,7 +1341,7 @@ mod tests {
 /// `--release` and `--nocapture` for the figures. The install is only read;
 /// the cache is a scratch directory, so each terrain's road graph is built.
 #[cfg(test)]
-mod install_tests {
+pub(crate) mod install_tests {
     use std::path::PathBuf;
     use std::time::Instant;
 
@@ -1351,7 +1351,7 @@ mod install_tests {
     use crate::roads::tests::Unit;
     use crate::scratch::Scratch;
 
-    fn percentile(v: &[f64], p: f64) -> f64 {
+    pub(crate) fn percentile(v: &[f64], p: f64) -> f64 {
         if v.is_empty() {
             return f64::NAN;
         }
