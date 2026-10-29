@@ -1,7 +1,6 @@
 //! The extract's JSON and JSON Lines tables: each must parse and carry its
 //! keys. A key whose value is null is present; only an absent one fails,
-//! because without the hook a run writes null for the fields only a running
-//! DCS knows.
+//! because a run writes null for the fields it could not read.
 
 use std::fs;
 use std::io::{self, BufRead, BufReader};
@@ -46,16 +45,12 @@ const TABLES: [(&str, Shape, &[&str]); 13] = [
         &[
             "id",
             "name_id",
-            "code",
             "display_name",
             "names",
             "x",
             "z",
             "lat",
             "lon",
-            "civilian",
-            "abandoned",
-            "class",
             "runway_names",
             "beacon_ids",
             "radio_ids",
@@ -315,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn a_null_hook_field_is_present() {
+    fn a_null_field_is_present() {
         let s = fixture_extract();
         let path = s.0.join("config.json");
         let mut c: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();

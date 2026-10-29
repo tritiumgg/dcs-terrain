@@ -1,27 +1,15 @@
 //! The synthetic terrain: its reference constants, the closed form they
 //! define, and the `Source` that answers from it in memory.
 //!
-//! The constants' twin is `extractor/test/support/synth_constants.lua`, which holds the
-//! same names with the same values. The test at the foot of this file parses
-//! that one and fails when the two sets differ, so neither can be edited
-//! alone.
-//!
 //! The synthetic theatre is the thing almost every test is stated against: a
 //! closed-form terrain with no DCS in the loop. This file holds only the
-//! numbers that define it, never the functions that evaluate them, because two
-//! languages have to agree on the numbers and only one of them evaluates
-//! them. The closed form is beside them, in `synth/`.
+//! numbers that define it, never the functions that evaluate them; anything
+//! derivable (grid extents, feature positions in absolute metres, tile
+//! counts) is computed by the closed form, beside them in `synth/`.
 //!
 //! Positions are offsets from the grid origin, in metres: `_NORTH_M` grows
 //! with DCS x, `_EAST_M` grows with DCS z. Nothing here is absolute, so
 //! raising `DEFAULT_SIZE_KM` adds land to the north-east and moves no feature.
-//!
-//! Format, so the cross-language test can parse a line:
-//!
-//! * one `pub const NAME: T = <literal>;` per line, nothing else on it
-//! * no trailing comments
-//! * primitives only; anything derivable (grid extents, feature positions in
-//!   absolute metres, tile counts) is computed by the closed form
 
 mod memory;
 mod tables;
@@ -61,20 +49,6 @@ pub const SURFACE_RUNWAY: u8 = 5;
 pub const COUNT_NODATA: u16 = 65535;
 pub const COUNT_MAX: u16 = 65534;
 
-// The fill triple, which is Caucasus's: what the engine returns outside the
-// terrain. A cell matching all three unrounded is written nodata. Only the
-// hook's sweeps test for it; the v2 extract has no fill, because a cell no
-// mesh triangle covers is nodata by construction.
-//
-// The height is worth staring at. It rounds to 5, and so does real 5 m land,
-// which is why the test is on the unrounded returns. The synthetic theatre
-// contains that collision on purpose: its plane passes through exactly 5 m,
-// and those cells are valid land carrying the same encoded height as fill.
-
-pub const FILL_HEIGHT_M: f64 = 5.000005;
-pub const FILL_WATER: u8 = 0;
-pub const FILL_SEABED_M: f64 = 0.0;
-
 // Theatre identity, as the manifest records it. The data version of a theatre
 // is the DCS build, so the file list is a record and not a version: each
 // file's path, the class name and format version its container header names,
@@ -84,7 +58,6 @@ pub const FILL_SEABED_M: f64 = 0.0;
 // file or the asset file has no header, so no class, version or payload.
 
 pub const THEATRE: &str = "Synth";
-pub const EXTRACTOR_VERSION: &str = "0.1.0";
 pub const DCS_BUILD: &str = "0.0.0.0";
 pub const DCS_BUILD_TIMESTAMP: &str = "00000000-000000";
 
@@ -121,7 +94,7 @@ pub const FILE_NODES_SIZE: u64 = 1024;
 
 // Grid. The authored rectangle is inset a quarter cell from the grid on every
 // side, so snapping it outward to a multiple of CELL_SIZE_M reproduces the
-// grid exactly, and an extractor that snaps the wrong way is off by a cell in
+// grid exactly, and a reader that snaps the wrong way is off by a cell in
 // every direction. The declared bounds rectangle is the authored one grown by
 // BOUNDS_MARGIN_KM, which is the shape every real theatre has: bounds larger
 // than the terrain.
@@ -228,15 +201,12 @@ pub const RUNWAY_NORTH_M: f64 = 60025.0;
 pub const RUNWAY_EAST_M: f64 = 20000.0;
 pub const RUNWAY_LENGTH_M: f64 = 2500.0;
 pub const RUNWAY_WIDTH_M: f64 = 50.0;
-// Spelled out rather than taken from `std::f64::consts`, because the Lua twin
-// has to carry the same digits and the cross-language test compares literals.
-#[allow(clippy::approx_constant)]
-pub const RUNWAY_COURSE_RAD: f64 = 1.5707963267948966;
+pub const RUNWAY_COURSE_RAD: f64 = std::f64::consts::FRAC_PI_2;
 
 // The only randomness in the theatre: where the town's buildings sit inside
 // their spread. Terrain, roads and tables are closed-form and ignore the seed.
 // The generator is Park and Miller's minimal standard, whose products stay
-// under 2^53 and so are exact in a Lua 5.1 double.
+// under 2^53 and so are exact in a double.
 
 pub const PRNG_MULTIPLIER: u32 = 16807;
 pub const PRNG_MODULUS: u32 = 2147483647;
@@ -306,7 +276,6 @@ pub const SCENERY_NOBOX_SPACING_M: f64 = 100.0;
 
 pub const AIRDROME_ID: u32 = 1;
 pub const AIRDROME_NAME_ID: &str = "SYNTH";
-pub const AIRDROME_CODE: &str = "XSYN";
 pub const AIRDROME_DISPLAY_NAME: &str = "Synth Field";
 pub const RUNWAY_EDGE1_NAME: &str = "09";
 pub const RUNWAY_EDGE2_NAME: &str = "27";
@@ -393,7 +362,7 @@ pub const BEACH_EAST_M: f64 = 24000.0;
 
 // Projection. Caucasus's parameters, because a fit must reproduce the published
 // Caucasus row within a metre. The samples are the beacons', one per beacon;
-// with fewer than three the extractor takes the parameters from its table
+// with fewer than three the tool takes the parameters from its table
 // rather than fitting them, so the synthetic crs says so.
 
 pub const CRS_LON_0_DEG: i32 = 33;
@@ -416,115 +385,3 @@ pub const BULLSEYE_BLUE_EAST_M: f64 = 60000.0;
 pub const BULLSEYE_RED_NORTH_M: f64 = 60000.0;
 pub const BULLSEYE_RED_EAST_M: f64 = 20000.0;
 pub const CAMERA_ALT_KM: f64 = 5.0;
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-    use std::path::PathBuf;
-
-    /// A constant's value, compared across the two languages by what it means
-    /// rather than by how it is spelled: `50` and `50.0` are the same number,
-    /// and only strings are compared verbatim.
-    #[derive(Debug, PartialEq)]
-    enum Value {
-        Num(f64),
-        Str(String),
-        Bool(bool),
-    }
-
-    /// Parses `<literal>` from either language. Both files are written to a
-    /// format that keeps this honest: one constant per line, no trailing
-    /// comment, primitives only.
-    fn parse_value(raw: &str) -> Value {
-        let raw = raw.trim();
-        if let Some(inner) = raw.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
-            assert!(
-                !inner.contains('\\') && !inner.contains('"'),
-                "escapes are not handled; keep constant strings plain: {raw}"
-            );
-            return Value::Str(inner.to_string());
-        }
-        match raw {
-            "true" => Value::Bool(true),
-            "false" => Value::Bool(false),
-            _ => Value::Num(
-                raw.parse::<f64>()
-                    .unwrap_or_else(|_| panic!("not a primitive literal: {raw}")),
-            ),
-        }
-    }
-
-    fn rust_constants() -> BTreeMap<String, Value> {
-        // Reading this file's own source keeps the parser and the constants in
-        // one place; a constant added below is picked up with no second list
-        // to maintain.
-        let src = include_str!("synth.rs");
-        // A Windows checkout carries CRLF, and the join below matches on the
-        // newline, so normalise first. Nothing else here needs it: lines()
-        // drops the carriage return by itself.
-        let src = src.replace("\r\n", "\n");
-        let mut out = BTreeMap::new();
-        // `pub const NAME: T = value;` may wrap after the `=` when rustfmt
-        // decides the line is too long, so joining continuations comes first.
-        let joined = src.replace("=\n", "= ");
-        for line in joined.lines() {
-            let line = line.trim();
-            let Some(rest) = line.strip_prefix("pub const ") else {
-                continue;
-            };
-            let (name, rest) = rest.split_once(':').expect("const without a type");
-            let (_, value) = rest.split_once('=').expect("const without a value");
-            let value = value.trim().strip_suffix(';').expect("const without a ;");
-            out.insert(name.trim().to_string(), parse_value(value));
-        }
-        out
-    }
-
-    fn lua_constants() -> BTreeMap<String, Value> {
-        let path: PathBuf = [
-            env!("CARGO_MANIFEST_DIR"),
-            "..",
-            "..",
-            "..",
-            "extractor",
-            "test",
-            "support",
-            "synth_constants.lua",
-        ]
-        .iter()
-        .collect();
-        let src = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-        let mut out = BTreeMap::new();
-        for line in src.lines() {
-            let Some(rest) = line.strip_prefix("M.") else {
-                continue;
-            };
-            let (name, value) = rest.split_once(" = ").expect("assignment without a value");
-            out.insert(name.trim().to_string(), parse_value(value));
-        }
-        out
-    }
-
-    #[test]
-    fn the_two_constant_files_agree() {
-        let rust = rust_constants();
-        let lua = lua_constants();
-
-        assert!(rust.len() > 100, "the Rust parser found {}", rust.len());
-
-        let missing_in_lua: Vec<_> = rust.keys().filter(|k| !lua.contains_key(*k)).collect();
-        let missing_in_rust: Vec<_> = lua.keys().filter(|k| !rust.contains_key(*k)).collect();
-        assert!(
-            missing_in_lua.is_empty() && missing_in_rust.is_empty(),
-            "absent from the Lua file: {missing_in_lua:?}; absent from this one: {missing_in_rust:?}"
-        );
-
-        let differing: Vec<_> = rust
-            .iter()
-            .filter(|(name, value)| lua[*name] != **value)
-            .map(|(name, value)| format!("{name}: rust {value:?}, lua {:?}", lua[name]))
-            .collect();
-        assert!(differing.is_empty(), "values differ: {differing:?}");
-    }
-}

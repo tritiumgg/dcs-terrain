@@ -60,9 +60,9 @@ pub fn read_build(install: &Path) -> Result<Build, Refusal> {
 /// depth, which is wrong for Lua in general and right for these files, whose
 /// strings are names and paths.
 ///
-/// Ties go as the hook's reader broke them, so the two agree on any file: by
-/// form, in the order `['id'] = "…"`, `["id"] = "…"`, `['id'] = '…'`,
-/// `["id"] = '…'`, `id = "…"`, `id = '…'`, then the first in the file.
+/// Ties go by form, in the order `['id'] = "…"`, `["id"] = "…"`,
+/// `['id'] = '…'`, `["id"] = '…'`, `id = "…"`, `id = '…'`, then the first in
+/// the file.
 pub fn entry_id(text: &str) -> Option<String> {
     let b = text.as_bytes();
     // (depth, form, id): the least wins, and the first of equals.
@@ -734,7 +734,7 @@ mod tests {
     }
 
     #[test]
-    fn ties_break_by_form_then_position_as_the_hook_breaks_them() {
+    fn ties_break_by_form_then_position() {
         assert_eq!(
             entry_id("t = { [\"id\"] = \"A\"; ['id'] = \"B\" }").as_deref(),
             Some("B")

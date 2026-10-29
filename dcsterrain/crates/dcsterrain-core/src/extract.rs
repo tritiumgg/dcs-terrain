@@ -99,9 +99,8 @@ pub fn layer(name: &str) -> Option<Layer> {
 
 /// Every key the manifest carries; a null value is allowed, an absent key is
 /// not.
-const MANIFEST_KEYS: [&str; 17] = [
+const MANIFEST_KEYS: [&str; 15] = [
     "format_version",
-    "extractor_version",
     "theatre",
     "dcs_build",
     "dcs_build_timestamp",
@@ -114,7 +113,6 @@ const MANIFEST_KEYS: [&str; 17] = [
     "layers",
     "tiles",
     "tables",
-    "hook",
     "timing_ms",
     "notes",
 ];
@@ -125,7 +123,6 @@ const FILE_KEYS: [&str; 6] = ["role", "path", "class", "version", "size", "paylo
 #[derive(Debug, Clone, Deserialize)]
 pub struct Manifest {
     pub format_version: u32,
-    pub extractor_version: String,
     pub theatre: String,
     pub dcs_build: String,
     pub dcs_build_timestamp: String,
@@ -138,7 +135,6 @@ pub struct Manifest {
     pub layers: BTreeMap<String, LayerEntry>,
     pub tiles: Vec<TileEntry>,
     pub tables: BTreeMap<String, String>,
-    pub hook: Option<Value>,
     pub timing_ms: BTreeMap<String, Value>,
     pub notes: Vec<String>,
 }
@@ -591,7 +587,7 @@ mod tests {
         .unwrap();
         let f = Extract::open(&s.0).unwrap_err();
         assert!(
-            f.message.contains("grid") && f.message.contains("hook"),
+            f.message.contains("grid") && f.message.contains("timing_ms"),
             "{f}"
         );
         assert!(!f.message.contains("theatre"), "{f}");

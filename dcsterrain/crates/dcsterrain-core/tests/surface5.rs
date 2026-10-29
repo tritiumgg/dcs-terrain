@@ -347,7 +347,7 @@ fn each_cover_bit_matches_its_material_subset() {
 }
 
 /// The live extract to compare against, from `DCSTERRAIN_EXTRACT`: the
-/// whole-map Caucasus extract the hook wrote, format 1.
+/// whole-map Caucasus extract, format 1.
 fn live_extract() -> Option<PathBuf> {
     match std::env::var_os("DCSTERRAIN_EXTRACT") {
         Some(p) => Some(PathBuf::from(p)),

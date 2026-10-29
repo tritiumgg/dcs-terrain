@@ -95,7 +95,6 @@ pub fn write(dir: &Path) {
         .collect();
     let manifest = json!({
         "format_version": super::FORMAT_VERSION,
-        "extractor_version": "0",
         "theatre": "Fixture",
         "dcs_build": "0.0.0.0",
         "dcs_build_timestamp": "00000000-000000",
@@ -114,7 +113,6 @@ pub fn write(dir: &Path) {
         "layers": layers,
         "tiles": tiles,
         "tables": tables,
-        "hook": null,
         "timing_ms": {},
         "notes": [],
     });

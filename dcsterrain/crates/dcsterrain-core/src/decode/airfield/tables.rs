@@ -1,7 +1,7 @@
 //! The extract's `runways.json` and `stands.json`, from every airfield's
 //! decoded `.rn4` and `.rn5` and the map's stand classes.
 //!
-//! An airdrome's numeric id comes from the map's Lua files or the hook, not
+//! An airdrome's numeric id comes from the map's Lua files, not
 //! from these, so every row is made with it null for the run to fill in.
 
 use std::collections::BTreeMap;
