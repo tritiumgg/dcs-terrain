@@ -17,19 +17,17 @@ use crate::source::Layer;
 use crate::types::{Issue, Polygon, ViewshedRequest, ViewshedResponse};
 
 /// The most cells the mask, or the window of heights under it, may hold:
-/// a radius of about 50 km at 50 m, a few hundred milliseconds of sweep.
+/// a radius of about 50 km at 50 m, under a second of sweep.
 const CELLS_MAX: u64 = 4 << 20;
 
-fn invalid(code: &str, message: &str, path: &str) -> Issue {
-    Issue::new(code, message, path)
-}
-
-fn too_large(cells: u64) -> Vec<Issue> {
+/// A mask of `cells`, or a window of heights of `cells` under it, over the
+/// most one may hold. Only a coarser mask makes a smaller mask; the window
+/// is of terrain cells whatever the mask's.
+fn too_large(what: &str, cells: u64, hint: &str) -> Vec<Issue> {
     vec![Issue::new(
         "too_large",
         &format!(
-            "this viewshed reads {cells} cells, over the {CELLS_MAX} one may; shrink the \
-             radius or coarsen the resolution"
+            "this viewshed's {what} holds {cells} cells, over the {CELLS_MAX} one may; {hint}"
         ),
         "radius",
     )]
@@ -62,28 +60,28 @@ pub fn viewshed(terrain: &Terrain, q: ViewshedRequest) -> Result<ViewshedRespons
     let res = q.resolution.unwrap_or(cell);
     let mut issues = Vec::new();
     if ![o.x, o.z, o.alt_agl].iter().all(|v| v.is_finite()) {
-        issues.push(invalid(
+        issues.push(Issue::new(
             "invalid_point",
             "every coordinate must be finite",
             "observer",
         ));
     }
     if !(q.radius.is_finite() && q.radius > 0.0) {
-        issues.push(invalid(
+        issues.push(Issue::new(
             "invalid_request",
             "the radius must be positive",
             "radius",
         ));
     }
     if !q.target_alt_agl.is_finite() {
-        issues.push(invalid(
+        issues.push(Issue::new(
             "invalid_request",
             "the target height must be finite",
             "target_alt_agl",
         ));
     }
     if !(res.is_finite() && res >= cell) {
-        issues.push(invalid(
+        issues.push(Issue::new(
             "invalid_request",
             &format!("the resolution must be at least the cell size, {cell} m"),
             "resolution",
@@ -98,7 +96,11 @@ pub fn viewshed(terrain: &Terrain, q: ViewshedRequest) -> Result<ViewshedRespons
     let n = (q.radius / res).ceil();
     let side = 2.0 * n + 1.0;
     if side * side > CELLS_MAX as f64 {
-        return Err(too_large((side * side) as u64));
+        return Err(too_large(
+            "mask",
+            (side * side) as u64,
+            "shrink the radius or coarsen the resolution",
+        ));
     }
     let (n, side) = (n as i64, side as i64);
     let row0 = ((o.x - g.origin_x) / res).floor() as i64 - n;
@@ -121,7 +123,11 @@ pub fn viewshed(terrain: &Terrain, q: ViewshedRequest) -> Result<ViewshedRespons
     );
     let (rows, cols) = ((r_hi - r_lo + 1) as u64, (c_hi - c_lo + 1) as u64);
     if rows * cols > CELLS_MAX {
-        return Err(too_large(rows * cols));
+        return Err(too_large(
+            "window of heights",
+            rows * cols,
+            "shrink the radius",
+        ));
     }
 
     let Some(ground) = src.point(o.x, o.z).map_err(refused)? else {
