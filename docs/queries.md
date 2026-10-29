@@ -149,17 +149,33 @@ Line-of-sight criteria run last.
 Request: `a: Point3, b: Point3`. Response: `{visible, blocking: Point3 | null,
 clearance_m}`, where clearance is the least vertical gap between the sightline
 and the terrain (negative when blocked) and `blocking` carries an absolute
-`alt`. The height is sampled every half cell along the segment, bilinear, on a
-flat world. DCS's own sightline ignores buildings and trees, and so does this.
+`alt`. The ends stand on the mesh triangle's own height; between them the
+height is sampled every half cell along the segment, bilinear, on a flat
+world, and a step no mesh covers does not block. Ends too close for a step
+between them report the lower end's height above its ground as the
+clearance. An end off the mesh is the issue `off_terrain`. DCS's own
+sightline ignores buildings and trees, and so does this.
 
 ### `viewshed`
 
 Request: `observer`, `radius`, `target_alt_agl`, `resolution` (default the
-cell size). Response: `{origin_x, origin_z, cell, width, height, bits:
-base64}`, `visible_fraction`, and `rings: Vec<Polygon>` when `as_polygons` is
-true (marching squares, simplified to half a cell). Radials are spaced to give
-one per cell on the outer ring. `geojson` traces the same polygons whether or
-not `as_polygons` is set.
+cell size, never finer). Response: `{origin_x, origin_z, cell, width, height,
+bits: base64}`, `visible_fraction`, and `rings: Vec<Polygon>` when
+`as_polygons` is true. The mask is aligned to multiples of its cell from the
+grid's origin, so at the cell size its cells are the grid's; `bits` is row
+major, rows running north, most significant bit first. A cell is set when its
+center lies within `radius` and a target `target_alt_agl` above its raster
+ground is seen; `visible_fraction` is the share of the cells within `radius`
+that have ground.
+
+Radials are spaced to give one per mask cell on the outer ring, each stepped
+every half cell and keeping the steepest angle to the ground so far. A cell
+is judged against the radial nearest it in bearing, by the test `visible`
+makes, so the share matches a sightline to every cell. The rings run along
+cell edges, holes included and cells meeting only at a corner apart, then are
+simplified to half a mask cell; `geojson` draws the same polygons whether or
+not `as_polygons` is set. A mask, or the window of heights under it, of more
+than 4 Mi cells is the issue `too_large`: about 50 km at 50 m.
 
 ### `coverage`
 

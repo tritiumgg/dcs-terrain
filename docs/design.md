@@ -554,9 +554,9 @@ correctness rule: a miss is a decision about the target.
 | open / `describe` | open 2.6 / 4.2 / 5.4 ms (Caucasus / GermanyCW / Afghanistan) and 4.9 ms on Syria from the cache, OS cache warm, on 2.9.30.28738; on GermanyCW finding the files and reading the surface header take 2 ms, and reading and decoding `mesh.toc` 1 ms | 20 ms |
 | `sample` 10 k lattice | 10–12 ms; over the block with the most runway triangles, OS cache warm, blocks held: 4.3 / 13.0 / 11.9 ms (Caucasus / GermanyCW / Afghanistan) against 2.8 / 5.1 / 3.0 ms over a block of like size with no runway, the gap the airfield's denser ground, its runway test 0.2–1.1 ms | 100 ms |
 | `sample` 10 k scattered over a whole terrain | 8.5 / 25.9 / 2.7 s at the 32 MiB block budget, 0.7 / 13.5 / 1.2 s sorted by tile Z-order, 0.7 / 2.9 / 1.3 s with each block prepared once (Caucasus / GermanyCW / Afghanistan); block by block, a block holding 32 points or fewer tested triangle by triangle rather than binned, 0.33 / 1.4–1.6 s (Caucasus / GermanyCW, OS cache warm, 2.9.30.28738), and 10 k points over 2 km on MarianaIslands 74 ms | 3 s on GermanyCW |
-| `visible` 10–40 km | 5.4–12 ms cold, 0.01–0.05 ms warm | 1 ms within a batch, 20 ms cold |
-| one `query` call end to end, OS cache warm | not measured | 50 ms for `describe`, `sample`, `visible` |
-| `viewshed`, `radar_floor` 20 km | 89–111 ms | 300 ms |
+| `visible` 10–40 km | 5.4–12 ms cold, 0.01–0.05 ms warm; 12–17 ms over 8–38 km on Caucasus in a fresh process, OS cache warm, on 2.9.30.28738 | 1 ms within a batch, 20 ms cold |
+| one `query` call end to end, OS cache warm | 64–79 ms for `visible` on Caucasus, 2.9.30.28738 | 50 ms for `describe`, `sample`, `visible` |
+| `viewshed`, `radar_floor` 20 km | 89–111 ms; `viewshed` 120 ms at 20 km and 644 ms at 50 km on Caucasus, OS cache warm, on 2.9.30.28738 | 300 ms |
 | `exposure`, 10 sites of 20 km | ~1 s estimated | 3 s |
 | `find_sites` 20 × 20 km, geometric | 15–24 ms | 500 ms |
 | `find_sites` with one LOS criterion, 36 observers | not measured | 10 s |

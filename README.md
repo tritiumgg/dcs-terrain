@@ -16,9 +16,10 @@ your user cache directory.
 
 > **Not usable yet.** The project was redesigned to read the install directly,
 > and the query engine is being built. `list-terrains`, `check`, `cache`, `schema`
-> and the `query` operations `describe`, `sample`, `geo`, `nearest` and
-> `scenery_in` work today; every other operation is planned, kept here so the
-> shape is visible. Progress is in [docs/STATE.md](docs/STATE.md).
+> and the `query` operations `describe`, `sample`, `geo`, `nearest`,
+> `scenery_in`, `visible` and `viewshed` work today; every other operation is
+> planned, kept here so the shape is visible. Progress is in
+> [docs/STATE.md](docs/STATE.md).
 
 ## Requirements
 
@@ -69,6 +70,14 @@ beacon or scenery object, or list the scenery in a region:
 
 ```bash
 dcsterrain query --terrain Caucasus sample '{"points": [{"x": -281782, "z": 647279}], "layers": ["height", "slope", "dist_road"]}'
+```
+
+Ask whether the terrain hides one point from another, or which ground around
+an observer sees a target; `"geojson": true` adds the answer as GeoJSON for any
+map program:
+
+```bash
+dcsterrain query --terrain Caucasus viewshed '{"observer": {"x": -260000, "z": 690000, "alt_agl": 10}, "radius": 20000, "target_alt_agl": 2, "geojson": true}'
 ```
 
 `dcsterrain schema` names every field, and
