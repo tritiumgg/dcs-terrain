@@ -20,6 +20,9 @@ const SHARE_RADIUS_M: f64 = 300.0;
 /// over the box around them all, about 50 km square; past it, over the box
 /// around each tile's cells.
 const ONE_BOX_CELLS: u64 = 1 << 20;
+/// The most lattice points a region's box may hold, inside the region or
+/// not: well under a second to walk.
+const LATTICE_CANDIDATES_MAX: f64 = 1e8;
 /// Up to this many cells, a region's ground layers are read as one window
 /// around its lattice; past it, at each lattice point.
 const ONE_WINDOW_CELLS: u64 = 4 << 20;
@@ -100,10 +103,24 @@ fn too_many(n: usize, max: u32) -> Vec<Issue> {
 /// minimum corner, or too many rows.
 fn lattice(area: &super::Area, step: f64, max_rows: u32) -> Result<Vec<[f64; 2]>, Vec<Issue>> {
     let [x0, z0, x1, z1] = area.bbox;
-    let (nx, nz) = (
-        ((x1 - x0) / step).floor() as u64 + 1,
-        ((z1 - z0) / step).floor() as u64 + 1,
+    let (fx, fz) = (
+        ((x1 - x0) / step).floor() + 1.0,
+        ((z1 - z0) / step).floor() + 1.0,
     );
+    // The cap counts the points inside the region, so a sparse region in a
+    // vast box would walk the whole box before reaching it.
+    if fx * fz > LATTICE_CANDIDATES_MAX {
+        return Err(vec![Issue::new(
+            "too_many_rows",
+            &format!(
+                "the region's box holds {:.0} lattice points, over the {LATTICE_CANDIDATES_MAX:.0} \
+                 a region may span; widen the step or shrink the region",
+                fx * fz
+            ),
+            "step",
+        )]);
+    }
+    let (nx, nz) = (fx as u64, fz as u64);
     let mut out = Vec::new();
     for i in 0..nx {
         let x = x0 + i as f64 * step;
@@ -139,20 +156,19 @@ fn raster_values(
     pts: &[[f64; 2]],
 ) -> Result<Vec<Option<f64>>, Vec<Issue>> {
     let g = src.grid();
-    let c = f64::from(g.cell_size);
-    let rc = |x: f64, z: f64| {
-        (
-            ((x - g.origin_x) / c).floor() as i64,
-            ((z - g.origin_z) / c).floor() as i64,
-        )
-    };
+    // Only points on the grid have a value, and only they bound the window.
     let (mut r0, mut c0, mut r1, mut c1) = (i64::MAX, i64::MAX, i64::MIN, i64::MIN);
     for &[x, z] in pts {
-        let (r, k) = rc(x, z);
-        (r0, c0, r1, c1) = (r0.min(r - 1), c0.min(k - 1), r1.max(r + 1), c1.max(k + 1));
+        if let Some((r, k)) = g.cell_at(x, z) {
+            let (r, k) = (i64::from(r), i64::from(k));
+            (r0, c0, r1, c1) = (r0.min(r - 1), c0.min(k - 1), r1.max(r + 1), c1.max(k + 1));
+        }
     }
-    let cells = (r1 - r0 + 1).max(0) as u64 * (c1 - c0 + 1).max(0) as u64;
-    if pts.is_empty() || cells > ONE_WINDOW_CELLS {
+    if r0 > r1 {
+        return Ok(vec![None; pts.len()]);
+    }
+    let cells = (r1 - r0 + 1) as u64 * (c1 - c0 + 1) as u64;
+    if cells > ONE_WINDOW_CELLS {
         return pts
             .iter()
             .map(|&[x, z]| grid::sample(src, l, x, z).map_err(refused))
@@ -533,6 +549,32 @@ mod tests {
             code(json!({"region": all, "step": 50, "layers": ["height"]})),
             "too_many_rows"
         );
+    }
+
+    #[test]
+    fn an_empty_far_or_sparse_region_answers_or_refuses_at_once() {
+        let t = synth();
+        let ask = |region: Value| {
+            answer(
+                &t,
+                "sample",
+                &json!({"region": region, "step": 50, "layers": ["height", "slope"]}),
+            )
+        };
+        // A triangle no lattice point falls in.
+        let thin = json!({"Polygon": {"points": [[0, 0], [1, 1], [0, 2]]}});
+        assert!(rows(&ask(thin).unwrap()).is_empty());
+        // Far off the grid, every value is null.
+        for at in [1e30, -1e30, 1e300] {
+            let far = json!({"Box": {"min_x": at, "min_z": at, "max_x": at, "max_z": at}});
+            let v = ask(far).unwrap();
+            assert_eq!(rows(&v)[0]["values"]["height"], Value::Null, "{at}");
+        }
+        // A sliver in a box of 1e11 lattice points is refused before walking it.
+        let sliver = json!({"Polygon": {"points": [[0, 0], [1, 1e10], [2, 0]]}});
+        let started = std::time::Instant::now();
+        assert_eq!(ask(sliver).unwrap_err()[0].code, "too_many_rows");
+        assert!(started.elapsed().as_secs_f64() < 1.0);
     }
 
     #[test]
