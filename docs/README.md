@@ -14,6 +14,7 @@ it.
 | [data/live-gate.md](data/live-gate.md) | Reading terrain files beside a running DCS: the open test, how DCS opens them, and what it keeps resident |
 | [data/sightline-exact.md](data/sightline-exact.md) | The exact sightline over the mesh against the raster walk: agreement and cost on Caucasus and GermanyCW |
 | [data/query-bench.md](data/query-bench.md) | The query benchmark before and after the performance pass: every case, cold and warm, and the cache sizes |
+| [data/criteria-prune.md](data/criteria-prune.md) | The siting criteria pruned against exhaustive evaluation on every installed terrain: tiles skipped and times |
 | [data/caucasus-scenery-catalogue.tsv](data/caucasus-scenery-catalogue.tsv) | The Caucasus scenery model census |
 
 The project was reset on 2026-10-27. The documents before it — nine frozen
