@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use super::{CELL_SIZE, Ground, Identity, Layer, Refusal, Source, TILE_SIZE};
-use crate::cache::{Cache, Entry, TerrainCache};
+use crate::cache::{Cache, Entry, Parts, TerrainCache};
 use crate::classes::Class;
 use crate::decode::install::{self, Map};
 use crate::decode::scn5::Pool;
@@ -43,6 +43,33 @@ pub(super) const BOX_PAD_M: f64 = 1.0;
 pub struct MeshToc;
 
 pub static MESH_TOC: MeshToc = MeshToc;
+
+/// The horizon tiles: a directory of one file per tile, each computed the
+/// first time a query touches it.
+pub struct HorizonTiles;
+
+pub static HORIZON: HorizonTiles = HorizonTiles;
+
+impl Entry for HorizonTiles {
+    fn name(&self) -> &str {
+        "horizon"
+    }
+
+    fn version(&self) -> u32 {
+        1
+    }
+
+    /// The heights are the mesh's alone.
+    fn roles(&self) -> &[&str] {
+        &["surface"]
+    }
+
+    fn build(&self, _: &TerrainCache, _: &[FileEntry]) -> Result<Vec<u8>, Refusal> {
+        Err(Refusal(
+            "the horizon is computed a tile at a time, as a query needs it".into(),
+        ))
+    }
+}
 
 /// A decoder's error, naming the file unless the error already does.
 fn refusal(path: &str, e: impl std::fmt::Display) -> Refusal {
@@ -213,6 +240,8 @@ pub struct Install {
     /// Read the first time a route or a road distance asks, likewise.
     roads: OnceLock<crate::roads::Graph>,
     betweenness: OnceLock<Vec<f32>>,
+    /// Opened the first time a horizon tile is asked for.
+    horizon: OnceLock<Parts>,
 }
 
 /// The sizes of the surface, road and scene files, joined by `-`.
@@ -280,6 +309,7 @@ impl Install {
             tables: OnceLock::new(),
             roads: OnceLock::new(),
             betweenness: OnceLock::new(),
+            horizon: OnceLock::new(),
         })
     }
 
@@ -434,6 +464,40 @@ impl Source for Install {
             surface: surface_of(g.tritype, g.runway),
             cover: cover_of(g.tritype),
         }))
+    }
+
+    /// Each tile from the cache, the missing ones computed together and
+    /// kept there.
+    fn horizon(&self, tiles: &[(u32, u32)]) -> Result<Vec<Vec<u8>>, Refusal> {
+        let parts = match self.horizon.get() {
+            Some(p) => p,
+            None => {
+                let p = self.cache.parts(&HORIZON)?;
+                self.horizon.get_or_init(|| p)
+            }
+        };
+        let name = |(tx, tz): (u32, u32)| format!("{tx}-{tz}");
+        let len = crate::horizon::tile_len(&self.grid);
+        let mut out = Vec::with_capacity(tiles.len());
+        let mut missing = Vec::new();
+        for (i, &t) in tiles.iter().enumerate() {
+            match parts.get(&name(t))?.filter(|p| p.len() == len) {
+                Some(p) => out.push(p),
+                None => {
+                    out.push(Vec::new());
+                    missing.push(i);
+                }
+            }
+        }
+        let want: Vec<(u32, u32)> = missing.iter().map(|&i| tiles[i]).collect();
+        for (i, p) in missing
+            .into_iter()
+            .zip(crate::horizon::compute(self, &want)?)
+        {
+            parts.put(&name(tiles[i]), &p)?;
+            out[i] = p;
+        }
+        Ok(out)
     }
 
     fn road_graph(&self) -> Result<&crate::roads::Graph, Refusal> {
@@ -599,6 +663,54 @@ mod tests {
         let p = t.point(1025.0, 2600.0).unwrap().unwrap();
         assert_eq!(p.surface, 4);
         assert!((p.height - 52.5).abs() < 1e-9, "{}", p.height);
+    }
+
+    #[test]
+    fn a_horizon_tile_is_computed_once_and_kept_across_an_update() {
+        let root = install(&file(&[square([1024, LAKE])], 1));
+        let c = Scratch::new();
+        let cache = Cache::new(&c.0);
+        let t = Install::open(&root.0, "Test", &cache).unwrap();
+        let made = t.horizon(&[(0, 0)]).unwrap();
+        assert_eq!(made, crate::horizon::compute(&t, &[(0, 0)]).unwrap());
+        // Some horizon cells see the slope; most lie off the mesh.
+        assert!(made[0].iter().any(|&b| b != crate::horizon::UNDEFINED));
+        let path = c.0.join("Test").join("horizon").join("0-0");
+        let stored = cache.stored("Test").unwrap();
+        assert!(stored.entries.iter().any(|(n, s)| n == "horizon" && *s > 0));
+
+        // What is read is what was kept: mark its last byte and open again.
+        let mut b = fs::read(&path).unwrap();
+        *b.last_mut().unwrap() ^= 1;
+        fs::write(&path, &b).unwrap();
+        let mut marked = made[0].clone();
+        *marked.last_mut().unwrap() ^= 1;
+        let t = Install::open(&root.0, "Test", &cache).unwrap();
+        assert_eq!(t.horizon(&[(0, 0)]).unwrap(), [marked.clone()]);
+
+        // An update that leaves the surface file alone re-stamps the tile.
+        put(
+            &root.0,
+            "autoupdate.cfg",
+            br#"{"version": "1.2.3.5", "timestamp": "20000102-000000"}"#,
+        );
+        let t = Install::open(&root.0, "Test", &cache).unwrap();
+        assert_eq!(t.horizon(&[(0, 0)]).unwrap(), [marked.clone()]);
+        let restamped = String::from_utf8_lossy(&fs::read(&path).unwrap()).into_owned();
+        assert!(restamped.contains("1.2.3.5"), "{restamped}");
+
+        // A changed surface file has it computed again, the mark gone.
+        let mut low = square([0, 0]);
+        low.t[1] = -50.0;
+        let f = file(&[square([0, 0]), low], 2);
+        put(&root.0, "Mods/terrains/Test/Surface/Test.surface5", &f);
+        let t = Install::open(&root.0, "Test", &cache).unwrap();
+        let again = t.horizon(&[(0, 0)]).unwrap();
+        assert_eq!(again, crate::horizon::compute(&t, &[(0, 0)]).unwrap());
+        assert_ne!(again, [marked]);
+
+        cache.clear(Some("Test"), true).unwrap();
+        assert!(!path.exists());
     }
 
     #[test]

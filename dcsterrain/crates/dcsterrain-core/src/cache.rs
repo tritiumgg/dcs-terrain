@@ -14,6 +14,7 @@ use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::decode::install::{self, Located, Map};
@@ -736,6 +737,19 @@ impl TerrainCache {
         Ok(())
     }
 
+    /// The parts of an entry kept as a directory of small files.
+    pub fn parts(&self, entry: &'static dyn Entry) -> Result<Parts, Refusal> {
+        let (files, checked) = self.checked(entry)?;
+        Ok(Parts {
+            cache: self.clone(),
+            entry,
+            files,
+            checked,
+            key: OnceLock::new(),
+            made_dir: OnceLock::new(),
+        })
+    }
+
     /// Writes `name` under a temporary name and renames it into place. When
     /// the rename fails, which Windows does while another process has the
     /// old file open, the write still succeeds if `current` says the file
@@ -747,10 +761,22 @@ impl TerrainCache {
         fill: impl FnOnce(&mut File) -> io::Result<()>,
         current: impl Fn(&Path) -> bool,
     ) -> Result<(), Refusal> {
+        self.write_to(name, &self.dir.join(name), fill, current)
+    }
+
+    /// `write`, to `dest`, which may lie in a directory under this one. The
+    /// temporary file is written in this one, labelled `label`, where a
+    /// crashed builder's is swept.
+    fn write_to(
+        &self,
+        label: &str,
+        dest: &Path,
+        fill: impl FnOnce(&mut File) -> io::Result<()>,
+        current: impl Fn(&Path) -> bool,
+    ) -> Result<(), Refusal> {
         static N: AtomicU32 = AtomicU32::new(0);
-        let dest = self.dir.join(name);
         let tmp = self.dir.join(format!(
-            ".{name}.{}.{}.tmp",
+            ".{label}.{}.{}.tmp",
             std::process::id(),
             N.fetch_add(1, Ordering::Relaxed)
         ));
@@ -762,17 +788,102 @@ impl TerrainCache {
             let _ = fs::remove_file(&tmp);
             return Err(cannot("write", &tmp, e));
         }
-        match fs::rename(&tmp, &dest) {
+        match fs::rename(&tmp, dest) {
             Ok(()) => Ok(()),
             Err(e) => {
                 let _ = fs::remove_file(&tmp);
-                if current(&dest) {
+                if current(dest) {
                     Ok(())
                 } else {
-                    Err(cannot("replace", &dest, e))
+                    Err(cannot("replace", dest, e))
                 }
             }
         }
+    }
+}
+
+/// An entry kept as a directory of small files, each made the first time
+/// something needs it and never by `index`. Each opens with the entry's
+/// header and is checked against the key alone, as an entry is; the install
+/// files are stat-ed once, when the parts are opened.
+pub struct Parts {
+    cache: TerrainCache,
+    entry: &'static dyn Entry,
+    files: Vec<Located>,
+    checked: String,
+    /// The key a part made now carries, read from the files' headers the
+    /// first time one is written or re-stamped.
+    key: OnceLock<String>,
+    made_dir: OnceLock<()>,
+}
+
+impl Parts {
+    fn path(&self, name: &str) -> PathBuf {
+        self.cache.dir.join(self.entry.name()).join(name)
+    }
+
+    fn key(&self) -> Result<&str, Refusal> {
+        if let Some(k) = self.key.get() {
+            return Ok(k);
+        }
+        let (_, k) = self.cache.built_key(&self.files)?;
+        Ok(self.key.get_or_init(|| k))
+    }
+
+    /// The payload of part `name`, `None` when it is missing or stale. One
+    /// made on another build whose files' headers still match is re-stamped
+    /// with the installed build and kept (ADR 0002).
+    pub fn get(&self, name: &str) -> Result<Option<Vec<u8>>, Refusal> {
+        let path = self.path(name);
+        let Ok(head) = read_head(&path) else {
+            return Ok(None);
+        };
+        let version = self.entry.version();
+        let restamp = judge(&head, version, &self.checked) != State::Current;
+        if restamp
+            && !(self.entry.survives_build()
+                && judge_but_build(&head, version, &self.checked)
+                && but_build(self.key()?) == but_build(&head.key))
+        {
+            return Ok(None);
+        }
+        // Either judgment checked that the payload runs to the file's end.
+        let payload = head
+            .opened(path.clone(), false)
+            .payload()
+            .map_err(|e| cannot("read", &path, e))?;
+        if restamp {
+            self.put(name, &payload)?;
+        }
+        Ok(Some(payload))
+    }
+
+    /// Writes part `name`, under a temporary name renamed into place.
+    pub fn put(&self, name: &str, payload: &[u8]) -> Result<(), Refusal> {
+        if self.made_dir.get().is_none() {
+            self.cache.make_dir()?;
+            let dir = self.cache.dir.join(self.entry.name());
+            fs::create_dir_all(&dir).map_err(|e| cannot("create", &dir, e))?;
+            let _ = self.made_dir.set(());
+        }
+        let key = self.key()?;
+        let (open, close) = framing(self.entry.version(), key, payload.len() as u64, false);
+        let label = format!("{}-{name}", self.entry.name());
+        self.cache.write_to(
+            &label,
+            &self.path(name),
+            |f| {
+                f.write_all(&open)?;
+                f.write_all(payload)?;
+                f.write_all(close)
+            },
+            |dest| self.current(dest),
+        )
+    }
+
+    fn current(&self, path: &Path) -> bool {
+        read_head(path)
+            .is_ok_and(|h| judge(&h, self.entry.version(), &self.checked) == State::Current)
     }
 }
 
