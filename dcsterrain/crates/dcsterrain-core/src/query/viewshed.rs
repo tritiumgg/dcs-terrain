@@ -18,7 +18,8 @@ use super::geojson::{Features, props};
 use super::sightline::horizon;
 use super::{Terrain, outline, refused};
 use crate::grid::{Grid, Window};
-use crate::source::{Layer, Source};
+use crate::source::{Layer, Refusal, Source};
+use crate::threads::try_map;
 use crate::types::{Issue, Observer, Polygon, ViewshedRequest, ViewshedResponse};
 
 /// The most cells the mask, or the window of heights under it, may hold:
@@ -307,11 +308,12 @@ pub(super) fn prepare_reaching(
                 [[o.x, o.z], [o.x + length * cos, o.z + length * sin]]
             })
             .collect();
-        let pieces = src.alongs(&segments).map_err(refused)?;
-        pieces
-            .into_par_iter()
-            .map(|p| horizon(&p, eye, length, step))
-            .collect()
+        // A radial at a time: over a dense mesh the pieces of every radial
+        // together run to tens of MiB, and only its horizon is kept.
+        try_map(&segments, true, |&[a, b]| {
+            Ok::<_, Refusal>(horizon(&src.along(a, b)?, eye, length, step))
+        })
+        .map_err(refused)?
     };
     Ok(Sweep {
         w,

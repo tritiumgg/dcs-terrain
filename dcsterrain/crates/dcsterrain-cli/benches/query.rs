@@ -754,6 +754,8 @@ struct Sample {
     bytes: u64,
     /// The most memory a child process held, 0 for work done in this one.
     peak: u64,
+    /// The most it had resident, mapped pages included.
+    resident: u64,
 }
 
 struct Figures {
@@ -820,6 +822,7 @@ fn timed(f: impl FnOnce() -> bool) -> (Sample, bool) {
             allocs: a1 - a0,
             bytes: b1 - b0,
             peak: 0,
+            resident: 0,
         },
         ok,
     )
@@ -987,6 +990,7 @@ impl Bench {
             allocs: 0,
             bytes: 0,
             peak: cost.peak_bytes,
+            resident: cost.peak_resident,
         };
         (s, status.success() && drained && wrote, printed)
     }
@@ -1180,6 +1184,7 @@ fn main() {
                 ) / 1024.0;
                 let peak = f.samples.iter().map(|s| s.peak).max().unwrap_or(0);
                 let peak_mib = peak as f64 / (1024.0 * 1024.0);
+                let resident = f.samples.iter().map(|s| s.resident).max().unwrap_or(0);
                 let os_name = if !install {
                     "-"
                 } else if cold {
@@ -1266,6 +1271,7 @@ fn main() {
                         "budget_mc": budget,
                         "verdict": verdict,
                         "peak_mib": peak_mib,
+                        "resident_mib": resident as f64 / (1024.0 * 1024.0),
                         "allocs": al,
                         "alloc_kib": kib,
                         "errors": f.errors,

@@ -127,7 +127,6 @@ pub fn exposure(terrain: &Terrain, q: ExposureRequest) -> Result<ExposureRespons
         return Err(issues);
     }
     let mut r = reduce(terrain, &q, &area.expect("no issues, so a region"))?;
-
     let mut heights = q.bands_agl.clone();
     heights.sort_unstable_by(f64::total_cmp);
     heights.dedup();
@@ -163,8 +162,11 @@ pub fn exposure(terrain: &Terrain, q: ExposureRequest) -> Result<ExposureRespons
     };
     let target = q.target_alt_agl;
     let seen_fraction = r.share(|v| v as f32 <= target as f32);
+    src.release();
     // Each raster goes as its text is made: at the limit they are 16 MiB
     // each, and their text 21.
+    let seen_count = base64(&r.seen);
+    r.seen = Vec::new();
     let floor_msl = floats32(&r.msl);
     r.msl = Vec::new();
     let floor_agl = floats32(&r.agl);
@@ -179,7 +181,7 @@ pub fn exposure(terrain: &Terrain, q: ExposureRequest) -> Result<ExposureRespons
             height: r.rows as u32,
             floor_agl,
             floor_msl,
-            seen_count: base64(&r.seen),
+            seen_count,
         },
         target_alt_agl: target,
         seen_fraction,

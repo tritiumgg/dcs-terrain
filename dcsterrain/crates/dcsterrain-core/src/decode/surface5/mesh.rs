@@ -711,7 +711,6 @@ impl Surface5 {
         Ok(view.map(|v| (v, lo)))
     }
 
-
     /// Reads finest block `index`, with the subsets of `materials`, viewing
     /// its arrays where they are large: for a block that will be kept.
     pub fn read_block<R: ReadAt + ?Sized>(

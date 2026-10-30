@@ -202,6 +202,9 @@ pub struct ChildCost {
     /// elsewhere, where the OS keeps no peak of private bytes. Zero on
     /// Linux where the child stayed under its parent's own peak.
     pub peak_bytes: u64,
+    /// The most pages it had resident, mapped ones included, on Windows;
+    /// zero elsewhere.
+    pub peak_resident: u64,
 }
 
 /// Waits for `child` and says what it cost. Drain its pipes first.
@@ -232,7 +235,13 @@ pub fn wait_costed(child: Child) -> io::Result<(ExitStatus, ChildCost)> {
             return Err(io::Error::last_os_error());
         }
         let peak_bytes = memory.PeakPagefileUsage as u64;
-        Ok((status, ChildCost { cycles, peak_bytes }))
+        let peak_resident = memory.PeakWorkingSetSize as u64;
+        let cost = ChildCost {
+            cycles,
+            peak_bytes,
+            peak_resident,
+        };
+        Ok((status, cost))
     }
     #[cfg(unix)]
     {
@@ -266,6 +275,7 @@ pub fn wait_costed(child: Child) -> io::Result<(ExitStatus, ChildCost)> {
         let cost = ChildCost {
             cycles: seconds_to_cycles(seconds(used.ru_utime) + seconds(used.ru_stime)),
             peak_bytes,
+            peak_resident: 0,
         };
         Ok((ExitStatus::from_raw(raw), cost))
     }

@@ -11,7 +11,9 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 use rayon::prelude::*;
 
@@ -29,7 +31,7 @@ use crate::grid::Grid;
 use crate::threads::try_map;
 
 /// The bytes of prepared blocks kept between requests.
-pub const BLOCK_BUDGET: usize = 24 << 20;
+pub const BLOCK_BUDGET: usize = 16 << 20;
 /// Up to this many points on a block not held, `points` tests its
 /// triangles directly rather than preparing it.
 const FEW_POINTS: usize = 32;
@@ -50,6 +52,10 @@ const PARALLEL_MIN: usize = 2;
 /// thread: a block a point or two falls on reads only what they need, in
 /// less time than waking the other threads takes.
 const POINTS_PARALLEL_MIN: usize = 8;
+/// A block of this many bytes or more is prepared by one thread at a time.
+const LARGE_BLOCK: u64 = 4 << 20;
+/// How long a terrain keeps blocks with none asked for.
+const IDLE: Duration = Duration::from_secs(1);
 /// Blocks under a line held at once: one for each core of a desktop.
 const ALONG_BLOCKS: usize = 16;
 
@@ -169,6 +175,11 @@ impl<K: Eq + Hash + Copy, V: Clone> Lru<K, V> {
         })
     }
 
+    fn clear(&mut self) {
+        self.items.clear();
+        self.used = 0;
+    }
+
     fn put(&mut self, k: K, v: V, size: usize) {
         self.tick += 1;
         if let Some((_, old, _)) = self.items.insert(k, (v, size, self.tick)) {
@@ -272,8 +283,12 @@ pub struct Install {
     /// the tiles: tile k's are `tile_blocks[tile_start[k]..tile_start[k + 1]]`.
     tile_start: Vec<u32>,
     tile_blocks: Vec<u32>,
-    blocks: Mutex<Lru<usize, Arc<Prepared>>>,
-    /// Held while a pool thread reads a block; see `pooled_block`.
+    blocks: Arc<Mutex<Lru<usize, Arc<Prepared>>>>,
+    /// The clock of the last block asked for, and the thread that lets go
+    /// of views when it stops.
+    used: Arc<AtomicU64>,
+    idle: OnceLock<()>,
+    /// Held while a large block is prepared.
     reading: Mutex<()>,
     tiles: Mutex<Lru<(u32, u32), Arc<Tile>>>,
     cache: TerrainCache,
@@ -352,7 +367,9 @@ impl Install {
             grid,
             tile_start,
             tile_blocks,
-            blocks: Mutex::new(Lru::new(BLOCK_BUDGET)),
+            blocks: Arc::new(Mutex::new(Lru::new(BLOCK_BUDGET))),
+            used: Arc::new(AtomicU64::new(0)),
+            idle: OnceLock::new(),
             reading: Mutex::new(()),
             tiles: Mutex::new(Lru::new(TILE_COUNT)),
             cache: terrain,
@@ -509,7 +526,17 @@ impl Install {
 
     /// Block `i`, prepared, read on first use.
     fn block(&self, i: usize) -> Result<Arc<Prepared>, Refusal> {
+        self.used.fetch_add(1, Ordering::Relaxed);
         if let Some(b) = self.blocks.lock().unwrap().get(&i) {
+            return Ok(b);
+        }
+        // One large block at a time: its hierarchy takes 16 bytes a triangle
+        // to sort, and two threads would each build the same one.
+        let _one =
+            (self.toc.blocks[i].read_len() >= LARGE_BLOCK).then(|| self.reading.lock().unwrap());
+        if _one.is_some()
+            && let Some(b) = self.blocks.lock().unwrap().get(&i)
+        {
             return Ok(b);
         }
         // Read outside the lock, so other threads go on answering from the
@@ -520,19 +547,33 @@ impl Install {
             .map_err(|e| refusal(&self.path, e))?;
         let b = Arc::new(Prepared::new(b, &self.grid));
         self.blocks.lock().unwrap().put(i, b.clone(), b.bytes());
+        self.watch_idle();
         Ok(b)
     }
 
-    /// Block `i` for a pool thread at one line among many. It holds one block
-    /// and only one thread reads at a time, so the threads together keep
-    /// close to the block budget where blocks are large: each reading its
-    /// own would hold a block's bytes and its prepared form per thread.
-    fn pooled_block(&self, i: usize) -> Result<Arc<Prepared>, Refusal> {
-        if let Some(b) = self.blocks.lock().unwrap().get(&i) {
-            return Ok(b);
-        }
-        let _one = self.reading.lock().unwrap();
-        self.block(i)
+    /// Starts the thread that drops every held block after `IDLE` with none
+    /// asked for: a view of a file stops an updater truncating it, so a
+    /// batch waiting on its caller must hold none.
+    fn watch_idle(&self) {
+        self.idle.get_or_init(|| {
+            let (blocks, used) = (Arc::downgrade(&self.blocks), self.used.clone());
+            let watch = move || {
+                let mut seen = 0;
+                loop {
+                    std::thread::sleep(IDLE);
+                    let Some(blocks) = blocks.upgrade() else {
+                        return;
+                    };
+                    let now = used.load(Ordering::Relaxed);
+                    if now == seen {
+                        blocks.lock().unwrap().clear();
+                    }
+                    seen = now;
+                }
+            };
+            // Without the thread a batch only keeps its views longer.
+            let _ = std::thread::Builder::new().spawn(watch);
+        });
     }
 
     /// The blocks under tile `(tx, tz)`, in block order; none off the grid.
@@ -618,6 +659,11 @@ impl Source for Install {
 
     fn grid(&self) -> Grid {
         self.grid
+    }
+
+    fn release(&self) {
+        self.blocks.lock().unwrap().clear();
+        self.tiles.lock().unwrap().clear();
     }
 
     fn tile(&self, layer: Layer, tx: u32, tz: u32) -> Result<Vec<i32>, Refusal> {
@@ -770,7 +816,7 @@ impl Source for Install {
         // blocks are taken one by one.
         if rayon::current_thread_index().is_some() {
             for &i in &ids {
-                self.pooled_block(i)?.along(ga, gb, &mut out);
+                self.block(i)?.along(ga, gb, &mut out);
             }
             return Ok(out);
         }
@@ -1099,6 +1145,17 @@ mod tests {
         let map = install::open(&root.0, "Test").unwrap();
         let again = cache.terrain(&root.0, &map).get(&MESH_TOC).unwrap();
         assert!(!again.built);
+    }
+
+    #[test]
+    fn a_terrain_left_idle_lets_go_of_its_blocks() {
+        let root = install(&file(&[square([0, 0])], 1));
+        let c = Scratch::new();
+        let t = Install::open(&root.0, "Test", &Cache::new(&c.0)).unwrap();
+        t.point(1100.0, 2100.0).unwrap();
+        assert_eq!(t.blocks.lock().unwrap().items.len(), 1);
+        std::thread::sleep(IDLE * 3);
+        assert_eq!(t.blocks.lock().unwrap().items.len(), 0);
     }
 
     #[test]
