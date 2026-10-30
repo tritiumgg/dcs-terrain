@@ -19,6 +19,7 @@ use super::{
     Error, GroupRecord, MAX_MODELS, Model, Pool, PoolToc, Scene, layout, locate, malformed, placed,
 };
 use crate::decode::surface5::ReadAt;
+use crate::mapped::View;
 
 /// One instancer node: its instance count, translation, and where its
 /// position, model and axis arrays start, from the data base.
@@ -31,6 +32,72 @@ pub struct Placed {
     pub axis: u64,
 }
 
+/// Bytes of a node in the table: count, translation and three offsets.
+const NODE: usize = 4 + 24 + 24;
+
+/// The instancer nodes, read a record at a time from the bytes they are in.
+#[derive(Debug, Clone)]
+pub struct Nodes {
+    view: View,
+    at: usize,
+    n: usize,
+}
+
+impl PartialEq for Nodes {
+    fn eq(&self, other: &Nodes) -> bool {
+        self.bytes() == other.bytes()
+    }
+}
+
+impl Nodes {
+    fn of(nodes: &[Placed]) -> Nodes {
+        let mut w = Writer(Vec::with_capacity(nodes.len() * NODE));
+        for n in nodes {
+            w.u32(n.n);
+            n.t.iter().for_each(|&v| w.f64(v));
+            for v in [n.p, n.model, n.axis] {
+                w.u64(v);
+            }
+        }
+        Nodes {
+            view: View::from(w.0),
+            at: 0,
+            n: nodes.len(),
+        }
+    }
+
+    fn bytes(&self) -> &[u8] {
+        &self.view.bytes()[self.at..self.at + self.n * NODE]
+    }
+
+    pub fn len(&self) -> usize {
+        self.n
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.n == 0
+    }
+
+    pub fn get(&self, k: usize) -> Option<Placed> {
+        let c: &[u8; NODE] = self
+            .bytes()
+            .get(k * NODE..(k + 1) * NODE)?
+            .try_into()
+            .ok()?;
+        Some(Placed {
+            n: le32(c, 0),
+            t: [le64(c, 4), le64(c, 12), le64(c, 20)].map(f64::from_bits),
+            p: le64(c, 28),
+            model: le64(c, 36),
+            axis: le64(c, 44),
+        })
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = Placed> + '_ {
+        (0..self.n).map(|k| self.get(k).expect("within the count"))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Index {
     pub version: u32,
@@ -39,7 +106,7 @@ pub struct Index {
     /// The scene file's length, to tell a file that changed since.
     pub len: u64,
     pub models: Vec<Model>,
-    pub nodes: Vec<Placed>,
+    pub nodes: Nodes,
     pub group: Vec<GroupRecord>,
     /// Objects, lines, trees.
     pub pools: [PoolToc; 3],
@@ -52,7 +119,7 @@ impl Scene {
     pub fn index<R: Read + Seek>(&self, r: &mut R) -> Result<Index, Error> {
         self.check_ids(r)?;
         let l = self.layout;
-        let nodes = self
+        let nodes: Vec<Placed> = self
             .nodes
             .iter()
             .map(|n| {
@@ -73,7 +140,7 @@ impl Scene {
             data_base: self.data_base,
             len: self.len,
             models: self.models.clone(),
-            nodes,
+            nodes: Nodes::of(&nodes),
             group: self.group.clone(),
             pools: self.pools,
         })
@@ -163,7 +230,7 @@ impl Index {
         let Some((k, index)) = locate(id, self.shift, |k| self.nodes.get(k).map(|n| n.n)) else {
             return Ok(None);
         };
-        let n = &self.nodes[k];
+        let n = self.nodes.get(k).expect("just located");
         let mut p = [0u8; 12];
         r.read_exact_at(&mut p, self.data_base + n.p + 12 * index)?;
         Ok(Some(placed(n.t, &p, 0)))
@@ -187,13 +254,7 @@ impl Index {
             m.bbox.iter().for_each(|&v| w.f32(v));
         }
         w.u32(self.nodes.len() as u32);
-        for n in &self.nodes {
-            w.u32(n.n);
-            n.t.iter().for_each(|&v| w.f64(v));
-            for v in [n.p, n.model, n.axis] {
-                w.u64(v);
-            }
-        }
+        w.0.extend_from_slice(self.nodes.bytes());
         w.u32(self.group.len() as u32);
         for g in &self.group {
             w.u32(g.model);
@@ -204,6 +265,14 @@ impl Index {
     }
 
     pub fn decode(b: &[u8]) -> Result<Index, Error> {
+        Index::decode_view(&View::from(b.to_vec()))
+    }
+
+    /// `decode` of bytes that stay where they are, its node table among them:
+    /// half a million nodes on the largest terrain, 27 MiB as a table of
+    /// structs.
+    pub fn decode_view(view: &View) -> Result<Index, Error> {
+        let b = view.bytes();
         let mut r = Reader { b, at: 0 };
         let version = r.u32()?;
         let shift = r.u32()?;
@@ -246,17 +315,13 @@ impl Index {
         // The fixed-size records are read from one slice each, their count
         // already checked against the bytes left: half a million nodes on the
         // largest terrain, read on every first scenery request.
-        let nodes = r
-            .records::<{ 4 + 24 + 24 }>()?
-            .iter()
-            .map(|c| Placed {
-                n: le32(c, 0),
-                t: [le64(c, 4), le64(c, 12), le64(c, 20)].map(f64::from_bits),
-                p: le64(c, 28),
-                model: le64(c, 36),
-                axis: le64(c, 44),
-            })
-            .collect::<Vec<_>>();
+        let at = r.at + 4;
+        let n = r.records::<NODE>()?.len();
+        let nodes = Nodes {
+            view: view.clone(),
+            at,
+            n,
+        };
         let group = r
             .records::<{ 4 + 32 }>()?
             .iter()
@@ -351,8 +416,8 @@ mod tests {
         for version in [8, 9] {
             let i = index(version);
             assert_eq!(i.nodes.len(), 2);
-            assert_eq!(i.nodes[0].n, 3);
-            assert_eq!(i.nodes[1].t, [-140_000.0, 0.0, 460_000.0]);
+            assert_eq!(i.nodes.get(0).unwrap().n, 3);
+            assert_eq!(i.nodes.get(1).unwrap().t, [-140_000.0, 0.0, 460_000.0]);
             assert_eq!(i.group.len(), 2);
             assert_eq!(i.models[2].name, "wire");
             assert_eq!(Index::decode(&i.encode()).unwrap(), i, "v{version}");
@@ -387,9 +452,14 @@ mod tests {
         assert_eq!(e, "puts the objects pool's arrays past the file");
         let e = edited(|i| i.pools[2].tree_nodes = 0);
         assert_eq!(e, "puts the trees pool's arrays past the file");
-        let e = edited(|i| i.nodes[1].axis = u64::MAX - 3);
+        let node = |i: &mut Index, k: usize, f: fn(&mut Placed)| {
+            let mut all: Vec<Placed> = i.nodes.iter().collect();
+            f(&mut all[k]);
+            i.nodes = Nodes::of(&all);
+        };
+        let e = edited(|i| node(i, 1, |n| n.axis = u64::MAX - 3));
         assert!(e.starts_with("puts node 1's arrays past the file"), "{e}");
-        let e = edited(|i| i.nodes[0].t[2] = f64::NAN);
+        let e = edited(|i| node(i, 0, |n| n.t[2] = f64::NAN));
         assert!(e.starts_with("puts node 0's arrays"), "{e}");
         let e = edited(|i| i.data_base = i.len + 1);
         assert!(e.starts_with("puts the data base"), "{e}");

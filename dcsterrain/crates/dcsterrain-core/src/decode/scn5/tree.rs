@@ -108,7 +108,7 @@ impl Index {
                 let index = id & ((1 << self.shift) - 1);
                 match usize::try_from(id >> self.shift)
                     .ok()
-                    .filter(|&k| k < self.nodes.len() && index < u64::from(self.nodes[k].n))
+                    .filter(|&k| self.nodes.get(k).is_some_and(|n| index < u64::from(n.n)))
                 {
                     Some(k) => by_node[k].push(index as u32),
                     None => {

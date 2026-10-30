@@ -17,6 +17,7 @@ use crate::classes::{Assignment, Catalog, Classes};
 use crate::decode::scn5::{Index, Instance, Pool, Scene};
 use crate::decode::surface5::ReadAt;
 use crate::extract::FileEntry;
+use crate::mapped::View;
 use crate::source::Refusal;
 
 /// Bytes read from the scene file at a time.
@@ -128,8 +129,9 @@ impl Scenery {
                 cache.map().theatre
             ))
         };
-        let bytes = opened.payload().map_err(|e| unreadable(&e))?;
-        let index = Index::decode(&bytes).map_err(|e| unreadable(&e))?;
+        let len = usize::try_from(opened.len).map_err(|e| unreadable(&e))?;
+        let view = View::of(&opened.file, opened.offset, len).map_err(|e| unreadable(&e))?;
+        let index = Index::decode_view(&view).map_err(|e| unreadable(&e))?;
         let Some(f) = cache.map().files.iter().find(|f| f.role == "scene") else {
             return Err(Refusal(format!(
                 "{} has no scene file",
