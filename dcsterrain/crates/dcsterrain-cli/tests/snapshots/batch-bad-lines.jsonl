@@ -1,0 +1,12 @@
+{"line":1,"op":"describe","result":{"cache":[],"cell_size":50.0,"counts":{"airdromes":1,"beacons":2,"nodes":2,"road_edges":13,"runways":1,"scenery_objects":42,"stands":4,"towns":3},"dcs_build":"0.0.0.0","dcs_build_timestamp":"00000000-000000","elapsed_ms":"<ms>","extent":{"max_x":40000.0,"max_z":25000.0,"min_x":-30000.0,"min_z":-45000.0},"files":[],"terrain":"synth","terrain_fingerprint":"synth-1-70-50","validation":null}}
+{"issues":[{"code":"invalid_request","message":"the line is not JSON: expected ident at line 1 column 2","path":""}],"line":4}
+{"id":1,"issues":[{"code":"unknown_operation","message":"<304 chars>","path":""}],"line":5,"op":"nope"}
+{"id":2,"issues":[{"code":"invalid_request","message":"the line is not a request: missing field `op`","path":""}],"line":6}
+{"id":3,"issues":[{"code":"invalid_request","message":"<83 chars>","path":""}],"line":7,"op":"visible"}
+{"id":4,"issues":[{"code":"invalid_request","message":"<71 chars>","path":""}],"line":8}
+{"issues":[{"code":"invalid_request","message":"<71 chars>","path":""}],"line":9}
+{"issues":[{"code":"invalid_request","message":"<67 chars>","path":""}],"line":10}
+{"id":5,"issues":[{"code":"invalid_request","message":"invalid type: string \"north\", expected f64","path":"points.0.x"}],"line":11,"op":"sample"}
+{"id":6,"issues":[{"code":"point3_no_height","message":"set one of alt or alt_agl","path":"a"}],"line":12,"op":"visible"}
+{"id":7,"issues":[{"code":"unknown_layer","message":"no layer `nope`","path":"layers.0"}],"line":13,"op":"sample"}
+{"id":["last"],"line":14,"op":"describe","result":{"cache":[],"cell_size":50.0,"counts":{"airdromes":1,"beacons":2,"nodes":2,"road_edges":13,"runways":1,"scenery_objects":42,"stands":4,"towns":3},"dcs_build":"0.0.0.0","dcs_build_timestamp":"00000000-000000","elapsed_ms":"<ms>","extent":{"max_x":40000.0,"max_z":25000.0,"min_x":-30000.0,"min_z":-45000.0},"files":[],"terrain":"synth","terrain_fingerprint":"synth-1-70-50","validation":null}}
