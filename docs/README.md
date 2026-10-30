@@ -19,6 +19,7 @@ it.
 | [data/criteria-prune.md](data/criteria-prune.md) | The siting criteria pruned against exhaustive evaluation on every installed terrain: tiles skipped and times |
 | [data/route-search.md](data/route-search.md) | A\* against Dijkstra on every installed terrain's roads: agreement, nodes settled, and what a route costs |
 | [data/find-sites.md](data/find-sites.md) | A FARP-like `find_sites` on every installed terrain: each candidate rescored alone, the spacing, a brute-force search, and times |
+| [data/replay.md](data/replay.md) | The FARP and SAM examples replayed on Caucasus against the live probe, and the same requests on every other terrain |
 | [data/airdrome-ids.md](data/airdrome-ids.md) | Airdrome ids joined by position on every installed terrain, against the shipped missions and held out against the labels |
 | [data/point-info.md](data/point-info.md) | `point_info` on every installed terrain: the nearest town against a scan of every town, bearings against the geodesic, and cost |
 | [data/airfield-info.md](data/airfield-info.md) | `airfield_info` on every installed terrain: runways against the tables, true courses against the geodesic, widths and elevations against a scan, and cost |
