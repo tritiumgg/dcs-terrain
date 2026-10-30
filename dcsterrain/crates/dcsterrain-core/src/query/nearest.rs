@@ -87,30 +87,46 @@ fn scenery(
         .fold(0.0, f64::max);
     let mut r = SCENERY_FIRST_M;
     loop {
-        let mut found = Vec::new();
+        // The best `n` so far, by distance and then the order of their ids
+        // as text: a wide box holds millions of objects, so only these are
+        // ever made into answers.
+        let mut best: Vec<(f64, String, Nearby)> = Vec::with_capacity(n + 1);
         let b = [from.0 - r, from.1 - r, from.0 + r, from.1 + r];
         src.objects_in(Pool::Objects, b, &mut |o| {
-            if want(o.class) {
-                let mut f = at(
-                    "scenery",
-                    o.id.to_string(),
-                    Some(o.model.to_string()),
-                    (o.pos[0], o.pos[2]),
-                    from,
-                );
-                f.class = Some(o.class.name().to_string());
-                found.push(f);
+            if !want(o.class) {
+                return;
             }
+            let d = (o.pos[0] - from.0).hypot(o.pos[2] - from.1);
+            if best.len() == n && d > best[n - 1].0 {
+                return;
+            }
+            let id = o.id.to_string();
+            if best.iter().any(|f| f.1 == id) {
+                return;
+            }
+            let at_rank =
+                |f: &(f64, String, Nearby)| f.0.total_cmp(&d).then_with(|| f.1.cmp(&id)).is_lt();
+            let k = best.partition_point(at_rank);
+            if k == n {
+                return;
+            }
+            let mut f = at(
+                "scenery",
+                id.clone(),
+                Some(o.model.to_string()),
+                (o.pos[0], o.pos[2]),
+                from,
+            );
+            f.class = Some(o.class.name().to_string());
+            best.insert(k, (d, id, f));
+            best.truncate(n);
         })
         .map_err(refused)?;
-        found.sort_by(|a, b| a.id.cmp(&b.id));
-        found.dedup_by(|a, b| a.id == b.id);
-        // Ties keep the order of their ids. Only objects within the
-        // half-width are surely nearer than any
-        // outside the box.
-        let sure = found.iter().filter(|f| f.distance <= r).count();
-        if sure >= n || r >= farthest {
-            return Ok(nearest_of(found, n));
+        // Only objects within the half-width are surely nearer than any
+        // outside the box, so the `n` best stand once the last is within it.
+        let sure = best.len() == n && best[n - 1].0 <= r;
+        if sure || r >= farthest {
+            return Ok(best.into_iter().map(|f| f.2).collect());
         }
         r *= 2.0;
     }
