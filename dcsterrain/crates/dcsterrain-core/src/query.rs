@@ -96,6 +96,16 @@ impl Terrain {
         Ok(Terrain::Install(Box::new(i)))
     }
 
+    /// Whether the files this terrain was opened from have changed, as a
+    /// patch changes them, from metadata alone. A terrain whose files can no
+    /// longer be read has.
+    pub fn changed(&self) -> bool {
+        match self {
+            Terrain::Synth(_) => false,
+            Terrain::Install(i) => i.map().changed(i.root()).unwrap_or(true),
+        }
+    }
+
     pub fn source(&self) -> &dyn Source {
         match self {
             Terrain::Synth(s) => s.as_ref(),
@@ -118,7 +128,7 @@ impl Terrain {
 
 type Handler = fn(&Terrain, &Value) -> Result<Value, Vec<Issue>>;
 
-/// The operations built so far, by the name `OPERATIONS` lists each under.
+/// The operations, by the name `OPERATIONS` lists each under.
 const HANDLERS: &[(&str, Handler)] = &[
     ("describe", |t, r| run(t, r, describe)),
     ("geo", |t, r| run(t, r, geo)),
@@ -150,9 +160,28 @@ fn run<Q: DeserializeOwned, A: Serialize>(
     request: &Value,
     f: fn(&Terrain, Q) -> Result<A, Vec<Issue>>,
 ) -> Result<Value, Vec<Issue>> {
-    let q = serde_json::from_value(request.clone())
-        .map_err(|e| vec![Issue::new("invalid_request", &e.to_string(), "")])?;
+    let q = serde_path_to_error::deserialize(request).map_err(|e: PathError| {
+        let path: Vec<String> = e.path().iter().filter_map(dotted).collect();
+        vec![Issue::new(
+            "invalid_request",
+            &e.inner().to_string(),
+            &path.join("."),
+        )]
+    })?;
     Ok(serde_json::to_value(f(terrain, q)?).expect("a response serializes"))
+}
+
+type PathError = serde_path_to_error::Error<serde_json::Error>;
+
+/// One step of a path into the request, as `Issue::path` spells it.
+fn dotted(step: &serde_path_to_error::Segment) -> Option<String> {
+    use serde_path_to_error::Segment::{Enum, Map, Seq, Unknown};
+    match step {
+        Seq { index } => Some(index.to_string()),
+        Map { key } => Some(key.clone()),
+        Enum { variant } => Some(variant.clone()),
+        Unknown => None,
+    }
 }
 
 /// A refusal from the terrain, as the issue an operation returns.
@@ -168,7 +197,7 @@ pub(crate) fn invalid(message: &str, path: &str) -> Vec<Issue> {
 /// Answers one request, `op` with its JSON, timing it from here.
 pub fn answer(terrain: &Terrain, op: &str, request: &Value) -> Result<Value, Vec<Issue>> {
     let started = Instant::now();
-    if !OPERATIONS.iter().any(|o| o.name == op) {
+    let Some((_, handler)) = HANDLERS.iter().find(|(name, _)| *name == op) else {
         let names: Vec<_> = OPERATIONS.iter().map(|o| o.name).collect();
         return Err(vec![Issue::new(
             "unknown_operation",
@@ -176,13 +205,6 @@ pub fn answer(terrain: &Terrain, op: &str, request: &Value) -> Result<Value, Vec
                 "no operation `{op}`; the operations are {}",
                 names.join(", ")
             ),
-            "",
-        )]);
-    }
-    let Some((_, handler)) = HANDLERS.iter().find(|(name, _)| *name == op) else {
-        return Err(vec![Issue::new(
-            "not_built",
-            &format!("`{op}` is planned and not built yet"),
             "",
         )]);
     };
@@ -209,10 +231,20 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn every_handler_is_a_listed_operation() {
-        for (name, _) in HANDLERS {
-            assert!(OPERATIONS.iter().any(|o| o.name == *name), "{name}");
+    fn every_operation_has_one_handler() {
+        assert_eq!(HANDLERS.len(), OPERATIONS.len());
+        for o in OPERATIONS {
+            let handlers = HANDLERS.iter().filter(|(name, _)| *name == o.name);
+            assert_eq!(handlers.count(), 1, "{}", o.name);
         }
+    }
+
+    #[test]
+    fn a_bad_field_names_its_path() {
+        let request = json!({"points": [{"x": 1, "z": 2}, {"x": "north", "z": 2}], "layers": []});
+        let issues = answer(&synth(), "sample", &request).unwrap_err();
+        assert_eq!(issues[0].code, "invalid_request");
+        assert_eq!(issues[0].path, "points.1.x");
     }
 
     #[test]

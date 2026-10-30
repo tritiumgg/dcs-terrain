@@ -188,6 +188,20 @@ pub struct Located {
 }
 
 impl Map {
+    /// Whether the build or any file of the map differs from when it was
+    /// read, from metadata alone: `stat` of every role and the build file.
+    pub fn changed(&self, install: &Path) -> Result<bool, Refusal> {
+        if read_build(install)? != self.build {
+            return Ok(true);
+        }
+        let by_path = |mut files: Vec<Located>| {
+            files.sort_by(|a, b| a.path.cmp(&b.path));
+            files
+        };
+        let roles: Vec<&str> = ROLES.iter().map(|(role, ..)| *role).collect();
+        Ok(by_path(self.stat(install, &roles)?) != by_path(self.files.clone()))
+    }
+
     /// The files of `roles` as the disk holds them now, read from metadata
     /// alone: a stat of each file of a role that takes one file or a named
     /// one, and one listing of the directory of a role that takes every
@@ -713,6 +727,33 @@ mod tests {
              }} -- end of theatre\n",
             id.to_uppercase()
         )
+    }
+
+    #[test]
+    fn a_map_changes_with_its_files_and_its_build() {
+        let (_s, r) = install();
+        let map = open(&r, "Synth").unwrap();
+        assert!(!map.changed(&r).unwrap());
+
+        let added = r.join("Mods/terrains/Synth/AirfieldsTaxiways/New.rn4");
+        put(&r, "Mods/terrains/Synth/AirfieldsTaxiways/New.rn4", b"x");
+        assert!(map.changed(&r).unwrap(), "a file added to a listed role");
+        fs::remove_file(added).unwrap();
+        assert!(!map.changed(&r).unwrap());
+
+        let road = "Mods/terrains/Synth/roads/Synth.rn4";
+        let bytes = fs::read(r.join(road)).unwrap();
+        put(&r, road, &[bytes.as_slice(), b"x"].concat());
+        assert!(map.changed(&r).unwrap(), "a file grown");
+        put(&r, road, &bytes);
+
+        let map = open(&r, "Synth").unwrap();
+        put(
+            &r,
+            "autoupdate.cfg",
+            br#"{"version": "9.9", "timestamp": "20000101-000000"}"#,
+        );
+        assert!(map.changed(&r).unwrap(), "another build");
     }
 
     #[test]
