@@ -42,8 +42,8 @@ case (Decided, below).
   above 3× the budget, above 3× the memory target, on a failed request, or on no cycles over
   10 ms of work, since a shorter case can read zero under the CPU clock's tick.
   They catch a large regression, not a small one: `Synth` is small, so only
-  the horizon's first touch stands within 14× of its bound and
-  `find_sites_los_36` within 19×, and `open` or `route_50km` lie thousands of
+  the horizon's first touch and `find_sites_los_36` stand within 15× of their
+  bounds, and `open` or `route_50km` lie thousands of
   times under theirs.
   On Linux the memory bound sees a child only above the bench's own peak,
   because the OS seeds a child's peak from its parent's.
@@ -121,7 +121,7 @@ clock.
 | `radar_floor_20km` | cold | 300 | 10039.7 | 827 / 74.6 | 742 / 47.9 | 780 / 59.6 | 1316 / 105 | 4499 / **569** | 4501 / **569** | 802 / 65.0 | 746 / 49.3 | 928 / 78.3 |
 | `exposure_10_sites` | cold | 3000 | 100396.8 | 7635 / 515 | 6274 / 187 | 6018 / 183 | 9822 / 519 | 14337 / 1933 | 12159 / 1432 | 6347 / 202 | 6857 / 266 | 9106 / 452 |
 | `find_sites_20km` | cold | 500 | 2091.6 | 143 / 34.2 | 329 / 51.7 | 82.9 / 14.7 | 624 / 93.9 | 320 / 49.6 | 344 / 52.6 | 130 / 27.2 | 128 / 20.8 | 472 / 70.9 |
-| `find_sites_los_36` | cold | 10000 | 334656.0 | 53082 / 911 | 152329 / 2533 | 8590 / 183 | 14409 / 267 | **381490** / 6317 | **443244** / 7332 | 46239 / 803 | 9613 / 181 | 14695 / 275 |
+| `find_sites_los_36` | cold | 10000 | 334656.0 | 70263 / 1801 | 152329 / 2533 | 8590 / 183 | 14409 / 267 | **381490** / 6317 | **443244** / 7332 | 46239 / 803 | 9613 / 181 | 14695 / 275 |
 | `find_sites_horizon_first_touch` | cold | 5000 | 167328.0 | 36223 / 618 | 19243 / 463 | 99474 / 1670 | 10036 / 378 | 18655 / 391 | 18913 / 398 | 13962 / 423 | 25585 / 544 | 24702 / 577 |
 | `route_50km` | cold | 500 | 2091.6 | 0.38 / 0.10 | 15.2 / 4.40 | 5.06 / 2.06 | 25.8 / 6.61 | 3.15 / 0.76 | 51.1 / 12.2 | 24.3 / 8.71 | 3.90 / 1.59 | 36.7 / 8.83 |
 | `point_info/fresh` | cold | 150 | 627.5 | 2.43 / 0.60 | 345 / 52.9 | 58.9 / 13.7 | **765** / 118 | 96.1 / 20.7 | 96.4 / 20.5 | 87.5 / 20.1 | 133 / 24.9 | 608 / 95.9 |
@@ -132,6 +132,11 @@ clock.
 | `cli_visible` | warm | 50 | 209.2 | 22.3 / 5.96 | 45.0 / 11.2 | 37.5 / 9.19 | 46.8 / 11.2 | 102 / 20.7 | 105 / 21.5 | 41.0 / 9.77 | 43.7 / 10.9 | 47.3 / 11.6 |
 | `index_empty_cache` | warm | 10000 | 41832.0 | 2.05 / 0.51 | 22438 / 8538 | 2822 / 1307 | **43971** / **10502** | 1772 / 449 | 1437 / 369 | 4645 / 2505 | 6308 / 3993 | 28793 / **10112** |
 | `find_sites_horizon` | cold | 500 | 2091.6 | — | 131 / 32.3 | 69.8 / 16.6 | 178 / 44.2 | 243 / 34.4 | 271 / 35.1 | 191 / 47.9 | 68.2 / 16.1 | 170 / 41.8 |
+
+`find_sites_los_36` on `Synth` is 53 082 Mc / 911 ms when it runs alone. Run
+after another parallel case in one process it holds 9 threads busy against 14,
+repeatably; this was not split further. Afghanistan and MarianaIslands do not
+move in the same order.
 
 `find_sites_horizon` has no `Synth` figure: `Synth` keeps no horizons, so each
 touch there is the first.
