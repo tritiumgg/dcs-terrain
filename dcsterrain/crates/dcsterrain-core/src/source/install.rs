@@ -273,6 +273,8 @@ pub struct Install {
     tile_start: Vec<u32>,
     tile_blocks: Vec<u32>,
     blocks: Mutex<Lru<usize, Arc<Prepared>>>,
+    /// Held while a pool thread reads a block; see `pooled_block`.
+    reading: Mutex<()>,
     tiles: Mutex<Lru<(u32, u32), Arc<Tile>>>,
     cache: TerrainCache,
     /// Opened the first time scenery is asked for, so a scene file no
@@ -351,6 +353,7 @@ impl Install {
             tile_start,
             tile_blocks,
             blocks: Mutex::new(Lru::new(BLOCK_BUDGET)),
+            reading: Mutex::new(()),
             tiles: Mutex::new(Lru::new(TILE_COUNT)),
             cache: terrain,
             scenery: OnceLock::new(),
@@ -518,6 +521,18 @@ impl Install {
         let b = Arc::new(Prepared::new(b, &self.grid));
         self.blocks.lock().unwrap().put(i, b.clone(), b.bytes());
         Ok(b)
+    }
+
+    /// Block `i` for a pool thread at one line among many. It holds one block
+    /// and only one thread reads at a time, so the threads together keep
+    /// close to the block budget where blocks are large: each reading its
+    /// own would hold a block's bytes and its prepared form per thread.
+    fn pooled_block(&self, i: usize) -> Result<Arc<Prepared>, Refusal> {
+        if let Some(b) = self.blocks.lock().unwrap().get(&i) {
+            return Ok(b);
+        }
+        let _one = self.reading.lock().unwrap();
+        self.block(i)
     }
 
     /// The blocks under tile `(tx, tz)`, in block order; none off the grid.
@@ -751,6 +766,13 @@ impl Source for Install {
         let ids = self.along_blocks(a, b);
         let g = &self.grid;
         let (ga, gb) = (grid_units(g, a[0], a[1]), grid_units(g, b[0], b[1]));
+        // On a pool thread the other threads are at other lines, so the
+        // blocks are taken one by one.
+        if rayon::current_thread_index().is_some() {
+            for &i in &ids {
+                self.pooled_block(i)?.along(ga, gb, &mut out);
+            }
+            return Ok(out);
         }
         // The blocks a request has not read yet are prepared together, a
         // few at a time so a long line holds few at once; the pieces then
@@ -1153,8 +1175,13 @@ mod tests {
         assert_eq!(got.len(), segs.len());
         assert!(got[0].is_empty());
         let key = |p: &Piece| (p.t[0].to_bits(), p.t[1].to_bits(), p.rank);
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .unwrap();
         for (s, g) in segs.iter().zip(&got) {
             let mut want = t.along(s[0], s[1]).unwrap();
+            assert_eq!(pool.install(|| t.along(s[0], s[1])).unwrap(), want);
             let mut g = g.clone();
             want.sort_by_key(key);
             g.sort_by_key(key);
