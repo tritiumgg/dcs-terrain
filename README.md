@@ -19,9 +19,9 @@ your user cache directory.
 > and the `query` operations `describe`, `sample`, `geo`, `nearest`,
 > `scenery_in`, `visible`, `viewshed`, `radar_floor`, `coverage`,
 > `approach_spectrum`, `unmask_profile`, `route`, `route_alternatives`,
-> `chokepoints`, `trafficability`, `score_site`, `find_sites`, `point_info`
-> and `airfield_info` work today; every other operation is planned, kept here so the shape is
-> visible. Progress is in
+> `chokepoints`, `trafficability`, `score_site`, `find_sites`, `point_info`,
+> `airfield_info` and `validate_placements` work today; every other operation
+> is planned, kept here so the shape is visible. Progress is in
 > [docs/STATE.md](docs/STATE.md).
 
 ## Requirements
