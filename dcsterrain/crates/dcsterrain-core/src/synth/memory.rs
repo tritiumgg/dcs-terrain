@@ -178,6 +178,7 @@ impl Source for Synth {
                 id,
                 model: &models[i].name,
                 class: classes.of(i as u32).class,
+                family: classes.of(i as u32).family,
                 pos: [x, alt, z],
                 rotation,
                 bbox: models[i].bbox,

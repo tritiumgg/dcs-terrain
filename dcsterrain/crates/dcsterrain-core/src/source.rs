@@ -6,7 +6,7 @@
 
 use std::fmt;
 
-use crate::classes::Class;
+use crate::classes::{Class, Family};
 use crate::decode::scn5::Pool;
 pub use crate::decode::surface5::ground::Piece;
 use crate::grid::Grid;
@@ -183,6 +183,8 @@ pub struct Object<'a> {
     /// As the scene file spells it, lowercase.
     pub model: &'a str,
     pub class: Class,
+    /// Its settlement family; none for a model that is not a building.
+    pub family: Option<Family>,
     /// World x, altitude, z.
     pub pos: [f64; 3],
     /// Of the model's local x axis, radians from north towards east.

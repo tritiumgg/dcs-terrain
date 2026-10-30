@@ -884,6 +884,7 @@ impl Source for Install {
                 id: i.id,
                 model: &m.name,
                 class: classes.of(i.model).class,
+                family: classes.of(i.model).family,
                 pos: i.pos,
                 rotation: i.rotation,
                 bbox: m.bbox,
