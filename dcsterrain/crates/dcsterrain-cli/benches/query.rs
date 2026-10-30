@@ -622,9 +622,30 @@ fn target(case: &str) -> Option<(f64, bool)> {
     found.map(|t| (t.1, t.2))
 }
 
-/// The cycles of `ms` of one core's time, in millions.
-fn budget_mc(ms: f64) -> f64 {
-    ms * 1e-3 * cycle_hz() / 1e6
+/// The cases whose answer is computed over the pool on any source: the sweep
+/// of `viewshed` and `radar_floor`, the sites of `exposure`, the cells of a
+/// new horizon. Elsewhere only an install's reads of blocks fan out, and only
+/// for blocks not held, which leaves the operation one thread's work.
+const PARALLEL_CASES: &[&str] = &[
+    "viewshed_20km",
+    "radar_floor_20km",
+    "exposure_10_sites",
+    "find_sites_horizon_first_touch",
+];
+
+/// The cores a parallel case's budget counts (ADR 0007): a target is time a
+/// user waits, which such a case spends on every core at once.
+const PARALLEL_CORES: f64 = 8.0;
+
+/// The cycles `case` may spend in `ms`, in millions: one core's time, or
+/// [`PARALLEL_CORES`]' where the case runs on them.
+fn budget_mc(case: &str, ms: f64) -> f64 {
+    let cores = if PARALLEL_CASES.contains(&case) {
+        PARALLEL_CORES
+    } else {
+        1.0
+    };
+    ms * 1e-3 * cycle_hz() / 1e6 * cores
 }
 
 /// The terrain a bench runs over.
@@ -1103,7 +1124,7 @@ fn main() {
                 let goal = target(&case.name);
                 // Only the OS cache state a target is stated in is judged.
                 let judged = goal.filter(|g| !install || g.1 == cold);
-                let budget = judged.map(|g| budget_mc(g.0));
+                let budget = judged.map(|g| budget_mc(&case.name, g.0));
                 let verdict = match (judged, budget) {
                     (Some(g), Some(b)) if median_mc > b => format!(
                         "MISS {:.2}×{}",
@@ -1120,7 +1141,8 @@ fn main() {
                     verdict
                 };
                 if bounds {
-                    let limit = budget_mc(goal.map_or(f64::INFINITY, |g| g.0)) * BOUND_FACTOR;
+                    let ms = goal.map_or(f64::INFINITY, |g| g.0);
+                    let limit = budget_mc(&case.name, ms) * BOUND_FACTOR;
                     if median_mc > limit {
                         over.push(format!("{key}: {median_mc:.1} Mc over {limit:.1} Mc"));
                     }
