@@ -398,6 +398,78 @@
       ],
       "type": "object"
     },
+    "BatchRequest": {
+      "additionalProperties": false,
+      "description": "One line of a batch: an operation and its request.",
+      "properties": {
+        "id": {
+          "description": "Any JSON value, returned as given on the line that answers this one."
+        },
+        "op": {
+          "description": "The operation's name.",
+          "type": "string"
+        },
+        "request": {
+          "default": {},
+          "description": "The operation's request; `{}` when omitted."
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "type": "object"
+    },
+    "BatchResponse": {
+      "description": "The line answering one line of a batch, in the order they came.",
+      "oneOf": [
+        {
+          "description": "The response of the operation the line named.",
+          "properties": {
+            "result": true
+          },
+          "required": [
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "issues": {
+              "items": {
+                "$ref": "#/$defs/Issue"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "issues"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "id": {
+          "description": "The `id` the line gave."
+        },
+        "line": {
+          "description": "The line of the input this answers, the first being 1, blank lines\ncounted.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "op": {
+          "description": "The operation the line named; none when it could not be read.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "line"
+      ],
+      "type": "object"
+    },
     "Box": {
       "description": "An axis-aligned box in DCS metres, the canonical region.",
       "properties": {
@@ -5298,11 +5370,122 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
+    "batch": {
+      "properties": {
+        "request": {
+          "$ref": "#/$defs/BatchRequest"
+        },
+        "response": {
+          "$ref": "#/$defs/BatchResponse"
+        }
+      },
+      "required": [
+        "request",
+        "response"
+      ],
+      "type": "object"
+    },
     "error": {
       "items": {
         "$ref": "#/$defs/Issue"
       },
       "type": "array"
+    },
+    "issue_codes": {
+      "oneOf": [
+        {
+          "const": "internal_error",
+          "description": "a bug: the operation failed unexpectedly"
+        },
+        {
+          "const": "invalid_criterion",
+          "description": "a criterion's name or params are wrong"
+        },
+        {
+          "const": "invalid_flag",
+          "description": "a command-line flag does not apply here"
+        },
+        {
+          "const": "invalid_point",
+          "description": "a point is outside what can be converted"
+        },
+        {
+          "const": "invalid_region",
+          "description": "a region is empty or malformed"
+        },
+        {
+          "const": "invalid_request",
+          "description": "the request is not what the schema says"
+        },
+        {
+          "const": "no_cache",
+          "description": "no cache directory could be found"
+        },
+        {
+          "const": "no_install",
+          "description": "no DCS install was given or found"
+        },
+        {
+          "const": "no_network",
+          "description": "the terrain has no edge of that network"
+        },
+        {
+          "const": "no_route",
+          "description": "no route joins the ends under the constraints"
+        },
+        {
+          "const": "not_ready",
+          "description": "a cache entry `index` builds does not exist yet"
+        },
+        {
+          "const": "off_terrain",
+          "description": "a point lies off the terrain's mesh"
+        },
+        {
+          "const": "point3_no_height",
+          "description": "a point sets neither alt nor alt_agl"
+        },
+        {
+          "const": "point3_two_heights",
+          "description": "a point sets both alt and alt_agl"
+        },
+        {
+          "const": "refused",
+          "description": "a terrain file or cache entry cannot be read"
+        },
+        {
+          "const": "terrain_refused",
+          "description": "the terrain cannot be opened"
+        },
+        {
+          "const": "too_far",
+          "description": "the nearest road is too far to judge"
+        },
+        {
+          "const": "too_large",
+          "description": "the request's work is over its limit"
+        },
+        {
+          "const": "too_many_rows",
+          "description": "the answer is over `max_rows`"
+        },
+        {
+          "const": "unknown_airdrome",
+          "description": "no airdrome has that id or name_id"
+        },
+        {
+          "const": "unknown_class",
+          "description": "a class name is not in the closed set"
+        },
+        {
+          "const": "unknown_layer",
+          "description": "a layer name is not a layer"
+        },
+        {
+          "const": "unknown_operation",
+          "description": "no operation has that name"
+        }
+      ]
     },
     "operations": {
       "properties": {

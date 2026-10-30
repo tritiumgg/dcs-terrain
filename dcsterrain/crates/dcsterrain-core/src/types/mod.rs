@@ -1,6 +1,6 @@
 //! The request and response types every surface shares.
 //!
-//! An operation is one function in core and one `dcsterrain query` request (planned),
+//! An operation is one function in core and one `dcsterrain query` request,
 //! and both take and return these structs. Keeping them in one place is what
 //! stops the schemas drifting apart; `schema` prints them, and a snapshot
 //! test makes any change to them a deliberate diff.
@@ -14,10 +14,11 @@ mod schema;
 
 pub use criteria::*;
 pub use ops::*;
-pub use schema::{OPERATIONS, Operation, UnknownOperation, schema};
+pub use schema::{ISSUE_CODES, OPERATIONS, Operation, UnknownOperation, schema};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// An axis-aligned box in DCS metres, the canonical region.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -168,6 +169,49 @@ impl Issue {
             path: path.into(),
         }
     }
+}
+
+/// One line of a batch: an operation and its request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BatchRequest {
+    /// Any JSON value, returned as given on the line that answers this one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Value>,
+    /// The operation's name.
+    pub op: String,
+    /// The operation's request; `{}` when omitted.
+    #[serde(default = "empty_request")]
+    pub request: Value,
+}
+
+fn empty_request() -> Value {
+    Value::Object(Default::default())
+}
+
+/// The line answering one line of a batch, in the order they came.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BatchResponse {
+    /// The line of the input this answers, the first being 1, blank lines
+    /// counted.
+    pub line: u64,
+    /// The `id` the line gave.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Value>,
+    /// The operation the line named; none when it could not be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub op: Option<String>,
+    #[serde(flatten)]
+    pub outcome: BatchOutcome,
+}
+
+/// An operation's full response, or what stopped it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BatchOutcome {
+    /// The response of the operation the line named.
+    Result(Value),
+    Issues(Vec<Issue>),
 }
 
 /// A road network an operation runs over.

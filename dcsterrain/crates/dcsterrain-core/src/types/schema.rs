@@ -1,8 +1,8 @@
 //! The operation list and the JSON schema of its types.
 //!
-//! The list is the one place an operation is named. The CLI's `schema`
-//! prints from it and `query` will dispatch on it, so an operation added
-//! here appears on both at once.
+//! The list is the one place an operation is named: `schema` prints from it
+//! and `query` answers what it lists, so an operation added here appears on
+//! both at once.
 
 use std::fmt;
 
@@ -52,6 +52,40 @@ pub const OPERATIONS: &[Operation] = &[
     op::<TownsRequest, TownsResponse>("towns"),
 ];
 
+/// Every `Issue::code` a surface returns and what it means. A code is never
+/// reworded once shipped; a test holds this list to the source.
+pub const ISSUE_CODES: &[(&str, &str)] = &[
+    ("internal_error", "a bug: the operation failed unexpectedly"),
+    (
+        "invalid_criterion",
+        "a criterion's name or params are wrong",
+    ),
+    ("invalid_flag", "a command-line flag does not apply here"),
+    ("invalid_point", "a point is outside what can be converted"),
+    ("invalid_region", "a region is empty or malformed"),
+    ("invalid_request", "the request is not what the schema says"),
+    ("no_cache", "no cache directory could be found"),
+    ("no_install", "no DCS install was given or found"),
+    ("no_network", "the terrain has no edge of that network"),
+    ("no_route", "no route joins the ends under the constraints"),
+    (
+        "not_ready",
+        "a cache entry `index` builds does not exist yet",
+    ),
+    ("off_terrain", "a point lies off the terrain's mesh"),
+    ("point3_no_height", "a point sets neither alt nor alt_agl"),
+    ("point3_two_heights", "a point sets both alt and alt_agl"),
+    ("refused", "a terrain file or cache entry cannot be read"),
+    ("terrain_refused", "the terrain cannot be opened"),
+    ("too_far", "the nearest road is too far to judge"),
+    ("too_large", "the request's work is over its limit"),
+    ("too_many_rows", "the answer is over `max_rows`"),
+    ("unknown_airdrome", "no airdrome has that id or name_id"),
+    ("unknown_class", "a class name is not in the closed set"),
+    ("unknown_layer", "a layer name is not a layer"),
+    ("unknown_operation", "no operation has that name"),
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnknownOperation(pub String);
 
@@ -73,9 +107,11 @@ impl std::error::Error for UnknownOperation {}
 /// one named.
 ///
 /// The document is an object with an `operations` property holding each
-/// operation's `request` and `response`, and an `error` property, the issue
-/// list any operation returns instead of a result. Every type is a `$defs`
-/// entry under its own name, so a code generator emits one class per type.
+/// operation's `request` and `response`, an `error` property, the issue list
+/// any operation returns instead of a result, `issue_codes`, what an issue's
+/// `code` can be, and `batch`, the `request` and `response` of one line of a
+/// JSON-lines batch. Every type is a `$defs` entry under its own name, so a
+/// code generator emits one class per type.
 pub fn schema(only: Option<&str>) -> Result<Value, UnknownOperation> {
     let chosen: Vec<&Operation> = match only {
         None => OPERATIONS.iter().collect(),
@@ -102,6 +138,18 @@ pub fn schema(only: Option<&str>) -> Result<Value, UnknownOperation> {
     }
     let names: Vec<_> = chosen.iter().map(|o| o.name).collect();
     let error = json!({"type": "array", "items": generator.subschema_for::<Issue>()});
+    let issue_codes: Vec<Value> = ISSUE_CODES
+        .iter()
+        .map(|(code, meaning)| json!({"const": code, "description": meaning}))
+        .collect();
+    let batch = json!({
+        "type": "object",
+        "properties": {
+            "request": generator.subschema_for::<BatchRequest>(),
+            "response": generator.subschema_for::<BatchResponse>(),
+        },
+        "required": ["request", "response"],
+    });
 
     Ok(json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -114,6 +162,8 @@ pub fn schema(only: Option<&str>) -> Result<Value, UnknownOperation> {
                 "required": names,
             },
             "error": error,
+            "issue_codes": {"oneOf": issue_codes},
+            "batch": batch,
         },
         "$defs": generator.take_definitions(true),
     }))
@@ -147,6 +197,57 @@ mod tests {
         for r in found {
             let name = r.strip_prefix("#/$defs/").expect(r);
             assert!(defs.contains_key(name), "{r} has no definition");
+        }
+    }
+
+    /// Every code the source hands an issue: the string that opens the
+    /// arguments of each call that makes one.
+    fn codes_in(dir: &std::path::Path, out: &mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                codes_in(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") && !path.ends_with("tests.rs") {
+                let text = std::fs::read_to_string(&path).unwrap();
+                let text = text.split("#[cfg(test)]").next().unwrap();
+                for maker in ["Issue::new(", "issue(", "refused("] {
+                    for (at, _) in text.match_indices(maker) {
+                        let rest = text[at + maker.len()..].trim_start();
+                        if let Some(rest) = rest.strip_prefix('"') {
+                            let word = rest.split('"').next().unwrap();
+                            if word
+                                .bytes()
+                                .all(|b| b.is_ascii_lowercase() || b == b'_' || b.is_ascii_digit())
+                            {
+                                out.push(word.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_codes_are_the_ones_the_source_returns() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut found = Vec::new();
+        codes_in(&root.join("src"), &mut found);
+        codes_in(&root.join("../dcsterrain-cli/src"), &mut found);
+        found.sort_unstable();
+        found.dedup();
+        assert!(found.len() > 15, "{found:?}");
+        for code in &found {
+            assert!(
+                ISSUE_CODES.iter().any(|(c, _)| c == code),
+                "{code} is not listed"
+            );
+        }
+        let listed: Vec<_> = ISSUE_CODES.iter().map(|(c, _)| *c).collect();
+        assert!(listed.is_sorted(), "listed in order");
+        for code in &listed {
+            let source = found.iter().any(|c| c == code);
+            assert!(source, "{code} is listed and nothing returns it");
         }
     }
 
