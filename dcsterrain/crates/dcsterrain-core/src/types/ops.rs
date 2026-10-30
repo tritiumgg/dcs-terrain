@@ -1227,6 +1227,161 @@ pub struct StandSize {
     pub count: u32,
 }
 
+// validate_placements
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ValidatePlacementsRequest {
+    /// At most 10 000.
+    pub placements: Vec<Placement>,
+    /// Also return the answer as GeoJSON.
+    #[serde(default)]
+    pub geojson: bool,
+}
+
+/// Something to be placed: its shape at `x, z`, which is also its label
+/// point, and what it needs of the ground under it. The tool knows nothing
+/// of units: the caller gives the size and the needs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Placement {
+    pub id: String,
+    pub x: f64,
+    pub z: f64,
+    /// Degrees from north towards east; turns only a `Rect`.
+    #[serde(default)]
+    pub heading: f64,
+    #[serde(default)]
+    pub shape: PlacementShape,
+    #[serde(default)]
+    pub on: Underfoot,
+    /// Degrees, 0 to 90: the steepest slope allowed under the shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_slope_deg: Option<f64>,
+    /// Meters: the shallowest water allowed under the shape, for `on:
+    /// water` only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_depth: Option<f64>,
+}
+
+/// Lengths are meters, at most 10 km.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub enum PlacementShape {
+    /// The position alone.
+    #[default]
+    Point,
+    /// Centered on the position, `depth` along `heading` and `width`
+    /// across it.
+    Rect { width: f64, depth: f64 },
+    /// Centered on the position.
+    Circle { radius: f64 },
+    /// Absolute DCS `[x, z]` vertices, 3 to 1 000, closed by the first,
+    /// inside by the even-odd rule.
+    Polygon { points: Vec<[f64; 2]> },
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Underfoot {
+    #[default]
+    Land,
+    Water,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ValidatePlacementsResponse {
+    #[serde(flatten)]
+    pub provenance: Provenance,
+    /// In the order of the request's.
+    pub placements: Vec<PlacementCheck>,
+    /// A point per placement with its issues, its shape unless it is a
+    /// point, and each object it meets, when `geojson` was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
+}
+
+/// One placement checked. The ground fields read every cell the shape
+/// covers part of, each at its center, or a point's own ground; null where
+/// none of them has any.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PlacementCheck {
+    pub id: String,
+    /// No issues.
+    pub ok: bool,
+    /// The cells read: 1 for a point.
+    pub cells: u32,
+    /// Degrees: the steepest cell.
+    pub max_slope_deg: Option<f64>,
+    /// Meters: the shallowest water, null where none is water.
+    pub min_depth: Option<f64>,
+    /// Each cover class under the shape, in the order the classes are
+    /// listed: a placement in forest says so here.
+    pub cover: Vec<CoverClass>,
+    /// The scenery objects the shape meets; the issues list the nearest
+    /// 100 to the position.
+    pub objects_met: u32,
+    pub issues: Vec<PlacementIssue>,
+}
+
+/// One thing wrong with a placement and what it is. Where an issue names a
+/// place, `x, z` is the offending cell's center, or the point's own
+/// position, nearest the placement's.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PlacementIssue {
+    /// Under the shape, ground no mesh covers.
+    NoGround { cells: u32, x: f64, z: f64 },
+    /// For `on: land`, water of this class under the shape.
+    Water {
+        water: WaterClass,
+        cells: u32,
+        x: f64,
+        z: f64,
+    },
+    /// For `on: water`, land under the shape.
+    Land { cells: u32, x: f64, z: f64 },
+    /// For `on: water`, water shallower than `min_depth`; `depth` is the
+    /// shallowest.
+    Shallow {
+        depth: f64,
+        min_depth: f64,
+        cells: u32,
+        x: f64,
+        z: f64,
+    },
+    /// The steepest cell, over `max_slope_deg`.
+    Slope {
+        slope_deg: f64,
+        max_slope_deg: f64,
+        x: f64,
+        z: f64,
+    },
+    /// A scenery object the shape meets: a building, wall or other
+    /// structure of the objects pool by its box, a power-line pole by its
+    /// box, a tree by the circle its box bounds.
+    Scenery {
+        pool: ScenePool,
+        object: SceneryObject,
+    },
+    /// The airfield's paved surface. The terrain's files mark runway,
+    /// taxiway and apron alike, so the issue names the runway whose
+    /// centerline is nearest the shape, and how near.
+    Pavement {
+        airdrome_id: Option<i64>,
+        /// Its `name_id`; null with the runway when the terrain lists none.
+        airdrome: Option<String>,
+        runway: Option<String>,
+        centerline_m: Option<f64>,
+    },
+}
+
+/// A scenery pool, by name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ScenePool {
+    Objects,
+    Lines,
+    Trees,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

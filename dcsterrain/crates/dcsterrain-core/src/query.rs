@@ -30,6 +30,7 @@ mod geojson;
 mod mgrs;
 mod nearest;
 mod outline;
+mod placements;
 mod point_info;
 mod region;
 mod route;
@@ -53,6 +54,7 @@ pub use floor::{floor_msl_reaching, radar_floor};
 pub use geo::geo;
 pub use mgrs::mgrs;
 pub use nearest::nearest;
+pub use placements::validate_placements;
 pub use point_info::point_info;
 pub use region::{Area, resolve};
 pub use route::{route, route_alternatives};
@@ -136,6 +138,7 @@ const HANDLERS: &[(&str, Handler)] = &[
     ("find_sites", |t, r| run(t, r, find_sites)),
     ("point_info", |t, r| run(t, r, point_info)),
     ("airfield_info", |t, r| run(t, r, airfield_info)),
+    ("validate_placements", |t, r| run(t, r, validate_placements)),
 ];
 
 /// Reads the request as `Q`, answers it with `f`, and writes the answer.

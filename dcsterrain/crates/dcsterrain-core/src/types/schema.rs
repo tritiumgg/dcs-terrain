@@ -48,6 +48,7 @@ pub const OPERATIONS: &[Operation] = &[
     op::<TrafficabilityRequest, TrafficabilityResponse>("trafficability"),
     op::<PointInfoRequest, PointInfoResponse>("point_info"),
     op::<AirfieldInfoRequest, AirfieldInfoResponse>("airfield_info"),
+    op::<ValidatePlacementsRequest, ValidatePlacementsResponse>("validate_placements"),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]

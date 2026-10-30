@@ -104,7 +104,7 @@ pub(super) const OBJECT_REACH_M: f64 = 500.0;
 /// Whether an object found in the search box is in the answer.
 type Test = Box<dyn Fn(&Object) -> bool>;
 
-fn row(o: &Object) -> SceneryObject {
+pub(super) fn row(o: &Object) -> SceneryObject {
     let [x0, _, z0, x1, y1, z1] = o.bbox.map(f64::from);
     let flat = x1 - x0 == 0.0 && z1 - z0 == 0.0;
     SceneryObject {

@@ -2371,6 +2371,438 @@
       ],
       "type": "object"
     },
+    "Placement": {
+      "description": "Something to be placed: its shape at `x, z`, which is also its label\npoint, and what it needs of the ground under it. The tool knows nothing\nof units: the caller gives the size and the needs.",
+      "properties": {
+        "heading": {
+          "default": 0.0,
+          "description": "Degrees from north towards east; turns only a `Rect`.",
+          "format": "double",
+          "type": "number"
+        },
+        "id": {
+          "type": "string"
+        },
+        "max_slope_deg": {
+          "description": "Degrees, 0 to 90: the steepest slope allowed under the shape.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "min_depth": {
+          "description": "Meters: the shallowest water allowed under the shape, for `on:\nwater` only.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "on": {
+          "$ref": "#/$defs/Underfoot",
+          "default": "land"
+        },
+        "shape": {
+          "$ref": "#/$defs/PlacementShape",
+          "default": "Point"
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "x",
+        "z"
+      ],
+      "type": "object"
+    },
+    "PlacementCheck": {
+      "description": "One placement checked. The ground fields read every cell the shape\ncovers part of, each at its center, or a point's own ground; null where\nnone of them has any.",
+      "properties": {
+        "cells": {
+          "description": "The cells read: 1 for a point.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cover": {
+          "description": "Each cover class under the shape, in the order the classes are\nlisted: a placement in forest says so here.",
+          "items": {
+            "$ref": "#/$defs/CoverClass"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "issues": {
+          "items": {
+            "$ref": "#/$defs/PlacementIssue"
+          },
+          "type": "array"
+        },
+        "max_slope_deg": {
+          "description": "Degrees: the steepest cell.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "min_depth": {
+          "description": "Meters: the shallowest water, null where none is water.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "objects_met": {
+          "description": "The scenery objects the shape meets; the issues list the nearest\n100 to the position.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ok": {
+          "description": "No issues.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "ok",
+        "cells",
+        "cover",
+        "objects_met",
+        "issues"
+      ],
+      "type": "object"
+    },
+    "PlacementIssue": {
+      "description": "One thing wrong with a placement and what it is. Where an issue names a\nplace, `x, z` is the offending cell's center, or the point's own\nposition, nearest the placement's.",
+      "oneOf": [
+        {
+          "description": "Under the shape, ground no mesh covers.",
+          "properties": {
+            "cells": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "no_ground",
+              "type": "string"
+            },
+            "x": {
+              "format": "double",
+              "type": "number"
+            },
+            "z": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind",
+            "cells",
+            "x",
+            "z"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "For `on: land`, water of this class under the shape.",
+          "properties": {
+            "cells": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "water",
+              "type": "string"
+            },
+            "water": {
+              "$ref": "#/$defs/WaterClass"
+            },
+            "x": {
+              "format": "double",
+              "type": "number"
+            },
+            "z": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind",
+            "water",
+            "cells",
+            "x",
+            "z"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "For `on: water`, land under the shape.",
+          "properties": {
+            "cells": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "land",
+              "type": "string"
+            },
+            "x": {
+              "format": "double",
+              "type": "number"
+            },
+            "z": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind",
+            "cells",
+            "x",
+            "z"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "For `on: water`, water shallower than `min_depth`; `depth` is the\nshallowest.",
+          "properties": {
+            "cells": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "depth": {
+              "format": "double",
+              "type": "number"
+            },
+            "kind": {
+              "const": "shallow",
+              "type": "string"
+            },
+            "min_depth": {
+              "format": "double",
+              "type": "number"
+            },
+            "x": {
+              "format": "double",
+              "type": "number"
+            },
+            "z": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind",
+            "depth",
+            "min_depth",
+            "cells",
+            "x",
+            "z"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The steepest cell, over `max_slope_deg`.",
+          "properties": {
+            "kind": {
+              "const": "slope",
+              "type": "string"
+            },
+            "max_slope_deg": {
+              "format": "double",
+              "type": "number"
+            },
+            "slope_deg": {
+              "format": "double",
+              "type": "number"
+            },
+            "x": {
+              "format": "double",
+              "type": "number"
+            },
+            "z": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind",
+            "slope_deg",
+            "max_slope_deg",
+            "x",
+            "z"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A scenery object the shape meets: a building, wall or other\nstructure of the objects pool by its box, a power-line pole by its\nbox, a tree by the circle its box bounds.",
+          "properties": {
+            "kind": {
+              "const": "scenery",
+              "type": "string"
+            },
+            "object": {
+              "$ref": "#/$defs/SceneryObject"
+            },
+            "pool": {
+              "$ref": "#/$defs/ScenePool"
+            }
+          },
+          "required": [
+            "kind",
+            "pool",
+            "object"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The airfield's paved surface. The terrain's files mark runway,\ntaxiway and apron alike, so the issue names the runway whose\ncenterline is nearest the shape, and how near.",
+          "properties": {
+            "airdrome": {
+              "description": "Its `name_id`; null with the runway when the terrain lists none.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "airdrome_id": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "centerline_m": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "pavement",
+              "type": "string"
+            },
+            "runway": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PlacementShape": {
+      "description": "Lengths are meters, at most 10 km.",
+      "oneOf": [
+        {
+          "const": "Point",
+          "description": "The position alone.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Centered on the position, `depth` along `heading` and `width`\nacross it.",
+          "properties": {
+            "Rect": {
+              "properties": {
+                "depth": {
+                  "format": "double",
+                  "type": "number"
+                },
+                "width": {
+                  "format": "double",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "width",
+                "depth"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "Rect"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Centered on the position.",
+          "properties": {
+            "Circle": {
+              "properties": {
+                "radius": {
+                  "format": "double",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "radius"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "Circle"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Absolute DCS `[x, z]` vertices, 3 to 1 000, closed by the first,\ninside by the even-odd rule.",
+          "properties": {
+            "Polygon": {
+              "properties": {
+                "points": {
+                  "items": {
+                    "items": {
+                      "format": "double",
+                      "type": "number"
+                    },
+                    "maxItems": 2,
+                    "minItems": 2,
+                    "type": "array"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "points"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "Polygon"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Point": {
       "properties": {
         "x": {
@@ -3381,6 +3813,15 @@
       ],
       "type": "object"
     },
+    "ScenePool": {
+      "description": "A scenery pool, by name.",
+      "enum": [
+        "objects",
+        "lines",
+        "trees"
+      ],
+      "type": "string"
+    },
     "SceneryInRequest": {
       "description": "Either `region`, or `footprint_at` for exact overlap with a placed\nfootprint.",
       "properties": {
@@ -4133,6 +4574,13 @@
       ],
       "type": "object"
     },
+    "Underfoot": {
+      "enum": [
+        "land",
+        "water"
+      ],
+      "type": "string"
+    },
     "UnmaskProfileRequest": {
       "properties": {
         "geojson": {
@@ -4226,6 +4674,67 @@
         "elapsed_ms",
         "masked_segments",
         "visible_fraction"
+      ],
+      "type": "object"
+    },
+    "ValidatePlacementsRequest": {
+      "properties": {
+        "geojson": {
+          "default": false,
+          "description": "Also return the answer as GeoJSON.",
+          "type": "boolean"
+        },
+        "placements": {
+          "description": "At most 10 000.",
+          "items": {
+            "$ref": "#/$defs/Placement"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "placements"
+      ],
+      "type": "object"
+    },
+    "ValidatePlacementsResponse": {
+      "properties": {
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "geojson": {
+          "description": "A point per placement with its issues, its shape unless it is a\npoint, and each object it meets, when `geojson` was asked for."
+        },
+        "placements": {
+          "description": "In the order of the request's.",
+          "items": {
+            "$ref": "#/$defs/PlacementCheck"
+          },
+          "type": "array"
+        },
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "terrain",
+        "dcs_build",
+        "terrain_fingerprint",
+        "cell_size",
+        "elapsed_ms",
+        "placements"
       ],
       "type": "object"
     },
@@ -4742,6 +5251,21 @@
           ],
           "type": "object"
         },
+        "validate_placements": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/ValidatePlacementsRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/ValidatePlacementsResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
         "viewshed": {
           "properties": {
             "request": {
@@ -4793,7 +5317,8 @@
         "chokepoints",
         "trafficability",
         "point_info",
-        "airfield_info"
+        "airfield_info",
+        "validate_placements"
       ],
       "type": "object"
     }
