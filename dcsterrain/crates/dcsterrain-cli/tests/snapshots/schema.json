@@ -2486,7 +2486,7 @@
       "type": "object"
     },
     "PlacementIssue": {
-      "description": "One thing wrong with a placement and what it is. Where an issue names a\nplace, `x, z` is the offending cell's center, or the point's own\nposition, nearest the placement's.",
+      "description": "One thing wrong with a placement and what it is. Where an issue names a\nplace, `x, z` is the offending cell's center, or the point's own\nposition, nearest the placement's; for `slope` the steepest cell and\nfor `shallow` the shallowest.",
       "oneOf": [
         {
           "description": "Under the shape, ground no mesh covers.",
@@ -2652,7 +2652,7 @@
           "type": "object"
         },
         {
-          "description": "A scenery object the shape meets: a building, wall or other\nstructure of the objects pool by its box, a power-line pole by its\nbox, a tree by the circle its box bounds.",
+          "description": "A scenery object the shape meets: a building, wall or other\nstructure of the objects pool by its box, a power-line pole by its\nbox, a tree by the circle inscribed in its box.",
           "properties": {
             "kind": {
               "const": "scenery",

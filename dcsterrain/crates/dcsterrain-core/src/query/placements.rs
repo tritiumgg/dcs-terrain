@@ -14,7 +14,7 @@
 //! the shape, and each is then tested exactly against it, touching
 //! counted, as `shape` decides.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 
@@ -40,13 +40,23 @@ const POLYGON_POINTS_MAX: usize = 1_000;
 /// The most objects a placement lists, the nearest its position first; it
 /// counts them all.
 pub const OBJECTS_LISTED_MAX: usize = 100;
+/// How far past a shape's box the runway surface is searched: past the
+/// tolerance, and past the rounding of a far-out point taken to the mesh's
+/// grid units and back.
+const PAVEMENT_PAD_M: f64 = 1e-3;
+/// The most cells the boxes of one request's shapes may hold: a hundred
+/// shapes 10 km across.
+const CELLS_MAX: f64 = 4e6;
 
 /// The issues with placement `k`'s request.
 fn check_request(p: &Placement, k: usize) -> Vec<Issue> {
     let at = |field: &str| format!("placements.{k}.{field}");
     let mut issues = Vec::new();
-    if !(p.x.is_finite() && p.z.is_finite() && p.heading.is_finite()) {
-        issues.extend(invalid("x, z and heading must be finite", &at("x")));
+    if !(p.x.is_finite() && p.z.is_finite()) {
+        issues.extend(invalid("x and z must be finite", &at("x")));
+    }
+    if !p.heading.is_finite() {
+        issues.extend(invalid("must be finite", &at("heading")));
     }
     let size = |v: f64| (0.0..=FOOTPRINT_MAX_M).contains(&v);
     let ok = match &p.shape {
@@ -55,16 +65,10 @@ fn check_request(p: &Placement, k: usize) -> Vec<Issue> {
         PlacementShape::Circle { radius } => size(2.0 * radius),
         PlacementShape::Polygon { points } => {
             let finite = points.iter().all(|q| q[0].is_finite() && q[1].is_finite());
-            let shape = Shape::polygon(points.clone());
-            let b = if finite && points.len() >= 3 {
-                shape.bbox()
-            } else {
-                [0.0; 4]
-            };
-            (3..=POLYGON_POINTS_MAX).contains(&points.len())
-                && finite
-                && size(b[2] - b[0])
-                && size(b[3] - b[1])
+            (3..=POLYGON_POINTS_MAX).contains(&points.len()) && finite && {
+                let b = Shape::polygon(points.clone()).bbox();
+                size(b[2] - b[0]) && size(b[3] - b[1])
+            }
         }
     };
     if !ok {
@@ -153,7 +157,8 @@ pub(super) fn covered(g: &Grid, s: &Shape) -> Vec<(i64, i64)> {
 }
 
 /// An object's shape: its box turned and placed, or for a tree the circle
-/// its box bounds. A model with no box is its position alone.
+/// inscribed in its box, a round crown. A model with no box is its
+/// position alone.
 fn object_shape(pool: Pool, o: &Object) -> Shape {
     let r = footprint(o);
     let c = r.corners();
@@ -194,7 +199,14 @@ fn objects_met(src: &dyn Source, s: &Shape, at: [f64; 2]) -> Result<(Vec<Met>, u
         b[2] + OBJECT_REACH_M,
         b[3] + OBJECT_REACH_M,
     ];
-    let mut found: BTreeMap<(u8, u64), Met> = BTreeMap::new();
+    // Every object met counted once, and only the nearest kept with its
+    // row: a shape over a forest meets thousands of trees.
+    let mut seen: BTreeSet<(u8, u64)> = BTreeSet::new();
+    let mut near: Vec<(f64, (u8, u64), Met)> = Vec::new();
+    let nearest_first = |near: &mut Vec<(f64, (u8, u64), Met)>| {
+        near.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        near.truncate(OBJECTS_LISTED_MAX);
+    };
     for (k, pool) in Pool::ALL.into_iter().enumerate() {
         src.objects_in(pool, wide, &mut |ob| {
             if !ob.class.is_structure() {
@@ -206,18 +218,24 @@ fn objects_met(src: &dyn Source, s: &Shape, at: [f64; 2]) -> Result<(Vec<Met>, u
                 || ob_b[2] < b[0] - TOUCH_M
                 || ob_b[1] > b[3] + TOUCH_M
                 || ob_b[3] < b[1] - TOUCH_M;
-            if !apart && local.meets(&shape.translated(o)) {
-                found.insert((k as u8, ob.id), (pool, row(ob), shape));
+            if apart || !seen.insert((k as u8, ob.id)) {
+                return;
+            }
+            if !local.meets(&shape.translated(o)) {
+                seen.remove(&(k as u8, ob.id));
+                return;
+            }
+            let d = (ob.pos[0] - at[0]).hypot(ob.pos[2] - at[1]);
+            near.push((d, (k as u8, ob.id), (pool, row(ob), shape)));
+            if near.len() >= 2 * OBJECTS_LISTED_MAX {
+                nearest_first(&mut near);
             }
         })
         .map_err(refused)?;
     }
-    let n = found.len() as u32;
-    let mut all: Vec<_> = found.into_values().collect();
-    let d = |r: &SceneryObject| (r.x - at[0]).hypot(r.z - at[1]);
-    all.sort_by(|a, b| d(&a.1).total_cmp(&d(&b.1)));
-    all.truncate(OBJECTS_LISTED_MAX);
-    Ok((all, n))
+    nearest_first(&mut near);
+    let n = seen.len() as u32;
+    Ok((near.into_iter().map(|e| e.2).collect(), n))
 }
 
 /// The pavement issue, if the shape meets any of `tris`, the runway
@@ -300,17 +318,13 @@ fn ground_check(
         .filter_map(|s| s.ground.filter(|g| g.water != 0).map(|g| (g.depth, s.at)))
         .collect();
     let min_depth = wet.iter().map(|w| w.0).reduce(f64::min);
-    if let (Some(min), Some(depth)) = (p.min_depth, min_depth) {
-        let shallow: Vec<&(f64, [f64; 2])> = wet.iter().filter(|w| w.0 < min).collect();
-        if let Some(&&(_, [x, z])) = shallow.iter().min_by(|a, b| {
-            (a.1[0] - p.x)
-                .hypot(a.1[1] - p.z)
-                .total_cmp(&(b.1[0] - p.x).hypot(b.1[1] - p.z))
-        }) {
+    if let Some(min) = p.min_depth {
+        let shallow = wet.iter().filter(|w| w.0 < min);
+        if let Some(&(depth, [x, z])) = shallow.clone().min_by(|a, b| a.0.total_cmp(&b.0)) {
             issues.push(PlacementIssue::Shallow {
                 depth,
                 min_depth: min,
-                cells: shallow.len() as u32,
+                cells: shallow.count() as u32,
                 x,
                 z,
             });
@@ -366,6 +380,20 @@ pub fn validate_placements(
     let g = src.grid();
     let cs = f64::from(g.cell_size);
     let shapes: Vec<Shape> = q.placements.iter().map(shape_of).collect();
+    let cells: f64 = (shapes.iter())
+        .map(|s| {
+            let b = s.bbox();
+            ((b[2] - b[0]) / cs + 2.0) * ((b[3] - b[1]) / cs + 2.0)
+        })
+        .sum();
+    if cells > CELLS_MAX {
+        return Err(invalid(
+            &format!(
+                "the shapes span about {cells:.0} cells, over {CELLS_MAX:.0}; ask fewer or smaller"
+            ),
+            "placements",
+        ));
+    }
 
     // Each placement's samples, a cell read once however many placements
     // cover it.
@@ -404,7 +432,15 @@ pub fn validate_placements(
         .collect();
 
     let tables = src.tables().ok();
-    let boxes: Vec<[f64; 4]> = shapes.iter().map(Shape::bbox).collect();
+    // Widened past the tolerance and the rounding of the mesh's grid
+    // units, so a triangle the shape only touches is offered to the test.
+    let pad = PAVEMENT_PAD_M;
+    let boxes: Vec<[f64; 4]> = (shapes.iter())
+        .map(|s| {
+            let b = s.bbox();
+            [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad]
+        })
+        .collect();
     let tris = src.runway_triangles_each(&boxes).map_err(refused)?;
     let mut out = Vec::with_capacity(shapes.len());
     let mut met_shapes = Vec::with_capacity(shapes.len());
@@ -834,6 +870,75 @@ mod tests {
             e(json!({"id": "", "x": 0, "z": 0, "min_depth": 3})),
             bad("min_depth")
         );
+        for points in [json!([]), json!([[0, 0]])] {
+            let v = json!({"id": "", "x": 0, "z": 0, "shape": {"Polygon": {"points": points}}});
+            assert_eq!(e(v), bad("shape"));
+        }
+        // A hundred and one shapes 10 km across hold over 4 M cells.
+        let big = json!({"id": "", "x": 0, "z": 0, "shape": {"Circle": {"radius": 5000}}});
+        let q: ValidatePlacementsRequest =
+            serde_json::from_value(json!({ "placements": vec![big; 101] })).unwrap();
+        let e = validate_placements(&t, q).unwrap_err();
+        assert_eq!(
+            (e[0].code.as_str(), e[0].path.as_str()),
+            ("invalid_request", "placements")
+        );
+    }
+
+    #[test]
+    fn a_box_of_no_width_and_a_micrometer_gap_still_touch() {
+        let t = synth();
+        let f = form(&t);
+        let a = object(&t, SCENERY_INDUSTRIAL_MODEL_A);
+        let east = a.z + a.obb_d.unwrap() / 2.0;
+        let (x, z) = f.abs(RUNWAY_NORTH_M, RUNWAY_EAST_M);
+        let edge = x + RUNWAY_WIDTH_M / 2.0;
+        let line = json!({"Rect": {"width": 0, "depth": 10}});
+        let c = checked(
+            &t,
+            json!([
+                // A line along the building's east side.
+                {"id": "", "x": a.x, "z": east, "shape": line},
+                // Boxes 0.5 µm and 2 µm north of the runway's edge.
+                {"id": "", "x": edge + 5.0 + 0.5e-6, "z": z, "shape": {"Rect": {"width": 10, "depth": 10}}},
+                {"id": "", "x": edge + 5.0 + 2e-6, "z": z, "shape": {"Rect": {"width": 10, "depth": 10}}},
+            ]),
+        );
+        assert_eq!(c[0].objects_met, 1, "{:?}", c[0]);
+        assert!(c[0].cells >= 1);
+        assert!(kinds(&c[1]).contains(&"pavement".to_string()), "{:?}", c[1]);
+        assert!(
+            !kinds(&c[2]).contains(&"pavement".to_string()),
+            "{:?}",
+            c[2]
+        );
+    }
+
+    #[test]
+    fn a_shape_over_a_forest_lists_the_nearest_hundred_and_counts_them_all() {
+        let t = synth();
+        let f = form(&t);
+        let (x, z) = f.abs(FOREST_SOUTH_M + 1000.0, FOREST_WEST_M + 1000.0);
+        let c = checked(
+            &t,
+            json!([{"id": "", "x": x, "z": z, "shape": {"Circle": {"radius": 400}}}]),
+        );
+        let listed: Vec<f64> = (c[0].issues.iter())
+            .filter_map(|i| match i {
+                PlacementIssue::Scenery { object, .. } => Some((object.x - x).hypot(object.z - z)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(listed.len(), OBJECTS_LISTED_MAX);
+        assert!(
+            c[0].objects_met as usize > 5 * OBJECTS_LISTED_MAX,
+            "{}",
+            c[0].objects_met
+        );
+        assert!(listed.windows(2).all(|w| w[0] <= w[1]));
+        // The nearest hundred of some 600 trees spread over the circle lie
+        // within about 170 m of its middle.
+        assert!(listed[OBJECTS_LISTED_MAX - 1] < 200.0, "{listed:?}");
     }
 
     #[test]

@@ -504,10 +504,14 @@ scenery objects it meets, and a list of issues, each naming what it found:
     nearest the position.
   - `land`, for `on: water`; `shallow`, water shallower than `min_depth`.
   - `slope`: the steepest cell, over `max_slope_deg`.
+
+  An issue's `x, z` is the offending cell nearest the position, but for
+  `slope` the steepest cell and for `shallow` the shallowest. A request
+  whose shapes' boxes hold over 4 M cells is refused.
 - **`scenery`:** the shape against each structure of the objects pool and
-  each power-line pole by its box, and each instance tree by the circle its
-  box bounds; `effect` objects never count. The nearest 100 to the position
-  are listed, all counted.
+  each power-line pole by its box, and each instance tree by the circle
+  inscribed in its box, a round crown; `effect` objects never count. The
+  nearest 100 to the position are listed, all counted.
 - **`pavement`:** the shape against the runway surface's own mesh
   triangles. The files mark runway, taxiway and apron with one material,
   and most of its area lies more than 100 m from any runway's centerline,

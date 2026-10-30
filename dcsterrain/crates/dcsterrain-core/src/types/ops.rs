@@ -1323,7 +1323,8 @@ pub struct PlacementCheck {
 
 /// One thing wrong with a placement and what it is. Where an issue names a
 /// place, `x, z` is the offending cell's center, or the point's own
-/// position, nearest the placement's.
+/// position, nearest the placement's; for `slope` the steepest cell and
+/// for `shallow` the shallowest.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PlacementIssue {
@@ -1356,7 +1357,7 @@ pub enum PlacementIssue {
     },
     /// A scenery object the shape meets: a building, wall or other
     /// structure of the objects pool by its box, a power-line pole by its
-    /// box, a tree by the circle its box bounds.
+    /// box, a tree by the circle inscribed in its box.
     Scenery {
         pool: ScenePool,
         object: SceneryObject,

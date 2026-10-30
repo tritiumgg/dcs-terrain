@@ -55,6 +55,7 @@ impl Shape {
     /// A polygon of `points`, three or more, finite. One whose points all
     /// coincide is that point.
     pub fn polygon(points: Vec<[f64; 2]>) -> Shape {
+        assert!(!points.is_empty(), "a polygon needs a point");
         if points.iter().all(|&p| p == points[0]) {
             return Shape::point(points[0]);
         }
@@ -423,6 +424,30 @@ mod tests {
         );
     }
 
+    /// A random shape of any kind: convex, a star-shaped polygon that is
+    /// mostly concave, or a disc.
+    fn any(u: &mut Unit) -> Shape {
+        let c = [u.next() * 40.0 - 20.0, u.next() * 40.0 - 20.0];
+        match (u.next() * 3.0) as u32 {
+            0 => convex(u),
+            1 => {
+                let n = 5 + (u.next() * 8.0) as usize;
+                let points = (0..n)
+                    .map(|k| {
+                        let t = k as f64 * std::f64::consts::TAU / n as f64;
+                        let r = 2.0 + u.next() * 14.0;
+                        [c[0] + r * t.cos(), c[1] + r * t.sin()]
+                    })
+                    .collect();
+                Shape::polygon(points)
+            }
+            _ => Shape::Disc {
+                c,
+                r: u.next() * 12.0,
+            },
+        }
+    }
+
     #[test]
     fn the_distance_is_what_a_dense_scan_of_both_outlines_finds() {
         // Every vertex-to-side pairing the distance takes, against the
@@ -441,8 +466,8 @@ mod tests {
                 })
                 .collect()
         };
-        for _ in 0..300 {
-            let (a, b) = (convex(&mut u), convex(&mut u));
+        for _ in 0..600 {
+            let (a, b) = (any(&mut u), any(&mut u));
             let d = a.distance(&b);
             if d == 0.0 {
                 continue;
