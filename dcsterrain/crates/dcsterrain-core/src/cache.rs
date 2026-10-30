@@ -63,7 +63,7 @@ pub trait Entry: Sync {
 /// Every kind of entry `index` builds.
 pub fn entries() -> Vec<&'static dyn Entry> {
     use crate::source::install::{
-        MESH_TOC, ROADS_BETWEENNESS, ROADS_GRAPH, SCENE_NODES, TABLES_JSON,
+        MESH_TOC, PLACES, ROADS_BETWEENNESS, ROADS_GRAPH, SCENE_NODES, TABLES_JSON,
     };
     vec![
         &MESH_TOC,
@@ -71,6 +71,7 @@ pub fn entries() -> Vec<&'static dyn Entry> {
         &TABLES_JSON,
         &ROADS_GRAPH,
         &ROADS_BETWEENNESS,
+        &PLACES,
     ]
 }
 

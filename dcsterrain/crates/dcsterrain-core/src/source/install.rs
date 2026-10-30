@@ -53,9 +53,11 @@ const POINTS_PARALLEL_MIN: usize = 8;
 const ALONG_BLOCKS: usize = 16;
 
 mod airdrome_ids;
+mod places;
 mod roads;
 mod scenery;
 mod tables;
+pub use places::{PLACES, PlacesEntry};
 pub use roads::{ROADS_BETWEENNESS, ROADS_GRAPH, RoadsBetweenness, RoadsGraph};
 pub use scenery::{SCENE_NODES, SceneNodes, Scenery};
 pub use tables::{
@@ -284,6 +286,7 @@ pub struct Install {
     /// Read the first time a route or a road distance asks, likewise.
     roads: OnceLock<crate::roads::Graph>,
     betweenness: OnceLock<Vec<f32>>,
+    places: OnceLock<crate::places::Places>,
     /// Opened the first time a horizon tile is asked for.
     horizon: OnceLock<Parts>,
 }
@@ -354,6 +357,7 @@ impl Install {
             tables_entry: Mutex::new(None),
             roads: OnceLock::new(),
             betweenness: OnceLock::new(),
+            places: OnceLock::new(),
             horizon: OnceLock::new(),
         })
     }
@@ -941,6 +945,19 @@ impl Source for Install {
             return Ok(None);
         }
         self.betweenness().map(Some)
+    }
+
+    /// Read when its cache entry needs no build, as betweenness is: the
+    /// walk of every object takes up to a minute, which `index` spends.
+    fn places(&self) -> Result<Option<&crate::places::Places>, Refusal> {
+        if let Some(p) = self.places.get() {
+            return Ok(Some(p));
+        }
+        if !self.cache.ready(&PLACES)? {
+            return Ok(None);
+        }
+        let p = places::read(&self.cache)?;
+        Ok(Some(self.places.get_or_init(|| p)))
     }
 
     fn structures_in(

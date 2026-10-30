@@ -10,6 +10,7 @@ use crate::classes::{Class, Family};
 use crate::decode::scn5::Pool;
 pub use crate::decode::surface5::ground::Piece;
 use crate::grid::Grid;
+use crate::places::Places;
 use crate::roads::Graph;
 
 pub mod install;
@@ -144,6 +145,12 @@ pub trait Source {
     /// which on the largest terrains takes minutes.
     fn road_betweenness(&self) -> Result<Option<&[f32]>, Refusal> {
         Err(lacks(self, "road betweenness"))
+    }
+
+    /// Every place, in id order; `None` while the places are still being
+    /// built, which walks every object of the terrain.
+    fn places(&self) -> Result<Option<&Places>, Refusal> {
+        Err(lacks(self, "places"))
     }
 
     /// Calls `f` with the `x`, `z` and class of every scenery object that

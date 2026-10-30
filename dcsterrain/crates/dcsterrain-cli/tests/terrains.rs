@@ -429,6 +429,7 @@ fn list_terrains_shows_a_cache_after_index_and_none_after_clear() {
         names,
         [
             "mesh.toc",
+            "places",
             "roads.betweenness",
             "roads.graph",
             "scene.nodes",
@@ -440,7 +441,7 @@ fn list_terrains_shows_a_cache_after_index_and_none_after_clear() {
     let out = run(&["list-terrains", "--install", root, "--cache", cache]);
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(
-        text.contains("GermanyCW  GermanyColdWar  5 entries, "),
+        text.contains("GermanyCW  GermanyColdWar  6 entries, "),
         "{text}"
     );
 
@@ -701,6 +702,7 @@ fn check_reports_a_terrain_every_decoder_reads_and_passes() {
             ("tables.json", "current"),
             ("roads.graph", "missing"),
             ("roads.betweenness", "missing"),
+            ("places", "missing"),
         ]
     );
     assert_eq!(v["files"].as_array().unwrap().len(), 3);

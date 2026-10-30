@@ -23,6 +23,7 @@ pub struct Synth {
     roads: OnceLock<Graph>,
     betweenness: OnceLock<Vec<f32>>,
     tables: OnceLock<Tables>,
+    places: OnceLock<crate::places::Places>,
 }
 
 impl Synth {
@@ -40,6 +41,7 @@ impl Synth {
             roads: OnceLock::new(),
             betweenness: OnceLock::new(),
             tables: OnceLock::new(),
+            places: OnceLock::new(),
         })
     }
 
@@ -162,6 +164,14 @@ impl Source for Synth {
 
     fn tables(&self) -> Result<&Tables, Refusal> {
         Ok(self.tables.get_or_init(|| self.form.tables()))
+    }
+
+    fn places(&self) -> Result<Option<&crate::places::Places>, Refusal> {
+        if self.places.get().is_none() {
+            let p = crate::places::build(self)?;
+            let _ = self.places.set(p);
+        }
+        Ok(self.places.get())
     }
 
     fn objects_in(
