@@ -130,6 +130,24 @@ pub fn exact(pieces: &[Piece], a: [f64; 3], b: [f64; 3]) -> Sight {
     sight
 }
 
+/// The highest ground under a segment, over the mesh triangles `pieces`
+/// that `Source::along` found under it, and where, as a fraction of the
+/// way along: exact, since between two edge crossings the ground is one
+/// triangle's plane and so highest at an end. Where pieces overlap the one
+/// of higher rank is the ground. `None` where no piece covers any of it.
+pub fn highest(pieces: &[Piece]) -> Option<(f64, f64)> {
+    let mut top: Option<(f64, f64)> = None;
+    spans(pieces, |s, e, ground| {
+        for t in [s, e] {
+            let h = ground(t);
+            if top.is_none_or(|(best, _)| h > best) {
+                top = Some((h, t));
+            }
+        }
+    });
+    top
+}
+
 /// The lowest altitude at the far end of a segment at which a target is
 /// seen from an eye at altitude `eye` at its near end, over the mesh
 /// triangles `pieces` that `Source::along` found under it, or infinity
@@ -260,6 +278,16 @@ mod tests {
         let s = exact(&ridge(), [0.0, 0.0, 101.0], [1000.0, 0.0, 101.0]);
         assert_eq!(s.blocking, None);
         assert!((s.clearance.unwrap() - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_highest_ground_is_the_ridges_crest_under_the_top_piece() {
+        assert_eq!(highest(&ridge()), Some((100.0, 0.5)));
+        // A lower-ranked piece hidden under the ground does not count.
+        let mut hidden = ridge();
+        hidden.push(piece([0.7, 0.8], [500.0, 500.0], 0));
+        assert_eq!(highest(&hidden), Some((100.0, 0.5)));
+        assert_eq!(highest(&[]), None);
     }
 
     #[test]
