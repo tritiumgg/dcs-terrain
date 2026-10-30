@@ -78,7 +78,7 @@ pub fn chokepoints(
             edge_id: i as i64,
             betweenness: f64::from(b[i]),
             class: g.class(e).to_string(),
-            crosses_water: e.crosses_water,
+            crosses_water: e.crosses_water(),
             tpi_300_mean: (!values.is_empty())
                 .then(|| values.iter().sum::<f64>() / values.len() as f64),
             midpoint: Point {

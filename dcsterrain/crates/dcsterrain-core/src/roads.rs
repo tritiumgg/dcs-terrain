@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use crate::decode::rn4::{KIND_RAIL, KIND_ROAD};
+use crate::mapped::{Column, View};
 use crate::source::Refusal;
 
 /// Where along an edge its ground is sampled for water.
@@ -41,20 +42,56 @@ pub struct Stretch {
     pub points: Vec<[f64; 2]>,
 }
 
-/// One edge of the graph, between two nodes.
-#[derive(Debug, Clone, PartialEq)]
+/// One edge of the graph, between two nodes, as `roads.graph` lays it out.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(C)]
 pub struct Edge {
     pub kind: u8,
     pub class: u8,
+    wet: u8,
+    pad: u8,
     pub a: u32,
     pub b: u32,
+    /// Where its polyline lies in the graph's `points`: `[x, z]`, from `a`'s
+    /// end to `b`'s, through each contracted node.
+    start: u32,
+    end: u32,
+    pad_: u32,
     /// Meters along the polyline and the gaps from its ends to its nodes, so
     /// the straight line between two nodes is never longer than a path.
     pub length: f64,
-    pub crosses_water: bool,
-    /// Where its polyline lies in the graph's `points`: `[x, z]`, from `a`'s
-    /// end to `b`'s, through each contracted node.
-    pub points: Range<u32>,
+}
+
+// SAFETY: integers and an f64, laid out by `repr(C)` with no gap, the two
+// fields that would have been gaps being declared.
+unsafe impl bytemuck::Zeroable for Edge {}
+unsafe impl bytemuck::Pod for Edge {}
+
+impl Edge {
+    pub fn new(
+        (kind, class): (u8, u8),
+        (a, b): (u32, u32),
+        length: f64,
+        crosses_water: bool,
+        points: Range<u32>,
+    ) -> Edge {
+        Edge {
+            kind,
+            class,
+            wet: u8::from(crosses_water),
+            pad: 0,
+            a,
+            b,
+            start: points.start,
+            end: points.end,
+            pad_: 0,
+            length,
+        }
+    }
+
+    pub fn crosses_water(&self) -> bool {
+        self.wet != 0
+    }
 }
 
 /// The graph. Its edges are not changed once a search has run over it, since
@@ -63,12 +100,10 @@ pub struct Edge {
 pub struct Graph {
     pub classes: Vec<String>,
     /// `[x, z]` of each node.
-    pub nodes: Vec<[f64; 2]>,
-    pub edges: Vec<Edge>,
-    /// Every edge's polyline, one after another in edge order: one buffer
-    /// rather than one per edge, so a graph of half a million edges decodes
-    /// and frees in a few allocations.
-    pub points: Vec<[f32; 2]>,
+    pub nodes: Column<[f64; 2]>,
+    pub edges: Column<Edge>,
+    /// Every edge's polyline, one after another in edge order.
+    pub points: Column<[f32; 2]>,
     index: Indexes,
 }
 
@@ -202,21 +237,19 @@ pub fn build(
     for ((e, (a, b)), crosses_water) in built.iter().zip(ends).zip(crosses) {
         let start = run_start(points.len())?;
         points.extend(e.points.iter().map(|p| [p[0] as f32, p[1] as f32]));
-        edges.push(Edge {
-            kind: e.kind,
-            class: e.class,
-            a,
-            b,
-            length: e.length,
+        edges.push(Edge::new(
+            (e.kind, e.class),
+            (a, b),
+            e.length,
             crosses_water,
-            points: start..run_start(points.len())?,
-        });
+            start..run_start(points.len())?,
+        ));
     }
     Ok(Graph {
         classes,
-        nodes: kept_nodes,
-        edges,
-        points,
+        nodes: kept_nodes.into(),
+        edges: edges.into(),
+        points: points.into(),
         index: Indexes::default(),
     })
 }
@@ -321,129 +354,97 @@ fn short(what: &str) -> Refusal {
     Refusal(format!("the road graph ends inside its {what}"))
 }
 
-struct Reader<'a> {
-    b: &'a [u8],
-    at: usize,
-}
-
-impl Reader<'_> {
-    fn take(&mut self, n: usize, what: &str) -> Result<&[u8], Refusal> {
-        let s = self
-            .b
-            .get(self.at..self.at + n)
-            .ok_or_else(|| short(what))?;
-        self.at += n;
-        Ok(s)
-    }
-    fn u32(&mut self, what: &str) -> Result<u32, Refusal> {
-        Ok(u32::from_le_bytes(self.take(4, what)?.try_into().unwrap()))
-    }
-    fn f64(&mut self, what: &str) -> Result<f64, Refusal> {
-        Ok(f64::from_le_bytes(self.take(8, what)?.try_into().unwrap()))
-    }
+/// The bytes of `roads.graph` before its node, edge and point counts and its
+/// class table's size, four u64s: an entry opens this far into its file, and
+/// the arrays must start on 8 bytes there to be used where they lie.
+fn lead(head: u64) -> usize {
+    8 + (8 - (head % 8) as usize) % 8
 }
 
 impl Graph {
-    /// The payload of `roads.graph`, little-endian: the classes, each a u32
-    /// length and its bytes; the nodes, a u32 count and an f64 `x, z` each;
-    /// the edges, a u32 count and each as `u8 kind, u8 class, u8 crosses
-    /// water, u8 0, u32 a, u32 b, f64 length, u32 n, n × f32 x, z`.
-    pub fn encode(&self) -> Vec<u8> {
-        let mut b = Vec::new();
-        b.extend_from_slice(&(self.classes.len() as u32).to_le_bytes());
+    /// The payload of `roads.graph`, for an entry whose payload starts `head`
+    /// bytes into its file, as this machine lays the arrays out: its first
+    /// byte, how many bytes lead to the counts, then the counts; the nodes;
+    /// the edges; the points; then the classes, each a u32 length and its
+    /// bytes. So a reader takes all of it from a view of the file, and needs
+    /// no copy of a graph of a hundred MiB.
+    pub fn encode(&self, head: u64) -> Vec<u8> {
+        let n = lead(head);
+        let mut b = vec![0u8; n];
+        b[0] = n as u8;
+        let mut names = Vec::new();
         for c in &self.classes {
-            b.extend_from_slice(&(c.len() as u32).to_le_bytes());
-            b.extend_from_slice(c.as_bytes());
+            names.extend_from_slice(&(c.len() as u32).to_le_bytes());
+            names.extend_from_slice(c.as_bytes());
         }
-        b.extend_from_slice(&(self.nodes.len() as u32).to_le_bytes());
-        for n in &self.nodes {
-            b.extend_from_slice(&n[0].to_le_bytes());
-            b.extend_from_slice(&n[1].to_le_bytes());
+        for v in [
+            self.nodes.len(),
+            self.edges.len(),
+            self.points.len(),
+            names.len(),
+        ] {
+            b.extend_from_slice(&(v as u64).to_le_bytes());
         }
-        b.extend_from_slice(&(self.edges.len() as u32).to_le_bytes());
-        for e in &self.edges {
-            b.extend_from_slice(&[e.kind, e.class, u8::from(e.crosses_water), 0]);
-            b.extend_from_slice(&e.a.to_le_bytes());
-            b.extend_from_slice(&e.b.to_le_bytes());
-            b.extend_from_slice(&e.length.to_le_bytes());
-            let line = self.line(e);
-            b.extend_from_slice(&(line.len() as u32).to_le_bytes());
-            for p in line {
-                b.extend_from_slice(&p[0].to_le_bytes());
-                b.extend_from_slice(&p[1].to_le_bytes());
-            }
-        }
+        b.extend_from_slice(bytemuck::cast_slice(&self.nodes));
+        b.extend_from_slice(bytemuck::cast_slice(&self.edges));
+        b.extend_from_slice(bytemuck::cast_slice(&self.points));
+        b.extend_from_slice(&names);
         b
     }
 
-    pub fn decode(b: &[u8]) -> Result<Graph, Refusal> {
-        let mut r = Reader { b, at: 0 };
-        let n = r.u32("class table")?;
+    /// The graph `encode` wrote into `view`, its arrays left where they lie.
+    pub fn decode(view: &View) -> Result<Graph, Refusal> {
+        let b = view.bytes();
+        let lead = b.first().map_or(0, |&n| usize::from(n));
+        let counts = b.get(lead..lead + 32).filter(|_| lead > 0);
+        let counts = counts.ok_or_else(|| short("counts"))?;
+        let count = |k: usize| u64::from_le_bytes(counts[k * 8..k * 8 + 8].try_into().unwrap());
+        let (n, e, p, c) = (count(0), count(1), count(2), count(3));
+        let size = [(n, 16), (e, size_of::<Edge>() as u64), (p, 8), (c, 1)]
+            .into_iter()
+            .try_fold(lead as u64 + 32, |sum, (k, each)| {
+                sum.checked_add(k.checked_mul(each)?)
+            })
+            .ok_or_else(|| short("counts"))?;
+        if size > b.len() as u64 {
+            return Err(short("arrays"));
+        }
+        if size < b.len() as u64 {
+            return Err(Refusal("the road graph has bytes past its classes".into()));
+        }
+        let (n, e, p) = (n as usize, e as usize, p as usize);
+        let nodes_at = lead + 32;
+        let edges_at = nodes_at + n * 16;
+        let points_at = edges_at + e * size_of::<Edge>();
+        let cut = || short("arrays");
+        let nodes = Column::in_view(view, nodes_at, n).ok_or_else(cut)?;
+        let edges: Column<Edge> = Column::in_view(view, edges_at, e).ok_or_else(cut)?;
+        let points = Column::in_view(view, points_at, p).ok_or_else(cut)?;
         let mut classes = Vec::new();
-        for _ in 0..n {
-            let len = r.u32("class table")? as usize;
-            let name = r.take(len, "class table")?;
+        let mut at = &b[points_at + p * 8..];
+        while !at.is_empty() {
+            let len = at.get(..4).ok_or_else(|| short("class table"))?;
+            let len = u32::from_le_bytes(len.try_into().unwrap()) as usize;
+            let name = at.get(4..4 + len).ok_or_else(|| short("class table"))?;
             classes.push(String::from_utf8_lossy(name).into_owned());
+            at = &at[4 + len..];
         }
-        let n = r.u32("nodes")? as usize;
-        // Each count is checked against the bytes left before it sizes
-        // anything.
-        if n > b.len() / 16 {
-            return Err(short("nodes"));
-        }
-        let mut nodes = Vec::with_capacity(n);
-        for _ in 0..n {
-            nodes.push([r.f64("nodes")?, r.f64("nodes")?]);
-        }
-        let n = r.u32("edges")? as usize;
-        if n > b.len() / 24 {
-            return Err(short("edges"));
-        }
-        let mut edges = Vec::with_capacity(n);
-        // At most every byte left is a point's, and capacity reserved past
-        // the points there are is never touched.
-        let mut points: Vec<[f32; 2]> = Vec::with_capacity((b.len() - r.at) / 8);
-        let f32_at = |c: &[u8]| f32::from_le_bytes(c.try_into().unwrap());
-        for _ in 0..n {
-            let h = r.take(24, "edges")?;
-            let (kind, class, wet) = (h[0], h[1], h[2]);
-            let u32_at = |k: usize| u32::from_le_bytes(h[k..k + 4].try_into().unwrap());
-            let (a, b_) = (u32_at(4), u32_at(8));
-            let length = f64::from_le_bytes(h[12..20].try_into().unwrap());
-            let m = u32_at(20) as usize;
-            if m > (b.len() - r.at) / 8 {
-                return Err(short("edges"));
-            }
-            let run = r.take(m * 8, "edges")?;
-            let start = run_start(points.len())?;
-            points.extend(
-                run.as_chunks::<8>()
-                    .0
-                    .iter()
-                    .map(|c| [f32_at(&c[..4]), f32_at(&c[4..])]),
-            );
-            let points = start..run_start(points.len())?;
-            if a as usize >= nodes.len() || b_ as usize >= nodes.len() {
+        for edge in edges.iter() {
+            if edge.a as usize >= n || edge.b as usize >= n {
                 return Err(Refusal("a road graph edge names no node".into()));
             }
-            if !(kind == KIND_ROAD || kind == KIND_RAIL) || usize::from(class) >= classes.len() {
+            if edge.start > edge.end || edge.end as usize > p {
+                return Err(Refusal("a road graph edge names no points".into()));
+            }
+            let kind = edge.kind;
+            if !(kind == KIND_ROAD || kind == KIND_RAIL) || usize::from(edge.class) >= classes.len()
+            {
                 return Err(Refusal(format!(
-                    "a road graph edge has kind {kind} and class {class} of {}",
+                    "a road graph edge has kind {kind} and class {} of {}",
+                    edge.class,
                     classes.len()
                 )));
             }
-            edges.push(Edge {
-                kind,
-                class,
-                a,
-                b: b_,
-                length,
-                crosses_water: wet != 0,
-                points,
-            });
-        }
-        if r.at != b.len() {
-            return Err(Refusal("the road graph has bytes past its edges".into()));
         }
         Ok(Graph {
             classes,
@@ -460,7 +461,7 @@ impl Graph {
 
     /// `e`'s polyline, `[x, z]`, from `a`'s end to `b`'s.
     pub fn line(&self, e: &Edge) -> &[[f32; 2]] {
-        &self.points[e.points.start as usize..e.points.end as usize]
+        &self.points[e.start as usize..e.end as usize]
     }
 
     /// `e` as it is searched: its node `a`, its polyline and its node `b`.
@@ -1213,7 +1214,7 @@ pub(crate) mod tests {
             ]
         );
         assert_eq!(
-            g.nodes,
+            *g.nodes,
             [[0.0, 0.0], [200.0, 0.0], [300.0, 8.75], [400.0, 17.5]]
         );
     }
@@ -1234,10 +1235,10 @@ pub(crate) mod tests {
         };
         let g = build(classes(), s, &mut water).unwrap();
         assert_eq!(asked, [0.0, 25.0, 50.0, 75.0, 100.0, 110.0]);
-        assert!(!g.edges[0].crosses_water);
+        assert!(!g.edges[0].crosses_water());
         let s = vec![stretch(KIND_ROAD, 0, 1, 2, &[[0.0, 0.0], [110.0, 0.0]])];
         let g = build(classes(), s, &mut |x: f64, _: f64| x == 100.0).unwrap();
-        assert!(g.edges[0].crosses_water);
+        assert!(g.edges[0].crosses_water());
     }
 
     /// A generator of numbers in 0..1, the same on every run.
@@ -1273,12 +1274,12 @@ pub(crate) mod tests {
             } else {
                 at(u, 40_000.0, [o[0] + 20_000.0, o[1] + 20_000.0])
             };
-            g.nodes.push(c);
+            g.nodes.to_mut().push(c);
         }
         for i in 0..900 {
             if i % 10 == 9 {
                 let copy = g.edges[i - 1 - (u.next() * 5.0) as usize].clone();
-                g.edges.push(copy);
+                g.edges.to_mut().push(copy);
                 continue;
             }
             let a = (u.next() * 400.0) as u32;
@@ -1295,17 +1296,17 @@ pub(crate) mod tests {
                 let t = (k + 1) as f64 / (m + 1) as f64;
                 let c = [pa[0] + t * (pb[0] - pa[0]), pa[1] + t * (pb[1] - pa[1])];
                 let q = at(u, 300.0, c);
-                g.points.push([q[0] as f32, q[1] as f32]);
+                g.points.to_mut().push([q[0] as f32, q[1] as f32]);
             }
-            g.edges.push(Edge {
-                kind: if i % 5 == 0 { KIND_RAIL } else { KIND_ROAD },
-                class: (i % 3) as u8,
-                a,
-                b,
-                length: 0.0,
-                crosses_water: false,
-                points: start..g.points.len() as u32,
-            });
+            let kind = if i % 5 == 0 { KIND_RAIL } else { KIND_ROAD };
+            let end = g.points.len() as u32;
+            g.edges.to_mut().push(Edge::new(
+                (kind, (i % 3) as u8),
+                (a, b),
+                0.0,
+                false,
+                start..end,
+            ));
         }
         g
     }
@@ -1412,7 +1413,7 @@ pub(crate) mod tests {
             &[[0.0, 0.0], [0.0, 100.0], [98.0, 100.0]],
         )];
         let mut g = build(classes(), s, &mut dry).unwrap();
-        g.nodes[1] = [100.0, 100.0];
+        g.nodes.to_mut()[1] = [100.0, 100.0];
         let e = g.edges[0].clone();
         let (p, at) = g.locate(&e, [-5.0, 50.0]);
         assert_eq!(p, [0.0, 50.0]);
@@ -1438,19 +1439,23 @@ pub(crate) mod tests {
             stretch(KIND_RAIL, 2, 3, 4, &[[0.0, 50.0], [100.0, 60.0]]),
         ];
         let g = build(classes(), s, &mut |_: f64, z: f64| z > 55.0).unwrap();
-        let b = g.encode();
-        assert_eq!(Graph::decode(&b).unwrap(), g);
-        for cut in [1, 10, b.len() - 1] {
-            assert!(Graph::decode(&b[..cut]).is_err(), "{cut}");
+        for head in [0, 3, 8, 61] {
+            let b = g.encode(head);
+            assert_eq!((head as usize + b[0] as usize + 32) % 8, 0);
+            let decode = |b: &[u8]| Graph::decode(&View::from(b.to_vec()));
+            assert_eq!(decode(&b).unwrap(), g);
+            for cut in [1, 10, b.len() - 1] {
+                assert!(decode(&b[..cut]).is_err(), "{cut}");
+            }
+            let mut long = b.clone();
+            long.push(0);
+            assert!(decode(&long).is_err());
+            // The second edge's class byte, past the three classes.
+            let mut bad = b.clone();
+            let edges = b[0] as usize + 32 + 16 * g.nodes.len();
+            bad[edges + size_of::<Edge>() + 1] = 3;
+            assert!(decode(&bad).unwrap_err().0.contains("class 3 of 3"));
         }
-        let mut long = b.clone();
-        long.push(0);
-        assert!(Graph::decode(&long).is_err());
-        // The second edge's class byte, past the three classes.
-        let mut bad = b.clone();
-        let at = b.len() - (4 + 4 + 4 + 8 + 4 + 2 * 8) + 1;
-        bad[at] = 3;
-        assert!(Graph::decode(&bad).unwrap_err().0.contains("class 3 of 3"));
     }
 
     /// A square with a tail: the tail's edge carries every path to its end.

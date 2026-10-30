@@ -1644,7 +1644,7 @@ mod tests {
         let t = Install::open(&root.0, "Test", &Cache::new(&c.0)).unwrap();
         assert_eq!(t.point(1900.0, 2900.0).unwrap().unwrap().water, 0);
         let g = t.roads().unwrap();
-        let wet: Vec<bool> = g.edges.iter().map(|e| e.crosses_water).collect();
+        let wet: Vec<bool> = g.edges.iter().map(|e| e.crosses_water()).collect();
         assert_eq!(wet, [true, false]);
         assert_eq!(g.class(&g.edges[0]), "road");
         // Not built yet, so a query reads none rather than wait for it.

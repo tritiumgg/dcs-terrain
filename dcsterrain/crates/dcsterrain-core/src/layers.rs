@@ -1423,17 +1423,12 @@ mod tests {
         let t = *p.synth.form();
         let (a, b) = (t.abs(20_000.3, 30_000.7), t.abs(21_234.5, 31_777.1));
         let points = vec![[a.0 as f32, a.1 as f32], [b.0 as f32, b.1 as f32]];
-        p.roads.nodes = vec![[a.0, a.1], [b.0, b.1]];
-        p.roads.points = points.clone();
-        p.roads.edges.push(Edge {
-            kind: KIND_ROAD,
-            class: 0,
-            a: 0,
-            b: 1,
-            length: 0.0,
-            crosses_water: false,
-            points: 0..2,
-        });
+        p.roads.nodes = vec![[a.0, a.1], [b.0, b.1]].into();
+        p.roads.points = points.clone().into();
+        p.roads
+            .edges
+            .to_mut()
+            .push(Edge::new((KIND_ROAD, 0), (0, 1), 0.0, false, 0..2));
         let g = p.grid();
         let units = |q: [f32; 2]| {
             [

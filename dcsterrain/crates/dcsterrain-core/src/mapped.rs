@@ -11,7 +11,20 @@ use memmap2::{Mmap, MmapOptions};
 
 /// A read-only view of part of a file, shared by the columns in it.
 #[derive(Debug, Clone)]
-pub struct View(Arc<Mmap>);
+pub struct View(Arc<Bytes>);
+
+#[derive(Debug)]
+enum Bytes {
+    Mapped(Mmap),
+    /// Bytes in memory, read as a view of a file is.
+    Held(Vec<u8>),
+}
+
+impl From<Vec<u8>> for View {
+    fn from(b: Vec<u8>) -> View {
+        View(Arc::new(Bytes::Held(b)))
+    }
+}
 
 impl View {
     /// `len` bytes of `file` from `offset`, asked of the disk at once: page
@@ -22,11 +35,14 @@ impl View {
         // caller has checked against its table of contents, and held open.
         let map = unsafe { MmapOptions::new().offset(offset).len(len).map(file)? };
         prefetch(&map);
-        Ok(View(Arc::new(map)))
+        Ok(View(Arc::new(Bytes::Mapped(map))))
     }
 
     pub fn bytes(&self) -> &[u8] {
-        &self.0
+        match &*self.0 {
+            Bytes::Mapped(m) => m,
+            Bytes::Held(b) => b,
+        }
     }
 }
 
@@ -84,6 +100,19 @@ impl<T: bytemuck::Pod> Column<T> {
                 Column::Owned(v)
             }
         })
+    }
+}
+
+impl<T: Clone> Column<T> {
+    /// The elements to change, copied out of a view if they lie in one.
+    pub fn to_mut(&mut self) -> &mut Vec<T> {
+        if let Column::Viewed { .. } = self {
+            *self = Column::Owned(self.to_vec());
+        }
+        match self {
+            Column::Owned(v) => v,
+            Column::Viewed { .. } => unreachable!("just copied"),
+        }
     }
 }
 

@@ -953,7 +953,7 @@ mod tests {
     fn bridge(t: &Terrain) -> i64 {
         let g = t.source().road_graph().unwrap();
         let wet: Vec<usize> = (0..g.edges.len())
-            .filter(|&i| g.edges[i].kind == KIND_ROAD && g.edges[i].crosses_water)
+            .filter(|&i| g.edges[i].kind == KIND_ROAD && g.edges[i].crosses_water())
             .collect();
         assert_eq!(wet.len(), 1);
         wet[0] as i64

@@ -593,7 +593,7 @@ mod tests {
         let wet: Vec<usize> = road
             .iter()
             .copied()
-            .filter(|&i| g.edges[i].crosses_water)
+            .filter(|&i| g.edges[i].crosses_water())
             .collect();
         assert_eq!(wet.len(), 1);
         let bridge = &g.edges[wet[0]];

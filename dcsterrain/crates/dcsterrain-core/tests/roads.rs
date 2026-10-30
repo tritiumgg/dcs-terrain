@@ -46,7 +46,7 @@ impl Drop for TempDir {
 fn report(id: &str, g: &Graph) {
     for kind in [KIND_ROAD, KIND_RAIL] {
         let edges: Vec<_> = g.edges.iter().filter(|e| e.kind == kind).collect();
-        let wet = edges.iter().filter(|e| e.crosses_water).count();
+        let wet = edges.iter().filter(|e| e.crosses_water()).count();
         let km: f64 = edges.iter().map(|e| e.length).sum::<f64>() / 1000.0;
         eprintln!(
             "{id}: kind {kind}: {} edges, {wet} crossing water, {km:.0} km",

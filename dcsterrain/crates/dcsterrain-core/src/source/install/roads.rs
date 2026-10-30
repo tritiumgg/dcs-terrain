@@ -3,17 +3,17 @@
 //! edge, and `roads.betweenness`, built from the graph at low priority.
 
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use super::{BOX_PAD_M, MESH_TOC, refusal, tile_span};
-use crate::cache::{Entry, Opened, TerrainCache};
+use crate::cache::{Entry, TerrainCache};
 use crate::decode::rn4::{self, KIND_RAIL, KIND_ROAD, Reach};
 use crate::decode::surface5::grid_for;
 use crate::decode::surface5::ground::{Prepared, grid_units};
 use crate::decode::surface5::{ROAD_STRIP, Surface5, water_class};
 use crate::extract::FileEntry;
 use crate::grid::Grid;
+use crate::mapped::View;
 use crate::roads::{self, Graph, Stretch, Water};
 use crate::source::{CELL_SIZE, Refusal, TILE_SIZE};
 
@@ -22,7 +22,8 @@ pub struct RoadsGraph;
 
 pub static ROADS_GRAPH: RoadsGraph = RoadsGraph;
 
-const GRAPH_VERSION: u32 = 1;
+/// 2 lays the arrays out flat, to be read where they lie.
+const GRAPH_VERSION: u32 = 2;
 
 impl Entry for RoadsGraph {
     fn name(&self) -> &str {
@@ -77,7 +78,10 @@ impl Entry for RoadsGraph {
             file: &surface,
             path: &map.surface.path,
         };
-        Ok(roads::build(classes, stretches, &mut water)?.encode())
+        // The magic, the version, the length of the key, the key and the
+        // length of the payload lead the payload in the entry's file.
+        let head = 24 + cache.key(self)?.len() as u64;
+        Ok(roads::build(classes, stretches, &mut water)?.encode(head))
     }
 }
 
@@ -197,10 +201,10 @@ impl Entry for RoadsBetweenness {
         "roads.betweenness"
     }
 
-    /// Its rows follow the graph's edges, so a new graph layout is a new
-    /// version of this entry too.
+    /// Its rows follow the graph's edges, so a new order of them is a new
+    /// version of this entry too. The edges of graph 2 are those of graph 1.
     fn version(&self) -> u32 {
-        GRAPH_VERSION * 100 + 1
+        101
     }
 
     fn roles(&self) -> &[&str] {
@@ -232,20 +236,9 @@ fn unreadable(path: &Path, theatre: &str, e: impl std::fmt::Display) -> Refusal 
 pub fn graph(cache: &TerrainCache) -> Result<Graph, Refusal> {
     let opened = cache.get(&ROADS_GRAPH)?;
     let bad = |e: &dyn std::fmt::Display| unreadable(&opened.path, &cache.map().theatre, e);
-    let bytes = payload(&opened).map_err(|e| bad(&e))?;
-    Graph::decode(&bytes).map_err(|e| bad(&e.0))
-}
-
-/// An entry's payload read into a buffer of its size, allocated once: the
-/// largest terrain's graph is over a hundred MiB, which a growing buffer
-/// copies several times over on the way.
-fn payload(opened: &Opened) -> std::io::Result<Vec<u8>> {
-    let len = usize::try_from(opened.len).map_err(std::io::Error::other)?;
-    let mut out = vec![0u8; len];
-    let mut f = &opened.file;
-    f.seek(SeekFrom::Start(opened.offset))?;
-    f.read_exact(&mut out)?;
-    Ok(out)
+    let len = usize::try_from(opened.len).map_err(|e| bad(&e))?;
+    let view = View::of(&opened.file, opened.offset, len).map_err(|e| bad(&e))?;
+    Graph::decode(&view).map_err(|e| bad(&e.0))
 }
 
 /// Each edge's betweenness for `g`, from the cache, built there first if
