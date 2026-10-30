@@ -918,7 +918,7 @@ impl Bench {
         if cold_os {
             self.purge();
         }
-        let (warm_up, _) = self.round(case);
+        let (warm_up, warm_up_errors) = self.round(case);
         let median = |s: &[Sample], f: fn(&Sample) -> f64| {
             percentile(&s.iter().map(f).collect::<Vec<_>>(), 0.5)
         };
@@ -927,7 +927,7 @@ impl Bench {
         let mut samples = Vec::new();
         let mut medians = Vec::new();
         let mut medians_mc = Vec::new();
-        let mut errors = 0;
+        let mut errors = warm_up_errors;
         for _ in 0..rounds {
             clear_horizon();
             if cold_os {
