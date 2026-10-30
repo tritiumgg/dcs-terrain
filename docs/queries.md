@@ -29,17 +29,46 @@ struct Footprint { width: f64, depth: f64, orientations_deg: Vec<f64> }   // def
 - Every response carries `terrain`, `dcs_build`, `terrain_fingerprint`,
   `cell_size` and `elapsed_ms` (`design.md` §5).
 - Errors are a list of `{code, message, path}` issues. An operation returns a
-  full result or an error, never a partial one.
+  full result or an error, never a partial one. A code is stable once shipped;
+  `dcsterrain schema` lists them all under `issue_codes`, with their meanings.
+  `path` is dotted, `criteria.2.params.deg`, and empty when no field is at
+  fault.
 - **GeoJSON.** Every operation that returns geometry takes `geojson: true` and
   then also returns a `geojson` field: an RFC 7946 `FeatureCollection` that any
   map program opens. Coordinates are longitude and latitude (WGS84) through the
-  terrain's fitted projection, with area outlines simplified to half a cell. §1.1
+  terrain's fitted projection, with area outlines simplified to half a cell. §1.2
   lists what each operation's features are.
 - Point answers (`sample` at points, observer and target heights, `alt_agl`
   conversions) use point mode, the mesh triangle's own height. Regional answers
   read the 50 m raster.
 
-### 1.1 GeoJSON features
+### 1.1 Batches
+
+`dcsterrain query --terrain <Terrain>` with no operation reads JSON lines from
+stdin. A line is `{"op": name, "request": {...}, "id": any}`: `request` is `{}`
+when omitted, and `id`, any JSON value, is returned as given. Each line is
+answered on one line of stdout, in order and flushed before the next is
+read, so a caller can hold the pipe open and ask as it goes:
+
+```json
+{"line": 1, "id": "a", "op": "visible", "result": {...}}
+{"line": 3, "id": 7, "op": "sample", "issues": [{"code": "too_many_rows", "message": "...", "path": ""}]}
+{"line": 4, "issues": [{"code": "invalid_request", "message": "the line is not JSON: ...", "path": ""}]}
+```
+
+`line` counts from 1 and counts blank lines, which ask nothing and get no
+answer. `result` is what the operation alone would print. `issues` replaces it
+on a line that failed: a line that is not JSON, not a request, or asks
+something the operation refuses, an internal failure of one operation, or a
+terrain that cannot open, which the next line tries again. No line stops the
+batch, so the exit code is 0 unless stdin or stdout fails, and a reader that
+goes away ends the batch quietly.
+
+The terrain opens once, at the first request that needs it, and is reopened
+only when its files change under the batch (`design.md` §5) or an internal
+failure leaves it suspect. `--verbose` logs each opening.
+
+### 1.2 GeoJSON features
 
 Every feature carries the properties named here and nothing the JSON
 response does not already hold. An operation with an observer, site or

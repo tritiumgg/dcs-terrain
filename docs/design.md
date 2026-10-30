@@ -327,9 +327,11 @@ opening the install files it was derived from, except once after an update.
   when the entry was built. A build that differs while the rest matches
   re-stamps the entry rather than rebuilding it (§4.2). A repair that
   rewrites identical files costs a rebuild of seconds.
-- **A batch re-checks** the build and the keys before each request (a few
-  `stat`s) and reopens a terrain whose files changed. Terrain files are opened with
-  delete sharing so a patch can replace them under a long batch.
+- **A batch re-checks** the build and the files' sizes and times before each
+  request (a read of `autoupdate.cfg`, a stat per file and a listing per role
+  that takes a whole directory) and reopens a terrain whose files changed.
+  Terrain files are opened with delete sharing so a patch can replace them
+  under a long batch.
 - **Every response carries** `terrain` (the terrain id), `dcs_build`,
   `terrain_fingerprint` — the decimal sizes of `.surface5`, `.rn4` and `.scn5`
   joined by `-`, which needs no hash — `cell_size` (50) and `elapsed_ms`.
@@ -516,16 +518,18 @@ edges, and its road and rail graph has 357 k nodes.
 
 ## 7. The command line
 
-- `dcsterrain query [--install <dir>] --terrain <Terrain> <op> <json>` answers one
-  request. `--install` defaults to the registry value on Windows. A terrain
-  whose projection misses a beacon by more than 2 m is refused unless
+- `dcsterrain query [--install <dir>] --terrain <Terrain> <op> [<json>]` answers
+  one request: `{}` without `<json>`. The answer is the one JSON document on
+  stdout, or `{"issues": [...]}` with exit code 1; a bad flag exits 2.
+  `--install` defaults to the registry value on Windows. A terrain whose
+  projection misses a beacon by more than 2 m is refused unless
   `--allow-crs-residual` is given (§3.5).
-- With no `<json>`, `query` reads JSON lines from stdin, one request per line,
-  each naming its `op`, and writes one response line per request. A batch
+- With no `<op>`, `query` is a batch (`queries.md` §1.1): JSON lines on stdin,
+  one response line per request, flushed as each is answered, in order. A batch
   opens the terrain once and keeps its block and tile caches across requests.
 - Every operation that returns geometry takes `geojson: true` and adds a
   GeoJSON `FeatureCollection` in longitude and latitude, for drawing the
-  answer in any map program (`queries.md` §1.1).
+  answer in any map program (`queries.md` §1.2).
 - `sample` and `scenery_in` take a `max_rows` request field (defaults 10 000
   and 5 000); over the cap is an error, never a truncation. Errors are a list of `{code, message, path}` issues; an
   operation returns a full result or an error.
@@ -536,7 +540,9 @@ edges, and its road and rail graph has 357 k nodes.
   files, and what its cache holds and for which build. It reads only
   each `entry.lua` and the file headers, needs no cache, and is how a user
   finds the id `--terrain` takes.
-- `dcsterrain schema` prints every operation's request and response schema.
+- `dcsterrain schema [--op <op>]` prints a JSON Schema (draft 2020-12), generated
+  from the request and response types the handlers take: every operation's, a
+  batch line's, and the issue codes.
 - `dcsterrain index`, `dcsterrain cache`, as §4.
 - `dcsterrain check [--install <dir>] --terrain <Terrain> [--top <n>] [--json]`
   reports each terrain file's class and version and why no decoder reads it

@@ -868,3 +868,49 @@ fn check_reports_the_scenery_past_an_airfield_file_no_decoder_reads() {
     assert_eq!(v["tables"], Value::Null);
     assert_eq!(v["catalog"]["objects"], 1);
 }
+
+#[test]
+fn a_batch_reopens_a_terrain_whose_files_changed_under_it() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::process::Stdio;
+    let t = install(false);
+    let c = scratch();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_dcsterrain"))
+        .args(["--verbose", "query", "--terrain", "Caucasus", "--install"])
+        .arg(&t.0)
+        .arg("--cache")
+        .arg(&c.0)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut ask = |line: &str| {
+        writeln!(stdin, "{line}").unwrap();
+        let mut answer = String::new();
+        stdout.read_line(&mut answer).unwrap();
+        serde_json::from_str::<Value>(&answer).unwrap()
+    };
+    let describe = r#"{"op": "describe"}"#;
+    assert_eq!(ask(describe)["result"]["dcs_build"], "0.0.0.1");
+    assert_eq!(ask(describe)["result"]["dcs_build"], "0.0.0.1");
+
+    let update = br#"{"version": "0.0.0.2", "timestamp": "20000102-000000"}"#;
+    put(&t.0, "autoupdate.cfg", update);
+    assert_eq!(ask(describe)["result"]["dcs_build"], "0.0.0.2");
+
+    // A terrain gone refuses its line, and the next tries again.
+    put(&t.0, "autoupdate.cfg", b"not json");
+    assert_eq!(ask(describe)["issues"][0]["code"], "terrain_refused");
+    put(&t.0, "autoupdate.cfg", update);
+    assert_eq!(ask(describe)["result"]["dcs_build"], "0.0.0.2");
+
+    drop(ask);
+    drop(stdin);
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    let log = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(log.matches("opened terrain").count(), 3, "{log}");
+}

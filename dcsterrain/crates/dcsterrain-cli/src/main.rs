@@ -13,12 +13,13 @@ use dcsterrain_core::cache::{self, Cache, Stored};
 use dcsterrain_core::check;
 use dcsterrain_core::classes;
 use dcsterrain_core::decode::install;
-use dcsterrain_core::query::{self, Terrain};
 use dcsterrain_core::source::install::Tables;
-use dcsterrain_core::synth::{self, Synth};
+use dcsterrain_core::synth;
 use dcsterrain_core::types::Issue;
 use serde_json::{Value, json};
 use tracing::Level;
+
+mod query;
 
 #[derive(Parser)]
 #[command(
@@ -42,7 +43,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Answer one request about a terrain, as JSON on stdout.
+    /// Answer one request about a terrain, as JSON on stdout; or with no
+    /// operation, a batch: one JSON request per line on stdin, one response
+    /// per line on stdout, the terrain opened once.
     Query {
         /// The DCS install root. On Windows it defaults to the one the
         /// registry names.
@@ -61,8 +64,9 @@ enum Command {
         /// The synthetic terrain's cell, in meters.
         #[arg(long, default_value_t = synth::CELL_SIZE_M)]
         cell: u32,
-        /// The operation, such as `describe`.
-        op: String,
+        /// The operation, such as `describe`. Omitted, each line of stdin
+        /// is `{"op": .., "request": .., "id": ..}`.
+        op: Option<String>,
         /// The request as JSON; `{}` when omitted.
         request: Option<String>,
         /// Accept a projection fitted to the terrain's beacons that misses one
@@ -146,8 +150,8 @@ struct CacheDir {
 }
 
 impl CacheDir {
-    fn open(self) -> Result<Cache, String> {
-        match self.dir {
+    fn open(&self) -> Result<Cache, String> {
+        match &self.dir {
             Some(d) => Ok(Cache::new(d)),
             None => cache::default_root().map(Cache::new).map_err(|e| e.0),
         }
@@ -210,15 +214,21 @@ fn main() -> ExitCode {
             request,
             allow_crs_residual,
             cache,
-        } => run_query(
-            install,
-            &terrain,
-            (seed, size_km, cell),
-            &op,
-            request,
-            allow_crs_residual,
-            cache,
-        ),
+        } => {
+            let opener = query::Opener {
+                install,
+                id: terrain,
+                synth: (seed, size_km, cell),
+                allow_crs_residual,
+                cache,
+                terrain: None,
+                opens: 0,
+            };
+            match op {
+                Some(op) => query::one(opener, &op, request),
+                None => run_batch(opener),
+            }
+        }
         Command::ListTerrains {
             install,
             json,
@@ -301,56 +311,19 @@ fn refuse(issues: Vec<Issue>) -> ExitCode {
     ExitCode::FAILURE
 }
 
-fn run_query(
-    install: Option<PathBuf>,
-    id: &str,
-    (seed, size_km, cell): (u32, u32, u32),
-    op: &str,
-    request: Option<String>,
-    allow_crs_residual: bool,
-    cache: CacheDir,
-) -> ExitCode {
-    let refused = |code: &str, message: String| refuse(vec![Issue::new(code, &message, "")]);
-    let request: Value = match request.as_deref().map(serde_json::from_str).transpose() {
-        Ok(v) => v.unwrap_or_else(|| json!({})),
-        Err(e) => return refused("invalid_request", format!("the request is not JSON: {e}")),
-    };
-    let terrain = if id == synth::TERRAIN_ID {
-        match Synth::new(seed, size_km, cell) {
-            Ok(s) => Terrain::Synth(Box::new(s)),
-            Err(e) => return refused("terrain_refused", e.0),
+fn run_batch(mut opener: query::Opener) -> ExitCode {
+    let stdin = std::io::stdin();
+    if stdin.is_terminal() {
+        tracing::info!("reading one JSON request per line from stdin");
+    }
+    let ended = query::batch(&mut opener, stdin.lock(), std::io::stdout().lock());
+    tracing::debug!("the batch opened its terrain {} time(s)", opener.opens);
+    match ended {
+        query::Ended::Input | query::Ended::Closed => ExitCode::SUCCESS,
+        query::Ended::Failed(e) => {
+            tracing::error!("{e}");
+            ExitCode::FAILURE
         }
-    } else {
-        let defaults = (
-            synth::DEFAULT_SEED,
-            synth::DEFAULT_SIZE_KM,
-            synth::CELL_SIZE_M,
-        );
-        if (seed, size_km, cell) != defaults {
-            return refused(
-                "invalid_flag",
-                "--seed, --size-km and --cell set the synthetic terrain only".into(),
-            );
-        }
-        let root = match install_root(install) {
-            Ok(r) => r,
-            Err(e) => return refused("no_install", e),
-        };
-        let cache = match cache.open() {
-            Ok(c) => c,
-            Err(e) => return refused("no_cache", e),
-        };
-        match Terrain::open(&root, id, &cache, allow_crs_residual) {
-            Ok(t) => t,
-            Err(e) => return refused("terrain_refused", e.0),
-        }
-    };
-    match query::answer(&terrain, op, &request) {
-        Ok(v) => {
-            println!("{v}");
-            ExitCode::SUCCESS
-        }
-        Err(issues) => refuse(issues),
     }
 }
 
