@@ -31,8 +31,11 @@ cycles is that time on one core at the counter's rate.
   `no_route`, `too_far` or `off_terrain` as errors, the figure then including
   the refusal. On GermanyCW every `trafficability` request was refused, so
   that case times nothing else. `trafficability` has no target.
-- **The bounds in CI** take 9 rounds on `Synth` and fail above 3× the budget,
-  above 3× the memory target, on a failed request, or on no cycles over
+- **The bounds** are `mise run bench-bounds`, run by hand and not a CI check:
+  shared runners differ from run to run, and the same work on the horizon's
+  first touch cost 24.2 Gc on one and 36.9 Gc, 3.02× its budget, on the next,
+  so bounds are judged on one machine. They take 9 rounds on `Synth` and fail
+  above 3× the budget, above 3× the memory target, on a failed request, or on no cycles over
   10 ms of work, since a shorter case can read zero under the CPU clock's tick.
   They catch a large regression, not a small one: `Synth` is small, so only
   `viewshed_20km`, `radar_floor_20km`, `exposure_10_sites`,

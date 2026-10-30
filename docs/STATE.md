@@ -4,7 +4,7 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `design.md` and `queries.md` hold the design.
 
-**Last updated:** 2026-10-30T10:41Z
+**Last updated:** 2026-10-30T12:10Z
 
 ## Done
 
@@ -12,8 +12,8 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
 1. **Q8: benchmarks on cycles.** Every operation judged on reference cycles
    with the wall beside them, on each platform; `Synth` held to 3× the
-   targets over 9 rounds in CI; the install cold and warm, one call and a
-   100-line batch end to end. *Verified by:* an agent, through
+   targets over 9 rounds by hand, not in CI; the install cold and warm, one
+   call and a 100-line batch end to end. *Verified by:* an agent, through
    `mise run bench-bounds`, with 8 spinners beside it, and opt-in on the 8
    terrains of 2.9.30.28738. Targets missed, each with its cause and five
    decisions open (`data/targets.md`).
