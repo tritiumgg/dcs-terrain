@@ -60,12 +60,13 @@ One task. The thing to pick up immediately.
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **V1** — the live validation sortie.
-2. **R1** — release builds for the three platforms.
-3. **R2** — the guide a newcomer follows.
-4. **C1** — review the scenery catalog of every terrain without overrides.
+1. **Q17** — run `find_sites` sightline criteria in parallel.
+2. **V1** — the live validation sortie.
+3. **R1** — release builds for the three platforms.
+4. **R2** — the guide a newcomer follows.
+5. **C1** — review the scenery catalog of every terrain without overrides.
 
-Milestone in view: **MS1 Engine on the install**.
+Milestone in view: **MS2 Queries**.
 
 ## Carries
 

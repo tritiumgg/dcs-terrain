@@ -84,6 +84,7 @@ a valid RFC 7946 `FeatureCollection` whose features match its JSON response.
 | Q13 | `validate_placements` over point, rectangle, circle and polygon shapes, with the land or water, slope and depth each placement asks for | One synthetic case per issue kind and per shape, including a shape that touches an object only at its edge; opt-in: placements in a Caucasus building, lake and runway are each reported with the object | Q1, N7, N8 | agent, opt-in |
 | Q15 | `towns` and the `places` entry: 200 m grouping, size class and form, naming, outlines on request; `nearest` kind `place` and `point_info`'s place field | Synthetic places against brute-force linkage; opt-in: each terrain at hand records its class counts; on Caucasus the 72 towns of the 2014 Georgian and 2021 Russian censuses rank by residential floor with Spearman correlation at least 0.6 | N7, Q1 | agent, opt-in |
 | Q16 | Performance pass over the operations built so far: the query benchmark (`cargo bench --bench query`) over `Synth` and, opt-in, an install, cold and warm, with allocations and the cache's size per entry; each kept optimization its own commit with its measured delta | About 2× on the geometric mean of the benchmark's cases on Caucasus and GermanyCW, or the shortfall recorded with its reason; answers unchanged; no cache entry larger | Q2, N11 | agent, opt-in |
+| Q17 | Run `find_sites` sightline criteria in parallel, below normal priority (ADR 0004). They run on one thread today: `find_sites_los_36` takes 27.6 s on Afghanistan and 70 and 82 s on the Marianas against 10 s (`data/targets.md`) | Answers unchanged; the 10 s target met on Afghanistan; the Marianas met, or the shortfall recorded with its reason | Q8 | agent, opt-in |
 
 ### S, V, X, R
 
@@ -131,7 +132,7 @@ How to review one terrain:
 | Milestone | Contains | Proof |
 |---|---|---|
 | MS1 Engine on the install | A1, N0–N7, N10, N12, X1 | `query --terrain Caucasus describe` and `sample` answer from the install with no step before; every decoder passes its opt-in checks; `Synth` passes every grid test |
-| MS2 Queries | N8, N9, N11, Q1–Q13, Q15 | Every operation tested on `Synth`; opt-in benchmarks within the targets on Caucasus |
+| MS2 Queries | N8, N9, N11, Q1–Q13, Q15, Q17 | Every operation tested on `Synth`; opt-in benchmarks within the targets on Caucasus |
 | MS3 Assistant and release | S1, V1, R1, R2, C1 | An assistant with the skill answers the FARP example; live validation within target; release binaries; a guide a newcomer follows |
 
 N0 goes first among the N tasks because it could stop the design: if DCS holds
