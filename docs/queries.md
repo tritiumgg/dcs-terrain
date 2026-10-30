@@ -482,24 +482,49 @@ enum Shape { Point,                                // the position alone
              Polygon { points: Vec<[f64; 2]> } }   // absolute DCS x, z
 ```
 
-`heading` turns only a `Rect`; a circle and a polygon ignore it.
+`heading` turns only a `Rect`; a circle and a polygon ignore it. At most
+10 000 placements; a shape at most 10 km across, a polygon of 3 to 1 000
+points; `min_depth` only with `on: water`.
 
 The tool knows nothing about units: the caller gives the size and what the
 placement needs.
 
-Response per placement: the steepest slope and the shallowest water under the
-shape, and a list of issues, each naming the offending object. The checks run
-over every cell and object the shape touches:
+Response per placement: the cells read, the steepest slope and the
+shallowest water under the shape, the cover classes there, the count of
+scenery objects it meets, and a list of issues, each naming what it found:
 
-- **Surface:** for `on: land`, any water under the shape; for `on: water`,
-  any land, or water shallower than `min_depth` where it is given.
-- **Slope:** the steepest slope over `max_slope_deg`, where it is given. A
-  point is judged at its own cell.
-- **Overlap:** the shape against each building, wall and wire box, each
-  instance tree's radius, and each runway and taxiway, by exact intersection;
-  `effect` objects never count.
-- **Removed objects:** the shape inside an area where the terrain removes
-  scenery.
+- **Ground:** every cell the shape covers part of, however little, and none
+  it only touches at the cell's edge (conservative coverage); each cell
+  judged by its center, as the raster is. A point reads its own ground, in
+  point mode, and the slope of its own cell. So water and slope are found
+  to within a cell of the shape and never missed in a cell it reaches;
+  water narrower than a cell between two centers is missed.
+  - `no_ground`: cells no mesh covers.
+  - `water`, for `on: land`: per water class, its cell count and the cell
+    nearest the position.
+  - `land`, for `on: water`; `shallow`, water shallower than `min_depth`.
+  - `slope`: the steepest cell, over `max_slope_deg`.
+- **`scenery`:** the shape against each structure of the objects pool and
+  each power-line pole by its box, and each instance tree by the circle its
+  box bounds; `effect` objects never count. The nearest 100 to the position
+  are listed, all counted.
+- **`pavement`:** the shape against the runway surface's own mesh
+  triangles. The files mark runway, taxiway and apron with one material,
+  and most of its area lies more than 100 m from any runway's centerline,
+  so the issue names the runway whose centerline is nearest the shape, its
+  airdrome, and how near.
+
+Touching counts: two shapes meet when they come within 1 µm. A pair of
+convex shapes is tested by separating axes, and by its distance where every
+axis's gap is under the tolerance; any other pair by its distance. Each is
+first moved near the origin, where rounding is under 2e-12 m. The broad
+phase is the scene's own index and the mesh's runway index, over the
+shape's box widened by the largest model footprint likely.
+
+There is no removed-objects check. No install file records an area where a
+terrain removes scenery: `NotInstances.lua` lists exactly the `.scn5`
+group records, and a heliport clears the scenery around it only when a
+mission spawns it.
 
 Procedural forest is not a collision; a placement in forest is reported from
 `cover`.

@@ -139,11 +139,6 @@ its terrain files with a share mode that denies readers, the tool cannot run
 beside a live server. It needs DCS; N1 onward do not, and can proceed beside
 it. Each milestone gets a README pass.
 
-Q13's removed-objects check has no known source. No install file records an
-area where a terrain removes scenery: `NotInstances.lua` lists exactly the
-`.scn5` group records, and a heliport clears the scenery around it when a
-mission spawns it. Q13 finds a source or drops the check.
-
 Q14, `low_level_route`, is deferred until a user asks for routes. `exposure`
 already maps where the sites cannot see, and that answers most of the
 question. A route would stack approximations: terrain-only clearance, line of
