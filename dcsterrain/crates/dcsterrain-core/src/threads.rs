@@ -129,11 +129,17 @@ fn measure_cycle_hz() -> f64 {
         unsafe { QueryThreadCycleTime(GetCurrentThread(), &mut c) };
         c
     };
-    let (t, c) = (Instant::now(), thread_cycles());
-    while t.elapsed() < CALIBRATION {
-        std::hint::spin_loop();
-    }
-    (thread_cycles() - c) as f64 / t.elapsed().as_secs_f64()
+    // A thread preempted during a spin counts too few cycles for its wall
+    // clock and never too many, so the fastest spin is the truest.
+    (0..5)
+        .map(|_| {
+            let (t, c) = (Instant::now(), thread_cycles());
+            while t.elapsed() < CALIBRATION {
+                std::hint::spin_loop();
+            }
+            (thread_cycles() - c) as f64 / t.elapsed().as_secs_f64()
+        })
+        .fold(0.0, f64::max)
 }
 
 /// The time-stamp counter against the wall clock: it runs at one rate
@@ -170,7 +176,8 @@ pub struct ChildCost {
     /// Its [`cpu_cycles`], over all its threads.
     pub cycles: u64,
     /// The most memory it held: private bytes on Windows, resident
-    /// elsewhere, where the OS keeps no peak of private bytes.
+    /// elsewhere, where the OS keeps no peak of private bytes. Zero on
+    /// Linux where the child stayed under its parent's own peak.
     pub peak_bytes: u64,
 }
 
@@ -189,13 +196,16 @@ pub fn wait_costed(mut child: Child) -> io::Result<(ExitStatus, ChildCost)> {
         // SAFETY: the zeroed struct of integers is valid, its size is passed
         // along with it, and `child` keeps the handle open past its exit.
         let mut memory: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
-        unsafe {
-            QueryProcessCycleTime(handle as _, &mut cycles);
-            GetProcessMemoryInfo(
-                handle as _,
-                &mut memory,
-                size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
-            );
+        let counted = unsafe {
+            QueryProcessCycleTime(handle as _, &mut cycles) != 0
+                && GetProcessMemoryInfo(
+                    handle as _,
+                    &mut memory,
+                    size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+                ) != 0
+        };
+        if !counted {
+            return Err(io::Error::last_os_error());
         }
         let peak_bytes = memory.PeakPagefileUsage as u64;
         Ok((status, ChildCost { cycles, peak_bytes }))
@@ -207,15 +217,31 @@ pub fn wait_costed(mut child: Child) -> io::Result<(ExitStatus, ChildCost)> {
         // SAFETY: the zeroed struct of integers is valid to write over. The
         // child is taken by value, so nothing can wait for it a second time.
         let mut used: libc::rusage = unsafe { std::mem::zeroed() };
-        if unsafe { libc::wait4(child.id() as i32, &mut raw, 0, &mut used) } < 0 {
-            return Err(io::Error::last_os_error());
+        while unsafe { libc::wait4(child.id() as i32, &mut raw, 0, &mut used) } < 0 {
+            let e = io::Error::last_os_error();
+            if e.kind() != io::ErrorKind::Interrupted {
+                return Err(e);
+            }
         }
         let seconds = |t: libc::timeval| t.tv_sec as f64 + t.tv_usec as f64 * 1e-6;
         // The kilobytes Linux reports, the bytes macOS does.
         let unit = if cfg!(target_os = "macos") { 1 } else { 1024 };
+        let mut peak_bytes = used.ru_maxrss as u64 * unit;
+        // Linux seeds a spawned child's peak from its parent's, which the
+        // child shares memory with until it runs its program, so a peak no
+        // higher than the parent's says nothing about the child.
+        if cfg!(target_os = "linux") {
+            // SAFETY: as above, a zeroed struct of integers to write over.
+            let mut own: libc::rusage = unsafe { std::mem::zeroed() };
+            if unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut own) } == 0
+                && used.ru_maxrss <= own.ru_maxrss
+            {
+                peak_bytes = 0;
+            }
+        }
         let cost = ChildCost {
             cycles: seconds_to_cycles(seconds(used.ru_utime) + seconds(used.ru_stime)),
-            peak_bytes: used.ru_maxrss as u64 * unit,
+            peak_bytes,
         };
         Ok((ExitStatus::from_raw(raw), cost))
     }
