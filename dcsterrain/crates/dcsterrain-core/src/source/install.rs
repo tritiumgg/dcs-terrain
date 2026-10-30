@@ -28,7 +28,7 @@ use crate::extract::FileEntry;
 use crate::grid::Grid;
 
 /// The bytes of prepared blocks kept between requests.
-pub const BLOCK_BUDGET: usize = 32 << 20;
+pub const BLOCK_BUDGET: usize = 64 << 20;
 /// Up to this many points on a block not held, `points` tests its
 /// triangles directly rather than preparing it.
 const FEW_POINTS: usize = 32;
