@@ -32,7 +32,8 @@ cycles is that time on one core at the counter's rate.
   the refusal. On GermanyCW every `trafficability` request was refused, so
   that case times nothing else. `trafficability` has no target.
 - **The bounds in CI** take 9 rounds on `Synth` and fail above 3× the budget,
-  above 3× the memory target, on a failed request, or on no cycles counted.
+  above 3× the memory target, on a failed request, or on no cycles over
+  10 ms of work, since a shorter case can read zero under the CPU clock's tick.
   They catch a large regression, not a small one: `Synth` is small, so only
   `viewshed_20km`, `radar_floor_20km`, `exposure_10_sites`,
   `find_sites_los_36` and the horizon's first touch stand within 5× of their

@@ -605,6 +605,10 @@ const TARGETS: &[(&str, f64, bool)] = &[
     ("index_empty_cache", 10_000.0, false),
 ];
 
+/// The least time spent on a case that any counter here must see: a case
+/// shorter than the CPU clock's tick reads zero with the counter alive.
+const COUNTABLE_MS: f64 = 10.0;
+
 /// The most memory a call of the binary may hold.
 const TARGET_PEAK_MIB: f64 = 64.0;
 
@@ -1118,7 +1122,9 @@ fn main() {
                     if median_mc > limit {
                         over.push(format!("{key}: {median_mc:.1} Mc over {limit:.1} Mc"));
                     }
-                    if median_mc <= 0.0 {
+                    let spent_ms: f64 = f.samples.iter().map(|s| s.ms).sum();
+                    let spent_mc: f64 = f.samples.iter().map(|s| s.mc).sum();
+                    if spent_mc <= 0.0 && spent_ms >= COUNTABLE_MS {
                         over.push(format!("{key}: no cycles were counted"));
                     }
                     if peak_mib > TARGET_PEAK_MIB * BOUND_FACTOR {
