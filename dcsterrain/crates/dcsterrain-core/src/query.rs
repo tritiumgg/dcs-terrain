@@ -18,6 +18,7 @@ use crate::source::{Refusal, Source};
 use crate::synth::Synth;
 use crate::types::{Issue, OPERATIONS, Provenance};
 
+mod airfield_info;
 mod chokepoints;
 mod coverage;
 pub mod criteria;
@@ -42,6 +43,7 @@ mod unmask;
 mod viewshed;
 mod visible;
 
+pub use airfield_info::airfield_info;
 pub use chokepoints::chokepoints;
 pub use coverage::coverage;
 pub use describe::describe;
@@ -132,6 +134,7 @@ const HANDLERS: &[(&str, Handler)] = &[
     ("score_site", |t, r| run(t, r, score_site)),
     ("find_sites", |t, r| run(t, r, find_sites)),
     ("point_info", |t, r| run(t, r, point_info)),
+    ("airfield_info", |t, r| run(t, r, airfield_info)),
 ];
 
 /// Reads the request as `Q`, answers it with `f`, and writes the answer.

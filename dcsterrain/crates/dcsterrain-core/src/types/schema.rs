@@ -47,6 +47,7 @@ pub const OPERATIONS: &[Operation] = &[
     op::<ChokepointsRequest, ChokepointsResponse>("chokepoints"),
     op::<TrafficabilityRequest, TrafficabilityResponse>("trafficability"),
     op::<PointInfoRequest, PointInfoResponse>("point_info"),
+    op::<AirfieldInfoRequest, AirfieldInfoResponse>("airfield_info"),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]

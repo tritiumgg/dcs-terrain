@@ -13,8 +13,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    BoundingBox, CoverClass, Criterion, Footprint, LatLon, Network, Observer, Point, Point3,
-    Polygon, Provenance, Region, WaterClass,
+    AirdromeRef, BoundingBox, CoverClass, Criterion, Footprint, LatLon, Network, Observer, Point,
+    Point3, Polygon, Provenance, Region, WaterClass,
 };
 
 // describe
@@ -1065,6 +1065,165 @@ pub struct TownFix {
     pub compass: String,
     /// Such as "6 km NE of Zugdidi"; "at Zugdidi" within 50 m of it.
     pub description: String,
+}
+
+// airfield_info
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AirfieldInfoRequest {
+    /// A number is the airdrome's id; a string is its `name_id` or, where
+    /// none matches, its id written in digits.
+    pub airdrome: AirdromeRef,
+    /// An airframe's size: each stand then says whether it fits.
+    #[serde(default)]
+    pub fits: Option<Airframe>,
+    /// Also return the answer as GeoJSON.
+    #[serde(default)]
+    pub geojson: bool,
+}
+
+/// An airframe's size in meters, which the caller supplies.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Airframe {
+    /// Span, rotor disc included.
+    pub width: f64,
+    pub length: f64,
+    pub height: f64,
+    /// A helicopter needs a stand helicopters may use; an airplane one
+    /// airplanes may.
+    #[serde(default)]
+    pub helicopter: bool,
+}
+
+/// One airdrome. Courses are true, from true north at the threshold they
+/// leave, and grid, from DCS `x`; there is no magnetic model.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AirfieldInfoResponse {
+    #[serde(flatten)]
+    pub provenance: Provenance,
+    /// Null where no file gives it one; the airdrome is then named by its
+    /// `name_id`.
+    pub id: Option<i64>,
+    pub name_id: String,
+    /// Its first beacon's name, or its `name_id` where it has none.
+    pub name: String,
+    /// The mean of its runway ends; null with no runway.
+    pub x: Option<f64>,
+    pub z: Option<f64>,
+    pub lat: Option<f64>,
+    pub lon: Option<f64>,
+    /// The highest ground along any runway's centerline, over the mesh
+    /// triangles; with no runway, the highest ground at a stand. Null with
+    /// neither on the mesh.
+    pub elevation: Option<f64>,
+    pub runways: Vec<RunwayInfo>,
+    /// Each beacon of the airdrome, in the order the files list them.
+    pub navaids: Vec<Navaid>,
+    pub radio: Vec<RadioInfo>,
+    pub stands: Vec<StandInfo>,
+    /// How many stands there are of each size, widest first.
+    pub stand_sizes: Vec<StandSize>,
+    /// How many stands the airframe `fits` names fits; null without it.
+    pub stands_fitting: Option<u32>,
+    /// Each runway as a line between its thresholds and each stand as a
+    /// point, when `geojson` was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
+}
+
+/// A runway between its two thresholds, the ends the taxi graph names.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RunwayInfo {
+    /// Both ends' designators, the first threshold's first: "22-04".
+    pub designator: String,
+    /// From the first threshold to the second, clockwise from true north
+    /// at the first.
+    pub course_true_deg: f64,
+    /// The same, from grid north, DCS `x`.
+    pub course_grid_deg: f64,
+    /// Threshold to threshold, in the x–z plane.
+    pub length: f64,
+    /// Across the runway surface the mesh paints, the median of its width
+    /// at nine stations from a tenth to nine tenths of the way along; null
+    /// where the mesh paints none there.
+    pub width: Option<f64>,
+    /// The first threshold, then the second.
+    pub thresholds: Vec<Threshold>,
+}
+
+/// One end of a runway, and the course a landing on it flies.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Threshold {
+    pub designator: String,
+    pub x: f64,
+    pub z: f64,
+    pub lat: f64,
+    pub lon: f64,
+    /// The ground at the threshold; null off the mesh.
+    pub height: Option<f64>,
+    /// Towards the other threshold, clockwise from true north here.
+    pub course_true_deg: f64,
+    pub course_grid_deg: f64,
+}
+
+/// A radio navigation beacon.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Navaid {
+    pub id: Option<String>,
+    /// Such as `tacan`, `vor_dme`, `ils_localizer` or `airport_homer`, the
+    /// game's beacon type without its `BEACON_TYPE_` prefix; null for a
+    /// type the game does not name.
+    pub kind: Option<String>,
+    /// The game's code for the type.
+    pub kind_code: Option<i64>,
+    pub callsign: Option<String>,
+    pub frequency_hz: Option<f64>,
+    /// The TACAN channel.
+    pub channel: Option<i64>,
+    pub x: Option<f64>,
+    pub z: Option<f64>,
+    pub alt: Option<f64>,
+}
+
+/// A radio station, such as the tower.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RadioInfo {
+    pub id: Option<String>,
+    /// Its English callsign, or the first language's where it has none.
+    pub callsign: Option<String>,
+    /// HF, the low VHF band (FM), the high VHF band and UHF.
+    pub hf_hz: Option<f64>,
+    pub fm_hz: Option<f64>,
+    pub vhf_hz: Option<f64>,
+    pub uhf_hz: Option<f64>,
+}
+
+/// A parking stand. Its size fields are null where the files give it no
+/// class.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StandInfo {
+    pub name: String,
+    pub x: f64,
+    pub z: f64,
+    pub class: Option<String>,
+    pub width: Option<f64>,
+    pub length: Option<f64>,
+    /// The tallest airframe it takes; null where the class gives none.
+    pub height: Option<f64>,
+    pub helicopters: Option<bool>,
+    pub airplanes: Option<bool>,
+    /// Always null: no file says whether a stand is a shelter.
+    pub shelter: Option<bool>,
+    /// Whether the airframe `fits` names fits; null without `fits`, or
+    /// where a size it needs is unknown.
+    pub fits: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StandSize {
+    pub width: Option<f64>,
+    pub length: Option<f64>,
+    pub count: u32,
 }
 
 #[cfg(test)]

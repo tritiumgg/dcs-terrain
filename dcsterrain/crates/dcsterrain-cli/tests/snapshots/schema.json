@@ -12,6 +12,198 @@
       ],
       "description": "An airdrome as a request names it: a number is its id; a string is its\n`name_id` or, where no `name_id` matches, its id written in digits."
     },
+    "AirfieldInfoRequest": {
+      "properties": {
+        "airdrome": {
+          "$ref": "#/$defs/AirdromeRef",
+          "description": "A number is the airdrome's id; a string is its `name_id` or, where\nnone matches, its id written in digits."
+        },
+        "fits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Airframe"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An airframe's size: each stand then says whether it fits."
+        },
+        "geojson": {
+          "default": false,
+          "description": "Also return the answer as GeoJSON.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "airdrome"
+      ],
+      "type": "object"
+    },
+    "AirfieldInfoResponse": {
+      "description": "One airdrome. Courses are true, from true north at the threshold they\nleave, and grid, from DCS `x`; there is no magnetic model.",
+      "properties": {
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "elevation": {
+          "description": "The highest ground along any runway's centerline, over the mesh\ntriangles; with no runway, the highest ground at a stand. Null with\nneither on the mesh.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "geojson": {
+          "description": "Each runway as a line between its thresholds and each stand as a\npoint, when `geojson` was asked for."
+        },
+        "id": {
+          "description": "Null where no file gives it one; the airdrome is then named by its\n`name_id`.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "lat": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "lon": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Its first beacon's name, or its `name_id` where it has none.",
+          "type": "string"
+        },
+        "name_id": {
+          "type": "string"
+        },
+        "navaids": {
+          "description": "Each beacon of the airdrome, in the order the files list them.",
+          "items": {
+            "$ref": "#/$defs/Navaid"
+          },
+          "type": "array"
+        },
+        "radio": {
+          "items": {
+            "$ref": "#/$defs/RadioInfo"
+          },
+          "type": "array"
+        },
+        "runways": {
+          "items": {
+            "$ref": "#/$defs/RunwayInfo"
+          },
+          "type": "array"
+        },
+        "stand_sizes": {
+          "description": "How many stands there are of each size, widest first.",
+          "items": {
+            "$ref": "#/$defs/StandSize"
+          },
+          "type": "array"
+        },
+        "stands": {
+          "items": {
+            "$ref": "#/$defs/StandInfo"
+          },
+          "type": "array"
+        },
+        "stands_fitting": {
+          "description": "How many stands the airframe `fits` names fits; null without it.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
+          "type": "string"
+        },
+        "x": {
+          "description": "The mean of its runway ends; null with no runway.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "z": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "terrain",
+        "dcs_build",
+        "terrain_fingerprint",
+        "cell_size",
+        "elapsed_ms",
+        "name_id",
+        "name",
+        "runways",
+        "navaids",
+        "radio",
+        "stands",
+        "stand_sizes"
+      ],
+      "type": "object"
+    },
+    "Airframe": {
+      "description": "An airframe's size in meters, which the caller supplies.",
+      "properties": {
+        "height": {
+          "format": "double",
+          "type": "number"
+        },
+        "helicopter": {
+          "default": false,
+          "description": "A helicopter needs a stand helicopters may use; an airplane one\nairplanes may.",
+          "type": "boolean"
+        },
+        "length": {
+          "format": "double",
+          "type": "number"
+        },
+        "width": {
+          "description": "Span, rotor disc included.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "width",
+        "length",
+        "height"
+      ],
+      "type": "object"
+    },
     "Alternative": {
       "description": "One alternative: a full route, and how it relates to the others.",
       "properties": {
@@ -1950,6 +2142,75 @@
       ],
       "type": "object"
     },
+    "Navaid": {
+      "description": "A radio navigation beacon.",
+      "properties": {
+        "alt": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "callsign": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "channel": {
+          "description": "The TACAN channel.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "frequency_hz": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "description": "Such as `tacan`, `vor_dme`, `ils_localizer` or `airport_homer`, the\ngame's beacon type without its `BEACON_TYPE_` prefix; null for a\ntype the game does not name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind_code": {
+          "description": "The game's code for the type.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "x": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "z": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "Nearby": {
       "description": "For road and rail, the closest point on each of the nearest edges, `id`\nbeing the edge's index in the graph and `class` its road class. A node\nresult's `kind` is `node_red` or `node_blue`, the side whose position it\ngives. A scenery object's `class` is its scenery class and `name` its\nmodel.",
       "properties": {
@@ -2543,6 +2804,54 @@
       ],
       "type": "object"
     },
+    "RadioInfo": {
+      "description": "A radio station, such as the tower.",
+      "properties": {
+        "callsign": {
+          "description": "Its English callsign, or the first language's where it has none.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fm_hz": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "hf_hz": {
+          "description": "HF, the low VHF band (FM), the high VHF band and UHF.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "uhf_hz": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "vhf_hz": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "Region": {
       "description": "A region a request is bounded by. Each form is converted to its bounding\nbox plus a membership test before any grid is read.",
       "oneOf": [
@@ -2902,6 +3211,53 @@
       "required": [
         "from",
         "to"
+      ],
+      "type": "object"
+    },
+    "RunwayInfo": {
+      "description": "A runway between its two thresholds, the ends the taxi graph names.",
+      "properties": {
+        "course_grid_deg": {
+          "description": "The same, from grid north, DCS `x`.",
+          "format": "double",
+          "type": "number"
+        },
+        "course_true_deg": {
+          "description": "From the first threshold to the second, clockwise from true north\nat the first.",
+          "format": "double",
+          "type": "number"
+        },
+        "designator": {
+          "description": "Both ends' designators, the first threshold's first: \"22-04\".",
+          "type": "string"
+        },
+        "length": {
+          "description": "Threshold to threshold, in the x–z plane.",
+          "format": "double",
+          "type": "number"
+        },
+        "thresholds": {
+          "description": "The first threshold, then the second.",
+          "items": {
+            "$ref": "#/$defs/Threshold"
+          },
+          "type": "array"
+        },
+        "width": {
+          "description": "Across the runway surface the mesh paints, the median of its width\nat nine stations from a tenth to nine tenths of the way along; null\nwhere the mesh paints none there.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "designator",
+        "course_true_deg",
+        "course_grid_deg",
+        "length",
+        "thresholds"
       ],
       "type": "object"
     },
@@ -3396,6 +3752,109 @@
       ],
       "type": "object"
     },
+    "StandInfo": {
+      "description": "A parking stand. Its size fields are null where the files give it no\nclass.",
+      "properties": {
+        "airplanes": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "class": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fits": {
+          "description": "Whether the airframe `fits` names fits; null without `fits`, or\nwhere a size it needs is unknown.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "height": {
+          "description": "The tallest airframe it takes; null where the class gives none.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "helicopters": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "length": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "shelter": {
+          "description": "Always null: no file says whether a stand is a shelter.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "width": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "x",
+        "z"
+      ],
+      "type": "object"
+    },
+    "StandSize": {
+      "properties": {
+        "count": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "length": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "width": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "count"
+      ],
+      "type": "object"
+    },
     "Term": {
       "description": "One criterion's contribution: the measured `value`, whether the hard test\npassed, and the soft score from 0 to 1.",
       "properties": {
@@ -3456,6 +3915,57 @@
         "role",
         "path",
         "size"
+      ],
+      "type": "object"
+    },
+    "Threshold": {
+      "description": "One end of a runway, and the course a landing on it flies.",
+      "properties": {
+        "course_grid_deg": {
+          "format": "double",
+          "type": "number"
+        },
+        "course_true_deg": {
+          "description": "Towards the other threshold, clockwise from true north here.",
+          "format": "double",
+          "type": "number"
+        },
+        "designator": {
+          "type": "string"
+        },
+        "height": {
+          "description": "The ground at the threshold; null off the mesh.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "lat": {
+          "format": "double",
+          "type": "number"
+        },
+        "lon": {
+          "format": "double",
+          "type": "number"
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "designator",
+        "x",
+        "z",
+        "lat",
+        "lon",
+        "course_true_deg",
+        "course_grid_deg"
       ],
       "type": "object"
     },
@@ -3962,6 +4472,21 @@
     },
     "operations": {
       "properties": {
+        "airfield_info": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/AirfieldInfoRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/AirfieldInfoResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
         "approach_spectrum": {
           "properties": {
             "request": {
@@ -4267,7 +4792,8 @@
         "scenery_in",
         "chokepoints",
         "trafficability",
-        "point_info"
+        "point_info",
+        "airfield_info"
       ],
       "type": "object"
     }
