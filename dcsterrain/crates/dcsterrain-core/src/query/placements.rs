@@ -865,7 +865,10 @@ mod tests {
     /// The area of the polygon inside the cell from `(x0, z0)`, `cs`
     /// square: the polygon clipped to each side of the cell in turn.
     fn clipped_area(points: &[[f64; 2]], x0: f64, z0: f64, cs: f64) -> f64 {
-        let mut p = points.to_vec();
+        // In the cell's own frame, so a sliver's area is not lost to the
+        // rounding of coordinates far out.
+        let mut p: Vec<[f64; 2]> = points.iter().map(|q| [q[0] - x0, q[1] - z0]).collect();
+        let (x0, z0) = (0.0, 0.0);
         let sides = [
             (0, x0, true),
             (0, x0 + cs, false),
@@ -959,5 +962,531 @@ mod tests {
             [g.origin_x + 1000.0, g.origin_z + 1050.0],
         ]);
         assert_eq!(covered(&g, &s), [(20, 20)]);
+    }
+}
+
+/// Opt-in: on every terrain of a real install, a placement on a building,
+/// on water and on a runway is each reported with what it stands on, and a
+/// random batch of every shape agrees with a brute-force check of every
+/// cell, object and runway triangle near it. Set `DCSTERRAIN_INSTALL` to
+/// the install root, and `DCSTERRAIN_PLACEMENTS` to the batch if not 300;
+/// without the install this passes reading nothing, which is what CI does.
+/// Run it with `--release` and `--nocapture` for the figures. The install
+/// is only read; the cache is a scratch directory.
+#[cfg(test)]
+mod install_tests {
+    use std::collections::BTreeSet;
+    use std::path::PathBuf;
+    use std::time::Instant;
+
+    use super::*;
+    use crate::cache::Cache;
+    use crate::classes::Class;
+    use crate::decode::install::terrains;
+    use crate::roads::tests::Unit;
+    use crate::scratch::Scratch;
+    use crate::threads::cpu_cycles;
+
+    fn now() -> (Instant, u64) {
+        (Instant::now(), cpu_cycles())
+    }
+
+    /// Wall milliseconds and millions of CPU cycles since `since`.
+    fn spent(since: (Instant, u64)) -> (f64, f64) {
+        let cycles = cpu_cycles().saturating_sub(since.1) as f64 / 1e6;
+        (since.0.elapsed().as_secs_f64() * 1000.0, cycles)
+    }
+
+    fn placement(id: String, x: f64, z: f64, shape: PlacementShape, heading: f64) -> Placement {
+        Placement {
+            id,
+            x,
+            z,
+            heading,
+            shape,
+            on: Underfoot::Land,
+            max_slope_deg: None,
+            min_depth: None,
+        }
+    }
+
+    /// A random shape about `(x, z)`: a point, a box, a circle, or a
+    /// star-shaped polygon of 3 to 8 corners.
+    fn random_shape(u: &mut Unit, x: f64, z: f64) -> (PlacementShape, f64) {
+        let heading = u.next() * 360.0;
+        let shape = match (u.next() * 4.0) as u32 {
+            0 => PlacementShape::Point,
+            1 => PlacementShape::Rect {
+                width: 2.0 + u.next() * 60.0,
+                depth: 2.0 + u.next() * 60.0,
+            },
+            2 => PlacementShape::Circle {
+                radius: 2.0 + u.next() * 40.0,
+            },
+            _ => {
+                let n = 3 + (u.next() * 6.0) as usize;
+                let mut a: Vec<f64> = (0..n).map(|_| u.next() * std::f64::consts::TAU).collect();
+                a.sort_by(f64::total_cmp);
+                let points = a
+                    .iter()
+                    .map(|t| {
+                        let r = 5.0 + u.next() * 45.0;
+                        [x + r * t.cos(), z + r * t.sin()]
+                    })
+                    .collect();
+                PlacementShape::Polygon { points }
+            }
+        };
+        (shape, heading)
+    }
+
+    /// What the brute force finds of a placement: its cells, the water
+    /// codes under it with their counts and the cells with no ground, every
+    /// object it meets, and whether it meets the runway surface. Each cell
+    /// is judged by its area inside the shape, each object and runway
+    /// triangle in a box 2 km wider than the shape by its distance alone.
+    /// A cell the shape reaches by a sliver, under 0.01 m² or within a
+    /// millimeter of a disc's rim, is not judged: `ambiguous` counts them.
+    struct Found {
+        cells: usize,
+        ambiguous: usize,
+        water: BTreeMap<u8, u32>,
+        no_ground: u32,
+        objects: BTreeSet<(u8, u64)>,
+        pavement: bool,
+    }
+
+    /// The area of the polygon inside a cell: the polygon clipped to each
+    /// side of the cell in turn.
+    fn clipped_area(points: &[[f64; 2]], x0: f64, z0: f64, cs: f64) -> f64 {
+        // In the cell's own frame, so a sliver's area is not lost to the
+        // rounding of coordinates far out.
+        let mut p: Vec<[f64; 2]> = points.iter().map(|q| [q[0] - x0, q[1] - z0]).collect();
+        let (x0, z0) = (0.0, 0.0);
+        for (k, v, above) in [
+            (0, x0, true),
+            (0, x0 + cs, false),
+            (1, z0, true),
+            (1, z0 + cs, false),
+        ] {
+            let keep = |q: &[f64; 2]| if above { q[k] >= v } else { q[k] <= v };
+            let mut out = Vec::new();
+            for i in 0..p.len() {
+                let (a, b) = (p[i], p[(i + 1) % p.len()]);
+                if keep(&a) {
+                    out.push(a);
+                }
+                if keep(&a) != keep(&b) {
+                    let t = (v - a[k]) / (b[k] - a[k]);
+                    out.push([a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]);
+                }
+            }
+            p = out;
+            if p.is_empty() {
+                return 0.0;
+            }
+        }
+        signed_area(&p).abs() / 2.0
+    }
+
+    fn brute(src: &dyn Source, p: &Placement) -> Found {
+        let g = src.grid();
+        let cs = f64::from(g.cell_size);
+        let s = shape_of(p);
+        let b = s.bbox();
+        let mut centers = Vec::new();
+        let mut ambiguous = 0;
+        if p.shape == PlacementShape::Point {
+            centers.push([p.x, p.z]);
+        } else {
+            let row = |x: f64| ((x - g.origin_x) / cs).floor() as i64;
+            let col = |z: f64| ((z - g.origin_z) / cs).floor() as i64;
+            for r in row(b[0]) - 1..=row(b[2]) + 1 {
+                for c in col(b[1]) - 1..=col(b[3]) + 1 {
+                    let (x0, z0) = (g.origin_x + r as f64 * cs, g.origin_z + c as f64 * cs);
+                    let (inside, sliver) = match &s {
+                        Shape::Polygon { points, .. } => {
+                            let a = clipped_area(points, x0, z0, cs);
+                            (a >= 1e-2, a > 0.0 && a < 1e-2)
+                        }
+                        Shape::Disc { c, r } => {
+                            let dx = c[0] - c[0].clamp(x0, x0 + cs);
+                            let dz = c[1] - c[1].clamp(z0, z0 + cs);
+                            let d = dx.hypot(dz);
+                            (d < r - 1e-3, (d - r).abs() <= 1e-3)
+                        }
+                    };
+                    ambiguous += usize::from(sliver);
+                    if inside {
+                        centers.push([x0 + cs / 2.0, z0 + cs / 2.0]);
+                    }
+                }
+            }
+        }
+        let mut water = BTreeMap::new();
+        let mut no_ground = 0;
+        for c in &centers {
+            match src.point(c[0], c[1]).unwrap() {
+                None => no_ground += 1,
+                Some(gr) if gr.water != 0 => *water.entry(gr.water).or_insert(0) += 1,
+                Some(_) => {}
+            }
+        }
+        let wide = [b[0] - 2000.0, b[1] - 2000.0, b[2] + 2000.0, b[3] + 2000.0];
+        let mut objects = BTreeSet::new();
+        for (k, pool) in Pool::ALL.into_iter().enumerate() {
+            src.objects_in(pool, wide, &mut |o| {
+                if o.class.is_structure() && s.distance(&object_shape(pool, o)) <= TOUCH_M {
+                    objects.insert((k as u8, o.id));
+                }
+            })
+            .unwrap();
+        }
+        let pavement = (src.runway_triangles(wide).unwrap().iter())
+            .any(|t| s.distance(&Shape::polygon(t.to_vec())) <= TOUCH_M);
+        Found {
+            cells: centers.len(),
+            ambiguous,
+            water,
+            no_ground,
+            objects,
+            pavement,
+        }
+    }
+
+    /// The first of `n` random points in point mode whose water is `code`.
+    fn find_water(src: &dyn Source, u: &mut Unit, code: u8) -> Option<[f64; 2]> {
+        let g = src.grid();
+        let c = f64::from(g.cell_size);
+        for _ in 0..20 {
+            let pts: Vec<[f64; 2]> = (0..20_000)
+                .map(|_| {
+                    [
+                        g.origin_x + u.next() * f64::from(g.height) * c,
+                        g.origin_z + u.next() * f64::from(g.width) * c,
+                    ]
+                })
+                .collect();
+            let ground = src.points(&pts).unwrap();
+            if let Some(k) = ground
+                .iter()
+                .position(|g| g.is_some_and(|g| g.water == code))
+            {
+                return Some(pts[k]);
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn buildings_water_and_runways_are_reported_on_every_installed_terrain() {
+        let Some(root) = std::env::var_os("DCSTERRAIN_INSTALL").map(PathBuf::from) else {
+            eprintln!("DCSTERRAIN_INSTALL is not set; skipped");
+            return;
+        };
+        // Five threads, so the runs beside this one keep their share.
+        crate::threads::init(Some(5));
+        let n: usize = std::env::var("DCSTERRAIN_PLACEMENTS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(300);
+        println!(
+            "| terrain | build | building | water | runway | rows not runways | middles unpaved | batch agrees | with slivers | issues in batch | cold ms / Mcycles | warm ms / Mcycles | warm ms per placement |"
+        );
+        println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+        let scratch = Scratch::new();
+        let cache = Cache::new(&scratch.0);
+        let mut u = Unit(0x2545_f491_4f6c_dd1d);
+        let mut steps = Vec::new();
+        for listed in terrains(&root).unwrap() {
+            let Some(id) = listed.id else { continue };
+            let t = match Terrain::open(&root, &id, &cache, true) {
+                Ok(t) => t,
+                Err(e) => {
+                    println!("| {id} | refused: {} |", e.0);
+                    continue;
+                }
+            };
+            let src = t.source();
+            let g = src.grid();
+            let c = f64::from(g.cell_size);
+            let tables = src.tables().unwrap();
+            let check = |ps: Vec<Placement>| {
+                validate_placements(
+                    &t,
+                    ValidatePlacementsRequest {
+                        placements: ps,
+                        geojson: false,
+                    },
+                )
+                .unwrap()
+                .placements
+            };
+
+            // A building, found near random points, placed on at its middle.
+            let building = loop {
+                let (x, z) = (
+                    g.origin_x + u.next() * f64::from(g.height) * c,
+                    g.origin_z + u.next() * f64::from(g.width) * c,
+                );
+                let mut found = None;
+                src.objects_in(
+                    Pool::Objects,
+                    [x - 500.0, z - 500.0, x + 500.0, z + 500.0],
+                    &mut |o| {
+                        let [x0, _, z0, x1, _, z1] = o.bbox;
+                        if found.is_none()
+                            && o.class == Class::Building
+                            && x1 - x0 > 4.0
+                            && z1 - z0 > 4.0
+                        {
+                            let c = footprint(o).corners();
+                            found = Some((
+                                row(o),
+                                [(c[0][0] + c[2][0]) / 2.0, (c[0][1] + c[2][1]) / 2.0],
+                            ));
+                        }
+                    },
+                )
+                .unwrap();
+                if let Some(f) = found {
+                    break f;
+                }
+            };
+            let (house, mid) = building;
+            let got = &check(vec![placement(
+                "house".into(),
+                mid[0],
+                mid[1],
+                PlacementShape::Point,
+                0.0,
+            )])[0];
+            assert!(
+                got.issues.iter().any(|i| matches!(i, PlacementIssue::Scenery { pool: ScenePool::Objects, object } if object.id == house.id)),
+                "{id}: {house:?} {got:?}"
+            );
+
+            // A lake, else a river, else the sea.
+            let (code, wet) = [1, 3, 2]
+                .into_iter()
+                .find_map(|code| find_water(src, &mut u, code).map(|p| (code, p)))
+                .expect("every terrain has water");
+            let w = WaterClass::of_code(code).unwrap();
+            let got = &check(vec![placement(
+                "wet".into(),
+                wet[0],
+                wet[1],
+                PlacementShape::Point,
+                0.0,
+            )])[0];
+            assert!(
+                got.issues.iter().any(|i| *i
+                    == PlacementIssue::Water {
+                        water: w,
+                        cells: 1,
+                        x: wet[0],
+                        z: wet[1]
+                    }),
+                "{id}: {got:?}"
+            );
+            if id == "Caucasus" {
+                assert_eq!(w, WaterClass::Lake, "a lake on Caucasus");
+            }
+
+            // Each runway's middle.
+            let mut runway = String::new();
+            // A row whose ends are not designators joins two stands, and
+            // no pavement need lie under its middle.
+            let designated = |s: &str| s.starts_with(|c: char| c.is_ascii_digit());
+            let (mut odd, mut unpaved) = (0, 0);
+            for r in &tables.runways {
+                if !(designated(&r.edge1_name) && designated(&r.edge2_name)) {
+                    odd += 1;
+                    continue;
+                }
+                let m = [(r.edge1_x + r.edge2_x) / 2.0, (r.edge1_z + r.edge2_z) / 2.0];
+                let got = &check(vec![placement(
+                    "rw".into(),
+                    m[0],
+                    m[1],
+                    PlacementShape::Point,
+                    0.0,
+                )])[0];
+                let pav = got.issues.iter().find_map(|i| match i {
+                    PlacementIssue::Pavement {
+                        airdrome,
+                        runway,
+                        centerline_m,
+                        ..
+                    } => Some((airdrome.clone(), runway.clone(), *centerline_m)),
+                    _ => None,
+                });
+                // Pavement exactly where the point's own ground is runway:
+                // a runway may be paved only at its ends.
+                let paved = (src.point(m[0], m[1]).unwrap()).is_some_and(|g| g.surface == 5);
+                assert_eq!(pav.is_some(), paved, "{id}: {r:?} {got:?}");
+                let Some((a, name, d)) = pav else {
+                    unpaved += 1;
+                    continue;
+                };
+                assert!(d.unwrap() < 1e-6, "{id}: {r:?} {d:?}");
+                // Crossing runways share their middles' centerline distance.
+                if name.as_deref() == Some(r.name.as_str()) && runway.is_empty() {
+                    runway = format!("{} {}", a.unwrap_or_default(), r.name);
+                }
+            }
+            assert!(!runway.is_empty(), "{id}: no runway named at its middle");
+
+            // A random batch: a third near objects, a third along runways,
+            // the rest anywhere.
+            let mut batch = Vec::with_capacity(n);
+            while batch.len() < n {
+                let k = batch.len();
+                let (mut x, mut z) = (
+                    g.origin_x + u.next() * f64::from(g.height) * c,
+                    g.origin_z + u.next() * f64::from(g.width) * c,
+                );
+                if k % 3 == 0 {
+                    let mut near = None;
+                    src.objects_in(
+                        Pool::Objects,
+                        [x - 300.0, z - 300.0, x + 300.0, z + 300.0],
+                        &mut |o| {
+                            if near.is_none() && o.class.is_structure() {
+                                near = Some([o.pos[0], o.pos[2]]);
+                            }
+                        },
+                    )
+                    .unwrap();
+                    let Some(p) = near else { continue };
+                    (x, z) = (p[0] + u.next() * 40.0 - 20.0, p[1] + u.next() * 40.0 - 20.0);
+                } else if k % 3 == 1 && !tables.runways.is_empty() {
+                    let r = &tables.runways[(u.next() * tables.runways.len() as f64) as usize];
+                    let (s, across) = (u.next(), u.next() * 160.0 - 80.0);
+                    let (dx, dz) = (r.edge2_x - r.edge1_x, r.edge2_z - r.edge1_z);
+                    let l = dx.hypot(dz);
+                    x = r.edge1_x + s * dx - dz / l * across;
+                    z = r.edge1_z + s * dz + dx / l * across;
+                }
+                let (shape, heading) = random_shape(&mut u, x, z);
+                batch.push(placement(format!("{k}"), x, z, shape, heading));
+            }
+            let clock = now();
+            let cold = check(batch.clone());
+            let cold_t = spent(clock);
+            let clock = now();
+            let warm = check(batch.clone());
+            let warm_t = spent(clock);
+            assert_eq!(cold, warm, "{id}: the answer is the same twice");
+            // Each step of a warm request alone, over the same placements.
+            let shapes: Vec<Shape> = batch.iter().map(shape_of).collect();
+            let step = |f: &mut dyn FnMut(&Shape)| {
+                let clock = now();
+                shapes.iter().for_each(&mut *f);
+                spent(clock)
+            };
+            let mut found = [0usize; 3];
+            let mut read = Vec::new();
+            for (k, pool) in Pool::ALL.into_iter().enumerate() {
+                read.push(step(&mut |s| {
+                    let b = s.bbox();
+                    let r = OBJECT_REACH_M;
+                    src.objects_in(pool, [b[0] - r, b[1] - r, b[2] + r, b[3] + r], &mut |_| {
+                        found[k] += 1
+                    })
+                    .unwrap();
+                }));
+            }
+            let met = step(&mut |s| {
+                objects_met(src, s, [0.0, 0.0]).unwrap();
+            });
+            // The runway surface under every box at once, as the request reads it.
+            let clock = now();
+            let boxes: Vec<[f64; 4]> = shapes.iter().map(Shape::bbox).collect();
+            let tris = src.runway_triangles_each(&boxes).unwrap();
+            for (s, t) in shapes.iter().zip(&tris) {
+                pavement(t, Some(tables), s);
+            }
+            let pave = spent(clock);
+            let ms = |s: (f64, f64)| format!("{:.0} / {:.0}", s.0, s.1);
+            steps.push(format!(
+                "| {id} | {} ({}) | {} ({}) | {} ({}) | {} | {} |",
+                ms(read[0]),
+                found[0] / n,
+                ms(read[1]),
+                found[1] / n,
+                ms(read[2]),
+                found[2] / n,
+                ms(met),
+                ms(pave),
+            ));
+            let (mut issues, mut slivers) = (0, 0);
+            for (p, got) in batch.iter().zip(&warm) {
+                let want = brute(src, p);
+                issues += got.issues.len();
+                if want.ambiguous > 0 {
+                    // Slivers either way: the cells between, and the ground
+                    // under them not compared.
+                    let range = want.cells..=want.cells + want.ambiguous;
+                    assert!(range.contains(&(got.cells as usize)), "{id}: {p:?}");
+                    slivers += 1;
+                } else {
+                    assert_eq!(got.cells as usize, want.cells, "{id}: {p:?}");
+                }
+                let mut water = BTreeMap::new();
+                let mut no_ground = 0;
+                let mut pavement = false;
+                let mut ids = BTreeSet::new();
+                for i in &got.issues {
+                    match i {
+                        PlacementIssue::Water {
+                            water: w, cells, ..
+                        } => {
+                            water.insert(w.code(), *cells);
+                        }
+                        PlacementIssue::NoGround { cells, .. } => no_ground = *cells,
+                        PlacementIssue::Pavement { .. } => pavement = true,
+                        PlacementIssue::Scenery { pool, object } => {
+                            let k = Pool::ALL
+                                .iter()
+                                .position(|q| scene_pool(*q) == *pool)
+                                .unwrap();
+                            ids.insert((k as u8, object.id));
+                        }
+                        _ => {}
+                    }
+                }
+                if want.ambiguous == 0 {
+                    let found = (want.water, want.no_ground);
+                    assert_eq!((water, no_ground), found, "{id}: {p:?}");
+                }
+                assert_eq!(pavement, want.pavement, "{id}: {p:?}");
+                assert_eq!(got.objects_met as usize, want.objects.len(), "{id}: {p:?}");
+                if want.objects.len() <= OBJECTS_LISTED_MAX {
+                    assert_eq!(ids, want.objects, "{id}: {p:?}");
+                }
+            }
+            let ms = |s: (f64, f64)| format!("{:.0} / {:.0}", s.0, s.1);
+            println!(
+                "| {id} | {} | {} {} | {:?} at {:.0}, {:.0} | {runway} | {odd} | {unpaved} | {n} of {n} | {slivers} | {issues} | {} | {} | {:.2} |",
+                t.provenance().dcs_build,
+                house.model,
+                house.id,
+                w,
+                wet[0],
+                wet[1],
+                ms(cold_t),
+                ms(warm_t),
+                warm_t.0 / n as f64,
+            );
+        }
+        println!();
+        println!(
+            "| terrain | objects read ms / Mcycles (found per placement) | lines | trees | objects met | pavement |"
+        );
+        println!("|---|---|---|---|---|---|");
+        for s in steps {
+            println!("{s}");
+        }
     }
 }
