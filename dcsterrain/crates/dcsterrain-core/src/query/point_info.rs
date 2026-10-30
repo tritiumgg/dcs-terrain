@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use super::geojson::Features;
 use super::nearest::{airdromes, edges, towns};
 use super::sample::derived_values;
+use super::towns::{Lookup, place_ref};
 use super::{Terrain, mgrs, refused};
 use crate::crs::{Tmerc, grid_bearing};
 use crate::decode::rn4::KIND_ROAD;
@@ -94,6 +95,8 @@ pub fn point_info(terrain: &Terrain, q: PointInfoRequest) -> Result<PointInfoRes
     let slope = derived_values(src, Derived::Slope, &pts, &mut capped)?;
     let aspect = derived_values(src, Derived::Aspect, &pts, &mut capped)?;
 
+    let places = src.places().map_err(refused)?;
+    let mut lookup = places.map(Lookup::new);
     let mut out = Vec::with_capacity(pts.len());
     for (k, &p) in pts.iter().enumerate() {
         let from = (p[0], p[1]);
@@ -110,6 +113,10 @@ pub fn point_info(terrain: &Terrain, q: PointInfoRequest) -> Result<PointInfoRes
             slope: slope[k],
             aspect: aspect[k],
             town: towns(tables, from, 1).pop().map(|t| fix(&tm, t, p)),
+            place: match &mut lookup {
+                Some(l) => l.at(src, p[0], p[1])?.map(|q| place_ref(tables, q)),
+                None => None,
+            },
             road,
             airfield: airdromes(tables, from, 1).pop(),
             lat,
@@ -135,6 +142,7 @@ pub fn point_info(terrain: &Terrain, q: PointInfoRequest) -> Result<PointInfoRes
     Ok(PointInfoResponse {
         provenance: terrain.provenance(),
         points: out,
+        places_built: places.is_some(),
         geojson,
     })
 }

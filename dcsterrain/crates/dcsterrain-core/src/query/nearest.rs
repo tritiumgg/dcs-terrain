@@ -3,6 +3,7 @@
 
 use super::{Terrain, refused};
 use crate::classes::Class;
+use crate::decode::lua::tables::TownRow;
 use crate::decode::rn4::{KIND_RAIL, KIND_ROAD};
 use crate::decode::scn5::Pool;
 use crate::source::{Source, Tables};
@@ -151,6 +152,11 @@ pub(super) fn airdromes(tables: &Tables, from: (f64, f64), n: usize) -> Vec<Near
         .collect()
 }
 
+/// A town by its display name where it has one.
+pub(super) fn town_display_name(t: &TownRow) -> String {
+    t.display_name.clone().unwrap_or_else(|| t.name.clone())
+}
+
 /// The `n` towns of the tables nearest `from`, nearest first, ties in table
 /// order, each by its display name where it has one. Every town is measured,
 /// a linear scan: the tables hold under two thousand, a few microseconds'
@@ -161,10 +167,39 @@ pub(super) fn towns(tables: &Tables, from: (f64, f64), n: usize) -> Vec<Nearby> 
     near.into_iter()
         .map(|k| {
             let t = &all[k];
-            let name = t.display_name.clone().unwrap_or_else(|| t.name.clone());
-            at("town", k.to_string(), Some(name), (t.x, t.z), from)
+            at(
+                "town",
+                k.to_string(),
+                Some(town_display_name(t)),
+                (t.x, t.z),
+                from,
+            )
         })
         .collect()
+}
+
+/// The `n` places nearest `from`, each measured to its center, nearest
+/// first, ties to the least id; `class` is its size class.
+fn places(src: &dyn Source, from: (f64, f64), n: usize) -> Result<Vec<Nearby>, Vec<Issue>> {
+    let all = &super::towns::places_of(src)?.places;
+    let tables = src.tables().map_err(refused)?;
+    let near = nearest_indices(all.iter().map(|p| Some((p.x, p.z))), from, n);
+    Ok(near
+        .into_iter()
+        .map(|k| {
+            let p = &all[k];
+            let name = p.names.first().and_then(|&t| tables.towns.get(t as usize));
+            let mut f = at(
+                "place",
+                p.id.to_string(),
+                name.map(town_display_name),
+                (p.x, p.z),
+                from,
+            );
+            f.class = Some(p.size.name().to_string());
+            f
+        })
+        .collect())
 }
 
 pub fn nearest(terrain: &Terrain, q: NearestRequest) -> Result<NearestResponse, Vec<Issue>> {
@@ -198,6 +233,7 @@ pub fn nearest(terrain: &Terrain, q: NearestRequest) -> Result<NearestResponse, 
         NearestKind::Rail => edges(src, KIND_RAIL, from, n)?,
         NearestKind::Airdrome => airdromes(tables()?, from, n),
         NearestKind::Town => towns(tables()?, from, n),
+        NearestKind::Place => places(src, from, n)?,
         NearestKind::Node => {
             let mut found = Vec::new();
             for (k, node) in tables()?.nodes.iter().enumerate() {
@@ -462,10 +498,6 @@ mod tests {
         );
         assert_eq!(
             code(json!({"kind": "town", "x": 0, "z": 0, "class": "misc"})),
-            "invalid_request"
-        );
-        assert_eq!(
-            code(json!({"kind": "place", "x": 0, "z": 0})),
             "invalid_request"
         );
     }

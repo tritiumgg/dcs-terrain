@@ -49,6 +49,7 @@ pub const OPERATIONS: &[Operation] = &[
     op::<PointInfoRequest, PointInfoResponse>("point_info"),
     op::<AirfieldInfoRequest, AirfieldInfoResponse>("airfield_info"),
     op::<ValidatePlacementsRequest, ValidatePlacementsResponse>("validate_placements"),
+    op::<TownsRequest, TownsResponse>("towns"),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]

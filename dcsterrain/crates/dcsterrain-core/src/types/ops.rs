@@ -12,6 +12,8 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::places::{Form, SizeClass};
+
 use super::{
     AirdromeRef, BoundingBox, CoverClass, Criterion, Footprint, LatLon, Network, Observer, Point,
     Point3, Polygon, Provenance, Region, WaterClass,
@@ -821,7 +823,8 @@ fn default_nearest_n() -> u32 {
     1
 }
 
-/// `node` matches both sides' nodes; each result's `kind` says which.
+/// `node` matches both sides' nodes; each result's `kind` says which. A
+/// `place` is measured to its center, its `class` its size class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum NearestKind {
@@ -832,6 +835,7 @@ pub enum NearestKind {
     Node,
     Beacon,
     Scenery,
+    Place,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1012,6 +1016,9 @@ pub struct PointInfoResponse {
     pub provenance: Provenance,
     /// In the order of the request's.
     pub points: Vec<PointInfo>,
+    /// Whether the places were built, so a null `place` means outside
+    /// every one; `dcsterrain index` builds them.
+    pub places_built: bool,
     /// A point per request point with its fields, when `geojson` was asked
     /// for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1039,6 +1046,9 @@ pub struct PointInfo {
     pub aspect: Option<f64>,
     /// Null when the terrain lists no towns.
     pub town: Option<TownFix>,
+    /// The place whose outline holds the point; null outside every place,
+    /// and while the places are still being built.
+    pub place: Option<PlaceRef>,
     /// The nearest point of the nearest road; null when the terrain has
     /// none.
     pub road: Option<Nearby>,
@@ -1065,6 +1075,108 @@ pub struct TownFix {
     pub compass: String,
     /// Such as "6 km NE of Zugdidi"; "at Zugdidi" within 50 m of it.
     pub description: String,
+}
+
+// towns
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TownsRequest {
+    /// Places whose center lies in it; every place of the terrain when
+    /// omitted.
+    #[serde(default)]
+    pub region: Option<Region>,
+    /// Only places of these size classes; any class when empty.
+    #[serde(default)]
+    pub size: Vec<SizeClass>,
+    /// Only places of these forms; any form when empty.
+    #[serde(default)]
+    pub form: Vec<Form>,
+    #[serde(default)]
+    pub min_buildings: u32,
+    #[serde(default)]
+    pub sort: TownsSort,
+    /// At most 1 000.
+    #[serde(default = "default_towns_limit")]
+    pub limit: u32,
+    /// Each place's outline: its buildings buffered by 100 m, rasterized at
+    /// 50 m, traced and simplified to within 25 m.
+    #[serde(default)]
+    pub outlines: bool,
+    /// Also return the answer as GeoJSON.
+    #[serde(default)]
+    pub geojson: bool,
+}
+
+fn default_towns_limit() -> u32 {
+    50
+}
+
+/// What places are ranked by, most first, ties by id.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TownsSort {
+    #[default]
+    Buildings,
+    ResidentialFloor,
+    ApartmentShare,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TownsResponse {
+    #[serde(flatten)]
+    pub provenance: Provenance,
+    /// How many places pass the region and the filters, before the limit.
+    pub matched: u32,
+    pub places: Vec<PlaceInfo>,
+    /// A point at each place's center, and its outline when `outlines`
+    /// was asked for, when `geojson` was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
+}
+
+/// A place: settlement buildings each within 200 m of another, three or
+/// more.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PlaceInfo {
+    /// The least scenery object id among its buildings, stable while the
+    /// scene file is.
+    pub id: u64,
+    /// The town of the terrain's list that names it; null when none does.
+    pub name: Option<String>,
+    /// Other towns of the list it holds, largest first.
+    pub other_names: Vec<String>,
+    /// The mean of its buildings' positions.
+    pub x: f64,
+    pub z: f64,
+    /// Its buildings' positions' box.
+    pub bbox: BoundingBox,
+    pub size: SizeClass,
+    pub form: Form,
+    pub buildings: u32,
+    pub houses: u32,
+    pub apartments: u32,
+    pub shops: u32,
+    pub civic: u32,
+    pub industrial: u32,
+    /// Square meters of house and apartment floor.
+    pub residential_floor: f64,
+    /// Apartment blocks over its buildings.
+    pub apartment_share: f64,
+    /// The 100 m cells holding one of its buildings.
+    pub hectares: u32,
+    /// Polygons, each its exterior ring then its holes, as `[x, z]`
+    /// vertices; when `outlines` was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outline: Option<Vec<Vec<Vec<[f64; 2]>>>>,
+}
+
+/// The place a point stands in.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PlaceRef {
+    pub id: u64,
+    pub name: Option<String>,
+    pub size: SizeClass,
+    pub form: Form,
 }
 
 // airfield_info

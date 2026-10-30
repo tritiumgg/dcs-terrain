@@ -40,6 +40,7 @@ pub mod shape;
 pub mod sightline;
 mod sites;
 mod spectrum;
+mod towns;
 mod trafficability;
 mod unmask;
 mod viewshed;
@@ -62,6 +63,7 @@ pub use sample::{lattice, sample};
 pub use scenery::scenery_in;
 pub use sites::{find_sites, score_site};
 pub use spectrum::approach_spectrum;
+pub use towns::towns;
 pub use trafficability::trafficability;
 pub use unmask::unmask_profile;
 pub use viewshed::viewshed;
@@ -139,6 +141,7 @@ const HANDLERS: &[(&str, Handler)] = &[
     ("point_info", |t, r| run(t, r, point_info)),
     ("airfield_info", |t, r| run(t, r, airfield_info)),
     ("validate_placements", |t, r| run(t, r, validate_placements)),
+    ("towns", |t, r| run(t, r, towns)),
 ];
 
 /// Reads the request as `Q`, answers it with `f`, and writes the answer.

@@ -1964,6 +1964,27 @@
       ],
       "type": "object"
     },
+    "Form": {
+      "description": "How a place is laid out.",
+      "oneOf": [
+        {
+          "enum": [
+            "compact"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "dispersed",
+          "description": "A strung-out spread of houses no gap separates.",
+          "type": "string"
+        },
+        {
+          "const": "agglomeration",
+          "description": "Several named towns grown together.",
+          "type": "string"
+        }
+      ]
+    },
     "GeoPoint": {
       "description": "A position in WGS84 degrees, with its MGRS reference to the meter; the\nreference is null outside 80° S to 84° N, where MGRS uses polar grids.",
       "properties": {
@@ -2255,7 +2276,7 @@
       "type": "object"
     },
     "NearestKind": {
-      "description": "`node` matches both sides' nodes; each result's `kind` says which.",
+      "description": "`node` matches both sides' nodes; each result's `kind` says which. A\n`place` is measured to its center, its `class` its size class.",
       "enum": [
         "road",
         "rail",
@@ -2263,7 +2284,8 @@
         "town",
         "node",
         "beacon",
-        "scenery"
+        "scenery",
+        "place"
       ],
       "type": "string"
     },
@@ -2368,6 +2390,165 @@
         "x",
         "z",
         "alt_agl"
+      ],
+      "type": "object"
+    },
+    "PlaceInfo": {
+      "description": "A place: settlement buildings each within 200 m of another, three or\nmore.",
+      "properties": {
+        "apartment_share": {
+          "description": "Apartment blocks over its buildings.",
+          "format": "double",
+          "type": "number"
+        },
+        "apartments": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "bbox": {
+          "$ref": "#/$defs/Box",
+          "description": "Its buildings' positions' box."
+        },
+        "buildings": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "civic": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "form": {
+          "$ref": "#/$defs/Form"
+        },
+        "hectares": {
+          "description": "The 100 m cells holding one of its buildings.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "houses": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "description": "The least scenery object id among its buildings, stable while the\nscene file is.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "industrial": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "description": "The town of the terrain's list that names it; null when none does.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "other_names": {
+          "description": "Other towns of the list it holds, largest first.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "outline": {
+          "description": "Polygons, each its exterior ring then its holes, as `[x, z]`\nvertices; when `outlines` was asked for.",
+          "items": {
+            "items": {
+              "items": {
+                "items": {
+                  "format": "double",
+                  "type": "number"
+                },
+                "maxItems": 2,
+                "minItems": 2,
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "residential_floor": {
+          "description": "Square meters of house and apartment floor.",
+          "format": "double",
+          "type": "number"
+        },
+        "shops": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "size": {
+          "$ref": "#/$defs/SizeClass"
+        },
+        "x": {
+          "description": "The mean of its buildings' positions.",
+          "format": "double",
+          "type": "number"
+        },
+        "z": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "other_names",
+        "x",
+        "z",
+        "bbox",
+        "size",
+        "form",
+        "buildings",
+        "houses",
+        "apartments",
+        "shops",
+        "civic",
+        "industrial",
+        "residential_floor",
+        "apartment_share",
+        "hectares"
+      ],
+      "type": "object"
+    },
+    "PlaceRef": {
+      "description": "The place a point stands in.",
+      "properties": {
+        "form": {
+          "$ref": "#/$defs/Form"
+        },
+        "id": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "size": {
+          "$ref": "#/$defs/SizeClass"
+        }
+      },
+      "required": [
+        "id",
+        "size",
+        "form"
       ],
       "type": "object"
     },
@@ -2954,6 +3135,17 @@
             "null"
           ]
         },
+        "place": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlaceRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The place whose outline holds the point; null outside every place,\nand while the places are still being built."
+        },
         "road": {
           "anyOf": [
             {
@@ -3048,6 +3240,10 @@
         "geojson": {
           "description": "A point per request point with its fields, when `geojson` was asked\nfor."
         },
+        "places_built": {
+          "description": "Whether the places were built, so a null `place` means outside\nevery one; `dcsterrain index` builds them.",
+          "type": "boolean"
+        },
         "points": {
           "description": "In the order of the request's.",
           "items": {
@@ -3068,7 +3264,8 @@
         "terrain_fingerprint",
         "cell_size",
         "elapsed_ms",
-        "points"
+        "points",
+        "places_built"
       ],
       "type": "object"
     },
@@ -4080,6 +4277,18 @@
       ],
       "type": "object"
     },
+    "SizeClass": {
+      "description": "A place's size, in the terrain's own units: buildings, residential\nfloor and the share of apartment blocks.",
+      "enum": [
+        "hamlet",
+        "village",
+        "large_village",
+        "town",
+        "city",
+        "large_city"
+      ],
+      "type": "string"
+    },
     "SpectrumBand": {
       "properties": {
         "alt_agl": {
@@ -4458,6 +4667,122 @@
         "description"
       ],
       "type": "object"
+    },
+    "TownsRequest": {
+      "properties": {
+        "form": {
+          "default": [],
+          "description": "Only places of these forms; any form when empty.",
+          "items": {
+            "$ref": "#/$defs/Form"
+          },
+          "type": "array"
+        },
+        "geojson": {
+          "default": false,
+          "description": "Also return the answer as GeoJSON.",
+          "type": "boolean"
+        },
+        "limit": {
+          "default": 50,
+          "description": "At most 1 000.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "min_buildings": {
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "outlines": {
+          "default": false,
+          "description": "Each place's outline: its buildings buffered by 100 m, rasterized at\n50 m, traced and simplified to within 25 m.",
+          "type": "boolean"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Region"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Places whose center lies in it; every place of the terrain when\nomitted."
+        },
+        "size": {
+          "default": [],
+          "description": "Only places of these size classes; any class when empty.",
+          "items": {
+            "$ref": "#/$defs/SizeClass"
+          },
+          "type": "array"
+        },
+        "sort": {
+          "$ref": "#/$defs/TownsSort",
+          "default": "buildings"
+        }
+      },
+      "type": "object"
+    },
+    "TownsResponse": {
+      "properties": {
+        "cell_size": {
+          "format": "double",
+          "type": "number"
+        },
+        "dcs_build": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "geojson": {
+          "description": "A point at each place's center, and its outline when `outlines`\nwas asked for, when `geojson` was asked for."
+        },
+        "matched": {
+          "description": "How many places pass the region and the filters, before the limit.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "places": {
+          "items": {
+            "$ref": "#/$defs/PlaceInfo"
+          },
+          "type": "array"
+        },
+        "terrain": {
+          "type": "string"
+        },
+        "terrain_fingerprint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "terrain",
+        "dcs_build",
+        "terrain_fingerprint",
+        "cell_size",
+        "elapsed_ms",
+        "matched",
+        "places"
+      ],
+      "type": "object"
+    },
+    "TownsSort": {
+      "description": "What places are ranked by, most first, ties by id.",
+      "enum": [
+        "buildings",
+        "residential_floor",
+        "apartment_share"
+      ],
+      "type": "string"
     },
     "TpiClass": {
       "description": "A landform class from local relief, then regional relief, then slope:\nthe first that holds of `ridge`, `valley`, `upper`, `lower`, `mid`, and\n`flat` otherwise.",
@@ -5221,6 +5546,21 @@
           ],
           "type": "object"
         },
+        "towns": {
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/TownsRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/TownsResponse"
+            }
+          },
+          "required": [
+            "request",
+            "response"
+          ],
+          "type": "object"
+        },
         "trafficability": {
           "properties": {
             "request": {
@@ -5318,7 +5658,8 @@
         "trafficability",
         "point_info",
         "airfield_info",
-        "validate_placements"
+        "validate_placements",
+        "towns"
       ],
       "type": "object"
     }
