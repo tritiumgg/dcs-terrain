@@ -30,6 +30,14 @@
 //! - `DCSTERRAIN_BENCH_BOUNDS`: any value runs only the cases with a target,
 //!   and fails if one spends more than 3× its target's cycles.
 //!   `mise run bench-bounds` sets it.
+//! - `DCSTERRAIN_BENCH_PEAK`: any value runs each case's requests as lines
+//!   of one process of the binary, for the most memory a batch of them holds,
+//!   in the case's `peak_mib`.
+//!
+//! The run ends with each operation's figure, slowest first: the geometric
+//! mean of its held cases' medians over the install's terrains, warm. A held
+//! case is what the operation itself costs; opening a terrain and building a
+//! horizon are other cases' figures.
 //!
 //! A round is one process's worth of work: a terrain opened, then each of
 //! the case's requests answered against it, so blocks and tiles read for
@@ -816,6 +824,8 @@ struct Bench {
     target: Target,
     cache: Cache,
     cli: PathBuf,
+    /// Answer through one process of the binary, for its peak memory.
+    peak: bool,
 }
 
 impl Bench {
@@ -830,7 +840,11 @@ impl Bench {
                 false
             }
         };
-        match case.mode {
+        let mode = match case.mode {
+            Mode::Held | Mode::Fresh if self.peak => Mode::Batch,
+            mode => mode,
+        };
+        match mode {
             Mode::Held => {
                 let t = self.target.open(&self.cache);
                 for r in &case.requests {
@@ -866,8 +880,13 @@ impl Bench {
             }
             Mode::Batch => {
                 let mut input = String::new();
-                for r in &case.requests {
-                    input.push_str(&format!("{r}\n"));
+                for (id, r) in case.requests.iter().enumerate() {
+                    if case.mode == Mode::Batch {
+                        input.push_str(&format!("{r}\n"));
+                    } else {
+                        let line = json!({"id": id, "op": case.op, "request": r});
+                        input.push_str(&format!("{line}\n"));
+                    }
                 }
                 let (s, ok, printed) = self.called(&[], &input);
                 let answered = printed
@@ -1018,6 +1037,7 @@ fn main() {
         .filter(|a| !a.starts_with("--"))
         .collect();
     let bounds = env("DCSTERRAIN_BENCH_BOUNDS").is_some();
+    let peak = env("DCSTERRAIN_BENCH_PEAK").is_some();
     let rounds: usize = env("DCSTERRAIN_BENCH_ROUNDS")
         .map_or(if bounds { 9 } else { 3 }, |v| v.parse().expect("rounds"));
     let os = env("DCSTERRAIN_BENCH_OS").unwrap_or_else(|| "both".into());
@@ -1049,6 +1069,7 @@ fn main() {
     };
 
     let mut cases_out = serde_json::Map::new();
+    let mut by_op: BTreeMap<&str, Vec<(f64, f64)>> = BTreeMap::new();
     let mut sizes_out = serde_json::Map::new();
     let mut ratios: Vec<f64> = Vec::new();
     let mut over: Vec<String> = Vec::new();
@@ -1070,6 +1091,7 @@ fn main() {
             target: terrain.clone(),
             cache: cache.clone(),
             cli: PathBuf::from(env!("CARGO_BIN_EXE_dcsterrain")),
+            peak,
         };
         let install = matches!(terrain, Target::Install { .. });
         let keep = |name: &str| {
@@ -1124,6 +1146,9 @@ fn main() {
                     "warm"
                 };
                 let key = format!("{}/{}/{}", terrain.name(), case.name, os_name);
+                if install && !cold && case.mode == Mode::Held && !case.cold_horizon {
+                    (by_op.entry(case.op).or_default()).push((median_mc, median));
+                }
                 let goal = target(&case.name);
                 // Only the OS cache state a target is stated in is judged.
                 let judged = goal.filter(|g| !install || g.1 == cold);
@@ -1223,9 +1248,27 @@ fn main() {
             ratios.len()
         );
     }
+    let mean = |v: &[f64]| (v.iter().map(|x| x.ln()).sum::<f64>() / v.len() as f64).exp();
+    let mut ops: Vec<(&str, f64, f64)> = by_op
+        .iter()
+        .map(|(op, v)| {
+            let (mc, ms): (Vec<f64>, Vec<f64>) = v.iter().copied().unzip();
+            (*op, mean(&mc), mean(&ms))
+        })
+        .collect();
+    ops.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let mut ops_out = serde_json::Map::new();
+    if !ops.is_empty() {
+        println!("\n| operation | Mc | ms |\n|---|---|---|");
+    }
+    for (op, mc, ms) in ops {
+        println!("| {op} | {mc:.3} | {ms:.3} |");
+        ops_out.insert(op.to_string(), json!({"median_mc": mc, "median_ms": ms}));
+    }
     if let Some(p) = env("DCSTERRAIN_BENCH_OUT") {
         let out = json!({
             "cases": cases_out,
+            "operations": ops_out,
             "sizes": sizes_out,
             "rounds": rounds,
             "cycle_hz": cycle_hz(),
