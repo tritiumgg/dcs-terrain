@@ -74,7 +74,7 @@ impl Area {
 }
 
 /// The least distance from `p` to the segment from `a` to `b`.
-fn distance_to(a: [f64; 2], b: [f64; 2], p: [f64; 2]) -> f64 {
+pub(super) fn distance_to(a: [f64; 2], b: [f64; 2], p: [f64; 2]) -> f64 {
     let c = crate::roads::closest_on(a, b, p);
     (c[0] - p[0]).hypot(c[1] - p[1])
 }
@@ -139,7 +139,7 @@ impl Area {
 }
 
 /// Even-odd crossing test.
-fn inside(p: &[[f64; 2]], x: f64, z: f64) -> bool {
+pub(super) fn inside(p: &[[f64; 2]], x: f64, z: f64) -> bool {
     let mut odd = false;
     let mut j = p.len() - 1;
     for i in 0..p.len() {

@@ -35,6 +35,7 @@ mod region;
 mod route;
 mod sample;
 mod scenery;
+pub mod shape;
 pub mod sightline;
 mod sites;
 mod spectrum;
