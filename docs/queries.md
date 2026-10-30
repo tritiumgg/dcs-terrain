@@ -381,13 +381,36 @@ within 50 m. The place field comes with places (`data/point-info.md`).
 
 ### `airfield_info`
 
-Request: an airdrome id or `name_id`, and optionally `fits {width, length, height,
-helicopter}`. Response: runways (designator, true course, length, width,
-and each threshold's position and height), elevation, navaids (TACAN channel,
-ILS, VOR and NDB frequencies), radio frequencies, and stands, each with its
-name, position, width, length, height, helicopter use and shelter, plus counts
-by size; with `fits`, each stand says whether an airframe of that size fits. Courses are
-true; there is no magnetic model. The caller supplies the airframe's size.
+Request: `airdrome`, an id or `name_id` as `AirdromeBand` takes it, and
+optionally `fits {width, length, height, helicopter}`. Response: runways
+(designator, true course, length, width, and each threshold's position and
+height), elevation, navaids (TACAN channel, ILS, VOR and NDB frequencies),
+radio frequencies, and stands, each with its name, position, width, length,
+height, helicopter use and shelter, plus counts by size; with `fits`, each
+stand says whether an airframe of that size fits. Courses are true; there is
+no magnetic model. The caller supplies the airframe's size.
+
+A runway is a pair of named ends of the taxi graph, and each end is a
+threshold: its course is the one a landing on it flies, towards the other
+end, and the length is threshold to threshold in the x–z plane. The true
+course is the normal section's azimuth in the threshold's east-north plane
+on WGS84 through the terrain's projection, within 1e-5° of the geodesic's;
+the grid course, from DCS x, is the tables' own, and they differ by the
+meridian convergence. The designators are the files', three of which
+name the opposite end. The width is the runway surface the mesh paints,
+across the runway at nine stations from a tenth to nine tenths along, the
+median of the stations, so the taxiways and aprons that meet a runway at a
+few stations do not count. Each side's edge is where the first stretch off
+the paint 1 m wide or more begins, found in 1 m steps, then quarter meters,
+then bisected to 1 cm: a narrower stretch is a seam between the paint's
+triangles. The width is null where every station is off the paint, as on
+most Mariana runways, or on over 150 m of it, an apron's. The elevation is
+the highest ground along any centerline, exact over the mesh's triangles.
+An airdrome with no runway,
+a helipad, answers no runways and the highest ground at its stands. One
+with no id answers a null id and no navaids or radio, which follow from the
+id. A stand's `fits` is null where its height, size or use is unknown
+(`data/airfield-info.md`).
 
 ### `radar_floor`
 
