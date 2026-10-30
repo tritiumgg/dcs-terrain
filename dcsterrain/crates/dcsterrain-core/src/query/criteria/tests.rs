@@ -662,9 +662,13 @@ fn the_evaluator_agrees_with_a_brute_force_oracle() {
     ]));
     let e = evaluate(s, &cands, &footprint, &cs, Mode::Every).unwrap();
     let mut objects = Vec::new();
-    s.objects_in([f64::MIN, f64::MIN, f64::MAX, f64::MAX], &mut |ob| {
-        objects.push((ob.pos[0], ob.pos[2], ob.class));
-    })
+    s.objects_in(
+        Pool::Objects,
+        [f64::MIN, f64::MIN, f64::MAX, f64::MAX],
+        &mut |ob| {
+            objects.push((ob.pos[0], ob.pos[2], ob.class));
+        },
+    )
     .unwrap();
     let airdrome = at(synth::RUNWAY_NORTH_M, synth::RUNWAY_EAST_M);
     let (mut passed, mut failed) = ([0usize; 9], [0usize; 9]);

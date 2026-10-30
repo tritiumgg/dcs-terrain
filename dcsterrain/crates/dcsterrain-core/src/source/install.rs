@@ -828,10 +828,15 @@ impl Source for Install {
         Install::tables(self)
     }
 
-    fn objects_in(&self, b: [f64; 4], f: &mut dyn FnMut(&Object)) -> Result<(), Refusal> {
+    fn objects_in(
+        &self,
+        pool: Pool,
+        b: [f64; 4],
+        f: &mut dyn FnMut(&Object),
+    ) -> Result<(), Refusal> {
         let s = self.scenery()?;
         let (classes, models) = (s.classes(), &s.index().models);
-        s.each_in(Pool::Objects, b, |i| {
+        s.each_in(pool, b, |i| {
             let m = &models[i.model as usize];
             f(&Object {
                 id: i.id,
@@ -1490,8 +1495,10 @@ mod tests {
         .unwrap();
         assert_eq!(standing, [(0, Class::Building), (0, Class::Building)]);
         let mut objects = Vec::new();
-        t.objects_in(b, &mut |o| objects.push((o.model.to_string(), o.class)))
-            .unwrap();
+        t.objects_in(Pool::Objects, b, &mut |o| {
+            objects.push((o.model.to_string(), o.class))
+        })
+        .unwrap();
         objects.sort();
         assert_eq!(objects.len(), 4);
         assert_eq!(objects[3], ("smoke#big".to_string(), Class::Effect));

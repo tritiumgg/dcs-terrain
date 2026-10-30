@@ -4,6 +4,7 @@
 use super::{Terrain, refused};
 use crate::classes::Class;
 use crate::decode::rn4::{KIND_RAIL, KIND_ROAD};
+use crate::decode::scn5::Pool;
 use crate::source::{Source, Tables};
 use crate::types::{Issue, Nearby, NearestKind, NearestRequest, NearestResponse};
 
@@ -87,7 +88,7 @@ fn scenery(
     loop {
         let mut found = Vec::new();
         let b = [from.0 - r, from.1 - r, from.0 + r, from.1 + r];
-        src.objects_in(b, &mut |o| {
+        src.objects_in(Pool::Objects, b, &mut |o| {
             if want(o.class) {
                 let mut f = at(
                     "scenery",

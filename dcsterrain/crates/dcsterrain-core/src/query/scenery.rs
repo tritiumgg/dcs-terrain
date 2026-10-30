@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 use super::{Terrain, refused, resolve};
 use crate::classes::Class;
+use crate::decode::scn5::Pool;
 use crate::source::Object;
 use crate::types::{Issue, SceneryInRequest, SceneryInResponse, SceneryObject};
 
@@ -202,7 +203,7 @@ pub fn scenery_in(terrain: &Terrain, q: SceneryInRequest) -> Result<SceneryInRes
     // Keyed by id, so an object found twice counts once against the cap.
     let mut found: BTreeMap<u64, SceneryObject> = BTreeMap::new();
     let mut over = false;
-    src.objects_in(bbox, &mut |o| {
+    src.objects_in(Pool::Objects, bbox, &mut |o| {
         if over || !wanted(o.class) || !test(o) {
             return;
         }

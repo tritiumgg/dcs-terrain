@@ -12,6 +12,9 @@ use crate::source::{Ground, Identity, Layer, Object, Piece, Refusal, Source, TIL
 
 /// The terrain `--terrain synth` names.
 pub const TERRAIN_ID: &str = "synth";
+/// The first id of the power-line poles, and of the trees, as objects.
+pub const LINES_FIRST_ID: u64 = 80_000_001;
+pub const TREES_FIRST_ID: u64 = 90_000_001;
 
 #[derive(Debug, Clone)]
 pub struct Synth {
@@ -146,20 +149,47 @@ impl Source for Synth {
         Ok(self.tables.get_or_init(|| self.form.tables()))
     }
 
-    fn objects_in(&self, b: [f64; 4], f: &mut dyn FnMut(&Object)) -> Result<(), Refusal> {
+    fn objects_in(
+        &self,
+        pool: Pool,
+        b: [f64; 4],
+        f: &mut dyn FnMut(&Object),
+    ) -> Result<(), Refusal> {
         let (names, models) = models();
         let classes = Classes::new(TERRAIN_ID, &models);
-        for o in self.form.scenery() {
-            if inside(b, o.x, o.z) {
-                let i = names.iter().position(|n| *n == o.model).unwrap();
-                f(&Object {
-                    id: o.id,
-                    model: &models[i].name,
-                    class: classes.of(i as u32).class,
-                    pos: [o.x, o.alt, o.z],
-                    rotation: o.rotation,
-                    bbox: models[i].bbox,
-                });
+        let mut put = |id: u64, model: &str, x: f64, alt: f64, z: f64, rotation: f64| {
+            let i = names.iter().position(|n| *n == model).unwrap();
+            f(&Object {
+                id,
+                model: &models[i].name,
+                class: classes.of(i as u32).class,
+                pos: [x, alt, z],
+                rotation,
+                bbox: models[i].bbox,
+            });
+        };
+        match pool {
+            Pool::Objects => {
+                for o in self.form.scenery() {
+                    if inside(b, o.x, o.z) {
+                        put(o.id, o.model, o.x, o.alt, o.z, o.rotation);
+                    }
+                }
+            }
+            // The instances as `instances_in` places them, each pool's ids
+            // counting up from its own first.
+            Pool::Lines | Pool::Trees => {
+                let (model, mut id) = match pool {
+                    Pool::Lines => (LINE_MODEL, LINES_FIRST_ID),
+                    _ => (TREE_MODEL, TREES_FIRST_ID),
+                };
+                let mut at = Vec::new();
+                self.instances_in(pool, b, &mut |x, z| at.push((x, z)))?;
+                for (x, z) in at {
+                    let alt = self.point(x, z)?.map_or(0.0, |g| g.height);
+                    put(id, model, x, alt, z, 0.0);
+                    id += 1;
+                }
             }
         }
         Ok(())
@@ -262,6 +292,8 @@ fn models() -> (Vec<&'static str>, Vec<Model>) {
             SCENERY_POLE_HEIGHT_M,
         ),
         (SCENERY_NOBOX_MODEL, 0.0, 0.0, 0.0),
+        (LINE_MODEL, LINE_OBB_W_M, LINE_OBB_D_M, LINE_HEIGHT_M),
+        (TREE_MODEL, TREE_OBB_W_M, TREE_OBB_D_M, TREE_HEIGHT_M),
     ];
     let names = boxed.iter().map(|m| m.0).collect();
     let models = boxed
@@ -340,9 +372,11 @@ mod tests {
         assert!((bx - x).abs() < 1e-3 && (bz - z).abs() < 1e-3, "{bx} {bz}");
 
         let mut all = Vec::new();
-        s.objects_in([f64::MIN, f64::MIN, f64::MAX, f64::MAX], &mut |o| {
-            all.push((o.id, o.model.to_string(), o.class))
-        })
+        s.objects_in(
+            Pool::Objects,
+            [f64::MIN, f64::MIN, f64::MAX, f64::MAX],
+            &mut |o| all.push((o.id, o.model.to_string(), o.class)),
+        )
         .unwrap();
         assert_eq!(all.len(), SCENERY_COUNT as usize);
         assert_eq!(all[0].1, SCENERY_TOWN_MODEL.to_lowercase());
@@ -468,6 +502,23 @@ mod tests {
         );
         assert_eq!(count(Pool::Trees, [x + 1.0, z, x + 10.0, z + 10.0]), 0);
         assert!(s.instances_in(Pool::Objects, all, &mut |_, _| ()).is_err());
+        // As objects, the same instances with their models' boxes.
+        let mut trees = Vec::new();
+        s.objects_in(Pool::Trees, all, &mut |o| {
+            trees.push((o.id, o.model.to_string(), o.bbox))
+        })
+        .unwrap();
+        assert_eq!(trees.len() as u32, s.form().tree_count());
+        assert_eq!(trees[0].0, crate::synth::TREES_FIRST_ID);
+        assert_eq!(trees[0].1, TREE_MODEL.to_lowercase());
+        assert_eq!(trees[0].2[3] - trees[0].2[0], TREE_OBB_W_M as f32);
+        let mut poles = 0;
+        s.objects_in(Pool::Lines, all, &mut |o| {
+            assert_eq!(o.model, LINE_MODEL.to_lowercase());
+            poles += 1;
+        })
+        .unwrap();
+        assert_eq!(poles, s.form().pole_count());
         assert_eq!(*s.road_graph().unwrap(), s.form().road_graph());
     }
 

@@ -15,7 +15,7 @@ mod memory;
 mod tables;
 mod theatre;
 
-pub use memory::{Synth, TERRAIN_ID};
+pub use memory::{LINES_FIRST_ID, Synth, TERRAIN_ID, TREES_FIRST_ID};
 pub use tables::{beacon_id, node_name, town_name};
 pub use theatre::{Cell, Edge, Object, SynthError, Theatre};
 

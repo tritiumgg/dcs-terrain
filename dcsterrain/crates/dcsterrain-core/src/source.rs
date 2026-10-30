@@ -96,11 +96,17 @@ pub trait Source {
         Err(lacks(self, "tables"))
     }
 
-    /// Calls `f` with every scenery object within `b`, min x, min z, max x,
-    /// max z in DCS meters, `effect` objects too, and perhaps a few just
-    /// outside it.
-    fn objects_in(&self, b: [f64; 4], f: &mut dyn FnMut(&Object)) -> Result<(), Refusal> {
-        let _ = (b, f);
+    /// Calls `f` with every instance of `pool` within `b`, min x, min z,
+    /// max x, max z in DCS meters, as an object with its model and box:
+    /// for the objects pool every scenery object, `effect` objects too.
+    /// It may also call `f` with a few just outside `b`.
+    fn objects_in(
+        &self,
+        pool: Pool,
+        b: [f64; 4],
+        f: &mut dyn FnMut(&Object),
+    ) -> Result<(), Refusal> {
+        let _ = (pool, b, f);
         Err(lacks(self, "scenery"))
     }
 

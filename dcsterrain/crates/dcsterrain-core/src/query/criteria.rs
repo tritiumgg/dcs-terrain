@@ -32,6 +32,7 @@ use super::scenery::{OBJECT_REACH_M, Rect, footprint as object_rect};
 use super::sightline::exact;
 use super::visible::altitude;
 use crate::classes::Class;
+use crate::decode::scn5::Pool;
 use crate::grid::{Grid, Window, box_distance};
 use crate::horizon;
 use crate::layers::{Cells, DISTANCE_CAP_M, Derived, Raster, TPI_300, TPI_2000, Target, derive};
@@ -635,7 +636,7 @@ impl Objects {
             buckets: BTreeMap::new(),
         };
         let mut found = Vec::new();
-        src.objects_in(b, &mut |obj| {
+        src.objects_in(Pool::Objects, b, &mut |obj| {
             if obj.class.is_structure() && seen.insert(obj.id) {
                 found.push(Obj {
                     x: obj.pos[0],
