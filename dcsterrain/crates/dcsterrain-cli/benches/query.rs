@@ -870,7 +870,9 @@ impl Bench {
         let mut errors = 0;
         let ask = |t: &Terrain, r: &Value| match query::answer(t, case.op, r) {
             Ok(a) => {
-                self.answered(case, r, &a.to_string());
+                if self.hashes.is_some() {
+                    self.answered(case, r, &a.to_string());
+                }
                 true
             }
             Err(issues) => {
