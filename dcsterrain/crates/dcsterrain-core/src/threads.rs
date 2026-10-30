@@ -8,9 +8,11 @@ use std::io;
 use std::process::{Child, ExitStatus};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(any(test, windows, all(unix, target_arch = "x86_64")))]
 use std::time::{Duration, Instant};
 
 /// How long a spin measures the rate of the cycle counter.
+#[cfg(any(windows, all(unix, target_arch = "x86_64")))]
 const CALIBRATION: Duration = Duration::from_millis(20);
 
 /// The cap `--threads` set, or 0 for none.
@@ -182,7 +184,7 @@ pub struct ChildCost {
 }
 
 /// Waits for `child` and says what it cost. Drain its pipes first.
-pub fn wait_costed(mut child: Child) -> io::Result<(ExitStatus, ChildCost)> {
+pub fn wait_costed(child: Child) -> io::Result<(ExitStatus, ChildCost)> {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawHandle;
@@ -190,6 +192,7 @@ pub fn wait_costed(mut child: Child) -> io::Result<(ExitStatus, ChildCost)> {
             GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
         };
         use windows_sys::Win32::System::WindowsProgramming::QueryProcessCycleTime;
+        let mut child = child;
         let status = child.wait()?;
         let handle = child.as_raw_handle();
         let mut cycles = 0u64;
