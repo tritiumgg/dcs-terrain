@@ -46,7 +46,7 @@ struct Footprint { width: f64, depth: f64, orientations_deg: Vec<f64> }   // def
 
 `dcsterrain query --terrain <Terrain>` with no operation reads JSON lines from
 stdin. A line is `{"op": name, "request": {...}, "id": any}`: `request` is `{}`
-when omitted, and `id`, any JSON value, is returned as given. Each line is
+when omitted, and `id`, any JSON value but null, is returned as given. Each line is
 answered on one line of stdout, in order and flushed before the next is
 read, so a caller can hold the pipe open and ask as it goes:
 
@@ -62,7 +62,7 @@ on a line that failed: a line that is not JSON, not a request, or asks
 something the operation refuses, an internal failure of one operation, or a
 terrain that cannot open, which the next line tries again. No line stops the
 batch, so the exit code is 0 unless stdin or stdout fails, and a reader that
-goes away ends the batch quietly.
+goes away ends the batch quietly. A line over 64 MiB is the issue `too_large`.
 
 The terrain opens once, at the first request that needs it, and is reopened
 only when its files change under the batch (`design.md` §5) or an internal

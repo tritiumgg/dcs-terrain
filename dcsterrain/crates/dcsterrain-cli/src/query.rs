@@ -3,7 +3,7 @@
 //! language server's stream of messages. A batch answers each line as it
 //! arrives, in order, so a caller can hold the pipe open and ask as it goes.
 
-use std::io::{BufRead, ErrorKind, Write};
+use std::io::{BufRead, ErrorKind, Read, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -87,8 +87,7 @@ impl Opener {
         &mut self,
         ask: impl FnOnce(&Terrain) -> Result<Value, Vec<Issue>>,
     ) -> Result<Value, Vec<Issue>> {
-        let terrain = self.current()?;
-        let answered = catch_unwind(AssertUnwindSafe(|| ask(terrain)));
+        let answered = catch_unwind(AssertUnwindSafe(|| ask(self.current()?)));
         answered.unwrap_or_else(|panic| {
             self.terrain = None;
             let why = panic
@@ -115,7 +114,7 @@ impl Opener {
         let asked = match BatchRequest::deserialize(&value) {
             Ok(q) => q,
             Err(e) => {
-                let id = value.get("id").cloned();
+                let id = value.get("id").filter(|id| !id.is_null()).cloned();
                 let op = value.get("op").and_then(Value::as_str).map(String::from);
                 return refused(id, op, format!("the line is not a request: {e}"));
             }
@@ -152,6 +151,10 @@ pub fn one(mut opener: Opener, op: &str, request: Option<String>) -> ExitCode {
     }
 }
 
+/// The longest line a batch reads. The largest requests the operations
+/// accept are a few MiB, and a stream with no newlines must not fill memory.
+const MAX_LINE: u64 = 64 << 20;
+
 /// How a batch ended, for its exit code: lines with issues are answered
 /// lines, so only losing the streams themselves is a failure.
 #[derive(Debug, PartialEq, Eq)]
@@ -171,20 +174,34 @@ pub fn batch(opener: &mut Opener, input: impl BufRead, output: impl Write) -> En
     let mut line = 0;
     loop {
         text.clear();
-        match input.read_until(b'\n', &mut text) {
+        match input.by_ref().take(MAX_LINE).read_until(b'\n', &mut text) {
             Ok(0) => return Ended::Input,
             Ok(_) => line += 1,
             Err(e) => return Ended::Failed(format!("stdin cannot be read: {e}")),
+        }
+        let whole = text.len() < MAX_LINE as usize || text.ends_with(b"\n");
+        if !whole && let Err(e) = input.skip_until(b'\n') {
+            return Ended::Failed(format!("stdin cannot be read: {e}"));
         }
         // Windows tools write a byte-order mark at the top of a file.
         let body = match (line, text.strip_prefix(b"\xEF\xBB\xBF")) {
             (1, Some(rest)) => rest,
             _ => text.as_slice(),
         };
-        if body.iter().all(u8::is_ascii_whitespace) {
+        if whole && body.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
-        let response = opener.line(line, body);
+        let response = if whole {
+            opener.line(line, body)
+        } else {
+            let message = format!("the line is over {MAX_LINE} bytes");
+            BatchResponse {
+                line,
+                id: None,
+                op: None,
+                outcome: BatchOutcome::Issues(issue("too_large", &message)),
+            }
+        };
         let written = serde_json::to_writer(&mut output, &response)
             .map_err(std::io::Error::from)
             .and_then(|()| output.write_all(b"\n"))
@@ -227,6 +244,24 @@ mod tests {
         assert_eq!(o.opens, 2);
         assert!(o.answer("describe", &json!({})).is_ok());
         assert_eq!(o.opens, 2);
+    }
+
+    #[test]
+    fn a_line_over_the_limit_is_refused_and_the_next_is_read() {
+        let mut input = vec![b'x'; MAX_LINE as usize + 9];
+        input.extend_from_slice(b"\n{\"op\":\"describe\"}\n");
+        let mut output = Vec::new();
+        let ended = batch(&mut opener(), &input[..], &mut output);
+        assert_eq!(ended, Ended::Input);
+        let lines: Vec<Value> = output
+            .split(|b| *b == b'\n')
+            .filter(|l| !l.is_empty())
+            .map(|l| serde_json::from_slice(l).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0]["issues"][0]["code"], "too_large");
+        assert_eq!(lines[1]["line"], 2);
+        assert!(lines[1]["result"].is_object());
     }
 
     #[test]

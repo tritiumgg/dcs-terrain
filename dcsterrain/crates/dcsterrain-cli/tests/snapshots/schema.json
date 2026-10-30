@@ -403,7 +403,7 @@
       "description": "One line of a batch: an operation and its request.",
       "properties": {
         "id": {
-          "description": "Any JSON value, returned as given on the line that answers this one."
+          "description": "Any JSON value but null, returned as given on the line that answers\nthis one; null is no id."
         },
         "op": {
           "description": "The operation's name.",
@@ -458,11 +458,8 @@
           "type": "integer"
         },
         "op": {
-          "description": "The operation the line named; none when it could not be read.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "description": "The operation the line named; absent when it could not be read.",
+          "type": "string"
         }
       },
       "required": [

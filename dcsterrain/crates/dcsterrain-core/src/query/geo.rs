@@ -28,20 +28,25 @@ pub fn geo(terrain: &Terrain, q: GeoRequest) -> Result<GeoResponse, Vec<Issue>> 
         return Err(issues);
     }
     let tm = terrain.source().tables().map_err(refused)?.crs.tmerc();
+    let mut to_latlon = Vec::with_capacity(q.to_latlon.len());
+    for (k, p) in q.to_latlon.iter().enumerate() {
+        let (lat, lon) = tm.to_latlon(p.x, p.z);
+        if !(lat.is_finite() && lon.is_finite()) {
+            return Err(vec![Issue::new(
+                "invalid_point",
+                "the terrain's projection has no position this far out",
+                &format!("to_latlon.{k}"),
+            )]);
+        }
+        to_latlon.push(GeoPoint {
+            lat,
+            lon,
+            mgrs: mgrs(lat, lon),
+        });
+    }
     Ok(GeoResponse {
         provenance: terrain.provenance(),
-        to_latlon: q
-            .to_latlon
-            .iter()
-            .map(|p| {
-                let (lat, lon) = tm.to_latlon(p.x, p.z);
-                GeoPoint {
-                    lat,
-                    lon,
-                    mgrs: mgrs(lat, lon),
-                }
-            })
-            .collect(),
+        to_latlon,
         to_xz: q
             .to_xz
             .iter()
@@ -58,6 +63,14 @@ mod tests {
     use super::super::answer;
     use super::super::tests::synth;
     use serde_json::json;
+
+    #[test]
+    fn a_point_past_the_projection_is_refused() {
+        let far = json!({"to_latlon": [{"x": 0, "z": 0}, {"x": 1e308, "z": 1e308}]});
+        let e = answer(&synth(), "geo", &far).unwrap_err();
+        assert_eq!(e[0].code, "invalid_point");
+        assert_eq!(e[0].path, "to_latlon.1");
+    }
 
     #[test]
     fn converts_both_ways_through_the_tables_projection() {

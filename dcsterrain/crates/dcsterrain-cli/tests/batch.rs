@@ -142,7 +142,10 @@ fn every_operation(at: &Around) -> Vec<(&'static str, Value)> {
             "nearest",
             json!({"kind": "road", "x": x, "z": z, "n": 2, "geojson": true}),
         ),
-        ("scenery_in", json!({"region": box_, "geojson": true})),
+        (
+            "scenery_in",
+            json!({"region": box_, "max_rows": 1000000, "geojson": true}),
+        ),
         (
             "chokepoints",
             json!({"region": wide, "network": "roads", "limit": 5, "geojson": true}),
@@ -179,25 +182,25 @@ fn synth() -> Around {
     }
 }
 
-/// The surface of an answer without what a machine or a run may change:
-/// a float's last bits, the time taken. Keys, strings, integers and booleans
-/// stay; a long array keeps three items and its length; a long string,
-/// base64 or GeoJSON, its length.
+/// The surface of an answer without what a platform's floating point or a
+/// run may change: every float, the lengths of what geometry sized, and the
+/// time taken. Keys, short strings, integers and booleans stay; a long array
+/// keeps three items.
 fn surface(v: &Value) -> Value {
     match v {
-        Value::Number(n) if n.is_f64() && n.as_f64().unwrap().fract() != 0.0 => json!("<float>"),
-        Value::String(s) if s.len() > 60 => json!(format!("<{} chars>", s.len())),
+        Value::Number(n) if n.is_f64() => json!("<float>"),
+        Value::String(s) if s.len() > 60 => json!("<long>"),
         Value::Array(a) if a.len() > 3 => {
             let mut kept: Vec<Value> = a[..3].iter().map(surface).collect();
-            kept.push(json!(format!("<{} items>", a.len())));
+            kept.push(json!("<more>"));
             Value::Array(kept)
         }
         Value::Array(a) => Value::Array(a.iter().map(surface).collect()),
         Value::Object(m) => {
             let mut out = Map::new();
             for (k, x) in m {
-                let x = if k == "elapsed_ms" {
-                    json!("<ms>")
+                let x = if k == "elapsed_ms" || k == "mgrs" {
+                    json!("<varies>")
                 } else {
                     surface(x)
                 };
@@ -532,15 +535,30 @@ fn around_on(args: &[&str], reference: (f64, f64)) -> Around {
         airdrome["x"].as_f64().unwrap(),
         airdrome["z"].as_f64().unwrap(),
     );
-    let roads = ask(&[("nearest", json!({"kind": "road", "x": x, "z": z, "n": 8}))]);
+    let roads = ask(&[("nearest", json!({"kind": "road", "x": x, "z": z, "n": 50}))]);
     let roads = roads[0]["result"]["results"].as_array().unwrap().clone();
     let end = |r: &Value| json!({"x": r["x"], "z": r["z"]});
+    // The farthest of the near roads a route reaches: not every road is
+    // joined to the first, on a terrain of islands.
+    let from = end(&roads[0]);
+    let probes: Vec<(&str, Value)> = (roads.iter().rev())
+        .map(|r| {
+            (
+                "route",
+                json!({"network": "roads", "from": from, "to": end(r)}),
+            )
+        })
+        .collect();
+    let reached = ask(&probes);
+    let to = (reached.iter().zip(roads.iter().rev()))
+        .find(|(answer, _)| answer["result"]["length"].as_f64().is_some_and(|l| l > 0.0))
+        .map_or(from.clone(), |(_, r)| end(r));
     Around {
         x,
         z,
         airdrome: airdrome["id"].clone(),
-        from: end(&roads[0]),
-        to: end(&roads[roads.len() - 1]),
+        from,
+        to,
     }
 }
 

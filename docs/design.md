@@ -329,7 +329,8 @@ opening the install files it was derived from, except once after an update.
   rewrites identical files costs a rebuild of seconds.
 - **A batch re-checks** the build and the files' sizes and times before each
   request (a read of `autoupdate.cfg`, a stat per file and a listing per role
-  that takes a whole directory) and reopens a terrain whose files changed.
+  that takes a whole directory) and reopens a terrain whose files changed. A
+  named file absent when the terrain opened is not looked for again.
   Terrain files are opened with delete sharing so a patch can replace them
   under a long batch.
 - **Every response carries** `terrain` (the terrain id), `dcs_build`,

@@ -175,7 +175,8 @@ impl Issue {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BatchRequest {
-    /// Any JSON value, returned as given on the line that answers this one.
+    /// Any JSON value but null, returned as given on the line that answers
+    /// this one; null is no id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<Value>,
     /// The operation's name.
@@ -198,8 +199,9 @@ pub struct BatchResponse {
     /// The `id` the line gave.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<Value>,
-    /// The operation the line named; none when it could not be read.
+    /// The operation the line named; absent when it could not be read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
     pub op: Option<String>,
     #[serde(flatten)]
     pub outcome: BatchOutcome,
