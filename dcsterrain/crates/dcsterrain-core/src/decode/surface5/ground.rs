@@ -176,6 +176,7 @@ pub fn grid_units(g: &Grid, x: f64, z: f64) -> [f64; 2] {
 impl Prepared {
     /// A block read with its `Runway` subset, prepared for `g`.
     pub fn new(mut b: Block, g: &Grid) -> Prepared {
+        let all = [b.bbox[0], b.bbox[2], b.bbox[3], b.bbox[5]];
         let runway: Vec<[u32; 3]> = b
             .subsets
             .iter()
@@ -189,8 +190,8 @@ impl Prepared {
             cell: f64::from(g.cell_size),
             origin: [g.origin_x, g.origin_z],
             wet: b.depth.iter().any(|&d| d != 0.0),
-            bvh: Bvh::new(&b.p, &b.tri),
-            runway_bvh: Bvh::new(&b.p, &runway),
+            bvh: Bvh::new(&b.p, &b.tri, all),
+            runway_bvh: Bvh::new(&b.p, &runway, all),
             runway,
             block: b,
         }
@@ -686,6 +687,45 @@ fn cells(
     Some((clip(0, r0, r1)?, clip(1, c0, c1)?))
 }
 
+/// A cheap test ahead of `cover`, with no division: most of a triangle's box
+/// lies outside it, and its cells need no weights.
+struct Near {
+    a: [f64; 2],
+    v0: [f64; 2],
+    v1: [f64; 2],
+    /// The cross product, made positive by flipping the weights with `sign`.
+    d: f64,
+    sign: f64,
+}
+
+impl Near {
+    fn new(p: [[f64; 2]; 3]) -> Near {
+        let v0 = [p[1][0] - p[0][0], p[1][1] - p[0][1]];
+        let v1 = [p[2][0] - p[0][0], p[2][1] - p[0][1]];
+        let d = v0[0] * v1[1] - v1[0] * v0[1];
+        Near {
+            a: p[0],
+            v0,
+            v1,
+            d: d.abs(),
+            sign: if d < 0.0 { -1.0 } else { 1.0 },
+        }
+    }
+
+    /// Whether `cover` surely refuses `p`: a weight past its edge by more
+    /// than twice the tolerance, with the rounding of its products allowed
+    /// for. A triangle of no area keeps its cells for `cover`.
+    #[inline]
+    fn off(&self, p: [f64; 2]) -> bool {
+        let (px, pz) = (p[0] - self.a[0], p[1] - self.a[1]);
+        let (a, b) = (px * self.v1[1], self.v1[0] * pz);
+        let (c, e) = (self.v0[0] * pz, px * self.v0[1]);
+        let (u, v) = ((a - b) * self.sign, (c - e) * self.sign);
+        let slack = 2.0 * EDGE_TOLERANCE * self.d + 1e-14 * (a.abs() + b.abs() + c.abs() + e.abs());
+        u < -slack || v < -slack || u + v > self.d + slack
+    }
+}
+
 /// Rasterizes tile `(tx, tz)` of `g` from the blocks under it, each cell
 /// the winning triangle at its center.
 pub fn tile(blocks: &[&Prepared], g: &Grid, tx: u32, tz: u32) -> Tile {
@@ -724,17 +764,20 @@ pub fn tile(blocks: &[&Prepared], g: &Grid, tx: u32, tz: u32) -> Tile {
                         continue;
                     };
                     let k = rank(b.block.tritype[t as usize], b.index, t as usize);
+                    let near = Near::new(p);
                     for r in rr {
                         for c in cc.clone() {
-                            let Some((u, v)) = cover(p[0], p[1], p[2], [r as f64, c as f64]) else {
+                            let i = at(r, c);
+                            let cell = [r as f64, c as f64];
+                            if (best[i] != NONE && k <= best[i]) || near.off(cell) {
+                                continue;
+                            }
+                            let Some((u, v)) = cover(p[0], p[1], p[2], cell) else {
                                 continue;
                             };
-                            let i = at(r, c);
-                            if best[i] == NONE || k > best[i] {
-                                best[i] = k;
-                                h[i] = b.height(tri, u, v);
-                                ty[i] = b.block.tritype[t as usize];
-                            }
+                            best[i] = k;
+                            h[i] = b.height(tri, u, v);
+                            ty[i] = b.block.tritype[t as usize];
                         }
                     }
                 }
@@ -749,9 +792,11 @@ pub fn tile(blocks: &[&Prepared], g: &Grid, tx: u32, tz: u32) -> Tile {
                     let Some((rr, cc)) = cells(p, rows, cols) else {
                         continue;
                     };
+                    let near = Near::new(p);
                     for r in rr {
                         for c in cc.clone() {
-                            if cover(p[0], p[1], p[2], [r as f64, c as f64]).is_some() {
+                            let cell = [r as f64, c as f64];
+                            if !near.off(cell) && cover(p[0], p[1], p[2], cell).is_some() {
                                 runway[at(r, c)] = true;
                             }
                         }

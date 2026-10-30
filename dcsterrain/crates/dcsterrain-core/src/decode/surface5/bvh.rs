@@ -163,13 +163,14 @@ fn spread(v: u32) -> u32 {
     (v | (v << 1)) & 0x5555_5555
 }
 
-/// Sorts `v` by its high word, a key of 24 bits, in three passes of eight,
+/// Sorts `v` by its high word, a key of 24 bits, in two passes of twelve,
 /// `tmp` being as long.
 fn radix(v: &mut Vec<u64>, tmp: &mut Vec<u64>) {
-    let mut counts = [[0u32; 256]; 3];
+    let mut counts = [[0u32; 1 << KEY_BITS]; 2];
+    let digit = |e: u64, pass: usize| (e >> (32 + KEY_BITS as usize * pass)) as usize & 4095;
     for &e in v.iter() {
         for (pass, c) in counts.iter_mut().enumerate() {
-            c[(e >> (32 + 8 * pass)) as usize & 255] += 1;
+            c[digit(e, pass)] += 1;
         }
     }
     for (pass, c) in counts.iter_mut().enumerate() {
@@ -180,7 +181,7 @@ fn radix(v: &mut Vec<u64>, tmp: &mut Vec<u64>) {
             at += here;
         }
         for &e in v.iter() {
-            let n = &mut c[(e >> (32 + 8 * pass)) as usize & 255];
+            let n = &mut c[digit(e, pass)];
             tmp[*n as usize] = e;
             *n += 1;
         }
@@ -202,25 +203,28 @@ pub struct Bvh {
 }
 
 impl Bvh {
-    /// The hierarchy over the triangles `tri` of vertices `p`, `[x, y, z]`.
-    pub fn new(p: &[[f32; 3]], tri: &[[u32; 3]]) -> Bvh {
+    /// The hierarchy over the triangles `tri` of vertices `p`, `[x, y, z]`,
+    /// which lie in `all`, `[min_x, min_z, max_x, max_z]`, to within a key's
+    /// width: a key only orders triangles.
+    pub fn new(p: &[[f32; 3]], tri: &[[u32; 3]], all: [f32; 4]) -> Bvh {
         if tri.is_empty() {
             return Bvh::default();
         }
         let boxed = |t: &[u32; 3]| tri_box(t.map(|v| p[v as usize]));
-        let all = tri.iter().fold(NO_BOX, |a, t| grow(a, boxed(t)));
         let side = (all[2] - all[0]).max(all[3] - all[1]);
-        // A center's coordinate doubled, from the corner of all of them, is
-        // below twice the side.
-        let scale = ((1u32 << KEY_BITS) as f32 - 1.0) / (2.0 * side).max(f32::MIN_POSITIVE);
-        let key = |b: &[f32; 4]| {
-            let q = |lo: f32, hi: f32, at: f32| ((lo + hi - 2.0 * at) * scale) as u32;
-            spread(q(b[0], b[2], all[0])) | (spread(q(b[1], b[3], all[1])) << 1)
+        // By a triangle's first corner: one vertex to read, and triangles
+        // near one another have corners near one another.
+        let top = (1u32 << KEY_BITS) - 1;
+        let scale = top as f32 / side.max(f32::MIN_POSITIVE);
+        let key = |t: &[u32; 3]| {
+            let v = p[t[0] as usize];
+            let q = |at: f32, lo: f32| (((at - lo) * scale) as u32).min(top);
+            spread(q(v[0], all[0])) | (spread(q(v[2], all[1])) << 1)
         };
         let mut sorted: Vec<u64> = tri
             .iter()
             .enumerate()
-            .map(|(i, t)| (u64::from(key(&boxed(t))) << 32) | i as u64)
+            .map(|(i, t)| (u64::from(key(t)) << 32) | i as u64)
             .collect();
         let mut tmp = vec![0u64; sorted.len()];
         radix(&mut sorted, &mut tmp);
@@ -309,6 +313,13 @@ impl Bvh {
 mod tests {
     use super::*;
 
+    impl Bvh {
+        fn over(p: &[[f32; 3]], tri: &[[u32; 3]]) -> Bvh {
+            let box_of = |t: &[u32; 3]| tri_box(t.map(|v| p[v as usize]));
+            Bvh::new(p, tri, tri.iter().fold(NO_BOX, |a, t| grow(a, box_of(t))))
+        }
+    }
+
     /// A lattice of `n` by `n` unit squares in two triangles each, and two
     /// triangles over all of it.
     fn lattice(n: u32) -> (Vec<[f32; 3]>, Vec<[u32; 3]>) {
@@ -339,7 +350,7 @@ mod tests {
     fn a_search_finds_every_triangle_whose_box_meets_the_question() {
         for n in [1, 2, 3, 9, 40] {
             let (p, t) = lattice(n);
-            let b = Bvh::new(&p, &t);
+            let b = Bvh::over(&p, &t);
             let mut seen = vec![0u32; t.len()];
             let all = [-1e9, -1e9, 1e9, 1e9];
             b.search(
@@ -365,7 +376,7 @@ mod tests {
     #[test]
     fn a_search_along_a_line_finds_every_box_it_crosses() {
         let (p, t) = lattice(40);
-        let b = Bvh::new(&p, &t);
+        let b = Bvh::over(&p, &t);
         for k in 0..300 {
             let a = [(k * 7 % 41) as f32, (k * 11 % 41) as f32];
             let e = [(k * 13 % 41) as f32, (k * 3 % 41) as f32 + 0.5];
@@ -389,13 +400,13 @@ mod tests {
     #[test]
     fn it_costs_under_eight_bytes_a_triangle() {
         let (p, t) = lattice(100);
-        assert!(Bvh::new(&p, &t).bytes() < 8 * t.len());
+        assert!(Bvh::over(&p, &t).bytes() < 8 * t.len());
     }
 
     #[test]
     fn no_triangles_find_nothing() {
         let mut n = 0;
-        Bvh::new(&[], &[]).search(|_| 15, |_| n += 1);
+        Bvh::over(&[], &[]).search(|_| 15, |_| n += 1);
         assert_eq!(n, 0);
     }
 }

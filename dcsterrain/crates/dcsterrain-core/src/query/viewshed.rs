@@ -8,7 +8,7 @@
 //! one sweep judges every cell. `visible` judges over the triangles all the
 //! way.
 
-use std::f64::consts::TAU;
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use rayon::prelude::*;
@@ -366,6 +366,118 @@ pub(super) struct Sweep {
     near: Vec<Vec<f64>>,
 }
 
+/// The bearing of `(x, y)` from the x axis to within about 1e-5 radians.
+#[inline]
+fn rough_atan2(y: f64, x: f64) -> f64 {
+    let (ax, ay) = (x.abs(), y.abs());
+    if ax == 0.0 && ay == 0.0 {
+        return 0.0;
+    }
+    let t = ax.min(ay) / ax.max(ay);
+    let t2 = t * t;
+    let p = -0.011_721_20;
+    let p = p * t2 + 0.052_653_32;
+    let p = p * t2 - 0.116_432_87;
+    let p = p * t2 + 0.193_543_46;
+    let p = p * t2 - 0.332_623_47;
+    let mut a = t * (p * t2 + 0.999_977_26);
+    if ay > ax {
+        a = FRAC_PI_2 - a;
+    }
+    if x < 0.0 {
+        a = PI - a;
+    }
+    if y < 0.0 { -a } else { a }
+}
+
+/// Fills `out` with the raster's slope from the eye at each step of a radial
+/// running `cos` north and `sin` east, from step `first`, a chunk at a time
+/// so that the arithmetic compiles to wide registers where the machine has
+/// them. Additions, multiplications and divisions round alike at any width
+/// and nothing here fuses a multiply with an add, so each slope is what
+/// `Sweep::slope` finds.
+fn slopes(s: &Sweep, first: u64, cos: f64, sin: f64, out: &mut [f64]) {
+    #[cfg(target_arch = "x86_64")]
+    if std::arch::is_x86_feature_detected!("avx2") {
+        // SAFETY: the machine has just been seen to have AVX2.
+        unsafe { slopes_avx2(s, first, cos, sin, out) };
+        return;
+    }
+    slopes_any(s, first, cos, sin, out);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+fn slopes_avx2(s: &Sweep, first: u64, cos: f64, sin: f64, out: &mut [f64]) {
+    slopes_any(s, first, cos, sin, out);
+}
+
+/// Steps of a radial taken together.
+const CHUNK: usize = 32;
+
+#[inline(always)]
+fn slopes_any(s: &Sweep, first: u64, cos: f64, sin: f64, out: &mut [f64]) {
+    let g = &s.g;
+    let c = f64::from(g.cell_size);
+    let (o, step, eye) = (s.o, s.step, s.eye);
+    let (rows, cols) = (f64::from(g.height), f64::from(g.width));
+    let (w0, wc) = ((s.w.row0, s.w.col0), i64::from(s.w.cols));
+    let wrows = i64::from(s.w.rows);
+    let (mut d, mut qx, mut qz) = ([0f64; CHUNK], [0f64; CHUNK], [0f64; CHUNK]);
+    let (mut ir, mut ic) = ([0i32; CHUNK], [0i32; CHUNK]);
+    let (mut tr, mut tc) = ([0f64; CHUNK], [0f64; CHUNK]);
+    let (mut h, mut good) = ([0f64; CHUNK], [true; CHUNK]);
+    let nodata = Layer::Height.nodata();
+    for (n, out) in out.chunks_mut(CHUNK).enumerate() {
+        let from = first + (n * CHUNK) as u64;
+        let m = out.len();
+        for j in 0..m {
+            d[j] = (from + j as u64) as f64 * step;
+            qx[j] = (o.0 + d[j] * cos - g.origin_x) / c;
+            qz[j] = (o.1 + d[j] * sin - g.origin_z) / c;
+        }
+        for j in 0..m {
+            good[j] = (qx[j] >= 0.0) & (qx[j] < rows) & (qz[j] >= 0.0) & (qz[j] < cols);
+            let (fr, fc) = (
+                (qx[j] - 0.5).clamp(0.0, rows - 1.0),
+                (qz[j] - 0.5).clamp(0.0, cols - 1.0),
+            );
+            ir[j] = fr as i32;
+            ic[j] = fc as i32;
+            tr[j] = fr - f64::from(ir[j]);
+            tc[j] = fc - f64::from(ic[j]);
+        }
+        for j in 0..m {
+            let (r, c) = (i64::from(ir[j]) - w0.0, i64::from(ic[j]) - w0.1);
+            if !good[j] || r < 0 || c < 0 || r + 1 >= wrows || c + 1 >= wc {
+                good[j] = false;
+                continue;
+            }
+            let at = (r * wc + c) as usize;
+            let v = [
+                s.w.data[at],
+                s.w.data[at + 1],
+                s.w.data[at + wc as usize],
+                s.w.data[at + wc as usize + 1],
+            ];
+            good[j] = !v.contains(&nodata);
+            h[j] = (1.0 - tr[j]) * (1.0 - tc[j]) * f64::from(v[0])
+                + (1.0 - tr[j]) * tc[j] * f64::from(v[1])
+                + tr[j] * (1.0 - tc[j]) * f64::from(v[2])
+                + tr[j] * tc[j] * f64::from(v[3]);
+        }
+        for j in 0..m {
+            out[j] = if good[j] {
+                (h[j] - eye) / d[j]
+            } else {
+                // Near an edge of the grid or of the ground.
+                s.height(o.0 + d[j] * cos, o.1 + d[j] * sin)
+                    .map_or(f64::NEG_INFINITY, |h| (h - eye) / d[j])
+            };
+        }
+    }
+}
+
 /// What a cell of the mask asks of the sweep.
 enum Ask {
     /// Out of the radius or off the ground: never set, never counted.
@@ -398,6 +510,23 @@ impl Sweep {
             .map_or(f64::NEG_INFINITY, |h| (h - self.eye) / d)
     }
 
+    /// The steepest slope short of each step of radial `k`, out to step
+    /// `top`: entry 0 is before the first.
+    fn steepest(&self, k: u64, top: u64, cos: f64, sin: f64) -> Vec<f64> {
+        let mut out = vec![f64::NEG_INFINITY; top as usize + 1];
+        let near = (self.near[k as usize].len() as u64).min(top);
+        for done in 1..=near {
+            out[done as usize] = self.slope(k, done, cos, sin);
+        }
+        slopes(self, near + 1, cos, sin, &mut out[near as usize + 1..]);
+        let mut most = f64::NEG_INFINITY;
+        for s in &mut out {
+            most = most.max(*s);
+            *s = most;
+        }
+        out
+    }
+
     pub fn centre(&self, r: i64, c: i64) -> (f64, f64) {
         (
             self.origin.0 + (r as f64 + 0.5) * self.res,
@@ -408,7 +537,12 @@ impl Sweep {
     fn ask(&self, r: i64, c: i64) -> Ask {
         let (x, z) = self.centre(r, c);
         let (dx, dz) = (x - self.o.0, z - self.o.1);
-        let d = dx.hypot(dz);
+        // The square root in place of the C runtime's `hypot`: they differ in
+        // the last bits, which only a range on a step or on the radius sees.
+        let s = (dx * dx + dz * dz).sqrt();
+        let q = s / self.step;
+        let close = (q - q.round()).abs() < 1e-7 || (s - self.radius).abs() < 1e-6;
+        let d = if close { dx.hypot(dz) } else { s };
         // The cell holding the observer counts however small the radius.
         let own = r == self.n && c == self.n;
         if (d > self.radius && !own) || self.height(x, z).is_none() {
@@ -419,8 +553,21 @@ impl Sweep {
         if last == 0 {
             return Ask::Near;
         }
-        let k = (dz.atan2(dx).rem_euclid(TAU) / self.bearing).round() as u64 % self.radials;
+        let k = self.nearest_radial(dx, dz);
         Ask::Swept((k << 44) | (last << 24) | i as u64)
+    }
+
+    /// The radial nearest in bearing to `(dx, dz)` from the site. A cheap
+    /// arctangent settles it unless the bearing lies near halfway between
+    /// two radials, where the C runtime's decides.
+    #[inline]
+    fn nearest_radial(&self, dx: f64, dz: f64) -> u64 {
+        let at = rough_atan2(dz, dx).rem_euclid(TAU) / self.bearing;
+        let round = at.round();
+        if (at - round).abs() < 0.45 {
+            return round as u64 % self.radials;
+        }
+        (dz.atan2(dx).rem_euclid(TAU) / self.bearing).round() as u64 % self.radials
     }
 
     /// `f` over `items`, over every core when the mask is large enough.
@@ -443,13 +590,12 @@ impl Sweep {
         cells.sort_unstable();
         let (sin, cos) = (k as f64 * self.bearing).sin_cos();
         let o = self.o;
-        let (mut steepest, mut done, mut yes) = (f64::NEG_INFINITY, 0u64, 0u64);
+        let top = cells.last().map_or(0, |key| key >> 24);
+        let steepest = self.steepest(k, top, cos, sin);
+        let mut yes = 0u64;
         for &key in cells.iter() {
             let (last, i) = (key >> 24, (key & 0xFFFFFF) as i64);
-            while done < last {
-                done += 1;
-                steepest = steepest.max(self.slope(k, done, cos, sin));
-            }
+            let steepest = steepest[last as usize];
             let (x, z) = self.centre(i / self.side, i % self.side);
             let d = (x - o.0).hypot(z - o.1);
             let ground = self.height(x, z).expect("kept for its ground");
