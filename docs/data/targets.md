@@ -6,6 +6,7 @@ Measured 2026-10-30 on a Ryzen 7 7800X3D (8 cores, 16 threads), 32 GB, NVMe,
 Windows 11, DCS not running, nothing else at work. The two Mariana columns are
 at the 64 MiB block budget; the rest were measured at 32 MiB, and their
 verdicts recomputed against the budgets and targets of ADR 0007.
+`find_sites_los_36` was measured at 64 MiB, over the pool, on every terrain.
 
 **The bound is on cycles; the wall is beside it for a reader.** Each figure
 is cycles, then wall clock. The target is the design's time; its budget in
@@ -41,9 +42,9 @@ case (Decided, below).
   above 3× the budget, above 3× the memory target, on a failed request, or on no cycles over
   10 ms of work, since a shorter case can read zero under the CPU clock's tick.
   They catch a large regression, not a small one: `Synth` is small, so only
-  `find_sites_los_36` stands within 6× of its bound and the horizon's first
-  touch within 14×, and `open` or `route_50km` lie thousands of times under
-  theirs.
+  the horizon's first touch stands within 14× of its bound and
+  `find_sites_los_36` within 19×, and `open` or `route_50km` lie thousands of
+  times under theirs.
   On Linux the memory bound sees a child only above the bench's own peak,
   because the OS seeds a child's peak from its parent's.
 
@@ -90,14 +91,17 @@ What follows from that:
 
 A parallel case can therefore spend far more than its time on one core:
 `viewshed_20km` on `Synth` spends 748 Mc in 52 ms. It can also meet its
-budget and still be over its time, so the wall is read as well.
+budget and still be over its time, so the wall is read as well. The reverse
+holds too: on all 16 threads a case can meet its time and be over a budget
+of 8 cores, as `find_sites_los_36` is on the Marianas.
 
 **Under noise.** `Synth` with 8 spinner processes against the idle machine, 5
 rounds: cycles moved 0.77–1.32× (1.77× on one sub-millisecond case,
 `airfield_info/fresh`) while wall moved up to 1.88×. The horizon's first
 touch moved 0.98× in cycles and 1.88× in wall, `viewshed_20km` 1.02× and
 1.37×. Nothing crossed a bound. The tightest case at rest is
-`find_sites_los_36`, 23.2 Gc of its 125.5 Gc bound.
+`find_sites_horizon_first_touch`, 36.2 Gc of its 502 Gc bound. That run
+predates the sightlines going parallel.
 
 ## The table
 
@@ -117,7 +121,7 @@ clock.
 | `radar_floor_20km` | cold | 300 | 10039.7 | 827 / 74.6 | 742 / 47.9 | 780 / 59.6 | 1316 / 105 | 4499 / **569** | 4501 / **569** | 802 / 65.0 | 746 / 49.3 | 928 / 78.3 |
 | `exposure_10_sites` | cold | 3000 | 100396.8 | 7635 / 515 | 6274 / 187 | 6018 / 183 | 9822 / 519 | 14337 / 1933 | 12159 / 1432 | 6347 / 202 | 6857 / 266 | 9106 / 452 |
 | `find_sites_20km` | cold | 500 | 2091.6 | 143 / 34.2 | 329 / 51.7 | 82.9 / 14.7 | 624 / 93.9 | 320 / 49.6 | 344 / 52.6 | 130 / 27.2 | 128 / 20.8 | 472 / 70.9 |
-| `find_sites_los_36` | cold | 10000 | 41832.0 | 23305 / 5563 | **115441** / **27559** | 5205 / 1238 | 6378 / 1515 | **293666** / **70068** | **344547** / **82206** | 27025 / 6449 | 4956 / 1178 | 6181 / 1474 |
+| `find_sites_los_36` | cold | 10000 | 334656.0 | 53082 / 911 | 152329 / 2533 | 8590 / 183 | 14409 / 267 | **381490** / 6317 | **443244** / 7332 | 46239 / 803 | 9613 / 181 | 14695 / 275 |
 | `find_sites_horizon_first_touch` | cold | 5000 | 167328.0 | 36223 / 618 | 19243 / 463 | 99474 / 1670 | 10036 / 378 | 18655 / 391 | 18913 / 398 | 13962 / 423 | 25585 / 544 | 24702 / 577 |
 | `route_50km` | cold | 500 | 2091.6 | 0.38 / 0.10 | 15.2 / 4.40 | 5.06 / 2.06 | 25.8 / 6.61 | 3.15 / 0.76 | 51.1 / 12.2 | 24.3 / 8.71 | 3.90 / 1.59 | 36.7 / 8.83 |
 | `point_info/fresh` | cold | 150 | 627.5 | 2.43 / 0.60 | 345 / 52.9 | 58.9 / 13.7 | **765** / 118 | 96.1 / 20.7 | 96.4 / 20.5 | 87.5 / 20.1 | 133 / 24.9 | 608 / 95.9 |
@@ -161,7 +165,7 @@ the measurement and taken out again.
 |---|---|
 | The wall of a parallel operation: `viewshed_20km`, `radar_floor_20km` on the Marianas, 1.8–1.9× | Within the 8-core budget. Not the block budget: unchanged from 16 MiB to 1 GiB. They spread over 1.9 cores against 3–9 elsewhere. Those two facts are as far as this was taken. |
 | `visible_10_40km` on the Marianas, 1.4–2.1× | Blocks are 4.5 MiB against GermanyCW's 0.7, so each line still turns over blocks at 64 MiB. Over 200 lines the blocks read fell from 985 at 32 MiB to 0 with 512 MiB, 13.8 → 0.9 ms a line. |
-| `find_sites_los_36`: Afghanistan 2.8×, MarianaIslands 7×, MarianaIslandsWWII 8× | One thread: cycles ÷ rate equals the wall. Reads do not matter: 42–87 blocks a request, the same at 32 and 256 MiB. It is sightlines × triangles: 811 k lines of 231 triangles on Afghanistan, 215 k of 620 on MarianaIslands, against 323 k of 41 on Caucasus. |
+| `find_sites_los_36` on the Marianas, 1.14–1.32× on cycles alone | The budget counts 8 cores and the work runs on all 16 threads: cycles ÷ rate ÷ wall is 14.4 threads busy, and SMT siblings count in full, so the same answer costs 1.3× the cycles of one thread (293.7 and 344.5 Gc) in an eleventh of the wall. It is sightlines × triangles: 215 k lines of 620 triangles, against 323 k of 41 on Caucasus. |
 | `point_info/fresh` on GermanyCW, 1.2× on cycles alone | The first nearest road. Of 114 ms on GermanyCW, 91 ms are the per-point step, 47 of them loading the 144 MB road graph; of 52 ms on Afghanistan, 42 and 23. Warm and cold agree, so it is CPU, not the disk. Held, `point_info` takes 0.08–5.5 ms. |
 | `airfield_info/fresh` on the Marianas, 1.03–1.5× | Not split further. `data/airfield-info.md` has the runway width as the cost on those terrains. |
 | `index_empty_cache` on GermanyCW, 1.05× | The road build: `design.md` §8 has 9.8 s of it, against 10.5 s here. Syria is 1 % over on the wall alone. |
@@ -182,7 +186,7 @@ The block budget against the Mariana misses, MarianaIslands, warm, 2 rounds:
 ADR 0007 has the reasoning of 1, 4 and 5.
 
 1. **A cycle budget** is the target's time on 8 cores for `viewshed_20km`,
-   `radar_floor_20km`, `exposure_10_sites` and
+   `radar_floor_20km`, `exposure_10_sites`, `find_sites_los_36` and
    `find_sites_horizon_first_touch`, whose answers are computed over the pool
    on any source, and on one core for every other case. Where only an
    install's reads of blocks fan out, as in `sample`, `visible` or
@@ -191,7 +195,15 @@ ADR 0007 has the reasoning of 1, 4 and 5.
 2. **The block budget** is 64 MiB, from the table above. The rerun at 64 MiB
    took `visible_10_40km` warm from 14× to 1.4× on MarianaIslands and to 2.1×
    on MarianaIslandsWWII.
-3. **`find_sites` with sightlines** goes parallel in plan task Q17.
+3. **`find_sites` with sightlines** runs over the pool, each site on a free
+   thread and the sites gathered in candidate order. The wall fell 6–11× and
+   every terrain meets 10 s, Afghanistan at 2.5 s and the Marianas at 6.3 and
+   7.3 s; the Marianas are over the 8-core cycle budget, for the reason above.
+   A pool thread takes a line's blocks one at a time, and one thread reads at
+   a time, because each thread reading its own held 295 MiB on MarianaIslands
+   in one call: it now holds 112 MiB against 84 on one thread, in the same
+   5.0 s. Answers on Afghanistan and the Marianas match `--threads 1` byte for
+   byte.
 4. **`point_info` in a fresh process** has a target of 150 ms. Held, it keeps
    its target.
 5. **The memory target** of a query process is 150 MiB. The Mariana cause
