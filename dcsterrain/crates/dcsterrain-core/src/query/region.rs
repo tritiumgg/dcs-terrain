@@ -243,6 +243,22 @@ pub(super) fn airdrome<'a>(tables: &'a Tables, r: &AirdromeRef) -> Option<&'a Ai
     digits.then(|| name.parse().ok()).flatten().and_then(by_id)
 }
 
+/// The airdrome `r` names, as `airdrome` finds it, or the issue, at `path`,
+/// when none has that name.
+pub(super) fn known_airdrome<'a>(
+    tables: &'a Tables,
+    r: &AirdromeRef,
+    path: &str,
+) -> Result<&'a AirdromeRow, Vec<Issue>> {
+    airdrome(tables, r).ok_or_else(|| {
+        let message = match r {
+            AirdromeRef::Id(id) => format!("no airdrome has the id {id}"),
+            AirdromeRef::Name(n) => format!("no airdrome has the name_id or id `{n}`"),
+        };
+        vec![Issue::new("unknown_airdrome", &message, path)]
+    })
+}
+
 /// The reference point of the airdrome `r` names, or of every airdrome
 /// placed when none is named; the issue, at `path`, when there is none to
 /// give.
@@ -266,12 +282,7 @@ pub(super) fn airdromes(
         }
         return Ok(at);
     };
-    let a = airdrome(tables, r).ok_or_else(|| {
-        none(match r {
-            AirdromeRef::Id(id) => format!("no airdrome has the id {id}"),
-            AirdromeRef::Name(n) => format!("no airdrome has the name_id or id `{n}`"),
-        })
-    })?;
+    let a = known_airdrome(tables, r, path)?;
     match (a.x, a.z) {
         (Some(x), Some(z)) => Ok(vec![[x, z]]),
         _ => Err(none(format!(
