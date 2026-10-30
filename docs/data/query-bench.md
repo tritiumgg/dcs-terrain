@@ -14,6 +14,10 @@ Reproduce with `cargo bench -p dcsterrain-cli --bench query`; the file's
 header lists its settings. `DCSTERRAIN_BENCH_BASELINE` prints each median
 against an earlier run's JSON.
 
+These times are wall clock, from before the benchmark judged on cycles, and
+stand as the record of that pass. `data/targets.md` has the current figures
+in cycles with the wall beside them.
+
 ## Summary
 
 Geometric mean of before ÷ after over each set of cases:

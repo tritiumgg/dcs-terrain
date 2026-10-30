@@ -16,6 +16,7 @@ it.
 | [data/radar-floor.md](data/radar-floor.md) | The radar floor on every installed terrain: nesting, agreement with `visible`, the raster against the exact floor, and cost |
 | [data/exposure.md](data/exposure.md) | `exposure` over seven sites on every installed terrain: against the sites' own floors and `visible`, and cost |
 | [data/query-bench.md](data/query-bench.md) | The query benchmark before and after the performance pass: every case, cold and warm, and the cache sizes |
+| [data/targets.md](data/targets.md) | Every target on every installed terrain, in cycles with the wall beside them, how cycles are counted, and why each miss |
 | [data/criteria-prune.md](data/criteria-prune.md) | The siting criteria pruned against exhaustive evaluation on every installed terrain: tiles skipped and times |
 | [data/route-search.md](data/route-search.md) | A\* against Dijkstra on every installed terrain's roads: agreement, nodes settled, and what a route costs |
 | [data/find-sites.md](data/find-sites.md) | A FARP-like `find_sites` on every installed terrain: each candidate rescored alone, the spacing, a brute-force search, and times |

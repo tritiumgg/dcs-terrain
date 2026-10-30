@@ -572,7 +572,9 @@ needs one.
 NVMe, cold OS cache unless marked; on one thread unless a figure says it is
 from the query benchmark, which spreads large work over every core of an
 8-core machine (ADR 0004, `data/query-bench.md`). Each is a benchmark, not a
-correctness rule: a miss is a decision about the target.
+correctness rule: a miss is a decision about the target. Every target on
+every terrain, in cycles with the wall beside them, and why each miss, is in
+`data/targets.md`.
 
 | Operation | Measured | Target |
 |---|---|---|
@@ -584,7 +586,7 @@ correctness rule: a miss is a decision about the target.
 | `viewshed`, `radar_floor` 20 km | 89–111 ms; `radar_floor` 20 km 91–303 ms median per terrain over eight terrains at 5 threads, the mesh out to 1 km and GeoJSON bands included, MarianaIslandsWWII 3 ms over the target (`data/radar-floor.md`); `viewshed` 120 ms at 20 km and 644 ms at 50 km on Caucasus, OS cache warm, on 2.9.30.28738; query benchmark `viewshed` 20 km 15 / 12 ms warm, 23 / 14 ms cold (Caucasus / GermanyCW) | 300 ms |
 | `find_sites` 20 × 20 km, geometric | 15–24 ms; a FARP's ten criteria every 100 m, 57–205 ms over the 8 terrains of 2.9.30.28738, tiles read, 5 threads (`data/find-sites.md`) | 500 ms |
 | `exposure`, 10 sites of 20 km | 7 sites of 20 km 0.24–1.2 s warm, 3.4–9.3 Gcycles, over eight terrains at 5 threads, on 2.9.30.28738 (`data/exposure.md`) | 3 s |
-| `find_sites` with one LOS criterion, 36 observers | not measured | 10 s |
+| `find_sites` with one LOS criterion, 36 observers | query benchmark, on one thread: 1.2–1.5 s on Caucasus, GermanyCW, PersianGulf and Syria, 6.4 s on Nevada, 27.6 s on Afghanistan, 70 and 82 s on the Marianas, on 2.9.30.28738 (`data/targets.md`) | 10 s |
 | `find_sites` with a horizon criterion, first touch | 3.4–4.9 s for the horizon of a 20 × 20 km region, 7–10 ms once cached (Caucasus, 2.9.30.28738) | 5 s, then 500 ms |
 | `route` 50 km | 2.5 / 13 ms; 100 pairs of 2–80 km on each of 8 terrains, the search 0.05–1.6 ms p50 and the whole operation 4.9–43 ms p50, 90 ms p95 at most, on 2.9.30.28738 (`data/route-search.md`) | 500 ms |
 | `validate_placements`, 1 000 placements | 1 000 of every shape, a third near structures and a third by runways, scattered over each of 8 terrains: 0.76–2.5 s warm, GermanyCW the slowest, and 1.0–4.4 s cold, Syria over the target on first touch, at 5 threads, on 2.9.30.28738 (`data/placements.md`) | 3 s |
@@ -662,8 +664,9 @@ Each names what settles it.
    walk about one. *Mitigation:* low priority, two threads, once per build.
 9. **Road graph fidelity.** Built from junction ids; route lengths not yet
    compared with `findPathOnRoads`. *Settles it:* V1.
-10. **Per-call cost.** Every `query` call is a fresh process. *Settles it:*
-    the end-to-end benchmark; batches are the fallback.
+10. **Per-call cost.** Every `query` call is a fresh process. *Settled:* one
+    call takes 8–23 ms on every installed terrain (`data/targets.md`);
+    batches remain the fallback.
 11. **Cover bits and place sizes are measured on one terrain.** On Caucasus the
     town subsets cover 46 468 km² but bit 64 only 27 110 km², unexplained;
     a forest edge follows coarse triangles (13 per km² p50). The size classes
