@@ -46,6 +46,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    opt-in on the 8 terrains of 2.9.30.28738: a building, water and runway
    each reported, 1 000 placements a terrain equal to brute force,
    0.76–2.5 s warm (`data/placements.md`).
+
 ## Next
 
 One task. The thing to pick up immediately.

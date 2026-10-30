@@ -25,8 +25,9 @@ terrain of 2.9.30.28738 (`data/targets.md`), three things did not fit:
 A target stays a time. Its budget in cycles is that time on 8 cores for an
 operation whose answer is computed over the pool on any source, and on one
 core for every other operation, including one where only an install's reads
-of blocks fan out. `point_info` in a fresh process has a target of 150 ms; held,
-its target does not change. The memory target of a query process is 150 MiB.
+of blocks fan out, or a build that averages at most one core. `point_info` in
+a fresh process has a target of 150 ms; held, its target does not change. The
+memory target of a query process is 150 MiB.
 
 ### Alternatives considered
 

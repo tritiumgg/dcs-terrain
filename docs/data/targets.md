@@ -36,7 +36,7 @@ case (Decided, below).
   that case times nothing else. `trafficability` has no target.
 - **The bounds** are `mise run bench-bounds`, run by hand and not a CI check:
   shared runners differ from run to run, and the same work on the horizon's
-  first touch cost 24.2 Gc on one and 36.9 Gc, 3.02× its budget, on the next,
+  first touch cost 24.2 Gc on one and 36.9 Gc, 3.02× its one-core budget of the day, on the next,
   so bounds are judged on one machine. They take 9 rounds on `Synth` and fail
   above 3× the budget, above 3× the memory target, on a failed request, or on no cycles over
   10 ms of work, since a shorter case can read zero under the CPU clock's tick.
@@ -97,7 +97,7 @@ rounds: cycles moved 0.77–1.32× (1.77× on one sub-millisecond case,
 `airfield_info/fresh`) while wall moved up to 1.88×. The horizon's first
 touch moved 0.98× in cycles and 1.88× in wall, `viewshed_20km` 1.02× and
 1.37×. Nothing crossed a bound. The tightest case at rest is
-`find_sites_los_36`, 23.2 Gc of its 125.7 Gc bound.
+`find_sites_los_36`, 23.2 Gc of its 125.5 Gc bound.
 
 ## The table
 
@@ -163,7 +163,7 @@ the measurement and taken out again.
 | `visible_10_40km` on the Marianas, 1.4–2.1× | Blocks are 4.5 MiB against GermanyCW's 0.7, so each line still turns over blocks at 64 MiB. Over 200 lines the blocks read fell from 985 at 32 MiB to 0 with 512 MiB, 13.8 → 0.9 ms a line. |
 | `find_sites_los_36`: Afghanistan 2.8×, MarianaIslands 7×, MarianaIslandsWWII 8× | One thread: cycles ÷ rate equals the wall. Reads do not matter: 42–87 blocks a request, the same at 32 and 256 MiB. It is sightlines × triangles: 811 k lines of 231 triangles on Afghanistan, 215 k of 620 on MarianaIslands, against 323 k of 41 on Caucasus. |
 | `point_info/fresh` on GermanyCW, 1.2× on cycles alone | The first nearest road. Of 114 ms on GermanyCW, 91 ms are the per-point step, 47 of them loading the 144 MB road graph; of 52 ms on Afghanistan, 42 and 23. Warm and cold agree, so it is CPU, not the disk. Held, `point_info` takes 0.08–5.5 ms. |
-| `airfield_info/fresh` on the Marianas, 1.1–1.5× | Not split further. `data/airfield-info.md` has the runway width as the cost on those terrains. |
+| `airfield_info/fresh` on the Marianas, 1.03–1.5× | Not split further. `data/airfield-info.md` has the runway width as the cost on those terrains. |
 | `index_empty_cache` on GermanyCW, 1.05× | The road build: `design.md` §8 has 9.8 s of it, against 10.5 s here. Syria is 1 % over on the wall alone. |
 | `validate_1000` on GermanyCW, wall 0.1 % over | Cold: half a core's worth of cycles over the wall, so most of the time is the disk's. 6.9 Gc against 12.5 Gc. |
 

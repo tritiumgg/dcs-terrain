@@ -624,8 +624,9 @@ fn target(case: &str) -> Option<(f64, bool)> {
 
 /// The cases whose answer is computed over the pool on any source: the sweep
 /// of `viewshed` and `radar_floor`, the sites of `exposure`, the cells of a
-/// new horizon. Elsewhere only an install's reads of blocks fan out, and only
-/// for blocks not held, which leaves the operation one thread's work.
+/// new horizon. Elsewhere only an install's reads of blocks fan out, for blocks
+/// not held, and two steps of a road build, within a build that averages at
+/// most one core. That leaves those cases one thread's work.
 const PARALLEL_CASES: &[&str] = &[
     "viewshed_20km",
     "radar_floor_20km",

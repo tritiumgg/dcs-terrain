@@ -593,7 +593,7 @@ core, or on 8 for an operation computed over the pool (ADR 0007).
 | `validate_placements`, 1 000 placements | 1 000 of every shape, a third near structures and a third by runways, scattered over each of 8 terrains: 0.76–2.5 s warm, GermanyCW the slowest, and 1.0–4.4 s cold, Syria over the target on first touch, at 5 threads, on 2.9.30.28738 (`data/placements.md`) | 3 s |
 | `point_info`, `airfield_info` | µs to a few ms; `point_info` 0.4–3.9 ms a point warm over 3 000 uniform points on each of 8 terrains, most of it the nearest road from points far out at sea, so 10 000 points at sea take about 20 s, on 2.9.30.28738 (`data/point-info.md`); `airfield_info` 0.8–16.5 ms p50 cold, 0.6–5.1 ms warm, over every airdrome of 8 terrains at 5 threads, most of it the runway width; worst 23 ms cold off the Mariana terrains and 44 and 109 ms on them, on 2.9.30.28738 (`data/airfield-info.md`) | `point_info` 150 ms cold in a fresh process, 20 ms held; `airfield_info` 20 ms cold |
 | cache build, all but betweenness and places | < 2 s; roads 0.5 / 9.8 s (Caucasus / GermanyCW, 2.9.30.28738), 3.1 s of it the GermanyCW scan and 4.6 s its water | 10 s |
-| private memory per query process | 15–45 MiB; up to 118 MiB on the Marianas (`data/targets.md`) | 150 MiB |
+| private memory per query process | 15–66 MiB, up to 118 MiB on the Marianas (`data/targets.md`) | 150 MiB |
 
 Accuracy:
 
