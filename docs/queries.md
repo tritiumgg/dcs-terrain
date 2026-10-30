@@ -66,7 +66,7 @@ endpoints also returns them as `Point` features.
 | `point_info` | a `Point` per request point with its fields |
 | `airfield_info` | each runway as a `LineString` between its thresholds with designator, course, length and width; each stand as a `Point` with its size, and whether it fits when `fits` is given |
 | `validate_placements` | a `Point` per placement with its issues; its shape as a `Polygon` (a circle as a 32-sided one) unless it is a point; each offending object's box |
-| `towns` | each place's outline as a `Polygon` when outlines are asked for, and a `Point` at its center with its name, size class and form |
+| `towns` | each place's outline as a `MultiPolygon` when outlines are asked for, and a `Point` at its center with its id, name, size class, form and building count |
 
 `describe` and `geo` return no geometry to draw; `geo` is the conversion
 itself.
@@ -317,6 +317,9 @@ airdrome returns as `id` its numeric id in digits, or its `name_id` where the
 files give none, and as `name` its display name, or its `name_id`. Wherever a
 request names an airdrome, a number is an id, and a string is a `name_id` or,
 failing any, an id in digits, so an `id` from here can be passed back as is.
+A place is measured to its center; it returns its id in digits, its name,
+null when no town names it, and its size class as `class`. Until the places
+are built it is the issue `not_ready`.
 
 ### `scenery_in`
 
@@ -377,7 +380,9 @@ inside 100 km, and `bearing_grid_deg` from DCS x. They differ by the
 meridian convergence, up to 11.5° on GermanyCW. The description takes the
 true bearing's point of the eight-point compass: hundreds of meters inside
 950 m, whole kilometers beyond, each rounded half up, and "at" the town
-within 50 m. The place field comes with places (`data/point-info.md`).
+within 50 m. The place is the one whose ground, as `towns` outlines it, holds
+the point, null outside every place; `places_built` says whether the places
+exist, since until `index` builds them every place is null.
 
 ### `airfield_info`
 
@@ -546,12 +551,25 @@ does not hold an AGL between waypoints without terrain following.
 
 ### `towns`
 
-Request: `region` or none for the whole terrain, filters on size class, form and
-minimum building count, `sort` (building count, floor area, apartment share),
-`limit`, `outlines: bool`. Response: places (`design.md` §6.3) with id, name
-and other names, center, box, size class, form, building count, residential
-floor area, apartment share and industrial count, and an outline when asked.
-Errors with "still being built" until the `places` entry exists.
+Request: `region`, or none for the whole terrain; `size` and `form`, lists a
+place must be one of, any when empty; `min_buildings`; `sort`, `buildings`
+(the default), `residential_floor` or `apartment_share`, most first, ties
+to the least id; `limit` (default 50, max 1 000, or 100 with outlines); `outlines: bool`.
+Response: `matched`, how many places pass the region (by their center) and
+the filters before the limit, and the places (`design.md` §6.3), each with
+its id, name and other names, center, box, size class, form, counts of
+buildings, houses, apartments, shops, civic and industrial buildings,
+residential floor, apartment share and occupied hectares, and its outline
+when asked. Until the `places` entry exists, which `index` builds, the
+answer is the issue `not_ready`; a query never builds it.
+
+An outline is the place's ground: every 50 m cell, on the cells of DCS x and
+z from 0, whose center lies within 100 m of one of its buildings' circles,
+traced along the cells' edges and simplified to within 25 m. Half the
+linking gap, so two linked buildings' buffers meet, and two places' grounds
+never share a cell. A place's buildings are read again for its outline: the
+settlement buildings in its box that link to its least-id building, which is
+exactly the place, since none outside the box belongs to it.
 
 ## 5. Criteria
 

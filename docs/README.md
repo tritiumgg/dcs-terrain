@@ -23,6 +23,7 @@ it.
 | [data/airdrome-ids.md](data/airdrome-ids.md) | Airdrome ids joined by position on every installed terrain, against the shipped missions and held out against the labels |
 | [data/placements.md](data/placements.md) | `validate_placements` on every installed terrain: a building, water and a runway, a random batch against brute force, and times |
 | [data/point-info.md](data/point-info.md) | `point_info` on every installed terrain: the nearest town against a scan of every town, bearings against the geodesic, and cost |
+| [data/places.md](data/places.md) | Places on every installed terrain: size classes, forms, build and query cost, each point's place against brute force, and Caucasus towns against their census |
 | [data/airfield-info.md](data/airfield-info.md) | `airfield_info` on every installed terrain: runways against the tables, true courses against the geodesic, widths and elevations against a scan, and cost |
 | [data/caucasus-scenery-catalogue.tsv](data/caucasus-scenery-catalogue.tsv) | The Caucasus scenery model census |
 

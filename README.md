@@ -20,8 +20,8 @@ your user cache directory.
 > `scenery_in`, `visible`, `viewshed`, `radar_floor`, `coverage`,
 > `approach_spectrum`, `unmask_profile`, `route`, `route_alternatives`,
 > `chokepoints`, `trafficability`, `score_site`, `find_sites`, `point_info`,
-> `airfield_info` and `validate_placements` work today; every other operation
-> is planned, kept here so the shape is visible. Progress is in
+> `airfield_info`, `validate_placements` and `towns` work today; every other
+> operation is planned, kept here so the shape is visible. Progress is in
 > [docs/STATE.md](docs/STATE.md).
 
 ## Requirements
@@ -67,9 +67,11 @@ dcsterrain query --terrain Caucasus describe
 ```
 
 Ask for layer values at points or on a lattice in a region, convert positions
-to latitude, longitude and MGRS, find the nearest road, airdrome, town, node,
-beacon or scenery object, list the scenery in a region, or describe a point:
-its ground, and how far and which way it lies from the nearest town:
+to latitude, longitude and MGRS, find the nearest road, airdrome, town, place, node,
+beacon or scenery object, list the scenery in a region, list the places
+its buildings form, from hamlet to city, or describe a point: its ground,
+the place it stands in, and how far and which way it lies from the nearest
+town:
 
 ```bash
 dcsterrain query --terrain Caucasus sample '{"points": [{"x": -281782, "z": 647279}], "layers": ["height", "slope", "dist_road"]}'
@@ -101,7 +103,9 @@ dcsterrain check --terrain Caucasus
 the DCS build each terrain's entries were made on; after a DCS update, an
 entry whose terrain files did not change is kept. `cache clear` deletes all
 of it, asking before the live validation figures.
-`dcsterrain index --terrain Caucasus` builds a cache ahead of time. `query`,
+`dcsterrain index --terrain Caucasus` builds a cache ahead of time, among it
+the road betweenness and the places, which a query never waits minutes for:
+until they are built, `chokepoints` and `towns` say so. `query`,
 `index` and `list-terrains` take `--cache <dir>` too, and `index` takes
 `--allow-crs-residual` as `query` does.
 
