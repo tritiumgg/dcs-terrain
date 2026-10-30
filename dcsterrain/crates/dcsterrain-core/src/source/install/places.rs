@@ -22,8 +22,10 @@ impl Entry for PlacesEntry {
         "places"
     }
 
+    /// Raised past 1 with the layout; the classes' rules are folded in, so a
+    /// change to which models settle rebuilds it too.
     fn version(&self) -> u32 {
-        1
+        1 ^ crate::classes::rules_digest()
     }
 
     /// The scene for the buildings, and the Lua tables for the towns that
@@ -54,7 +56,7 @@ impl Entry for PlacesEntry {
                 Ok(places::group(&all, &towns).encode())
             })
             .join()
-            .expect("the places build does not panic")
+            .unwrap_or_else(|_| Err(Refusal("the places build failed".into())))
         })
     }
 }

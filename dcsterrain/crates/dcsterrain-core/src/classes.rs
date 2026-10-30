@@ -157,6 +157,29 @@ pub fn override_files() -> impl Iterator<Item = &'static str> {
     OVERRIDES.iter().map(|(t, _)| *t)
 }
 
+/// A digest of the override files and the name rules, FNV-1a: an entry
+/// built from the classes folds it into its version, so changing which
+/// models settle rebuilds it. A rule changed in code alone, such as the
+/// box split's sizes, still has to raise that entry's own version.
+pub fn rules_digest() -> u32 {
+    let mut h: u32 = 0x811c_9dc5;
+    let mut eat = |s: &str| {
+        for b in s.bytes().chain([0]) {
+            h = (h ^ u32::from(b)).wrapping_mul(0x0100_0193);
+        }
+    };
+    for (file, text) in OVERRIDES {
+        eat(file);
+        eat(text);
+    }
+    eat(INDUSTRIAL_NAME.as_str());
+    for r in FAMILY_RULES {
+        eat(&format!("{:?}", r.family));
+        eat(r.pattern);
+    }
+    h
+}
+
 /// Width across the model's local x, depth across its local z, height.
 pub fn dims(bbox: &[f32; 6]) -> (f64, f64, f64) {
     let e = |k: usize| f64::from(bbox[k + 3] - bbox[k]);
