@@ -27,8 +27,9 @@ cache. The install holds 9 terrain folders; Kola's has no `entry.lua`, so
   narrower than 1 m as the operation does. The test fails if one finds an
   edge the other does not, or if they differ by more than 3 cm.
 - **Elevation:** against the highest of points every meter along every
-  centerline. The test fails if the elevation is under the scan's; with no
-  runway, unless it equals the highest ground at the stands.
+  centerline. The test fails if the elevation is under the scan's or 5 cm
+  over it; with no runway, unless it equals the highest ground at the
+  stands. It fails too unless every threshold lies on the runway paint.
 - **Designators:** each threshold's true course less ten times its number;
   the terrain's median of that is the declination the designators imply,
   and each threshold's departure from it is recorded. There is no magnetic
@@ -54,7 +55,7 @@ it of 1 m or more begins, then bisected to 1 cm; a stretch narrower than
 1 m is a seam between triangles, where a point falls through to the ground
 beneath. The 1 m step lands in every stretch that is not a seam, so the
 coarse step skips none. Each edge is within 5 mm, the bisection's half
-bracket, so a station's width within 1 cm; a stretch off the paint 0.75–1 m
+bracket, so a station's width within 1 cm; a stretch off the paint 1–1.25 m
 wide may be judged either way. The runway's width is the median of its
 stations. The paint is not a runway outline: taxiways, aprons and shoulders share its material, so a
 station where one meets the runway reads wide, and some runways carry no

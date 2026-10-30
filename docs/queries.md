@@ -406,10 +406,11 @@ then bisected to 1 cm: a narrower stretch is a seam between the paint's
 triangles. The width is null where every station is off the paint, as on
 most Mariana runways, or on over 150 m of it, an apron's. The elevation is
 the highest ground along any centerline, exact over the mesh's triangles.
-An airdrome with no runway,
-a helipad, answers no runways and the highest ground at its stands. One
-with no id answers a null id and no navaids or radio, which follow from the
-id. A stand's `fits` is null where its height, size or use is unknown
+An airdrome with no runway, a helipad, answers no runways; its elevation,
+and that of one whose runways lie off the mesh, is the highest ground at
+its stands. One with no id answers a null id and no navaids or radio, which follow from the
+id. A stand's `fits` is false where a known size or use fails the
+airframe, and null where none does but one is unknown
 (`data/airfield-info.md`).
 
 ### `radar_floor`
