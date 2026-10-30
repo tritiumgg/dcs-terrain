@@ -57,7 +57,7 @@
           "type": "integer"
         },
         "elevation": {
-          "description": "The highest ground along any runway's centerline, over the mesh\ntriangles; with no runway, the highest ground at a stand. Null with\nneither on the mesh.",
+          "description": "The highest ground along any runway's centerline, over the mesh\ntriangles; with no runway on the mesh, the highest ground at a stand.\nNull with neither on the mesh.",
           "format": "double",
           "type": [
             "number",
@@ -3768,7 +3768,7 @@
           ]
         },
         "fits": {
-          "description": "Whether the airframe `fits` names fits; null without `fits`, or\nwhere a size it needs is unknown.",
+          "description": "Whether the airframe `fits` names fits: false where any known size\nor use fails it; null without `fits`, or where none fails it but one\nis unknown.",
           "type": [
             "boolean",
             "null"

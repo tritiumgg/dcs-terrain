@@ -1113,8 +1113,8 @@ pub struct AirfieldInfoResponse {
     pub lat: Option<f64>,
     pub lon: Option<f64>,
     /// The highest ground along any runway's centerline, over the mesh
-    /// triangles; with no runway, the highest ground at a stand. Null with
-    /// neither on the mesh.
+    /// triangles; with no runway on the mesh, the highest ground at a stand.
+    /// Null with neither on the mesh.
     pub elevation: Option<f64>,
     pub runways: Vec<RunwayInfo>,
     /// Each beacon of the airdrome, in the order the files list them.
@@ -1214,8 +1214,9 @@ pub struct StandInfo {
     pub airplanes: Option<bool>,
     /// Always null: no file says whether a stand is a shelter.
     pub shelter: Option<bool>,
-    /// Whether the airframe `fits` names fits; null without `fits`, or
-    /// where a size it needs is unknown.
+    /// Whether the airframe `fits` names fits: false where any known size
+    /// or use fails it; null without `fits`, or where none fails it but one
+    /// is unknown.
     pub fits: Option<bool>,
 }
 

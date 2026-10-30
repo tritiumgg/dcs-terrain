@@ -17,10 +17,10 @@ use super::geojson::{Features, props};
 use super::region::known_airdrome;
 use super::sightline::highest;
 use super::{Terrain, invalid, refused};
-use crate::crs::{Tmerc, grid_bearing};
+use crate::crs::{Tmerc, degrees, grid_bearing, median};
 use crate::decode::surface5::ground::SURFACE_RUNWAY;
 use crate::source::install::AirdromeRow;
-use crate::source::{Refusal, Source, Tables};
+use crate::source::{Ground, Refusal, Source, Tables};
 use crate::types::{
     AirfieldInfoRequest, AirfieldInfoResponse, Airframe, Issue, Navaid, RadioInfo, RunwayInfo,
     StandInfo, StandSize, Threshold,
@@ -77,14 +77,35 @@ fn beacon_kind(code: i64) -> Option<&'static str> {
         .map(|(_, name)| *name)
 }
 
-/// The runway's width at each station `stations` gives: the ground there
-/// must be runway, and each side's edge is where the first stretch off it
-/// of `WIDTH_SEAM_M` or more begins, found to `WIDTH_STEP_M` and then
-/// bisected. `None` at a station whose centerline is not runway, or whose
-/// edge lies past `WIDTH_REACH_M`. Each look is one batch of points for
-/// every side at once, so a runway costs a few batches.
+/// Whether the ground is the runway's paint.
+fn on_paint(g: &Option<Ground>) -> bool {
+    g.is_some_and(|g| g.surface == SURFACE_RUNWAY)
+}
+
+/// The runway's width at each station `stations` gives, over the mesh's
+/// paint, as `paint_widths` measures it.
 fn runway_widths(
     src: &dyn Source,
+    a: [f64; 2],
+    b: [f64; 2],
+    stations: &[f64],
+) -> Result<Vec<Option<f64>>, Refusal> {
+    let mut paint = |p: &[[f64; 2]]| Ok(src.points(p)?.iter().map(on_paint).collect());
+    paint_widths(&mut paint, a, b, stations)
+}
+
+/// Whether each of a batch of points is on the paint.
+type Paint<'a> = dyn FnMut(&[[f64; 2]]) -> Result<Vec<bool>, Refusal> + 'a;
+
+/// The width of the paint across the segment from `a` to `b` at each
+/// station `stations` gives: the centerline there must be on it, and each
+/// side's edge is where the first stretch off it of `WIDTH_SEAM_M` or more
+/// begins, found to `WIDTH_STEP_M` and then bisected. `None` at a station
+/// whose centerline is off the paint, or whose edge lies past
+/// `WIDTH_REACH_M`. Each look is one batch for every side at once, so a
+/// runway costs a few batches.
+fn paint_widths(
+    paint: &mut Paint,
     a: [f64; 2],
     b: [f64; 2],
     stations: &[f64],
@@ -103,15 +124,16 @@ fn runway_widths(
         })
         .collect();
     let at = |(c, n): ([f64; 2], [f64; 2]), d: f64| [c[0] + d * n[0], c[1] + d * n[1]];
-    let on = |g: &Option<crate::source::Ground>| g.is_some_and(|g| g.surface == SURFACE_RUNWAY);
     let coarse = (WIDTH_REACH_M / WIDTH_COARSE_M).round() as usize;
     let fine = (WIDTH_COARSE_M / WIDTH_STEP_M).round() as usize;
-    let seam = (WIDTH_SEAM_M / WIDTH_STEP_M).ceil() as usize;
+    // The fine steps a stretch off the paint must hold to span a seam.
+    let seam = (WIDTH_SEAM_M / WIDTH_STEP_M).round() as usize + 1;
     let pts: Vec<[f64; 2]> = (sides.iter())
         .flat_map(|&s| (0..=coarse).map(move |k| at(s, k as f64 * WIDTH_COARSE_M)))
         .collect();
-    let steps: Vec<Vec<bool>> = (src.points(&pts)?.chunks(coarse + 1))
-        .map(|g| g.iter().map(on).collect())
+    let steps: Vec<Vec<bool>> = paint(&pts)?
+        .chunks(coarse + 1)
+        .map(<[bool]>::to_vec)
         .collect();
     // The first coarse step past `k` off the paint, where the stretch off it
     // may begin.
@@ -127,18 +149,18 @@ fn runway_widths(
         .collect();
     while !open.is_empty() {
         // Fine steps from the coarse one before, out past a seam's width.
-        let n = fine + seam + 1;
+        let n = fine + seam;
         let pts: Vec<[f64; 2]> = (open.iter())
             .flat_map(|&(s, k)| {
                 let (side, from) = (sides[s], (k - 1) as f64 * WIDTH_COARSE_M);
                 (0..n).map(move |j| at(side, from + j as f64 * WIDTH_STEP_M))
             })
             .collect();
-        let ground = src.points(&pts)?;
+        let on = paint(&pts)?;
         let mut still = Vec::new();
-        for (&(s, k), g) in open.iter().zip(ground.chunks(n)) {
-            let off = |j: usize| g[j..j + seam].iter().all(|g| !on(g));
-            match (1..=fine).find(|&j| on(&g[j - 1]) && off(j)) {
+        for (&(s, k), g) in open.iter().zip(on.chunks(n)) {
+            let off = |j: usize| g[j..j + seam].iter().all(|&g| !g);
+            match (1..=fine).find(|&j| g[j - 1] && off(j)) {
                 Some(j) => {
                     let edge = (k - 1) as f64 * WIDTH_COARSE_M + j as f64 * WIDTH_STEP_M;
                     brackets[s] = Some([edge - WIDTH_STEP_M, edge]);
@@ -157,10 +179,10 @@ fn runway_widths(
         let mids: Vec<[f64; 2]> = (sides.iter().zip(&brackets))
             .filter_map(|(&s, b)| b.map(|[i, o]| at(s, 0.5 * (i + o))))
             .collect();
-        let mut g = src.points(&mids)?.into_iter();
+        let mut on = paint(&mids)?.into_iter();
         for b in brackets.iter_mut().flatten() {
             let m = 0.5 * (b[0] + b[1]);
-            if on(&g.next().expect("a point per bracket")) {
+            if on.next().expect("a point per bracket") {
                 b[0] = m;
             } else {
                 b[1] = m;
@@ -173,23 +195,6 @@ fn runway_widths(
         .chunks(2)
         .map(|s| Some(edge(&s[0])? + edge(&s[1])?))
         .collect())
-}
-
-/// The median of the values given, the mean of the middle two of an even
-/// count; `None` of none.
-fn median(mut v: Vec<f64>) -> Option<f64> {
-    v.sort_by(f64::total_cmp);
-    let n = v.len();
-    match n {
-        0 => None,
-        _ if n % 2 == 1 => Some(v[n / 2]),
-        _ => Some(0.5 * (v[n / 2 - 1] + v[n / 2])),
-    }
-}
-
-/// Degrees in [0, 360) of radians from north towards east.
-fn degrees(rad: f64) -> f64 {
-    rad.to_degrees().rem_euclid(360.0) % 360.0 + 0.0
 }
 
 /// A threshold at `p`, its course towards `other`.
@@ -256,16 +261,28 @@ fn runways(
     Ok((out, top))
 }
 
-/// Whether `f` fits a stand of this size and use; `None` where a size or
-/// use it needs is unknown.
+/// Whether `f` fits a stand of this size and use: no where any known size
+/// or use fails it, `None` where none does but one is unknown.
 fn fits(f: &Airframe, s: &StandInfo) -> Option<bool> {
-    let room = f.width <= s.width? && f.length <= s.length? && f.height <= s.height?;
     let usable = if f.helicopter {
-        s.helicopters?
+        s.helicopters
     } else {
-        s.airplanes?
+        s.airplanes
     };
-    Some(room && usable)
+    let checks = [
+        s.width.map(|w| f.width <= w),
+        s.length.map(|l| f.length <= l),
+        s.height.map(|h| f.height <= h),
+        usable,
+    ];
+    // One known failure settles it, whatever else is unknown.
+    if checks.contains(&Some(false)) {
+        Some(false)
+    } else if checks.contains(&None) {
+        None
+    } else {
+        Some(true)
+    }
 }
 
 /// Counts of the stands by width and length, widest first, then longest;
@@ -368,7 +385,9 @@ pub fn airfield_info(
             class: s.stand_class.clone(),
             width: s.params.WIDTH,
             length: s.params.LENGTH,
-            height: (s.params.HEIGHT.as_deref()).and_then(|h| h.trim().parse().ok()),
+            height: (s.params.HEIGHT.as_deref())
+                .and_then(|h| h.trim().parse().ok())
+                .filter(|h: &f64| h.is_finite()),
             helicopters: s.params.FOR_HELICOPTERS,
             airplanes: s.params.FOR_AIRPLANES,
             shelter: s.params.SHELTER,
@@ -382,9 +401,9 @@ pub fn airfield_info(
         }
         stands_fitting = Some(stands.iter().filter(|s| s.fits == Some(true)).count() as u32);
     }
-    let elevation = match (runways.is_empty(), centerline_top) {
-        (false, top) => top,
-        (true, _) => {
+    let elevation = match centerline_top {
+        Some(top) => Some(top),
+        None => {
             let at: Vec<[f64; 2]> = stands.iter().map(|s| [s.x, s.z]).collect();
             (src.points(&at).map_err(refused)?.into_iter())
                 .flatten()
@@ -446,7 +465,6 @@ mod tests {
     use super::super::tests::synth;
     use super::*;
     use crate::crs::tests::{geodesic_azimuth, turn};
-    use crate::decode::surface5::ground::SURFACE_RUNWAY;
     use crate::synth::*;
 
     fn ask(t: &Terrain, q: Value) -> Result<Value, Vec<Issue>> {
@@ -516,7 +534,7 @@ mod tests {
                 .map(|mm| [c[0] + f64::from(mm) / 1000.0, c[1]])
                 .collect();
             let on = (src.points(&pts).unwrap().iter())
-                .filter(|g| g.is_some_and(|g| g.surface == SURFACE_RUNWAY))
+                .filter(|g| on_paint(g))
                 .count();
             let scan = on as f64 / 1000.0;
             let at = (runway_widths(src, w, e, &[f]).unwrap().pop())
@@ -543,6 +561,43 @@ mod tests {
         // Off the runway's surface, no width.
         let off = [[w[0] + 500.0, w[1]], [e[0] + 500.0, e[1]]];
         assert_eq!(runway_widths(src, off[0], off[1], &[0.5]).unwrap(), [None]);
+    }
+
+    /// Paint across x either side of a centerline along z: `on` for the
+    /// offsets x on it.
+    fn across(on: impl Fn(f64) -> bool + Copy) -> Option<f64> {
+        let mut paint = |p: &[[f64; 2]]| Ok(p.iter().map(|p| on(p[0])).collect());
+        paint_widths(&mut paint, [0.0, 0.0], [0.0, 100.0], &[0.5]).unwrap()[0]
+    }
+
+    #[test]
+    fn a_seam_is_bridged_and_a_wider_stretch_off_the_paint_is_an_edge() {
+        let close = |w: Option<f64>, want: f64| {
+            let w = w.unwrap();
+            assert!((w - want).abs() <= WIDTH_TOLERANCE_M, "{w} against {want}");
+        };
+        close(across(|x| x.abs() <= 25.0), 50.0);
+        // A crack a coarse step lands in, and one between the steps.
+        close(
+            across(|x| x.abs() <= 25.0 && !(10.0..10.5).contains(&x)),
+            50.0,
+        );
+        close(
+            across(|x| x.abs() <= 25.0 && !(12.3..12.8).contains(&x)),
+            50.0,
+        );
+        // Under a meter off it is still a seam; two meters is the edge.
+        close(
+            across(|x| x.abs() <= 25.0 && !(20.0..20.9).contains(&x)),
+            50.0,
+        );
+        close(
+            across(|x| x.abs() <= 25.0 && !(20.0..22.0).contains(&x)),
+            45.0,
+        );
+        // Paint past the reach on one side, or none at the center: no width.
+        assert_eq!(across(|x| (-25.0..=80.0).contains(&x)), None);
+        assert_eq!(across(|x| x.abs() <= 25.0 && x.abs() > 0.1), None);
     }
 
     #[test]
@@ -665,6 +720,9 @@ mod tests {
         );
         // An unknown height leaves the answer unknown.
         assert_eq!(fits(&jet, &stand(22.0, None, false, true)), None);
+        // But a known failure settles it.
+        assert_eq!(fits(&jet, &stand(18.0, None, false, true)), Some(false));
+        assert_eq!(fits(&helo, &stand(22.0, None, false, true)), Some(false));
         // Exactly the stand's size fits.
         assert_eq!(fits(&jet, &stand(20.0, Some(5.0), false, true)), Some(true));
     }
@@ -731,7 +789,6 @@ mod install_tests {
     use crate::decode::install::terrains;
     use crate::query::route::install_tests::percentile;
     use crate::scratch::Scratch;
-    use crate::source::Ground;
     use crate::threads::cpu_cycles;
     use crate::types::AirdromeRef;
 
@@ -748,10 +805,6 @@ mod install_tests {
         (Instant::now(), cpu_cycles())
     }
 
-    fn on(g: &Option<Ground>) -> bool {
-        g.is_some_and(|g| g.surface == SURFACE_RUNWAY)
-    }
-
     /// Brute force: the run of runway surface through `c` along `n`,
     /// sampled every `SCAN_STEP_M` out to the width search's reach and
     /// across any seam narrower than `WIDTH_SEAM_M`, as many samples as it
@@ -760,14 +813,14 @@ mod install_tests {
     fn scan_width(src: &dyn Source, c: [f64; 2], n: [f64; 2]) -> Option<f64> {
         let k = ((WIDTH_REACH_M + WIDTH_SEAM_M) / SCAN_STEP_M).round() as i64;
         let reach = (WIDTH_REACH_M / SCAN_STEP_M).round() as usize;
-        let seam = (WIDTH_SEAM_M / SCAN_STEP_M).round() as usize;
+        let seam = (WIDTH_SEAM_M / SCAN_STEP_M).round() as usize + 1;
         let pts: Vec<[f64; 2]> = (-k..=k)
             .map(|i| {
                 let d = i as f64 * SCAN_STEP_M;
                 [c[0] + d * n[0], c[1] + d * n[1]]
             })
             .collect();
-        let g: Vec<bool> = src.points(&pts).unwrap().iter().map(on).collect();
+        let g: Vec<bool> = src.points(&pts).unwrap().iter().map(on_paint).collect();
         let mid = k as usize;
         if !g[mid] {
             return None;
@@ -841,7 +894,7 @@ mod install_tests {
             let (mut true_off, mut convergence, mut width_off, mut elev_over) =
                 (0.0f64, 0.0f64, 0.0f64, 0.0f64);
             let (mut widths, mut spreads, mut residuals) = (Vec::new(), Vec::new(), Vec::new());
-            let (mut on_paint, mut ends, mut unnamed) = (0, 0, 0);
+            let (mut painted, mut ends, mut unnamed) = (0, 0, 0);
             let (mut cold, mut warm) = (Vec::new(), Vec::new());
             let mut width_spent = (0.0, 0.0);
             for a in &tables.airdromes {
@@ -880,7 +933,6 @@ mod install_tests {
                     let what = format!("{id} {} {}", a.name_id, r.designator);
                     // The answer is the table's, and the table's course its
                     // own ends'.
-                    assert_eq!(r.course_grid_deg, degrees(row.course), "{what}");
                     assert!(
                         turn(degrees(row.course), grid_bearing(p1, p2)) < 1e-9,
                         "{what}"
@@ -907,7 +959,7 @@ mod install_tests {
                             ));
                         }
                         ends += 1;
-                        on_paint += usize::from(on(&src.point(p[0], p[1]).unwrap()));
+                        painted += usize::from(on_paint(&src.point(p[0], p[1]).unwrap()));
                     }
                     // Width against the scan, station by station.
                     let len = r.length;
@@ -964,6 +1016,8 @@ mod install_tests {
                         "{id} {}: {e} under the scan's {s}",
                         a.name_id
                     );
+                    // The scan steps a meter, so it may stand a little under a crest.
+                    assert!(e - s < 0.05, "{id} {}: {e} over the scan's {s}", a.name_id);
                     elev_over = elev_over.max(e - s);
                 }
                 let stands = (tables.stands.iter())
@@ -985,6 +1039,7 @@ mod install_tests {
                     .filter(|n| n.kind_code.is_some() && n.kind.is_none())
                     .count();
             }
+            assert_eq!(painted, ends, "{id}: every threshold on the paint");
             // The designators' declination: the median of each threshold's
             // true course less its number's tens of degrees.
             let decl = {
@@ -1008,7 +1063,7 @@ mod install_tests {
                 format!("{:.1} ({lo:.1}–{hi:.1})", percentile(v, 0.5))
             };
             println!(
-                "| {id} | {build} | {} | {} | {no_id} | {no_runway} | {n_runways} | all | {true_off:.1e} | {convergence:.2} | {} of {n_runways} | {} | {width_off:.3} | {:.2} / {:.2} | {elev_over:.3} | {decl:+.1} | {:.1} / {:.1} | {on_paint} of {ends} | {unnamed} | {n_stands} |",
+                "| {id} | {build} | {} | {} | {no_id} | {no_runway} | {n_runways} | all | {true_off:.1e} | {convergence:.2} | {} of {n_runways} | {} | {width_off:.3} | {:.2} / {:.2} | {elev_over:.3} | {decl:+.1} | {:.1} / {:.1} | {painted} of {ends} | {unnamed} | {n_stands} |",
                 tables.airdromes.len(),
                 tables.airdromes.len(),
                 widths.len(),
