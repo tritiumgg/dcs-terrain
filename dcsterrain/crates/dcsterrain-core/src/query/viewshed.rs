@@ -472,7 +472,7 @@ impl Sweep {
         let side = self.side;
         // Each row's swept keys, and how many of its cells are near.
         let rows = self.map((0..side).collect(), |r| {
-            let (mut keys, mut near_count) = (Vec::new(), 0u64);
+            let (mut keys, mut near_count) = (Vec::with_capacity(side as usize), 0u64);
             for c in 0..side {
                 match self.ask(r, c) {
                     Ask::Out => {}

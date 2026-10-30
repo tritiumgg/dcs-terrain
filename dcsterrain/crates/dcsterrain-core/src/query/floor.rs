@@ -179,6 +179,14 @@ pub(super) fn check_bands(bands: &[f64], path: &str) -> Option<Issue> {
 }
 
 /// Little-endian `f32`s, base64 encoded.
+/// `floats` of what is already f32, with no second copy of its bytes.
+pub(super) fn floats32(v: &[f32]) -> String {
+    if cfg!(target_endian = "big") {
+        return floats(v.iter().map(|&f| f64::from(f)));
+    }
+    base64(bytemuck::cast_slice(v))
+}
+
 pub(super) fn floats(v: impl Iterator<Item = f64>) -> String {
     let bytes: Vec<u8> = v.flat_map(|f| (f as f32).to_le_bytes()).collect();
     base64(&bytes)

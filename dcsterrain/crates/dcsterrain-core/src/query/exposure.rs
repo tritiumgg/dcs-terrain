@@ -18,13 +18,15 @@
 //! its floor's error is larger than the floor's distance from the target
 //! height.
 
+use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
+
 use rayon::prelude::*;
 use serde_json::json;
 
-use super::floor::{Floor, check_bands, floats, site};
+use super::floor::{check_bands, floats32, site};
 use super::geojson::{Features, props};
 use super::viewshed::{
-    CELLS_MAX, base64, check_reach, check_resolution, check_size, site_eye, too_large,
+    CELLS_MAX, base64, check_reach, check_resolution, check_size, prepare, site_eye, too_large,
 };
 use super::{Area, Terrain, refused, resolve};
 use crate::grid::Window;
@@ -45,11 +47,12 @@ struct Reduced {
     cols: i64,
     /// Each cell's least floor above its ground, row major, rows running
     /// north: infinite where no site reaches, NaN off the ground or outside
-    /// the region.
-    agl: Vec<f64>,
-    /// Each cell's ground, NaN where it has none or lies outside the
-    /// region.
-    ground: Vec<f64>,
+    /// the region. In f32, as answered: rounding keeps order, so the least
+    /// of the rounded is the rounded least.
+    agl: Vec<f32>,
+    /// The same above sea level, each site's floor added to the ground and
+    /// rounded, which keeps order for the same reason.
+    msl: Vec<f32>,
     /// How many sites see a target at the target height above the cell.
     seen: Vec<u8>,
 }
@@ -62,7 +65,8 @@ impl Reduced {
         if counted == 0 {
             return 0.0;
         }
-        let n = self.agl.iter().filter(|&&v| !v.is_nan() && keep(v)).count();
+        let held = |v: &&f32| !v.is_nan() && keep(f64::from(**v));
+        let n = self.agl.iter().filter(held).count();
         n as f64 / counted as f64
     }
 }
@@ -122,7 +126,7 @@ pub fn exposure(terrain: &Terrain, q: ExposureRequest) -> Result<ExposureRespons
     if !issues.is_empty() {
         return Err(issues);
     }
-    let r = reduce(terrain, &q, &area.expect("no issues, so a region"))?;
+    let mut r = reduce(terrain, &q, &area.expect("no issues, so a region"))?;
 
     let mut heights = q.bands_agl.clone();
     heights.sort_unstable_by(f64::total_cmp);
@@ -143,7 +147,7 @@ pub fn exposure(terrain: &Terrain, q: ExposureRequest) -> Result<ExposureRespons
             let set = |row: i64, col: i64| {
                 (0..r.rows).contains(&row)
                     && (0..r.cols).contains(&col)
-                    && r.agl[(row * r.cols + col) as usize] as f32 > h as f32
+                    && r.agl[(row * r.cols + col) as usize] > h as f32
             };
             f.polygons(
                 &super::outline::polygons(&set, r.rows, r.cols, &corner, 0.0),
@@ -158,6 +162,13 @@ pub fn exposure(terrain: &Terrain, q: ExposureRequest) -> Result<ExposureRespons
         None
     };
     let target = q.target_alt_agl;
+    let seen_fraction = r.share(|v| v as f32 <= target as f32);
+    // Each raster goes as its text is made: at the limit they are 16 MiB
+    // each, and their text 21.
+    let floor_msl = floats32(&r.msl);
+    r.msl = Vec::new();
+    let floor_agl = floats32(&r.agl);
+    r.agl = Vec::new();
     Ok(ExposureResponse {
         provenance: terrain.provenance(),
         raster: ExposureRaster {
@@ -166,12 +177,12 @@ pub fn exposure(terrain: &Terrain, q: ExposureRequest) -> Result<ExposureRespons
             cell: r.res,
             width: r.cols as u32,
             height: r.rows as u32,
-            floor_agl: floats(r.agl.iter().copied()),
-            floor_msl: floats(r.agl.iter().zip(&r.ground).map(|(a, g)| a + g)),
+            floor_agl,
+            floor_msl,
             seen_count: base64(&r.seen),
         },
         target_alt_agl: target,
-        seen_fraction: r.share(|v| v as f32 <= target as f32),
+        seen_fraction,
         bands,
         geojson,
     })
@@ -259,7 +270,7 @@ fn reduce(terrain: &Terrain, q: &ExposureRequest, area: &Area) -> Result<Reduced
             rows: 0,
             cols: 0,
             agl: Vec::new(),
-            ground: Vec::new(),
+            msl: Vec::new(),
             seen: Vec::new(),
         });
     }
@@ -294,22 +305,20 @@ fn reduce(terrain: &Terrain, q: &ExposureRequest, area: &Area) -> Result<Reduced
         (c_hi - c_lo + 1) as u32,
     )
     .map_err(refused)?;
-    let ground: Vec<f64> = (0..rows * cols)
+    let agl: Vec<AtomicU32> = (0..rows * cols)
         .into_par_iter()
         .map(|i| {
             let (x, z) = centre(i / cols, i % cols);
             match w.value_at(&g, x, z) {
-                Some(h) if area.contains(x, z) => h,
-                _ => f64::NAN,
+                Some(_) if area.contains(x, z) => AtomicU32::new(f32::INFINITY.to_bits()),
+                _ => AtomicU32::new(f32::NAN.to_bits()),
             }
         })
         .collect();
     drop(w);
-    let mut agl: Vec<f64> = ground
-        .iter()
-        .map(|h| if h.is_nan() { f64::NAN } else { f64::INFINITY })
-        .collect();
-    let mut seen = vec![0u8; (rows * cols) as usize];
+    let load = |a: &AtomicU32| a.load(Ordering::Relaxed);
+    let msl: Vec<AtomicU32> = agl.iter().map(|a| AtomicU32::new(load(a))).collect();
+    let seen: Vec<AtomicU8> = (0..rows * cols).map(|_| AtomicU8::new(0)).collect();
 
     // Counted as the floors are returned, so the count is what the returned
     // floors say.
@@ -322,7 +331,7 @@ fn reduce(terrain: &Terrain, q: &ExposureRequest, area: &Area) -> Result<Reduced
             continue;
         }
         let at = [format!("sites.{i}.observer"), format!("sites.{i}.radius")];
-        let fl = Floor::sweep(
+        let sweep = prepare(
             terrain,
             s.observer,
             [&at[0], &at[1]],
@@ -331,42 +340,51 @@ fn reduce(terrain: &Terrain, q: &ExposureRequest, area: &Area) -> Result<Reduced
             vec![],
         )?;
         // The site's raster sits at a whole offset in the region's.
-        let dr = ((fl.origin.0 - origin.0) / res).round() as i64;
-        let dc = ((fl.origin.1 - origin.1) / res).round() as i64;
-        let (c_from, c_to) = (dc.max(0), (dc + fl.side).min(cols));
-        if c_from >= c_to {
-            continue;
-        }
-        agl.par_chunks_mut(cols as usize)
-            .zip(seen.par_chunks_mut(cols as usize))
-            .enumerate()
-            .for_each(|(r, (agl, seen))| {
-                let fr = r as i64 - dr;
-                if !(0..fl.side).contains(&fr) {
-                    return;
-                }
-                for c in c_from..c_to {
-                    let f = fl.agl[(fr * fl.side + c - dc) as usize];
-                    let a = &mut agl[c as usize];
-                    // NaN beyond the site's radius, and wherever the region
-                    // holds no cell to count.
-                    if f.is_nan() || a.is_nan() {
-                        continue;
-                    }
-                    *a = a.min(f);
-                    if f as f32 <= target {
-                        seen[c as usize] += 1;
-                    }
-                }
-            });
+        let dr = ((sweep.origin.0 - origin.0) / res).round() as i64;
+        let dc = ((sweep.origin.1 - origin.1) / res).round() as i64;
+        let side = sweep.side;
+        // Each cell of a sweep is given once, so no two threads write one
+        // cell here, and a floor goes straight into the region's raster with
+        // no raster of the site's: rows and cells of the region's at the
+        // limit outnumber a site's by six.
+        let fold = |i: i64, f: f64, ground: f64| {
+            let (r, c) = (i / side + dr, i % side + dc);
+            if !(0..rows).contains(&r) || !(0..cols).contains(&c) {
+                return;
+            }
+            let at = (r * cols + c) as usize;
+            let a = f32::from_bits(load(&agl[at]));
+            // NaN wherever the region holds no cell to count.
+            if a.is_nan() {
+                return;
+            }
+            agl[at].store(a.min(f as f32).to_bits(), Ordering::Relaxed);
+            let m = f32::from_bits(load(&msl[at]));
+            msl[at].store(m.min((f + ground) as f32).to_bits(), Ordering::Relaxed);
+            if f as f32 <= target {
+                seen[at].fetch_add(1, Ordering::Relaxed);
+            }
+        };
+        let eye = sweep.eye;
+        sweep.sweep(&|i, g| fold(i, 0.0, g), &|i, d, g, steepest| {
+            fold(i, (eye + steepest * d - g).max(0.0), g);
+            false
+        });
     }
+    let floats = |v: Vec<AtomicU32>| -> Vec<f32> {
+        v.into_iter()
+            .map(|a| f32::from_bits(a.into_inner()))
+            .collect()
+    };
+    let (agl, msl) = (floats(agl), floats(msl));
+    let seen = seen.into_iter().map(AtomicU8::into_inner).collect();
     Ok(Reduced {
         origin,
         res,
         rows,
         cols,
         agl,
-        ground,
+        msl,
         seen,
     })
 }

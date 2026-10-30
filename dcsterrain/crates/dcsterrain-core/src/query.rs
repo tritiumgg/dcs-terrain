@@ -139,7 +139,7 @@ const HANDLERS: &[(&str, Handler)] = &[
     ("viewshed", |t, r| run(t, r, viewshed)),
     ("radar_floor", |t, r| run(t, r, radar_floor)),
     ("coverage", |t, r| run(t, r, coverage)),
-    ("exposure", |t, r| run(t, r, exposure)),
+    ("exposure", run_exposure),
     ("approach_spectrum", |t, r| run(t, r, approach_spectrum)),
     ("unmask_profile", |t, r| run(t, r, unmask_profile)),
     ("route", |t, r| run(t, r, route)),
@@ -160,15 +160,31 @@ fn run<Q: DeserializeOwned, A: Serialize>(
     request: &Value,
     f: fn(&Terrain, Q) -> Result<A, Vec<Issue>>,
 ) -> Result<Value, Vec<Issue>> {
-    let q = serde_path_to_error::deserialize(request).map_err(|e: PathError| {
+    Ok(serde_json::to_value(f(terrain, read(request)?)?).expect("a response serializes"))
+}
+
+/// `exposure`, whose rasters move into the answer: serializing one would
+/// copy tens of MiB of text.
+fn run_exposure(terrain: &Terrain, request: &Value) -> Result<Value, Vec<Issue>> {
+    let mut a = exposure(terrain, read(request)?)?;
+    let agl = std::mem::take(&mut a.raster.floor_agl);
+    let msl = std::mem::take(&mut a.raster.floor_msl);
+    let mut v = serde_json::to_value(a).expect("a response serializes");
+    v["raster"]["floor_agl"] = agl.into();
+    v["raster"]["floor_msl"] = msl.into();
+    Ok(v)
+}
+
+/// The request as `Q`.
+fn read<Q: DeserializeOwned>(request: &Value) -> Result<Q, Vec<Issue>> {
+    serde_path_to_error::deserialize(request).map_err(|e: PathError| {
         let path: Vec<String> = e.path().iter().filter_map(dotted).collect();
         vec![Issue::new(
             "invalid_request",
             &e.inner().to_string(),
             &path.join("."),
         )]
-    })?;
-    Ok(serde_json::to_value(f(terrain, q)?).expect("a response serializes"))
+    })
 }
 
 type PathError = serde_path_to_error::Error<serde_json::Error>;
