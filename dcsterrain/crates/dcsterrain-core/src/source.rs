@@ -43,7 +43,7 @@ pub struct Identity {
     pub fingerprint: String,
 }
 
-pub trait Source {
+pub trait Source: Sync {
     fn identity(&self) -> &Identity;
 
     /// The cells the tiles cover.

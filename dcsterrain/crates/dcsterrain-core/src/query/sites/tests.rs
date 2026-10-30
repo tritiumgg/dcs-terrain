@@ -5,9 +5,10 @@ use std::sync::OnceLock;
 
 use serde_json::{Value, json};
 
+use super::super::answer;
+use super::super::criteria::{PARALLEL_LINES, evaluate};
 use super::super::geojson::tests::assert_valid;
 use super::super::tests::synth as open_synth;
-use super::super::{answer, criteria::evaluate};
 use super::*;
 use crate::synth;
 
@@ -441,4 +442,49 @@ fn the_best_orientation_passes_then_scores_most_by_the_weights() {
     assert!((v - 2.4).abs() < 1e-12, "{v}");
     // Only failing sites: the best of them.
     assert_eq!(best(&sites[..1], &w(1.0, 1.0)).0.orientation_deg, 0.0);
+}
+
+/// The answer with the pool at `threads`, whose own one thread takes the
+/// same order as the calling thread would.
+fn on_threads(threads: usize, q: &Value) -> FindSitesResponse {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build()
+        .unwrap();
+    pool.install(|| find(q.clone()))
+}
+
+#[test]
+fn sightlines_answer_the_same_on_any_number_of_threads() {
+    let [ox, oz] = at(synth::HILL_A_NORTH_M, synth::HILL_A_EAST_M - 4000.0);
+    let observers: Vec<Value> = (0..6)
+        .map(|k| json!({"x": ox - 500.0 * f64::from(k), "z": oz, "alt_agl": 2}))
+        .collect();
+    // Across the hill sites score apart; on the plane every one sees the
+    // same and they tie, so the order of the ties shows too.
+    let hill = around(synth::HILL_A_NORTH_M, synth::HILL_A_EAST_M, 1500.0);
+    let plane = around(30_000.0, 40_000.0, 1000.0);
+    for region in [hill, plane] {
+        let q = json!({
+            "region": region,
+            "footprint": {"width": 20, "depth": 20, "orientations_deg": [0, 90]},
+            "criteria": [
+                {"name": "not_visible_from",
+                 "params": {"observers": observers, "max_fraction": 0.5}},
+                {"name": "visible_to",
+                 "params": {"targets": [{"x": ox, "z": oz + 9000.0, "alt_agl": 10}],
+                            "min_fraction": 0}},
+            ],
+            "step": 100, "spacing": 0, "limit": 200, "weights": {"visible_to": 0}
+        });
+        let one = on_threads(1, &q);
+        let lines = one.stats.cells_considered as usize * observers.len();
+        assert!(lines >= PARALLEL_LINES, "{lines} lines stay on one thread");
+        assert!(!one.candidates.is_empty());
+        for threads in [2, 3, 8] {
+            // Every bit: the debug form keeps a float's shortest exact digits.
+            let many = on_threads(threads, &q);
+            assert_eq!(format!("{many:?}"), format!("{one:?}"));
+        }
+    }
 }

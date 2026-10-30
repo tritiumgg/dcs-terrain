@@ -37,6 +37,7 @@ use crate::grid::{Grid, Window, box_distance};
 use crate::horizon;
 use crate::layers::{Cells, DISTANCE_CAP_M, Derived, Raster, TPI_300, TPI_2000, Target, derive};
 use crate::source::{Layer, Refusal, Source};
+use crate::threads::try_map;
 use crate::types::{Criterion, Footprint, Issue, Point3, Term, TpiClass};
 
 /// Sites evaluated in full before the order of the per-site tests is fixed
@@ -48,6 +49,9 @@ pub const MASK_MARGIN_FULL_DEG: f64 = 10.0;
 pub const FOOTPRINT_MAX_M: f64 = 10_000.0;
 /// The side of a bucket of the objects' index.
 const BUCKET_M: f64 = 250.0;
+/// Fewer sightlines than this are drawn on the calling thread: at some
+/// microseconds a line, they are done before the other threads wake.
+pub(super) const PARALLEL_LINES: usize = 256;
 
 /// Whether to skip what cannot pass, or evaluate everything.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -214,6 +218,14 @@ impl Check {
 
     fn is_sight(&self) -> bool {
         matches!(self.kind, Kind::Sight { .. })
+    }
+
+    /// The sightlines a site draws for it at most.
+    fn ends(&self) -> usize {
+        match &self.kind {
+            Kind::Sight { ends, .. } => ends.len(),
+            _ => 0,
+        }
     }
 
     /// Rough cost of one evaluation, in center lookups.
@@ -1413,17 +1425,30 @@ fn prune(
             .map(|g| g.map(|g| g.height))
             .collect()
     };
-    let mut sites = Vec::new();
-    'site: for ((i, passing), ground) in through.into_iter().zip(ground) {
-        let c = &cands[i];
-        let mut seen = Vec::new();
+    // Each candidate's lines on whichever core is free, the sites then
+    // gathered in candidate order, so they are the same however the work
+    // falls. A candidate leaves at the first check it fails.
+    let lines: usize = sights.iter().map(|&j| checks[j].ends()).sum();
+    let at: Vec<(usize, Option<f64>)> = (through.iter().map(|t| t.0)).zip(ground).collect();
+    let parallel = at.len().saturating_mul(lines) >= PARALLEL_LINES;
+    let seen = try_map(&at, parallel, |&(i, ground)| -> Result<_, Refusal> {
+        let mut seen = Vec::with_capacity(sights.len());
         for &j in &sights {
-            let t = ctx.sight(&checks[j], ground, c, true).map_err(refused)?;
+            let t = ctx.sight(&checks[j], ground, &cands[i], true)?;
             if !t.pass {
-                continue 'site;
+                return Ok(None);
             }
             seen.push((j, t));
         }
+        Ok(Some(seen))
+    })
+    .map_err(refused)?;
+    let mut sites = Vec::new();
+    for ((i, passing), seen) in through.into_iter().zip(seen) {
+        let Some(seen) = seen else {
+            continue;
+        };
+        let c = &cands[i];
         stats.candidates_passed += 1;
         for (deg, mut terms) in passing {
             for (j, t) in &seen {
