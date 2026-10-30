@@ -824,6 +824,18 @@ impl Source for Install {
         Ok(out)
     }
 
+    fn runway_triangles(&self, b: [f64; 4]) -> Result<Vec<[[f64; 2]; 3]>, Refusal> {
+        let g = &self.grid;
+        let (lo, hi) = (grid_units(g, b[0], b[1]), grid_units(g, b[2], b[3]));
+        let mut out = Vec::new();
+        for p in self.blocks_of(&self.under(b[0], b[2], b[1], b[3]))? {
+            p.runway_within([lo[0], lo[1], hi[0], hi[1]], &mut out);
+        }
+        let cs = f64::from(g.cell_size);
+        let world = |[r, c]: [f64; 2]| [(r + 0.5) * cs + g.origin_x, (c + 0.5) * cs + g.origin_z];
+        Ok(out.into_iter().map(|t| t.map(world)).collect())
+    }
+
     fn tables(&self) -> Result<&Tables, Refusal> {
         Install::tables(self)
     }

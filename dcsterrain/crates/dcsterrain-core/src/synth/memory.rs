@@ -145,6 +145,21 @@ impl Source for Synth {
         Ok(Some(b))
     }
 
+    /// The runway's rectangle as two triangles.
+    fn runway_triangles(&self, b: [f64; 4]) -> Result<Vec<[[f64; 2]; 3]>, Refusal> {
+        let (hw, hl) = (RUNWAY_WIDTH_M / 2.0, RUNWAY_LENGTH_M / 2.0);
+        let at = |n: f64, e: f64| {
+            let (x, z) = self.form.abs(RUNWAY_NORTH_M + n, RUNWAY_EAST_M + e);
+            [x, z]
+        };
+        let (sw, ne) = (at(-hw, -hl), at(hw, hl));
+        if sw[0] > b[2] || ne[0] < b[0] || sw[1] > b[3] || ne[1] < b[1] {
+            return Ok(Vec::new());
+        }
+        let (se, nw) = (at(-hw, hl), at(hw, -hl));
+        Ok(vec![[sw, se, ne], [sw, ne, nw]])
+    }
+
     fn tables(&self) -> Result<&Tables, Refusal> {
         Ok(self.tables.get_or_init(|| self.form.tables()))
     }
@@ -519,6 +534,22 @@ mod tests {
         })
         .unwrap();
         assert_eq!(poles, s.form().pole_count());
+        // The runway, two triangles covering its rectangle, from a box that
+        // meets it; none from one beside it.
+        let (x, z) = s.form().abs(RUNWAY_NORTH_M, RUNWAY_EAST_M);
+        let tris = s.runway_triangles([x, z, x + 1.0, z + 1.0]).unwrap();
+        let area: f64 = (tris.iter())
+            .map(|[a, b, c]| {
+                ((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])).abs() / 2.0
+            })
+            .sum();
+        assert_eq!(area, RUNWAY_WIDTH_M * RUNWAY_LENGTH_M);
+        let beside = x + RUNWAY_WIDTH_M / 2.0 + 1.0;
+        assert!(
+            s.runway_triangles([beside, z, beside + 1.0, z])
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(*s.road_graph().unwrap(), s.form().road_graph());
     }
 

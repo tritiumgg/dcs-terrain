@@ -304,6 +304,24 @@ impl Index {
             .flat_map(move |b| b.at(p).iter().copied())
     }
 
+    /// The triangles listed in the bins the box `[r0, c0, r1, c1]`, in grid
+    /// units, overlaps, at every level, each once, in triangle order.
+    fn within(&self, b: [f64; 4]) -> Vec<u32> {
+        let mut seen = Vec::new();
+        for bins in &self.levels {
+            let (r0, r1) = bin_span(b[0], b[2], bins.inv);
+            let (c0, c1) = bin_span(b[1], b[3], bins.inv);
+            for r in r0.max(bins.row0)..=r1.min(bins.row0 + bins.rows - 1) {
+                for c in c0.max(bins.col0)..=c1.min(bins.col0 + bins.cols - 1) {
+                    seen.extend_from_slice(bins.get(r, c));
+                }
+            }
+        }
+        seen.sort_unstable();
+        seen.dedup();
+        seen
+    }
+
     fn bytes(&self) -> usize {
         self.levels.iter().map(Bins::bytes).sum()
     }
@@ -450,6 +468,19 @@ impl Prepared {
             let [a, b, c] = self.corners(self.runway[t as usize]);
             cover(a, b, c, p).is_some()
         })
+    }
+
+    /// Every triangle of this block's runway subsets whose box meets `b`,
+    /// `[r0, c0, r1, c1]` in grid units, its corners in grid units.
+    pub fn runway_within(&self, b: [f64; 4], out: &mut Vec<[[f64; 2]; 3]>) {
+        for t in self.runway_bins.within(b) {
+            let p = self.corners(self.runway[t as usize]);
+            let (r0, r1) = span(&p, 0);
+            let (c0, c1) = span(&p, 1);
+            if r0 <= b[2] && r1 >= b[0] && c0 <= b[3] && c1 >= b[1] {
+                out.push(p);
+            }
+        }
     }
 
     /// Whether a water triangle of this block covers `p`, in grid units,
@@ -1121,6 +1152,28 @@ mod tests {
         // Corners and edges, where the tolerance reaches past a bin.
         for v in &b.rc {
             assert_eq!(b.on_runway(*v), scan(*v), "{v:?}");
+        }
+        // A box takes every triangle whose box meets it, as a scan of their
+        // boxes finds, boxes touching included.
+        let boxed = |q: [f64; 4]| -> Vec<[[f64; 2]; 3]> {
+            let mut all: Vec<_> = (b.runway.iter())
+                .map(|&t| b.corners(t))
+                .filter(|p| {
+                    let ((r0, r1), (c0, c1)) = (span(p, 0), span(p, 1));
+                    r0 <= q[2] && r1 >= q[0] && c0 <= q[3] && c1 >= q[1]
+                })
+                .collect();
+            all.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            all
+        };
+        for k in 0..2000 {
+            let (r, c) = (f64::from(k % 40) * 10.3, f64::from(k / 40) * 8.1);
+            let w = f64::from(k % 7) * 9.0;
+            let q = [r, c, r + w, c + w * 0.5];
+            let mut got = Vec::new();
+            b.runway_within(q, &mut got);
+            got.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            assert_eq!(got, boxed(q), "{q:?}");
         }
         // A tile marks the cells the scan finds, across bins and tile edges.
         let (ntx, ntz) = g.tiles();

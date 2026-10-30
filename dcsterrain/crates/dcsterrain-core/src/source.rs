@@ -90,6 +90,14 @@ pub trait Source {
         segments.iter().map(|&[a, b]| self.along(a, b)).collect()
     }
 
+    /// Every triangle of the runway surface whose box meets `b`, min x,
+    /// min z, max x, max z in DCS meters, as its corners' `[x, z]`, in no
+    /// order; the same triangle may come twice.
+    fn runway_triangles(&self, b: [f64; 4]) -> Result<Vec<[[f64; 2]; 3]>, Refusal> {
+        let _ = b;
+        Err(lacks(self, "runway triangles"))
+    }
+
     /// The airdromes, runways, stands, beacons, radio, towns, nodes and the
     /// projection.
     fn tables(&self) -> Result<&Tables, Refusal> {
