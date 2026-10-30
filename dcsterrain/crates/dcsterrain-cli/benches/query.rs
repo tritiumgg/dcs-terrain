@@ -34,6 +34,10 @@
 //!   of one process of the binary, for the most memory a batch of them holds,
 //!   in the case's `peak_mib`.
 //!
+//! - `DCSTERRAIN_BENCH_ANSWERS`: a file to write a hash of each answer to,
+//!   `elapsed_ms` left out, a line for each request: two builds that answer
+//!   alike write the same file.
+//!
 //! The run ends with each operation's figure, slowest first: the geometric
 //! mean of its held cases' medians over the install's terrains, warm. A held
 //! case is what the operation itself costs; opening a terrain and building a
@@ -59,6 +63,7 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
@@ -826,17 +831,51 @@ struct Bench {
     cli: PathBuf,
     /// Answer through one process of the binary, for its peak memory.
     peak: bool,
+    /// Each request's answer's hash, by its case and its own hash.
+    hashes: Option<Mutex<BTreeMap<String, u64>>>,
 }
 
 impl Bench {
+    /// Keeps a hash of the answer to `request`, when the run asked for them.
+    fn answered(&self, case: &Case, request: &Value, answer: &str) {
+        let Some(hashes) = &self.hashes else {
+            return;
+        };
+        // The one field that differs from run to run, a number at the top
+        // of the object, as serde_json sorts its keys.
+        let stable = match answer.find("\"elapsed_ms\":") {
+            Some(at) => {
+                let rest = &answer[at + 13..];
+                let end = rest.find([',', '}']).unwrap_or(0);
+                format!("{}{}", &answer[..at], &rest[end..])
+            }
+            None => answer.to_string(),
+        };
+        let fnv = |s: &str| {
+            let step = |h: u64, b: &u8| (h ^ u64::from(*b)).wrapping_mul(0x100_0000_01b3);
+            s.as_bytes().iter().fold(0xcbf2_9ce4_8422_2325, step)
+        };
+        let key = format!(
+            "{}/{} {:016x}",
+            self.target.name(),
+            case.name,
+            fnv(&request.to_string())
+        );
+        hashes.lock().unwrap().insert(key, fnv(&stable));
+    }
+
     /// One round of `case`: its samples and errors.
     fn round(&self, case: &Case) -> (Vec<Sample>, usize) {
         let mut out = Vec::new();
         let mut errors = 0;
         let ask = |t: &Terrain, r: &Value| match query::answer(t, case.op, r) {
-            Ok(_) => true,
+            Ok(a) => {
+                self.answered(case, r, &a.to_string());
+                true
+            }
             Err(issues) => {
                 eprintln!("{}: {}: {}", case.name, issues[0].code, issues[0].message);
+                self.answered(case, r, &issues[0].message);
                 false
             }
         };
@@ -1092,6 +1131,7 @@ fn main() {
             cache: cache.clone(),
             cli: PathBuf::from(env!("CARGO_BIN_EXE_dcsterrain")),
             peak,
+            hashes: env("DCSTERRAIN_BENCH_ANSWERS").map(|_| Mutex::default()),
         };
         let install = matches!(terrain, Target::Install { .. });
         let keep = |name: &str| {
@@ -1229,6 +1269,16 @@ fn main() {
                         "errors": f.errors,
                     }),
                 );
+            }
+        }
+        if let (Some(hashes), Some(p)) = (&bench.hashes, env("DCSTERRAIN_BENCH_ANSWERS")) {
+            let mut f = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(p)
+                .expect("the hashes open");
+            for (key, h) in hashes.lock().unwrap().iter() {
+                writeln!(f, "{key} {h:016x}").expect("the hashes write");
             }
         }
         if install {
