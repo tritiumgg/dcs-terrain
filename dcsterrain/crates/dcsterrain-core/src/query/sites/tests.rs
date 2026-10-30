@@ -464,6 +464,7 @@ fn sightlines_answer_the_same_on_any_number_of_threads() {
     // same and they tie, so the order of the ties shows too.
     let hill = around(synth::HILL_A_NORTH_M, synth::HILL_A_EAST_M, 1500.0);
     let plane = around(30_000.0, 40_000.0, 1000.0);
+    let mut tied = false;
     for region in [hill, plane] {
         let q = json!({
             "region": region,
@@ -475,16 +476,23 @@ fn sightlines_answer_the_same_on_any_number_of_threads() {
                  "params": {"targets": [{"x": ox, "z": oz + 9000.0, "alt_agl": 10}],
                             "min_fraction": 0}},
             ],
-            "step": 100, "spacing": 0, "limit": 200, "weights": {"visible_to": 0}
+            "step": 100, "spacing": 0, "limit": 200
         });
         let one = on_threads(1, &q);
+        // No test but `valid` comes before the lines and the region is all
+        // land, so every position draws at least its observers' lines.
         let lines = one.stats.cells_considered as usize * observers.len();
         assert!(lines >= PARALLEL_LINES, "{lines} lines stay on one thread");
         assert!(!one.candidates.is_empty());
+        // Under the line count each site alone stays on the calling thread.
+        rescored(&one.candidates, &q["footprint"], &q["criteria"]);
+        let mut pairs = one.candidates.windows(2);
+        tied |= pairs.any(|w| w[0].score == w[1].score);
         for threads in [2, 3, 8] {
             // Every bit: the debug form keeps a float's shortest exact digits.
             let many = on_threads(threads, &q);
             assert_eq!(format!("{many:?}"), format!("{one:?}"));
         }
     }
+    assert!(tied, "no two sites tied");
 }
