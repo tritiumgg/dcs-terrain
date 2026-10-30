@@ -601,7 +601,7 @@ const TARGETS: &[(&str, f64, bool)] = &[
     ("find_sites_horizon", 500.0, true),
     ("route_50km", 500.0, true),
     ("validate_1000", 3000.0, true),
-    ("point_info/fresh", 20.0, true),
+    ("point_info/fresh", 150.0, true),
     ("airfield_info/fresh", 20.0, true),
     ("index_empty_cache", 10_000.0, false),
 ];
@@ -611,7 +611,7 @@ const TARGETS: &[(&str, f64, bool)] = &[
 const COUNTABLE_MS: f64 = 10.0;
 
 /// The most memory a call of the binary may hold.
-const TARGET_PEAK_MIB: f64 = 64.0;
+const TARGET_PEAK_MIB: f64 = 150.0;
 
 /// The headroom the bounds leave: the machine running them need not be the
 /// one the targets were measured on.

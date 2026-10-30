@@ -37,3 +37,4 @@ are in git at commit `4b85bd0`.
 | [0004](0004-spread-query-work-over-every-core-below-normal-priority.md) | Accepted | 2026-10-29 | Spread a query's work over every core, below normal priority |
 | [0005](0005-drop-the-hook-and-place-airdrome-ids-by-position.md) | Accepted | 2026-10-29 | Drop the hook, and give an airdrome its id by its beacons' positions |
 | [0006](0006-cross-the-mesh-near-the-site-in-the-radial-sweep.md) | Accepted | 2026-10-29 | Cross the mesh's triangles near the site in the radial sweep |
+| [0007](0007-count-parallel-budgets-on-8-cores-and-relax-two-targets.md) | Accepted | 2026-10-30 | Count a parallel operation's budget on 8 cores, and relax two targets |
