@@ -157,6 +157,12 @@ impl BlockInfo {
         world_box(self.t, self.bbox)
     }
 
+    /// Whether the table of contents lists any subset for it: in one
+    /// that `keep` cut to some materials, any of those.
+    pub fn has_subsets(&self) -> bool {
+        !self.subsets.is_empty()
+    }
+
     /// The bytes reading the block with every subset takes: what a caller
     /// holding many prepared blocks at once can bound itself by.
     pub fn read_len(&self) -> u64 {

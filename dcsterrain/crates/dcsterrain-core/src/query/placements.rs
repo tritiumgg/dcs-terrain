@@ -220,24 +220,20 @@ fn objects_met(src: &dyn Source, s: &Shape, at: [f64; 2]) -> Result<(Vec<Met>, u
     Ok((all, n))
 }
 
-/// The pavement issue, if the shape meets any of the runway surface: the
-/// runway whose centerline is nearest the shape, and how near.
-fn pavement(
-    src: &dyn Source,
-    tables: Option<&Tables>,
-    s: &Shape,
-) -> Result<Option<PlacementIssue>, Vec<Issue>> {
+/// The pavement issue, if the shape meets any of `tris`, the runway
+/// surface's triangles under its box: the runway whose centerline is
+/// nearest the shape, and how near.
+fn pavement(tris: &[[[f64; 2]; 3]], tables: Option<&Tables>, s: &Shape) -> Option<PlacementIssue> {
     let b = s.bbox();
     let o = middle(b);
     let local = s.translated(o);
-    let tris = src.runway_triangles(b).map_err(refused)?;
     let on = tris.iter().any(|t| {
         local.meets(&Shape::polygon(
             t.iter().map(|&p| [p[0] - o[0], p[1] - o[1]]).collect(),
         ))
     });
     if !on {
-        return Ok(None);
+        return None;
     }
     let nearest = tables.into_iter().flat_map(|t| &t.runways).map(|r| {
         let a = [r.edge1_x - o[0], r.edge1_z - o[1]];
@@ -245,12 +241,12 @@ fn pavement(
         (local.distance(&Shape::polygon(vec![a, e, e, a])), r)
     });
     let best = nearest.min_by(|a, b| a.0.total_cmp(&b.0));
-    Ok(Some(PlacementIssue::Pavement {
+    Some(PlacementIssue::Pavement {
         airdrome_id: best.and_then(|(_, r)| r.airdrome_id),
         airdrome: best.map(|(_, r)| r.airdrome_name_id.clone()),
         runway: best.map(|(_, r)| r.name.clone()),
         centerline_m: best.map(|(d, _)| d),
-    }))
+    })
 }
 
 /// One sample of the ground: a cell's center or a point's own position,
@@ -408,14 +404,16 @@ pub fn validate_placements(
         .collect();
 
     let tables = src.tables().ok();
+    let boxes: Vec<[f64; 4]> = shapes.iter().map(Shape::bbox).collect();
+    let tris = src.runway_triangles_each(&boxes).map_err(refused)?;
     let mut out = Vec::with_capacity(shapes.len());
     let mut met_shapes = Vec::with_capacity(shapes.len());
-    for ((p, s), ks) in q.placements.iter().zip(&shapes).zip(&taken) {
+    for (((p, s), ks), tris) in (q.placements.iter().zip(&shapes).zip(&taken)).zip(&tris) {
         let mut issues = Vec::new();
         let mine: Vec<&Sample> = ks.iter().map(|&k| &samples[k]).collect();
         let (max_slope_deg, min_depth, cover) = ground_check(p, &mine, &mut issues);
         let (objects, n) = objects_met(src, s, [p.x, p.z])?;
-        if let Some(i) = pavement(src, tables, s)? {
+        if let Some(i) = pavement(tris, tables, s) {
             issues.push(i);
         }
         for (pool, object, _) in &objects {

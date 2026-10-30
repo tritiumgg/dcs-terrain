@@ -98,6 +98,16 @@ pub trait Source {
         Err(lacks(self, "runway triangles"))
     }
 
+    /// `runway_triangles` for each of `boxes`, in order. An install answers
+    /// them block by block, each block read once however many boxes lie on
+    /// it.
+    fn runway_triangles_each(
+        &self,
+        boxes: &[[f64; 4]],
+    ) -> Result<Vec<Vec<[[f64; 2]; 3]>>, Refusal> {
+        boxes.iter().map(|&b| self.runway_triangles(b)).collect()
+    }
+
     /// The airdromes, runways, stands, beacons, radio, towns, nodes and the
     /// projection.
     fn tables(&self) -> Result<&Tables, Refusal> {

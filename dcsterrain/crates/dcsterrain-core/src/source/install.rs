@@ -825,15 +825,45 @@ impl Source for Install {
     }
 
     fn runway_triangles(&self, b: [f64; 4]) -> Result<Vec<[[f64; 2]; 3]>, Refusal> {
+        Ok(self.runway_triangles_each(&[b])?.pop().expect("one box"))
+    }
+
+    /// Block by block, as `points` answers: each block under any of the
+    /// boxes is prepared once and asked about every box over it, so
+    /// scattered boxes do not read the same airfield's blocks again as the
+    /// block budget turns them over.
+    fn runway_triangles_each(
+        &self,
+        boxes: &[[f64; 4]],
+    ) -> Result<Vec<Vec<[[f64; 2]; 3]>>, Refusal> {
         let g = &self.grid;
-        let (lo, hi) = (grid_units(g, b[0], b[1]), grid_units(g, b[2], b[3]));
-        let mut out = Vec::new();
-        for p in self.blocks_of(&self.under(b[0], b[2], b[1], b[3]))? {
-            p.runway_within([lo[0], lo[1], hi[0], hi[1]], &mut out);
+        let mut on: HashMap<usize, Vec<u32>> = HashMap::new();
+        for (k, b) in boxes.iter().enumerate() {
+            // The table of contents keeps only the runway subsets, so a
+            // block it lists none for is never read.
+            for i in self.under(b[0], b[2], b[1], b[3]) {
+                if self.toc.blocks[i].has_subsets() {
+                    on.entry(i).or_default().push(k as u32);
+                }
+            }
+        }
+        let mut order: Vec<usize> = on.keys().copied().collect();
+        order.sort_unstable();
+        let mut out = vec![Vec::new(); boxes.len()];
+        for i in order {
+            let p = self.block(i)?;
+            for &k in &on[&i] {
+                let b = boxes[k as usize];
+                let (lo, hi) = (grid_units(g, b[0], b[1]), grid_units(g, b[2], b[3]));
+                p.runway_within([lo[0], lo[1], hi[0], hi[1]], &mut out[k as usize]);
+            }
         }
         let cs = f64::from(g.cell_size);
         let world = |[r, c]: [f64; 2]| [(r + 0.5) * cs + g.origin_x, (c + 0.5) * cs + g.origin_z];
-        Ok(out.into_iter().map(|t| t.map(world)).collect())
+        Ok(out
+            .into_iter()
+            .map(|ts| ts.into_iter().map(|t| t.map(world)).collect())
+            .collect())
     }
 
     fn tables(&self) -> Result<&Tables, Refusal> {
