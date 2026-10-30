@@ -28,7 +28,8 @@
 //! - `DCSTERRAIN_BENCH_BASELINE`: figures an earlier run wrote, to print
 //!   each median against.
 //! - `DCSTERRAIN_BENCH_BOUNDS`: any value runs only the cases with a target,
-//!   and fails if one spends more than 3× its target's cycles. CI sets it.
+//!   and fails if one spends more than 3× its target's cycles.
+//!   `mise run bench-bounds` sets it.
 //!
 //! A round is one process's worth of work: a terrain opened, then each of
 //! the case's requests answered against it, so blocks and tiles read for
@@ -612,7 +613,8 @@ const COUNTABLE_MS: f64 = 10.0;
 /// The most memory a call of the binary may hold.
 const TARGET_PEAK_MIB: f64 = 64.0;
 
-/// The headroom CI's bounds leave: a shared runner is not this machine.
+/// The headroom the bounds leave: the machine running them need not be the
+/// one the targets were measured on.
 const BOUND_FACTOR: f64 = 3.0;
 
 fn target(case: &str) -> Option<(f64, bool)> {

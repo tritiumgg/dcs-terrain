@@ -45,7 +45,7 @@ run = [
 ]
 
 [tasks.bench-bounds]
-description = "Hold the operations under their bounds on the synthetic terrain"
+description = "Hold the operations under their bounds on the synthetic terrain, on this machine"
 dir = "dcsterrain"
 env = { DCSTERRAIN_BENCH_BOUNDS = "1" }
 run = "cargo bench -p dcsterrain-cli --bench query"
