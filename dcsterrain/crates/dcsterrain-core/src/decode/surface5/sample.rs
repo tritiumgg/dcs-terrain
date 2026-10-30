@@ -134,10 +134,11 @@ mod tests {
                 [100.0, 10.0, 0.0],
                 [0.0, 20.0, 100.0],
                 [100.0, 0.0, 100.0],
-            ],
-            depth: vec![0.0, 0.0, 0.0, 10.0],
-            tri: vec![[0, 1, 2], [1, 3, 2]],
-            tritype: tritype.to_vec(),
+            ]
+            .into(),
+            depth: vec![0.0, 0.0, 0.0, 10.0].into(),
+            tri: vec![[0, 1, 2], [1, 3, 2]].into(),
+            tritype: tritype.to_vec().into(),
             subsets: Vec::new(),
         }
     }

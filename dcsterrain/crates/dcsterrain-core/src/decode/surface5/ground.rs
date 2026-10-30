@@ -1,24 +1,17 @@
-//! The ground of one block, ready to answer: its corners in grid units, its
-//! triangles binned by the cells they can cover, and from those a tile's
-//! cells or a single point.
+//! The ground of one block, ready to answer: its vertices as the file holds
+//! them, a hierarchy of boxes over its triangles, and from those a tile's
+//! cells, a single point or the triangles under a segment.
 //!
-//! A block spans many tiles, and a tile or point needs only the triangles
-//! near it, so each triangle is listed in every bin its box touches, at
-//! the finest of several sizes of bin whose bins it touches few of: the
-//! finest `BIN_CELLS` square cells, each next size twice as wide. A tile
-//! visits its bins of every size, a point the one it falls in of each, and
-//! a triangle listed in several bins is tested in each only against that
-//! bin's cells.
+//! Grid units are found from a vertex each time it is wanted, so a block
+//! costs its hierarchy and no second copy of its vertices. A box in the
+//! block's meters rules out nearly every triangle before one is converted.
 
+use super::bvh::{Bvh, Line, tri_box};
 use super::mesh::Block;
 use super::sample::{EDGE_TOLERANCE, ROAD_STRIP, cover, rank, round_height, water_class};
 use crate::extract::Bounds;
 use crate::grid::Grid;
 use crate::source::{Cover, Layer};
-
-/// Cells along each side of the finest bins of the triangle index. A
-/// tile's side is a whole number of them.
-pub const BIN_CELLS: u32 = 8;
 
 /// The material whose subset marks a runway.
 pub const RUNWAY_MATERIAL: &str = "Runway";
@@ -133,37 +126,12 @@ pub fn merge(a: Option<Ground>, b: Option<Ground>) -> Option<Ground> {
     }
 }
 
-/// Triangles listed by bin, over a rectangle of bins `w` cells square.
-#[derive(Debug, Clone)]
-struct Bins {
-    /// The width in cells, a power of two, and its reciprocal.
-    w: i64,
-    inv: f64,
-    row0: i64,
-    col0: i64,
-    rows: i64,
-    cols: i64,
-    /// Where each bin's list starts in `items`, and one past the last.
-    start: Vec<u32>,
-    items: Vec<u32>,
-}
-
 /// `x.floor() as i64`, for every `x`, without the call into the C runtime
 /// that the default x86-64 target makes for `floor`: preparing a block
 /// takes four for each triangle.
 fn floor_i64(x: f64) -> i64 {
     let t = x as i64;
     t.saturating_sub(i64::from(t as f64 > x))
-}
-
-/// The bins a span of grid units touches, the bins `1 / inv` cells wide.
-/// A bin's width is a power of two, so multiplying by `inv` is exactly
-/// dividing by the width.
-fn bin_span(lo: f64, hi: f64, inv: f64) -> (i64, i64) {
-    (
-        floor_i64((lo - BIN_SLACK) * inv),
-        floor_i64((hi + BIN_SLACK) * inv),
-    )
 }
 
 /// A value over a triangle from its corners', at `u` of the way to the
@@ -180,198 +148,23 @@ fn span(corners: &[[f64; 2]], k: usize) -> (f64, f64) {
         })
 }
 
-/// A triangle is listed at the finest level whose bins its box spans at
-/// most this many of along each side. A sea triangle a hundred kilometers
-/// across would otherwise be listed in tens of thousands of the finest
-/// bins, and a block of a few such triangles holds millions of entries.
-const LEVEL_SPAN: i64 = 4;
-
-/// The levels a triangle can be listed at, each with bins twice as wide as
-/// the last: the coarsest is wider than any terrain.
-const LEVELS: usize = 16;
-
-/// Triangles listed by bin at several sizes of bin, each triangle at one:
-/// the finest whose bins it spans few of. A point or segment visits every
-/// level, and a triangle it may touch is listed in a bin it visits at that
-/// triangle's level.
-#[derive(Debug, Clone, Default)]
-struct Index {
-    levels: Vec<Bins>,
-}
-
-impl Index {
-    fn new(rc: &[[f64; 2]], tri: &[[u32; 3]]) -> Index {
-        Index::with_span(rc, tri, LEVEL_SPAN)
-    }
-
-    /// The index listing each triangle at the finest level whose bins it
-    /// spans at most `most` of along each side.
-    fn with_span(rc: &[[f64; 2]], tri: &[[u32; 3]], most: i64) -> Index {
-        // Each triangle's level and its bins there, rows then columns.
-        let mut placed: Vec<(u8, [i64; 4])> = Vec::with_capacity(tri.len());
-        let mut extent = [[i64::MAX, i64::MAX, i64::MIN, i64::MIN]; LEVELS];
-        let mut count = [0usize; LEVELS];
-        for t in tri {
-            let p = t.map(|k| rc[k as usize]);
-            // Every vertex is finite, so a plain comparison is `min`.
-            let lo = |a: f64, b: f64| if b < a { b } else { a };
-            let hi = |a: f64, b: f64| if b > a { b } else { a };
-            let (r0, r1) = (
-                lo(lo(p[0][0], p[1][0]), p[2][0]),
-                hi(hi(p[0][0], p[1][0]), p[2][0]),
-            );
-            let (c0, c1) = (
-                lo(lo(p[0][1], p[1][1]), p[2][1]),
-                hi(hi(p[0][1], p[1][1]), p[2][1]),
-            );
-            let mut k = 0;
-            let s = loop {
-                let inv = 1.0 / f64::from(BIN_CELLS << k);
-                let (a, b) = bin_span(r0, r1, inv);
-                let (c, d) = bin_span(c0, c1, inv);
-                if k + 1 == LEVELS || (b - a < most && d - c < most) {
-                    break [a, b, c, d];
-                }
-                k += 1;
-            };
-            let e = &mut extent[k];
-            *e = [
-                e[0].min(s[0]),
-                e[1].min(s[2]),
-                e[2].max(s[1]),
-                e[3].max(s[3]),
-            ];
-            count[k] += 1;
-            placed.push((k as u8, s));
-        }
-        let mut levels = Vec::new();
-        let mut slot = [usize::MAX; LEVELS];
-        for k in 0..LEVELS {
-            if count[k] == 0 {
-                continue;
-            }
-            let [row0, col0, r1, c1] = extent[k];
-            let (rows, cols) = (r1 - row0 + 1, c1 - col0 + 1);
-            slot[k] = levels.len();
-            levels.push(Bins {
-                inv: 1.0 / f64::from(BIN_CELLS << k),
-                w: i64::from(BIN_CELLS) << k,
-                row0,
-                col0,
-                rows,
-                cols,
-                start: vec![0u32; (rows * cols) as usize + 1],
-                items: Vec::new(),
-            });
-        }
-        // Each bin's count, then the running sum, which is where each
-        // bin's list ends; filling from the last triangle back leaves it
-        // where the list starts, each list in triangle order.
-        for &(k, [r0, r1, c0, c1]) in &placed {
-            let b = &mut levels[slot[k as usize]];
-            for r in r0..=r1 {
-                let i = (r - b.row0) * b.cols - b.col0;
-                for c in c0..=c1 {
-                    b.start[(i + c) as usize] += 1;
-                }
-            }
-        }
-        for b in &mut levels {
-            for i in 1..b.start.len() {
-                b.start[i] += b.start[i - 1];
-            }
-            b.items = vec![0u32; *b.start.last().unwrap() as usize];
-        }
-        for (t, &(k, [r0, r1, c0, c1])) in placed.iter().enumerate().rev() {
-            let b = &mut levels[slot[k as usize]];
-            for r in r0..=r1 {
-                let i = (r - b.row0) * b.cols - b.col0;
-                for c in c0..=c1 {
-                    let n = &mut b.start[(i + c) as usize];
-                    *n -= 1;
-                    b.items[*n as usize] = t as u32;
-                }
-            }
-        }
-        Index { levels }
-    }
-
-    /// The triangles listed in the bins `p`, in grid units, falls in, a
-    /// list for each level.
-    fn at(&self, p: [f64; 2]) -> impl Iterator<Item = u32> + '_ {
-        self.levels
-            .iter()
-            .flat_map(move |b| b.at(p).iter().copied())
-    }
-
-    /// The triangles listed in the bins the box `[r0, c0, r1, c1]`, in grid
-    /// units, overlaps, at every level, each once, in triangle order.
-    fn within(&self, b: [f64; 4]) -> Vec<u32> {
-        let mut seen = Vec::new();
-        for bins in &self.levels {
-            let (r0, r1) = bin_span(b[0], b[2], bins.inv);
-            let (c0, c1) = bin_span(b[1], b[3], bins.inv);
-            for r in r0.max(bins.row0)..=r1.min(bins.row0 + bins.rows - 1) {
-                for c in c0.max(bins.col0)..=c1.min(bins.col0 + bins.cols - 1) {
-                    seen.extend_from_slice(bins.get(r, c));
-                }
-            }
-        }
-        seen.sort_unstable();
-        seen.dedup();
-        seen
-    }
-
-    fn bytes(&self) -> usize {
-        self.levels.iter().map(Bins::bytes).sum()
-    }
-}
-
-impl Bins {
-    /// The triangles listed in bin `(r, c)`.
-    fn get(&self, r: i64, c: i64) -> &[u32] {
-        let (r, c) = (r - self.row0, c - self.col0);
-        if !(0..self.rows).contains(&r) || !(0..self.cols).contains(&c) {
-            return &[];
-        }
-        let i = (r * self.cols + c) as usize;
-        &self.items[self.start[i] as usize..self.start[i + 1] as usize]
-    }
-
-    /// The triangles listed in the bin `p`, in grid units, falls in.
-    fn at(&self, p: [f64; 2]) -> &[u32] {
-        let r = floor_i64(p[0] * self.inv).wrapping_sub(self.row0);
-        let c = floor_i64(p[1] * self.inv).wrapping_sub(self.col0);
-        // Below the first row or column wraps to past the last.
-        if r as u64 >= self.rows as u64 || c as u64 >= self.cols as u64 {
-            return &[];
-        }
-        let i = (r * self.cols + c) as usize;
-        &self.items[self.start[i] as usize..self.start[i + 1] as usize]
-    }
-
-    fn bytes(&self) -> usize {
-        (self.start.len() + self.items.len()) * 4
-    }
-}
-
 /// One block's ground on one grid. Cell `(row, col)` has its center at
 /// `(row, col)` in grid units.
 #[derive(Debug, Clone)]
 pub struct Prepared {
     pub index: usize,
-    rc: Vec<[f64; 2]>,
-    h: Vec<f64>,
-    /// Each vertex's water depth; empty when the block carries none, as
-    /// most land blocks do.
-    depth: Vec<f32>,
-    tri: Vec<[u32; 3]>,
-    tritype: Vec<u32>,
-    bins: Index,
-    /// The triangles of the block's runway subsets, binned as `tri` is: an
+    block: Block,
+    /// The block's place, the cell size and the grid's origin, as f64.
+    t: [f64; 3],
+    cell: f64,
+    origin: [f64; 2],
+    /// Whether any vertex has water depth: most land blocks have none.
+    wet: bool,
+    bvh: Bvh,
+    /// The triangles of the block's runway subsets, searched as `tri` is: an
     /// airfield block holds tens of thousands.
     runway: Vec<[u32; 3]>,
-    runway_bins: Index,
+    runway_bvh: Bvh,
 }
 
 /// A point in grid units.
@@ -380,44 +173,26 @@ pub fn grid_units(g: &Grid, x: f64, z: f64) -> [f64; 2] {
     [(x - g.origin_x) / cs - 0.5, (z - g.origin_z) / cs - 0.5]
 }
 
-/// A block's vertices in grid units, and each one's height, as
-/// `Block::world` gives it.
-fn grid_vertices(b: &Block, g: &Grid) -> (Vec<[f64; 2]>, Vec<f64>) {
-    let mut rc = Vec::with_capacity(b.p.len());
-    let mut h = Vec::with_capacity(b.p.len());
-    for i in 0..b.p.len() as u32 {
-        let v = b.world(i);
-        rc.push(grid_units(g, v[0], v[2]));
-        h.push(v[1]);
-    }
-    (rc, h)
-}
-
 impl Prepared {
     /// A block read with its `Runway` subset, prepared for `g`.
-    pub fn new(b: Block, g: &Grid) -> Prepared {
-        let (rc, h) = grid_vertices(&b, g);
+    pub fn new(mut b: Block, g: &Grid) -> Prepared {
         let runway: Vec<[u32; 3]> = b
             .subsets
             .iter()
             .filter(|s| s.material == RUNWAY_MATERIAL)
             .flat_map(|s| s.tri.iter().copied())
             .collect();
-        let depth = if b.depth.iter().any(|&d| d != 0.0) {
-            b.depth
-        } else {
-            Vec::new()
-        };
+        b.subsets = Vec::new();
         Prepared {
             index: b.index,
-            bins: Index::new(&rc, &b.tri),
-            runway_bins: Index::new(&rc, &runway),
-            h,
-            depth,
-            rc,
-            tri: b.tri,
-            tritype: b.tritype,
+            t: b.t.map(f64::from),
+            cell: f64::from(g.cell_size),
+            origin: [g.origin_x, g.origin_z],
+            wet: b.depth.iter().any(|&d| d != 0.0),
+            bvh: Bvh::new(&b.p, &b.tri),
+            runway_bvh: Bvh::new(&b.p, &runway),
             runway,
+            block: b,
         }
     }
 
@@ -430,50 +205,136 @@ impl Prepared {
             .map(|&t| water_class(t) != 0 && t & ROAD_STRIP == 0)
             .collect();
         let mut k = keep.iter();
-        b.tri.retain(|_| *k.next().unwrap());
-        b.tritype
-            .retain(|&t| water_class(t) != 0 && t & ROAD_STRIP == 0);
+        b.tri = (b.tri.iter().copied())
+            .filter(|_| *k.next().unwrap())
+            .collect::<Vec<_>>()
+            .into();
+        b.tritype = (b.tritype.iter().copied())
+            .filter(|&t| water_class(t) != 0 && t & ROAD_STRIP == 0)
+            .collect::<Vec<_>>()
+            .into();
         b.subsets.clear();
         Prepared::new(b, g)
     }
 
     /// Roughly the bytes it holds, for a cache's budget.
     pub fn bytes(&self) -> usize {
-        self.rc.len() * 24
-            + self.depth.len() * 4
-            + (self.tri.len() + self.runway.len()) * 12
-            + self.tritype.len() * 4
-            + self.bins.bytes()
-            + self.runway_bins.bytes()
+        self.block.p.private_bytes()
+            + self.block.tri.private_bytes()
+            + self.block.depth.private_bytes()
+            + self.block.tritype.private_bytes()
+            + self.runway.len() * 12
+            + self.bvh.bytes()
+            + self.runway_bvh.bytes()
     }
 
+    /// Vertex `k` in grid units, as `grid_units` gives it from the world.
+    #[inline]
+    fn rc(&self, k: u32) -> [f64; 2] {
+        let p = self.block.p[k as usize];
+        let x = self.t[0] + f64::from(p[0]);
+        let z = self.t[2] + f64::from(p[2]);
+        [
+            (x - self.origin[0]) / self.cell - 0.5,
+            (z - self.origin[1]) / self.cell - 0.5,
+        ]
+    }
+
+    /// Vertex `k`'s height, as `Block::world` gives it.
+    #[inline]
+    fn h(&self, k: u32) -> f64 {
+        let k = k as usize;
+        self.t[1] + f64::from(self.block.p[k][1]) + f64::from(self.block.depth_at(k as u32))
+    }
+
+    /// A point in grid units, in the block's own meters.
+    #[inline]
+    fn local(&self, p: [f64; 2]) -> [f32; 2] {
+        [
+            ((p[0] + 0.5) * self.cell + self.origin[0] - self.t[0]) as f32,
+            ((p[1] + 0.5) * self.cell + self.origin[1] - self.t[2]) as f32,
+        ]
+    }
+
+    #[inline]
     fn corners(&self, t: [u32; 3]) -> [[f64; 2]; 3] {
-        t.map(|k| self.rc[k as usize])
+        t.map(|k| self.rc(k))
+    }
+
+    /// The box of triangle `t` in the block's own meters.
+    #[inline]
+    fn box_of(&self, t: [u32; 3]) -> [f32; 4] {
+        tri_box(t.map(|k| self.block.p[k as usize]))
     }
 
     fn height(&self, t: [u32; 3], u: f64, v: f64) -> f64 {
-        lerp(t.map(|k| self.h[k as usize]), u, v)
+        lerp(t.map(|k| self.h(k)), u, v)
     }
 
     fn depth(&self, t: [u32; 3], u: f64, v: f64) -> f64 {
-        if self.depth.is_empty() {
+        if !self.wet {
             return 0.0;
         }
-        lerp(t.map(|k| f64::from(self.depth[k as usize])), u, v)
+        lerp(t.map(|k| f64::from(self.block.depth_at(k))), u, v)
+    }
+
+    /// Whether the box `e`, in the block's meters, holds no cell's center,
+    /// a hair more than the slack of `cells` to spare.
+    #[inline]
+    fn between_cells(&self, e: [f32; 4]) -> bool {
+        const SPARE: f64 = 2e-3;
+        let inv = 1.0 / self.cell;
+        let at =
+            |v: f32, axis: usize| (f64::from(v) + self.t[axis * 2] - self.origin[axis]) * inv - 0.5;
+        let none = |lo: f64, hi: f64| floor_i64(hi + SPARE) < -floor_i64(SPARE - lo);
+        none(at(e[0], 0), at(e[2], 0)) || none(at(e[1], 1), at(e[3], 1))
+    }
+
+    /// The question of `p`, in grid units, for `bvh`: a box around it.
+    #[inline]
+    fn around(&self, p: [f64; 2], bvh: &Bvh) -> [f32; 4] {
+        let l = self.local(p);
+        let pad = bvh.pad();
+        [l[0] - pad, l[1] - pad, l[0] + pad, l[1] + pad]
+    }
+
+    /// The question of a box `[r0, c0, r1, c1]` in grid units, for `bvh`.
+    #[inline]
+    fn around_box(&self, b: [f64; 4], bvh: &Bvh) -> [f32; 4] {
+        let (lo, hi) = (self.local([b[0], b[1]]), self.local([b[2], b[3]]));
+        let pad = bvh.pad();
+        [lo[0] - pad, lo[1] - pad, hi[0] + pad, hi[1] + pad]
     }
 
     /// Whether a runway subset of this block covers `p`, in grid units.
     pub fn on_runway(&self, p: [f64; 2]) -> bool {
-        self.runway_bins.at(p).any(|t| {
-            let [a, b, c] = self.corners(self.runway[t as usize]);
-            cover(a, b, c, p).is_some()
-        })
+        let q = self.around(p, &self.runway_bvh);
+        let mut on = false;
+        self.runway_bvh.search(
+            |n| n.meets(q),
+            |leaf| {
+                on = on
+                    || leaf.iter().any(|&t| {
+                        let t = self.runway[t as usize];
+                        meet(self.box_of(t), q) && {
+                            let [a, b, c] = self.corners(t);
+                            cover(a, b, c, p).is_some()
+                        }
+                    });
+            },
+        );
+        on
     }
 
     /// Every triangle of this block's runway subsets whose box meets `b`,
     /// `[r0, c0, r1, c1]` in grid units, its corners in grid units.
     pub fn runway_within(&self, b: [f64; 4], out: &mut Vec<[[f64; 2]; 3]>) {
-        for t in self.runway_bins.within(b) {
+        let q = self.around_box(b, &self.runway_bvh);
+        let mut seen: Vec<u32> = Vec::new();
+        self.runway_bvh
+            .search(|n| n.meets(q), |leaf| seen.extend_from_slice(leaf));
+        seen.sort_unstable();
+        for t in seen {
             let p = self.corners(self.runway[t as usize]);
             let (r0, r1) = span(&p, 0);
             let (c0, c1) = span(&p, 1);
@@ -487,38 +348,65 @@ impl Prepared {
     /// whatever wins there: a bridge's road strip covers the river it
     /// crosses. A road strip is not water, whatever its other bits say.
     pub fn water_under(&self, p: [f64; 2]) -> bool {
-        self.bins.at(p).any(|t| {
-            let ty = self.tritype[t as usize];
-            let [a, b, c] = self.corners(self.tri[t as usize]);
-            water_class(ty) != 0 && ty & ROAD_STRIP == 0 && cover(a, b, c, p).is_some()
-        })
+        let q = self.around(p, &self.bvh);
+        let mut under = false;
+        self.bvh.search(
+            |n| n.meets(q),
+            |leaf| {
+                under = under
+                    || leaf.iter().any(|&t| {
+                        let ty = self.block.tritype[t as usize];
+                        let tri = self.block.tri[t as usize];
+                        water_class(ty) != 0 && ty & ROAD_STRIP == 0 && {
+                            let [a, b, c] = self.corners(tri);
+                            cover(a, b, c, p).is_some()
+                        }
+                    });
+            },
+        );
+        under
     }
 
     /// The winning triangle of this block at `p`, in grid units. Its
     /// `runway` is false: a runway subset of any block marks the point, as
     /// it marks a tile's cell, so the caller asks every block `on_runway`.
     pub fn point(&self, p: [f64; 2]) -> Option<Ground> {
+        let q = self.around(p, &self.bvh);
         let mut best: Option<Ground> = None;
-        for t in self.bins.at(p) {
-            let tri = self.tri[t as usize];
-            let [a, b, c] = self.corners(tri);
-            let Some((u, v)) = cover(a, b, c, p) else {
-                continue;
-            };
-            let g = Ground {
-                h: self.height(tri, u, v),
-                depth: self.depth(tri, u, v),
-                tritype: self.tritype[t as usize],
-                runway: false,
-                block: self.index,
-                tri: t as usize,
-            };
-            if best.is_none_or(|cur| g.rank() > cur.rank()) {
-                best = Some(g);
-            }
-        }
+        self.bvh.search(
+            |n| n.meets(q),
+            |leaf| {
+                for &t in leaf {
+                    let tri = self.block.tri[t as usize];
+                    if !meet(self.box_of(tri), q) {
+                        continue;
+                    }
+                    let [a, b, c] = self.corners(tri);
+                    let Some((u, v)) = cover(a, b, c, p) else {
+                        continue;
+                    };
+                    let g = Ground {
+                        h: self.height(tri, u, v),
+                        depth: self.depth(tri, u, v),
+                        tritype: self.block.tritype[t as usize],
+                        runway: false,
+                        block: self.index,
+                        tri: t as usize,
+                    };
+                    if best.is_none_or(|cur| g.rank() > cur.rank()) {
+                        best = Some(g);
+                    }
+                }
+            },
+        );
         best
     }
+}
+
+/// Whether two boxes, `[min_x, min_z, max_x, max_z]`, meet.
+#[inline]
+fn meet(a: [f32; 4], b: [f32; 4]) -> bool {
+    a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1]
 }
 
 /// The part of a segment one triangle covers: from `t[0]` to `t[1]` of the
@@ -536,39 +424,24 @@ impl Prepared {
     /// grid units, clipped to the part of it the triangle covers.
     pub fn along(&self, a: [f64; 2], b: [f64; 2], out: &mut Vec<Piece>) {
         let d = [b[0] - a[0], b[1] - a[1]];
+        let line = Line::new(self.local(a), self.local(b), self.bvh.pad());
         let mut seen: Vec<u32> = Vec::new();
-        for bins in &self.bins.levels {
-            let w = bins.w as f64;
-            // The rows of bins the segment crosses, and in each the columns
-            // of the stretch of it within that row, widened by the bins'
-            // slack: a triangle that covers any point of the segment is
-            // listed in the bin that point falls in, at its level.
-            let (r0, r1) = bin_span(a[0].min(b[0]), a[0].max(b[0]), bins.inv);
-            for r in r0.max(bins.row0)..=r1.min(bins.row0 + bins.rows - 1) {
-                let (lo, hi) = (r as f64 * w - BIN_SLACK, (r + 1) as f64 * w + BIN_SLACK);
-                let (t0, t1) = if d[0] == 0.0 {
-                    (0.0, 1.0)
-                } else {
-                    let (u, v) = ((lo - a[0]) / d[0], (hi - a[0]) / d[0]);
-                    (u.min(v).max(0.0), u.max(v).min(1.0))
-                };
-                let (z0, z1) = (a[1] + t0 * d[1], a[1] + t1 * d[1]);
-                let (c0, c1) = bin_span(z0.min(z1), z0.max(z1), bins.inv);
-                for c in c0.max(bins.col0)..=c1.min(bins.col0 + bins.cols - 1) {
-                    seen.extend_from_slice(bins.get(r, c));
-                }
-            }
-        }
+        self.bvh.search(
+            |n| n.crosses(&line),
+            |leaf| {
+                let near = |t: &&u32| line.meets(self.box_of(self.block.tri[**t as usize]));
+                seen.extend(leaf.iter().filter(near));
+            },
+        );
         seen.sort_unstable();
-        seen.dedup();
         for k in seen {
-            let tri = self.tri[k as usize];
-            let z = tri.map(|v| self.h[v as usize]);
+            let tri = self.block.tri[k as usize];
+            let z = tri.map(|v| self.h(v));
             if let Some((t, h)) = clip(self.corners(tri), z, a, d) {
                 out.push(Piece {
                     t,
                     h,
-                    rank: rank(self.tritype[k as usize], self.index, k as usize),
+                    rank: rank(self.block.tritype[k as usize], self.index, k as usize),
                 });
             }
         }
@@ -687,7 +560,25 @@ pub fn few(b: &Block, g: &Grid, points: &[[f64; 2]]) -> Vec<(Option<Ground>, boo
         let v = b.world(k);
         grid_units(g, v[0], v[2])
     };
+    // Which sides of the points' box each vertex lies past, a bit each: a
+    // triangle whose three corners share a side misses every point, three
+    // bytes read against a box of six floats.
+    let near_box = all.map(|v| v as f32);
+    let far = reach as f32 + 1.0;
+    let sides: Vec<u8> = (b.p.iter())
+        .map(|v| {
+            u8::from(v[0] < near_box[0] - far)
+                | u8::from(v[0] > near_box[2] + far) << 1
+                | u8::from(v[2] < near_box[1] - far) << 2
+                | u8::from(v[2] > near_box[3] + far) << 3
+        })
+        .collect();
+    let away =
+        |t: &[u32; 3]| sides[t[0] as usize] & sides[t[1] as usize] & sides[t[2] as usize] != 0;
     for (t, tri) in b.tri.iter().enumerate() {
+        if away(tri) {
+            continue;
+        }
         let m = local_box(tri);
         if misses_all(&m) {
             continue;
@@ -707,7 +598,7 @@ pub fn few(b: &Block, g: &Grid, points: &[[f64; 2]]) -> Vec<(Option<Ground>, boo
             let z = tri.map(|k| b.world(k)[1]);
             let g = Ground {
                 h: lerp(z, u, v),
-                depth: lerp(tri.map(|k| f64::from(b.depth[k as usize])), u, v),
+                depth: lerp(tri.map(|k| f64::from(b.depth_at(k))), u, v),
                 tritype: b.tritype[t],
                 runway: false,
                 block: b.index,
@@ -720,6 +611,9 @@ pub fn few(b: &Block, g: &Grid, points: &[[f64; 2]]) -> Vec<(Option<Ground>, boo
     }
     let runway = b.subsets.iter().filter(|s| s.material == RUNWAY_MATERIAL);
     for tri in runway.flat_map(|s| s.tri.iter()) {
+        if away(tri) {
+            continue;
+        }
         let m = local_box(tri);
         if misses_all(&m) {
             continue;
@@ -793,13 +687,8 @@ fn cells(
 }
 
 /// Rasterizes tile `(tx, tz)` of `g` from the blocks under it, each cell
-/// the winning triangle at its center. `g.tile_size` must be a whole number
-/// of bins.
+/// the winning triangle at its center.
 pub fn tile(blocks: &[&Prepared], g: &Grid, tx: u32, tz: u32) -> Tile {
-    assert!(
-        g.tile_size.is_multiple_of(BIN_CELLS),
-        "a tile is a whole number of bins"
-    );
     let ts = i64::from(g.tile_size);
     let n = (ts * ts) as usize;
     const NONE: u64 = u64::MAX;
@@ -812,27 +701,29 @@ pub fn tile(blocks: &[&Prepared], g: &Grid, tx: u32, tz: u32) -> Tile {
     let rows = (tr0, (tr0 + ts).min(i64::from(g.height)));
     let cols = (tc0, (tc0 + ts).min(i64::from(g.width)));
     let at = |r: i64, c: i64| ((r - tr0) * ts + (c - tc0)) as usize;
-    // The bins of width `w` over the tile, each with the tile's cells in it.
-    let over = move |w: i64| {
-        (tr0.div_euclid(w)..=(tr0 + ts - 1).div_euclid(w)).flat_map(move |br| {
-            (tc0.div_euclid(w)..=(tc0 + ts - 1).div_euclid(w)).map(move |bc| {
-                let bin_rows = (rows.0.max(br * w), rows.1.min((br + 1) * w));
-                let bin_cols = (cols.0.max(bc * w), cols.1.min((bc + 1) * w));
-                (br, bc, bin_rows, bin_cols)
-            })
-        })
-    };
+    let around = [
+        rows.0 as f64,
+        cols.0 as f64,
+        (rows.1 - 1) as f64,
+        (cols.1 - 1) as f64,
+    ];
 
     for b in blocks {
-        for bins in &b.bins.levels {
-            for (br, bc, bin_rows, bin_cols) in over(bins.w) {
-                for &t in bins.get(br, bc) {
-                    let tri = b.tri[t as usize];
+        let q = b.around_box(around, &b.bvh);
+        b.bvh.search(
+            |n| n.meets(q),
+            |leaf| {
+                for &t in leaf {
+                    let tri = b.block.tri[t as usize];
+                    let e = b.box_of(tri);
+                    if !meet(e, q) || b.between_cells(e) {
+                        continue;
+                    }
                     let p = b.corners(tri);
-                    let Some((rr, cc)) = cells(p, bin_rows, bin_cols) else {
+                    let Some((rr, cc)) = cells(p, rows, cols) else {
                         continue;
                     };
-                    let k = rank(b.tritype[t as usize], b.index, t as usize);
+                    let k = rank(b.block.tritype[t as usize], b.index, t as usize);
                     for r in rr {
                         for c in cc.clone() {
                             let Some((u, v)) = cover(p[0], p[1], p[2], [r as f64, c as f64]) else {
@@ -842,18 +733,20 @@ pub fn tile(blocks: &[&Prepared], g: &Grid, tx: u32, tz: u32) -> Tile {
                             if best[i] == NONE || k > best[i] {
                                 best[i] = k;
                                 h[i] = b.height(tri, u, v);
-                                ty[i] = b.tritype[t as usize];
+                                ty[i] = b.block.tritype[t as usize];
                             }
                         }
                     }
                 }
-            }
-        }
-        for bins in &b.runway_bins.levels {
-            for (br, bc, bin_rows, bin_cols) in over(bins.w) {
-                for &t in bins.get(br, bc) {
+            },
+        );
+        let q = b.around_box(around, &b.runway_bvh);
+        b.runway_bvh.search(
+            |n| n.meets(q),
+            |leaf| {
+                for &t in leaf {
                     let p = b.corners(b.runway[t as usize]);
-                    let Some((rr, cc)) = cells(p, bin_rows, bin_cols) else {
+                    let Some((rr, cc)) = cells(p, rows, cols) else {
                         continue;
                     };
                     for r in rr {
@@ -864,8 +757,8 @@ pub fn tile(blocks: &[&Prepared], g: &Grid, tx: u32, tz: u32) -> Tile {
                         }
                     }
                 }
-            }
-        }
+            },
+        );
     }
 
     let mut out = Tile {
@@ -1150,7 +1043,7 @@ mod tests {
         }
         assert!(on > 1000, "{on} points on the runway");
         // Corners and edges, where the tolerance reaches past a bin.
-        for v in &b.rc {
+        for v in &b.vertices() {
             assert_eq!(b.on_runway(*v), scan(*v), "{v:?}");
         }
         // A box takes every triangle whose box meets it, as a scan of their
@@ -1276,12 +1169,9 @@ mod tests {
     }
 
     impl Prepared {
-        /// The same block with every triangle listed in the finest bins, as
-        /// a single grid of bins lists it.
-        fn flat(mut self) -> Prepared {
-            self.bins = Index::with_span(&self.rc, &self.tri, i64::MAX);
-            self.runway_bins = Index::with_span(&self.rc, &self.runway, i64::MAX);
-            self
+        /// Every vertex in grid units.
+        fn vertices(&self) -> Vec<[f64; 2]> {
+            (0..self.block.p.len() as u32).map(|k| self.rc(k)).collect()
         }
     }
 
@@ -1359,20 +1249,11 @@ mod tests {
     }
 
     #[test]
-    fn the_levels_answer_as_one_grid_of_bins_does() {
+    fn the_hierarchy_answers_as_a_search_of_every_triangle_does() {
         let g = grid(810);
-        let levels = &prepared(&[mixed()], &g)[0];
-        let flat = levels.clone().flat();
-        assert!(
-            levels.bins.levels.len() >= 3,
-            "{}",
-            levels.bins.levels.len()
-        );
-        assert_eq!(flat.bins.levels.len(), 1);
-        let (lb, fb) = (levels.bins.bytes(), flat.bins.bytes());
-        assert!(lb * 5 < fb, "{lb} bytes of bins against {fb}");
+        let block = &prepared(&[mixed()], &g)[0];
         // Points everywhere, densest over the fine patch, and every vertex.
-        let mut pts: Vec<[f64; 2]> = levels.rc.clone();
+        let mut pts: Vec<[f64; 2]> = block.vertices();
         for k in 0..40000 {
             let (a, b) = (f64::from(k % 200), f64::from(k / 200));
             pts.push([a * 4.07 - 3.0, b * 4.11 - 3.0]);
@@ -1382,36 +1263,33 @@ mod tests {
         // covering triangle of highest rank, and any runway triangle at all.
         let brute = |p: [f64; 2]| {
             let mut best: Option<Ground> = None;
-            for (t, &tri) in levels.tri.iter().enumerate() {
-                let [a, b, c] = levels.corners(tri);
+            for (t, &tri) in block.block.tri.iter().enumerate() {
+                let [a, b, c] = block.corners(tri);
                 let Some((u, v)) = cover(a, b, c, p) else {
                     continue;
                 };
                 let g = Ground {
-                    h: levels.height(tri, u, v),
-                    depth: levels.depth(tri, u, v),
-                    tritype: levels.tritype[t],
+                    h: block.height(tri, u, v),
+                    depth: block.depth(tri, u, v),
+                    tritype: block.block.tritype[t],
                     runway: false,
-                    block: levels.index,
+                    block: block.index,
                     tri: t,
                 };
                 if best.is_none_or(|cur| g.rank() > cur.rank()) {
                     best = Some(g);
                 }
             }
-            let runway = levels.runway.iter().any(|&tri| {
-                let [a, b, c] = levels.corners(tri);
+            let runway = block.runway.iter().any(|&tri| {
+                let [a, b, c] = block.corners(tri);
                 cover(a, b, c, p).is_some()
             });
             (best, runway)
         };
         let mut found = 0;
         for &p in &pts {
-            let got = levels.point(p);
-            assert_eq!((got, levels.on_runway(p)), brute(p), "{p:?}");
-            assert_eq!(got, flat.point(p), "{p:?}");
-            assert_eq!(levels.on_runway(p), flat.on_runway(p), "{p:?}");
-            assert_eq!(levels.water_under(p), flat.water_under(p), "{p:?}");
+            let got = block.point(p);
+            assert_eq!((got, block.on_runway(p)), brute(p), "{p:?}");
             found += usize::from(got.is_some_and(|g| g.tri >= 2));
         }
         assert!(
@@ -1420,39 +1298,24 @@ mod tests {
         );
         // Segments of every length and direction, some along a grid line.
         let mut a = Vec::new();
-        let mut b = Vec::new();
         for k in 0..400 {
             let (s, e) = (pts[k * 97 % pts.len()], pts[(k * 389 + 1000) % pts.len()]);
             let e = if k % 9 == 0 { [s[0], e[1]] } else { e };
             a.clear();
-            b.clear();
-            levels.along(s, e, &mut a);
-            flat.along(s, e, &mut b);
-            assert_eq!(a, b, "{s:?} to {e:?}");
+            block.along(s, e, &mut a);
             // Every triangle clipped, in triangle order, as no bin decides.
             let d = [e[0] - s[0], e[1] - s[1]];
-            let every: Vec<Piece> = (levels.tri.iter().enumerate())
+            let every: Vec<Piece> = (block.block.tri.iter().enumerate())
                 .filter_map(|(t, &tri)| {
-                    let z = tri.map(|v| levels.h[v as usize]);
-                    clip(levels.corners(tri), z, s, d).map(|(t2, h)| Piece {
+                    let z = tri.map(|v| block.h(v));
+                    clip(block.corners(tri), z, s, d).map(|(t2, h)| Piece {
                         t: t2,
                         h,
-                        rank: rank(levels.tritype[t], levels.index, t),
+                        rank: rank(block.block.tritype[t], block.index, t),
                     })
                 })
                 .collect();
             assert_eq!(a, every, "{s:?} to {e:?}");
-        }
-        // Every tile.
-        let (ntx, ntz) = g.tiles();
-        for tx in 0..ntx {
-            for tz in 0..ntz {
-                assert_eq!(
-                    tile(&[levels], &g, tx, tz),
-                    tile(&[&flat], &g, tx, tz),
-                    "({tx}, {tz})"
-                );
-            }
         }
     }
 
@@ -1467,7 +1330,7 @@ mod tests {
         let b = Prepared::new(raw.clone(), &g);
         // Every vertex, points over the fine patch and the runway, and
         // points across the block, a hair either side of grid lines too.
-        let mut pts: Vec<[f64; 2]> = b.rc.clone();
+        let mut pts: Vec<[f64; 2]> = b.vertices();
         for k in 0..6000 {
             let (a, c) = (f64::from(k % 80), f64::from(k / 80));
             pts.push([100.0 + a * 0.6, 95.0 + c * 0.7]);

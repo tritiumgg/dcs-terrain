@@ -13,6 +13,7 @@ pub mod extract;
 pub mod grid;
 pub mod horizon;
 pub mod layers;
+pub mod mapped;
 pub mod offroad;
 pub mod places;
 pub mod query;

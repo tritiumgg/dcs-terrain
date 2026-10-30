@@ -27,6 +27,7 @@ mod mesh;
 pub use mesh::{Block, BlockInfo, Error, Mesh, ReadAt, Subset, Surface5, open};
 mod sample;
 pub use sample::{Hit, LAKE, RIVER, ROAD_STRIP, SEA, cover, water_class};
+pub mod bvh;
 pub mod ground;
 pub use ground::{RUNWAY_MATERIAL, grid_for};
 

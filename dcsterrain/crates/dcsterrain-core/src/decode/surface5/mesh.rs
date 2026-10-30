@@ -20,6 +20,7 @@ use super::super::container::{self, MAX_HEAD};
 use super::super::{Decoder, dispatch};
 use super::{BlockToc, Field, Malformed, Toc, scan};
 use crate::extract::Bounds;
+use crate::mapped::{Column, View};
 
 /// The bytes after a subset's `TRI` name in which its shader and material
 /// are found.
@@ -27,6 +28,9 @@ const MATERIAL_WINDOW: usize = 160;
 /// How far a vertex may lie outside its block's box. None does, on any map
 /// seen.
 const BOX_SLACK_M: f32 = 0.01;
+/// A block with fewer bytes of arrays is copied: a view costs more than
+/// reading this little, and such a block is rarely kept.
+const VIEW_MIN: u64 = 1 << 20;
 
 #[derive(Debug)]
 pub enum Error {
@@ -64,9 +68,24 @@ fn malformed(s: String) -> Error {
 pub trait ReadAt {
     fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> io::Result<()>;
     fn size(&self) -> io::Result<u64>;
+
+    /// A view of `len` bytes from `offset`, where reading can map them.
+    fn view(&self, offset: u64, len: usize) -> io::Result<Option<View>> {
+        let _ = (offset, len);
+        Ok(None)
+    }
 }
 
 impl ReadAt for File {
+    /// The file's arrays are little-endian, so only such a machine can use
+    /// them as they lie.
+    fn view(&self, offset: u64, len: usize) -> io::Result<Option<View>> {
+        if cfg!(target_endian = "big") {
+            return Ok(None);
+        }
+        View::of(self, offset, len).map(Some)
+    }
+
     #[cfg(unix)]
     fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> io::Result<()> {
         std::os::unix::fs::FileExt::read_exact_at(self, buf, offset)
@@ -216,25 +235,32 @@ pub struct Block {
     pub t: [f32; 3],
     pub bbox: [f32; 6],
     /// Block coordinates; `y` is the ground, or the bed under water.
-    pub p: Vec<[f32; 3]>,
-    /// Water depth above `p.y`, zero where the file has no depth field.
-    pub depth: Vec<f32>,
-    pub tri: Vec<[u32; 3]>,
-    pub tritype: Vec<u32>,
+    pub p: Column<[f32; 3]>,
+    /// Water depth above `p.y`; empty where the file has no depth field.
+    pub depth: Column<f32>,
+    pub tri: Column<[u32; 3]>,
+    pub tritype: Column<u32>,
     pub subsets: Vec<Subset>,
 }
 
 impl Block {
     /// A vertex in world coordinates: x north, z east, and the height of the
     /// water surface over water and of the ground elsewhere.
+    #[inline]
     pub fn world(&self, i: u32) -> [f64; 3] {
         let p = self.p[i as usize];
         let t = self.t.map(f64::from);
         [
             t[0] + f64::from(p[0]),
-            t[1] + f64::from(p[1]) + f64::from(self.depth[i as usize]),
+            t[1] + f64::from(p[1]) + f64::from(self.depth_at(i)),
             t[2] + f64::from(p[2]),
         ]
+    }
+
+    /// Vertex `i`'s water depth above `p.y`.
+    #[inline]
+    pub fn depth_at(&self, i: u32) -> f32 {
+        self.depth.get(i as usize).copied().unwrap_or(0.0)
     }
 
     pub fn world_box(&self) -> [f64; 4] {
@@ -586,15 +612,9 @@ impl Surface5 {
         union(self.blocks.iter().map(BlockInfo::world_box))
     }
 
-    /// An array of `T`, read straight into place, refused unless its
-    /// stride is `T`'s size and it lies inside the file. `T` is made of
-    /// little-endian 32-bit words, as the file is.
-    fn array<R: ReadAt + ?Sized, T: bytemuck::Pod>(
-        &self,
-        r: &R,
-        what: impl Fn() -> String,
-        a: Array,
-    ) -> Result<Vec<T>, Error> {
+    /// Where an array of `T` starts in the file and how many it holds,
+    /// refused unless its stride is `T`'s size and it lies inside the file.
+    fn located<T>(&self, what: impl Fn() -> String, a: Array) -> Result<(u64, usize), Error> {
         let stride = std::mem::size_of::<T>() as u16;
         if a.stride != stride {
             return Err(malformed(format!(
@@ -621,7 +641,19 @@ impl Surface5 {
                 what()
             )));
         }
-        let mut v = vec![T::zeroed(); (a.size / u64::from(stride)) as usize];
+        Ok((start, (a.size / u64::from(stride)) as usize))
+    }
+
+    /// An array of `T`, read straight into place, refused as `located`
+    /// refuses. `T` is made of little-endian 32-bit words, as the file is.
+    fn array<R: ReadAt + ?Sized, T: bytemuck::Pod>(
+        &self,
+        r: &R,
+        what: impl Fn() -> String,
+        a: Array,
+    ) -> Result<Vec<T>, Error> {
+        let (start, n) = self.located::<T>(what, a)?;
+        let mut v = vec![T::zeroed(); n];
         r.read_exact_at(bytemuck::cast_slice_mut(&mut v), start)?;
         if cfg!(target_endian = "big") {
             for w in bytemuck::cast_slice_mut::<T, u32>(&mut v) {
@@ -631,21 +663,99 @@ impl Surface5 {
         Ok(v)
     }
 
-    /// Reads finest block `index`, with the subsets of `materials`.
+    /// `array` as a column of `view`, which holds the file from `from`, or
+    /// read when there is no view.
+    fn column<R: ReadAt + ?Sized, T: bytemuck::Pod>(
+        &self,
+        r: &R,
+        what: impl Fn() -> String,
+        a: Array,
+        view: Option<&(View, u64)>,
+    ) -> Result<Column<T>, Error> {
+        match view {
+            None => Ok(self.array(r, what, a)?.into()),
+            Some((view, from)) => {
+                let (start, n) = self.located::<T>(what, a)?;
+                let at = (start - from) as usize;
+                Column::in_view(view, at, n)
+                    .ok_or_else(|| malformed(format!("an array at {start} lies outside its block")))
+            }
+        }
+    }
+
+    /// A view of `arrays` where they are worth one: `None` under `VIEW_MIN`
+    /// bytes, where copying is cheaper than mapping, if `r` cannot, or if one
+    /// runs past the file, which reading them will refuse.
+    fn view_of<R: ReadAt + ?Sized>(
+        &self,
+        r: &R,
+        arrays: &[Array],
+    ) -> Result<Option<(View, u64)>, Error> {
+        let (mut lo, mut hi) = (u64::MAX, 0);
+        for a in arrays {
+            let start = self.data_base.checked_add(a.offset);
+            let end = start.and_then(|s| s.checked_add(a.size));
+            let (Some(start), Some(end)) = (start, end) else {
+                return Ok(None);
+            };
+            if end > self.len {
+                return Ok(None);
+            }
+            lo = lo.min(start);
+            hi = hi.max(end);
+        }
+        if arrays.iter().map(|a| a.size).sum::<u64>() < VIEW_MIN {
+            return Ok(None);
+        }
+        let view = r.view(lo, (hi - lo) as usize)?;
+        Ok(view.map(|v| (v, lo)))
+    }
+
+
+    /// Reads finest block `index`, with the subsets of `materials`, viewing
+    /// its arrays where they are large: for a block that will be kept.
     pub fn read_block<R: ReadAt + ?Sized>(
         &self,
         r: &R,
         index: usize,
         materials: &[&str],
     ) -> Result<Block, Error> {
+        self.read_block_as(r, index, materials, true)
+    }
+
+    /// `read_block`, copied: for a block read once and dropped, where a
+    /// cold view would fault in piece by piece what one read fetches.
+    pub fn read_block_copied<R: ReadAt + ?Sized>(
+        &self,
+        r: &R,
+        index: usize,
+        materials: &[&str],
+    ) -> Result<Block, Error> {
+        self.read_block_as(r, index, materials, false)
+    }
+
+    fn read_block_as<R: ReadAt + ?Sized>(
+        &self,
+        r: &R,
+        index: usize,
+        materials: &[&str],
+        viewed: bool,
+    ) -> Result<Block, Error> {
         let info = &self.blocks[index];
         let field = |name: &'static str| move || format!("block {index}'s {name} field");
-        let tritype = self.array::<_, u32>(r, field("TRITYPE"), info.tritype)?;
-        let tri = self.array::<_, [u32; 3]>(r, field("TRI"), info.tri)?;
-        let p = self.array::<_, [f32; 3]>(r, field("Pbase"), info.pbase)?;
+        let mut arrays = vec![info.tritype, info.tri, info.pbase];
+        arrays.extend(info.depth);
+        let view = match viewed {
+            true => self.view_of(r, &arrays)?,
+            false => None,
+        };
+        let view = view.as_ref();
+        let tritype = self.column::<_, u32>(r, field("TRITYPE"), info.tritype, view)?;
+        let tri = self.column::<_, [u32; 3]>(r, field("TRI"), info.tri, view)?;
+        let p = self.column::<_, [f32; 3]>(r, field("Pbase"), info.pbase, view)?;
         let depth = match info.depth {
-            Some(a) => self.array::<_, f32>(r, field("depth"), a)?,
-            None => vec![0.0; p.len()],
+            Some(a) => self.column::<_, f32>(r, field("depth"), a, view)?,
+            None => Column::default(),
         };
         if tritype.len() != tri.len() {
             return Err(malformed(format!(
@@ -654,7 +764,7 @@ impl Surface5 {
                 tri.len()
             )));
         }
-        if depth.len() != p.len() {
+        if info.depth.is_some() && depth.len() != p.len() {
             return Err(malformed(format!(
                 "block {index} has {} depths for {} vertices",
                 depth.len(),
@@ -664,28 +774,20 @@ impl Surface5 {
         check_indices(&format!("block {index}'s triangle list"), &tri, p.len())?;
         // A NaN passes every comparison with the box below, so it is
         // refused here.
-        let bad = p.iter().flatten().chain(&depth).any(|v| !v.is_finite());
-        if bad {
-            return Err(malformed(format!(
-                "block {index} holds a vertex or depth that is not a finite number"
-            )));
-        }
-        // A reader skips a block by its box, so a vertex outside it would be
-        // ground nothing reads.
         let b = info.bbox;
-        let outside = p.iter().position(|v| {
-            let off = (b[0] - v[0])
-                .max(v[0] - b[3])
-                .max(b[2] - v[2])
-                .max(v[2] - b[5]);
-            off > BOX_SLACK_M
+        // Every test at once and none stopping early, which compiles to
+        // wide compares; the checks below only say what failed.
+        let within = p.iter().fold(true, |ok, v| {
+            let inside = (b[0] - v[0] <= BOX_SLACK_M)
+                & (v[0] - b[3] <= BOX_SLACK_M)
+                & (b[2] - v[2] <= BOX_SLACK_M)
+                & (v[2] - b[5] <= BOX_SLACK_M);
+            ok & inside & (v[1] - v[1] == 0.0)
         });
-        if let Some(i) = outside {
-            return Err(malformed(format!(
-                "block {index}'s vertex {i} lies outside the block's box"
-            )));
+        let dry = depth.iter().fold(true, |ok, d| ok & (d - d == 0.0));
+        if !(within && dry) {
+            return Err(self.what_is_wrong(index, &p, &depth));
         }
-
         let mut subsets = Vec::new();
         for s in &info.subsets {
             let material = &self.names[s.material as usize];
@@ -714,6 +816,30 @@ impl Surface5 {
             tritype,
             subsets,
         })
+    }
+
+    /// What `read_block_as` found wrong with a block's vertices or depths.
+    fn what_is_wrong(&self, index: usize, p: &[[f32; 3]], depth: &[f32]) -> Error {
+        let bad = (p.iter().flatten().chain(depth)).any(|v| !v.is_finite());
+        if bad {
+            return malformed(format!(
+                "block {index} holds a vertex or depth that is not a finite number"
+            ));
+        }
+        // A reader skips a block by its box, so a vertex outside it would be
+        // ground nothing reads.
+        let b = self.blocks[index].bbox;
+        let outside = p.iter().position(|v| {
+            let off = (b[0] - v[0])
+                .max(v[0] - b[3])
+                .max(b[2] - v[2])
+                .max(v[2] - b[5]);
+            off > BOX_SLACK_M
+        });
+        malformed(format!(
+            "block {index}'s vertex {} lies outside the block's box",
+            outside.unwrap_or(0)
+        ))
     }
 
     /// Reads every finest block: for a test, or a map small enough to hold.
@@ -768,6 +894,12 @@ impl Bytes<'_> {
 }
 
 fn check_indices(what: &str, tri: &[[u32; 3]], n: usize) -> Result<(), Error> {
+    // The largest found without stopping at the first, which compiles to
+    // wide compares, and the first found only for the message.
+    let top = (tri.as_flattened().iter()).fold(0, |a, &v| a.max(v));
+    if (top as usize) < n {
+        return Ok(());
+    }
     match tri.iter().flatten().find(|&&v| v as usize >= n) {
         Some(v) => Err(malformed(format!("{what} names vertex {v}, of {n}"))),
         None => Ok(()),
@@ -823,8 +955,8 @@ mod tests {
     fn reads_vertices_triangles_and_types() {
         let mesh = read_built(&[two_triangles()], 1, &[]).unwrap();
         let b = &mesh.blocks[0];
-        assert_eq!(b.tri, [[0, 1, 2], [1, 3, 2]]);
-        assert_eq!(b.tritype, [0, 2]);
+        assert_eq!(*b.tri, [[0, 1, 2], [1, 3, 2]]);
+        assert_eq!(*b.tritype, [0, 2]);
         assert_eq!(b.world(0), [1000.0, 15.0, 2000.0]);
         // Over water the height is the surface: bed plus depth.
         assert_eq!(b.world(3), [1100.0, 9.0, 2100.0]);

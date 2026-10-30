@@ -10,6 +10,7 @@ publish = false
 
 [dependencies]
 bytemuck = "1.19.0"
+memmap2 = "0.9.5"
 mlua = { version = "0.12.2", features = ["lua51", "vendored"] }
 rayon = "1.11.0"
 regex = { version = "1.13.1", default-features = false, features = ["std", "perf"] }
@@ -20,7 +21,7 @@ serde_path_to_error = "0.1.20"
 toml = { version = "1.1.8", default-features = false, features = ["parse", "serde"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem", "Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_System_WindowsProgramming"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_System_WindowsProgramming"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.191"

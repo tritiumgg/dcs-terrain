@@ -29,7 +29,7 @@ use crate::grid::Grid;
 use crate::threads::try_map;
 
 /// The bytes of prepared blocks kept between requests.
-pub const BLOCK_BUDGET: usize = 64 << 20;
+pub const BLOCK_BUDGET: usize = 24 << 20;
 /// Up to this many points on a block not held, `points` tests its
 /// triangles directly rather than preparing it.
 const FEW_POINTS: usize = 32;
@@ -716,7 +716,7 @@ impl Source for Install {
                 // points save.
                 None if ks.len() <= FEW_POINTS => {
                     let raw = (self.toc)
-                        .read_block(&self.file, i, &[RUNWAY_MATERIAL])
+                        .read_block_copied(&self.file, i, &[RUNWAY_MATERIAL])
                         .map_err(|e| refusal(&self.path, e))?;
                     ground::few(&raw, &self.grid, &ps)
                 }
