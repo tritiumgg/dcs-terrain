@@ -11,6 +11,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(any(test, windows, all(unix, target_arch = "x86_64")))]
 use std::time::{Duration, Instant};
 
+use rayon::prelude::*;
+
 /// How long a spin measures the rate of the cycle counter.
 #[cfg(any(windows, all(unix, target_arch = "x86_64")))]
 const CALIBRATION: Duration = Duration::from_millis(20);
@@ -39,6 +41,25 @@ pub fn cap() -> usize {
     match CAP.load(Ordering::Relaxed) {
         0 => std::thread::available_parallelism().map_or(1, |n| n.get()),
         n => n,
+    }
+}
+
+/// `f` over `items`, on every core when `parallel` and else on the calling
+/// thread, the answers in the order of `items`. Every item is answered and
+/// the answers then checked in order, so of two that fail the one returned
+/// is the first, however the work fell.
+pub fn try_map<T, U, E, F>(items: &[T], parallel: bool, f: F) -> Result<Vec<U>, E>
+where
+    T: Sync,
+    U: Send,
+    E: Send,
+    F: Fn(&T) -> Result<U, E> + Sync + Send,
+{
+    if parallel {
+        let answers: Vec<Result<U, E>> = items.par_iter().map(f).collect();
+        answers.into_iter().collect()
+    } else {
+        items.iter().map(f).collect()
     }
 }
 
@@ -253,6 +274,18 @@ pub fn wait_costed(child: Child) -> io::Result<(ExitStatus, ChildCost)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mapping_answers_in_order_and_refuses_with_the_first_failure() {
+        let items: Vec<u32> = (0..1000).collect();
+        let even = |&i: &u32| if i % 2 == 0 { Ok(i) } else { Err(i) };
+        let double = |&i: &u32| Ok::<u32, u32>(i * 2);
+        for parallel in [false, true] {
+            assert_eq!(try_map(&items, parallel, even), Err(1));
+            let doubled = try_map(&items, parallel, double).unwrap();
+            assert!(doubled.iter().enumerate().all(|(k, &d)| d == 2 * k as u32));
+        }
+    }
 
     #[test]
     fn a_spin_costs_cycles_at_a_believable_rate() {

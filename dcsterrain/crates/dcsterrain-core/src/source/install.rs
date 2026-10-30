@@ -26,6 +26,7 @@ use crate::decode::surface5::ground::{self, Prepared, Tile, cover_of, grid_units
 use crate::decode::surface5::{RUNWAY_MATERIAL, Surface5, grid_for, water_class};
 use crate::extract::FileEntry;
 use crate::grid::Grid;
+use crate::threads::try_map;
 
 /// The bytes of prepared blocks kept between requests.
 pub const BLOCK_BUDGET: usize = 64 << 20;
@@ -573,19 +574,9 @@ impl Install {
             ids.iter().map(|i| held.get(i)).collect()
         };
         let missing: Vec<usize> = (0..ids.len()).filter(|&k| out[k].is_none()).collect();
-        let made: Vec<Arc<Prepared>> = if missing.len() < PARALLEL_MIN {
-            (missing.iter())
-                .map(|&k| self.block(ids[k]))
-                .collect::<Result<_, _>>()?
-        } else {
-            // Collected whole and then checked in order, so of two blocks that
-            // fail the one refused is the first, however the work fell.
-            (missing.par_iter())
-                .map(|&k| self.block(ids[k]))
-                .collect::<Vec<_>>()
-                .into_iter()
-                .collect::<Result<_, _>>()?
-        };
+        let made = try_map(&missing, missing.len() >= PARALLEL_MIN, |&k| {
+            self.block(ids[k])
+        })?;
         for (&k, b) in missing.iter().zip(made) {
             out[k] = Some(b);
         }
@@ -699,7 +690,7 @@ impl Source for Install {
             let mut held = self.blocks.lock().unwrap();
             order.iter().map(|i| held.get(i)).collect()
         };
-        let answer = |(&i, held): (&usize, &Option<Arc<Prepared>>)| {
+        let answer = |(&i, held): (&usize, &Option<Arc<Prepared>>)| -> Result<_, Refusal> {
             let ks = &on[&i];
             let ps: Vec<[f64; 2]> = (ks.iter())
                 .map(|&k| grid_units(&self.grid, points[k as usize][0], points[k as usize][1]))
@@ -727,17 +718,9 @@ impl Source for Install {
         // answers merged in block order, so they are the same however the
         // work falls.
         let unheld = held.iter().filter(|b| b.is_none()).count();
-        let answers: Vec<Vec<(Option<ground::Ground>, bool)>> = if unheld < POINTS_PARALLEL_MIN {
-            (order.iter().zip(&held))
-                .map(answer)
-                .collect::<Result<_, Refusal>>()?
-        } else {
-            (order.par_iter().zip(&held))
-                .map(answer)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .collect::<Result<_, Refusal>>()?
-        };
+        let blocks: Vec<_> = order.iter().zip(&held).collect();
+        let answers: Vec<Vec<(Option<ground::Ground>, bool)>> =
+            try_map(&blocks, unheld >= POINTS_PARALLEL_MIN, |&b| answer(b))?;
         let mut best: Vec<Option<ground::Ground>> = vec![None; points.len()];
         let mut runway = vec![false; points.len()];
         for (i, answers) in order.iter().zip(answers) {
@@ -768,6 +751,7 @@ impl Source for Install {
         let ids = self.along_blocks(a, b);
         let g = &self.grid;
         let (ga, gb) = (grid_units(g, a[0], a[1]), grid_units(g, b[0], b[1]));
+        }
         // The blocks a request has not read yet are prepared together, a
         // few at a time so a long line holds few at once; the pieces then
         // follow in block order.
@@ -810,15 +794,7 @@ impl Source for Install {
         };
         // Each block on whichever core is free, the pieces then gathered in
         // block order, so they are the same however the work falls.
-        let answers: Vec<Vec<Vec<Piece>>> = if order.len() < PARALLEL_MIN {
-            order.iter().map(answer).collect::<Result<_, Refusal>>()?
-        } else {
-            (order.par_iter())
-                .map(answer)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .collect::<Result<_, Refusal>>()?
-        };
+        let answers = try_map(&order, order.len() >= PARALLEL_MIN, answer)?;
         let mut out: Vec<Vec<Piece>> = (0..segments.len()).map(|_| Vec::new()).collect();
         for (i, answers) in order.iter().zip(answers) {
             for (&k, pieces) in on[i].iter().zip(answers) {
