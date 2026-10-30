@@ -435,15 +435,15 @@ fn fits(doc: &Value, schema: &Value, v: &Value, at: &str, wrong: &mut Vec<String
             return;
         }
     }
-    if let Some(e) = s.get("enum").and_then(Value::as_array) {
-        if !e.contains(v) {
-            wrong.push(format!("{at}: {v} is not one of {e:?}"));
-        }
+    if let Some(e) = s.get("enum").and_then(Value::as_array)
+        && !e.contains(v)
+    {
+        wrong.push(format!("{at}: {v} is not one of {e:?}"));
     }
-    if let Some(c) = s.get("const") {
-        if c != v {
-            wrong.push(format!("{at}: {v} is not {c}"));
-        }
+    if let Some(c) = s.get("const")
+        && c != v
+    {
+        wrong.push(format!("{at}: {v} is not {c}"));
     }
     let branches = |key: &str| s.get(key).and_then(Value::as_array);
     for key in ["oneOf", "anyOf"] {

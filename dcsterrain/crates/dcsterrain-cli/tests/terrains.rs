@@ -907,7 +907,6 @@ fn a_batch_reopens_a_terrain_whose_files_changed_under_it() {
     put(&t.0, "autoupdate.cfg", update);
     assert_eq!(ask(describe)["result"]["dcs_build"], "0.0.0.2");
 
-    drop(ask);
     drop(stdin);
     let out = child.wait_with_output().unwrap();
     assert!(out.status.success());
