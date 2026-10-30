@@ -160,8 +160,13 @@ pub fn grid_bearing(a: [f64; 2], b: [f64; 2]) -> f64 {
 
 /// Degrees clockwise from the north axis, in [0, 360).
 fn bearing(north: f64, east: f64) -> f64 {
+    degrees(east.atan2(north))
+}
+
+/// An angle in radians clockwise from north as degrees in [0, 360).
+pub fn degrees(rad: f64) -> f64 {
     // Adding zero turns a negative zero into a positive one.
-    east.atan2(north).to_degrees().rem_euclid(360.0) % 360.0 + 0.0
+    rad.to_degrees().rem_euclid(360.0) % 360.0 + 0.0
 }
 
 /// Earth-centered coordinates of a position on the ellipsoid.
@@ -239,13 +244,15 @@ const MERIDIAN_REACH_DEG: i32 = 12;
 /// degrees; much wider is not one map, or not degrees.
 const MAX_SPAN_DEG: f64 = 30.0;
 
-fn median(mut v: Vec<f64>) -> f64 {
+/// The median of the values, the mean of the middle two of an even count;
+/// `None` of none.
+pub fn median(mut v: Vec<f64>) -> Option<f64> {
     v.sort_by(f64::total_cmp);
     let m = v.len() / 2;
-    if v.len() % 2 == 1 {
-        v[m]
-    } else {
-        (v[m - 1] + v[m]) / 2.0
+    match v.len() {
+        0 => None,
+        n if n % 2 == 1 => Some(v[m]),
+        _ => Some((v[m - 1] + v[m]) / 2.0),
     }
 }
 
@@ -293,8 +300,8 @@ pub fn fit(pairs: &[Pair]) -> Option<Fit> {
     let (lon_0, d, e, n) = (first..=last)
         .map(|l| {
             let d = offsets(l);
-            let e = median(d.iter().map(|o| o.0).collect());
-            let n = median(d.iter().map(|o| o.1).collect());
+            let e = median(d.iter().map(|o| o.0).collect()).expect("a fit has pairs");
+            let n = median(d.iter().map(|o| o.1).collect()).expect("a fit has pairs");
             let score = rms(&residuals(&d, e, n));
             (score, l, d, e, n)
         })
