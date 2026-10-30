@@ -191,19 +191,37 @@ impl Source for Synth {
                     }
                 }
             }
-            // The instances as `instances_in` places them, each pool's ids
-            // counting up from its own first.
+            // The instances as `instances_in` places them, each id from
+            // where it stands, so a box finds an instance under one id: a
+            // pole by its place along the line, a tree by its cell and its
+            // place among the cell's trees.
             Pool::Lines | Pool::Trees => {
-                let (model, mut id) = match pool {
-                    Pool::Lines => (LINE_MODEL, LINES_FIRST_ID),
-                    _ => (TREE_MODEL, TREES_FIRST_ID),
-                };
                 let mut at = Vec::new();
                 self.instances_in(pool, b, &mut |x, z| at.push((x, z)))?;
+                let g = self.grid();
+                let c = f64::from(g.cell_size);
+                let mut last = None;
+                let mut nth = 0;
                 for (x, z) in at {
+                    nth = if last == Some((x, z)) { nth + 1 } else { 0 };
+                    last = Some((x, z));
+                    let (model, id) = match pool {
+                        Pool::Lines => {
+                            let k = ((x - g.origin_x - LINE_SOUTH_M) / LINE_POLE_SPACING_M).round();
+                            (LINE_MODEL, LINES_FIRST_ID + k as u64)
+                        }
+                        _ => {
+                            let row = ((x - g.origin_x) / c).floor() as u64;
+                            let col = ((z - g.origin_z) / c).floor() as u64;
+                            let cell = row * u64::from(self.form.cells()) + col;
+                            (
+                                TREE_MODEL,
+                                TREES_FIRST_ID + cell * u64::from(TREES_PER_CELL) + nth,
+                            )
+                        }
+                    };
                     let alt = self.point(x, z)?.map_or(0.0, |g| g.height);
                     put(id, model, x, alt, z, 0.0);
-                    id += 1;
                 }
             }
         }
@@ -524,8 +542,25 @@ mod tests {
         })
         .unwrap();
         assert_eq!(trees.len() as u32, s.form().tree_count());
-        assert_eq!(trees[0].0, crate::synth::TREES_FIRST_ID);
         assert_eq!(trees[0].1, TREE_MODEL.to_lowercase());
+        // Each id once, and the same id from a box holding only its cell.
+        let ids: std::collections::BTreeSet<u64> = trees.iter().map(|t| t.0).collect();
+        assert_eq!(ids.len(), trees.len());
+        let (x, z) = s.form().abs(FOREST_SOUTH_M + 525.0, FOREST_WEST_M + 75.0);
+        let mut one = Vec::new();
+        s.objects_in(Pool::Trees, [x, z, x, z], &mut |o| one.push(o.id))
+            .unwrap();
+        assert_eq!(one.len() as u32, TREES_PER_CELL);
+        assert!(one.iter().all(|id| ids.contains(id)), "{one:?}");
+        let pole = |b| {
+            let mut v = Vec::new();
+            s.objects_in(Pool::Lines, b, &mut |o| v.push(o.id)).unwrap();
+            v
+        };
+        let (px, pz) = s
+            .form()
+            .abs(LINE_SOUTH_M + LINE_POLE_SPACING_M, LINE_EAST_M);
+        assert_eq!(pole([px, pz, px, pz]), [crate::synth::LINES_FIRST_ID + 1]);
         assert_eq!(trees[0].2[3] - trees[0].2[0], TREE_OBB_W_M as f32);
         let mut poles = 0;
         s.objects_in(Pool::Lines, all, &mut |o| {
