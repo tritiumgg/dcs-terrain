@@ -4,7 +4,14 @@
 //! priority, so a DCS server beside the tool wins the CPU whenever both
 //! want it (ADR 0004). `--threads` caps how many.
 
+use std::io;
+use std::process::{Child, ExitStatus};
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
+
+/// How long a spin measures the rate of the cycle counter.
+const CALIBRATION: Duration = Duration::from_millis(20);
 
 /// The cap `--threads` set, or 0 for none.
 static CAP: AtomicUsize = AtomicUsize::new(0);
@@ -69,8 +76,13 @@ pub fn low_priority() {
 }
 
 /// The CPU cycles this process has spent, over all its threads: set beside
-/// the wall clock, how much of the machine a measured step took. 0 where
-/// the platform does not count them.
+/// the wall clock, how much of the machine a measured step took.
+///
+/// These are reference cycles on every platform: time on a CPU, counted at
+/// the machine's constant counter rate, [`cycle_hz`], not the core's clock.
+/// Windows counts them itself; elsewhere the OS's CPU time is scaled by the
+/// rate. So a thread waiting for a disk or for a core costs none, but a
+/// core running above its base clock does the same work in fewer.
 pub fn cpu_cycles() -> u64 {
     #[cfg(windows)]
     {
@@ -81,6 +93,146 @@ pub fn cpu_cycles() -> u64 {
         unsafe { QueryProcessCycleTime(GetCurrentProcess(), &mut c) };
         c
     }
-    #[cfg(not(windows))]
-    0
+    #[cfg(unix)]
+    {
+        let mut t = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: a clock every Unix here has, and a timespec to write to.
+        unsafe { libc::clock_gettime(libc::CLOCK_PROCESS_CPUTIME_ID, &mut t) };
+        seconds_to_cycles(t.tv_sec as f64 + t.tv_nsec as f64 * 1e-9)
+    }
+}
+
+/// How many of [`cpu_cycles`]' cycles make a second of CPU time on this
+/// machine.
+pub fn cycle_hz() -> f64 {
+    static HZ: OnceLock<f64> = OnceLock::new();
+    *HZ.get_or_init(measure_cycle_hz)
+}
+
+#[cfg(unix)]
+fn seconds_to_cycles(s: f64) -> u64 {
+    (s * cycle_hz()) as u64
+}
+
+/// The rate of a spin on this thread against the wall clock, so nothing
+/// else running in the process counts.
+#[cfg(windows)]
+fn measure_cycle_hz() -> f64 {
+    use windows_sys::Win32::System::Threading::GetCurrentThread;
+    use windows_sys::Win32::System::WindowsProgramming::QueryThreadCycleTime;
+    let thread_cycles = || {
+        let mut c = 0u64;
+        // SAFETY: the pseudo-handle of this thread, and a u64 to write to.
+        unsafe { QueryThreadCycleTime(GetCurrentThread(), &mut c) };
+        c
+    };
+    let (t, c) = (Instant::now(), thread_cycles());
+    while t.elapsed() < CALIBRATION {
+        std::hint::spin_loop();
+    }
+    (thread_cycles() - c) as f64 / t.elapsed().as_secs_f64()
+}
+
+/// The time-stamp counter against the wall clock: it runs at one rate
+/// whatever the core's clock, on every x86-64 of the last fifteen years.
+#[cfg(all(unix, target_arch = "x86_64"))]
+fn measure_cycle_hz() -> f64 {
+    // SAFETY: reading the counter has no preconditions on x86-64.
+    let tsc = || unsafe { core::arch::x86_64::_rdtsc() };
+    let (t, c) = (Instant::now(), tsc());
+    while t.elapsed() < CALIBRATION {
+        std::hint::spin_loop();
+    }
+    (tsc() - c) as f64 / t.elapsed().as_secs_f64()
+}
+
+/// The generic timer's rate, which the architecture publishes.
+#[cfg(all(unix, target_arch = "aarch64"))]
+fn measure_cycle_hz() -> f64 {
+    let hz: u64;
+    // SAFETY: the register is readable from user mode on Linux and macOS.
+    unsafe { core::arch::asm!("mrs {}, cntfrq_el0", out(reg) hz) };
+    hz as f64
+}
+
+/// Nanoseconds, where no counter's rate is known.
+#[cfg(all(unix, not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+fn measure_cycle_hz() -> f64 {
+    1e9
+}
+
+/// What a finished child process cost.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ChildCost {
+    /// Its [`cpu_cycles`], over all its threads.
+    pub cycles: u64,
+    /// The most memory it held: private bytes on Windows, resident
+    /// elsewhere, where the OS keeps no peak of private bytes.
+    pub peak_bytes: u64,
+}
+
+/// Waits for `child` and says what it cost. Drain its pipes first.
+pub fn wait_costed(mut child: Child) -> io::Result<(ExitStatus, ChildCost)> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::ProcessStatus::{
+            GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+        };
+        use windows_sys::Win32::System::WindowsProgramming::QueryProcessCycleTime;
+        let status = child.wait()?;
+        let handle = child.as_raw_handle();
+        let mut cycles = 0u64;
+        // SAFETY: the zeroed struct of integers is valid, its size is passed
+        // along with it, and `child` keeps the handle open past its exit.
+        let mut memory: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
+        unsafe {
+            QueryProcessCycleTime(handle as _, &mut cycles);
+            GetProcessMemoryInfo(
+                handle as _,
+                &mut memory,
+                size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+            );
+        }
+        let peak_bytes = memory.PeakPagefileUsage as u64;
+        Ok((status, ChildCost { cycles, peak_bytes }))
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        let mut raw = 0;
+        // SAFETY: the zeroed struct of integers is valid to write over. The
+        // child is taken by value, so nothing can wait for it a second time.
+        let mut used: libc::rusage = unsafe { std::mem::zeroed() };
+        if unsafe { libc::wait4(child.id() as i32, &mut raw, 0, &mut used) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let seconds = |t: libc::timeval| t.tv_sec as f64 + t.tv_usec as f64 * 1e-6;
+        // The kilobytes Linux reports, the bytes macOS does.
+        let unit = if cfg!(target_os = "macos") { 1 } else { 1024 };
+        let cost = ChildCost {
+            cycles: seconds_to_cycles(seconds(used.ru_utime) + seconds(used.ru_stime)),
+            peak_bytes: used.ru_maxrss as u64 * unit,
+        };
+        Ok((ExitStatus::from_raw(raw), cost))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_spin_costs_cycles_at_a_believable_rate() {
+        assert!((1e6..1e11).contains(&cycle_hz()), "{}", cycle_hz());
+        let c = cpu_cycles();
+        let t = Instant::now();
+        while cpu_cycles() == c {
+            assert!(t.elapsed() < Duration::from_secs(5), "no cycles counted");
+            std::hint::spin_loop();
+        }
+    }
 }

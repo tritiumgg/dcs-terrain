@@ -200,6 +200,7 @@ name = "dcsterrain-core"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "libc",
  "miniz_oxide",
  "mlua",
  "rayon",
