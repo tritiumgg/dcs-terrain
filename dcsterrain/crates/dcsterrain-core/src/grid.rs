@@ -146,21 +146,30 @@ impl Window {
     /// As `sample`, from this window, which must hold the cells around
     /// `(x, z)`: `None` off the grid, where a cell that carries weight lies
     /// outside the window, or where it is `nodata`.
+    #[inline]
     pub fn value_at(&self, g: &Grid, x: f64, z: f64) -> Option<f64> {
-        let (row, col) = g.cell_at(x, z)?;
+        let c = f64::from(g.cell_size);
+        let (qx, qz) = ((x - g.origin_x) / c, (z - g.origin_z) / c);
+        // A sweep asks this millions of times, so neither axis calls the C
+        // runtime's `floor`, as the default x86-64 target would. A NaN fails
+        // the comparison and lands in `None`.
+        let inside = |q: f64, n: u32| q >= 0.0 && q < f64::from(n);
+        if !inside(qx, g.height) || !inside(qz, g.width) {
+            return None;
+        }
         let l = self.layer;
         let present = |v: i32| (v != l.nodata()).then_some(f64::from(v));
         if l != Layer::Height {
-            return present(self.get(row.into(), col.into())?);
+            return present(self.get(qx as i64, qz as i64)?);
         }
-        let c = f64::from(g.cell_size);
-        let axis = |v: f64, origin: f64, n: u32| {
-            let f = ((v - origin) / c - 0.5).clamp(0.0, f64::from(n - 1));
-            let i = f.floor();
-            (i as i64, f - i)
+        let axis = |q: f64, n: u32| {
+            let f = (q - 0.5).clamp(0.0, f64::from(n - 1));
+            // Never negative here, so truncating is the floor.
+            let i = f as i64;
+            (i, f - i as f64)
         };
-        let (r0, tr) = axis(x, g.origin_x, g.height);
-        let (c0, tc) = axis(z, g.origin_z, g.width);
+        let (r0, tr) = axis(qx, g.height);
+        let (c0, tc) = axis(qz, g.width);
         let mut sum = 0.0;
         for (dr, dc, weight) in [
             (0, 0, (1.0 - tr) * (1.0 - tc)),
