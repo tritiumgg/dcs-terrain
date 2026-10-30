@@ -3,11 +3,14 @@
 Every target of `design.md` §8 against the shipped build, on the 8 terrains
 of 2.9.30.28738 (`autoupdate.cfg` timestamp `20261006-075422`) and `Synth`.
 Measured 2026-10-30 on a Ryzen 7 7800X3D (8 cores, 16 threads), 32 GB, NVMe,
-Windows 11, DCS not running, nothing else at work.
+Windows 11, DCS not running, nothing else at work. The two Mariana columns are
+at the 64 MiB block budget; the rest were measured at 32 MiB, and their
+verdicts recomputed against the budgets and targets of ADR 0007.
 
 **The bound is on cycles; the wall is beside it for a reader.** Each figure
 is cycles, then wall clock. The target is the design's time; its budget in
-cycles is that time on one core at the counter's rate.
+cycles is that time on one core at the counter's rate, or on 8 for a parallel
+case (Decided, below).
 
 ## Method
 
@@ -38,9 +41,9 @@ cycles is that time on one core at the counter's rate.
   above 3× the budget, above 3× the memory target, on a failed request, or on no cycles over
   10 ms of work, since a shorter case can read zero under the CPU clock's tick.
   They catch a large regression, not a small one: `Synth` is small, so only
-  `viewshed_20km`, `radar_floor_20km`, `exposure_10_sites`,
-  `find_sites_los_36` and the horizon's first touch stand within 5× of their
-  bound, and `open` or `route_50km` lie thousands of times under theirs.
+  `find_sites_los_36` stands within 6× of its bound and the horizon's first
+  touch within 14×, and `open` or `route_50km` lie thousands of times under
+  theirs.
   On Linux the memory bound sees a child only above the bench's own peak,
   because the OS seeds a child's peak from its parent's.
 
@@ -85,15 +88,16 @@ What follows from that:
   preempted, counts no cycles. Cold wall is the only figure that sees a disk,
   which is why it stays beside the cycles.
 
-A parallel operation can therefore miss its one-core budget while meeting
-its time by far: `viewshed_20km` on `Synth` spends 748 Mc in 52 ms.
+A parallel case can therefore spend far more than its time on one core:
+`viewshed_20km` on `Synth` spends 748 Mc in 52 ms. It can also meet its
+budget and still be over its time, so the wall is read as well.
 
 **Under noise.** `Synth` with 8 spinner processes against the idle machine, 5
 rounds: cycles moved 0.77–1.32× (1.77× on one sub-millisecond case,
 `airfield_info/fresh`) while wall moved up to 1.88×. The horizon's first
 touch moved 0.98× in cycles and 1.88× in wall, `viewshed_20km` 1.02× and
-1.37×. Nothing crossed a bound. The tightest case at rest,
-`find_sites_horizon_first_touch`, stands at 36.2 Gc of its 62.7 Gc bound.
+1.37×. Nothing crossed a bound. The tightest case at rest is
+`find_sites_los_36`, 23.2 Gc of its 125.7 Gc bound.
 
 ## The table
 
@@ -103,27 +107,27 @@ clock.
 
 | Operation | OS cache | Target ms | Budget Mc | synth | Afghanistan | Caucasus | GermanyCW | MarianaIslands | MarianaIslandsWWII | Nevada | PersianGulf | Syria |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `open` | cold | 20 | 83.7 | 0.02 / 0.01 | 19.0 / 4.57 | 8.22 / 1.98 | 16.0 / 3.84 | 11.4 / 2.73 | 11.4 / 2.74 | 11.3 / 2.71 | 16.4 / 3.94 | 18.4 / 4.41 |
-| `describe` | cold | 20 | 83.7 | 0.07 / 0.02 | 8.13 / 1.95 | 7.58 / 1.82 | 11.6 / 2.78 | 7.46 / 1.79 | 7.51 / 1.80 | 7.50 / 1.80 | 8.02 / 1.93 | 11.0 / 2.64 |
-| `sample_10k_scattered` | cold | 3000 | 12549.6 | 52.3 / 12.5 | 2006 / 1598 | 1366 / 1040 | 3653 / 1794 | 382 / 95.4 | 393 / 97.3 | 1305 / 1239 | 1273 / 1145 | 2277 / 1706 |
-| `viewshed_20km` | cold | 300 | 1255.0 | 748 / 52.1 | 594 / 16.2 | 718 / 27.7 | 622 / 16.7 | **4518** / **571** | **4414** / **544** | 467 / 12.6 | 603 / 15.3 | 830 / 47.4 |
-| `sample_10k_lattice` | cold | 100 | 418.3 | 34.2 / 8.16 | 27.9 / 6.04 | 36.6 / 7.99 | 42.6 / 9.59 | 136 / 20.1 | 164 / 22.2 | 31.6 / 7.22 | 28.5 / 6.68 | 34.1 / 7.63 |
-| `visible_10_40km` | warm | 1 | 4.2 | 0.42 / 0.10 | 1.67 / 0.16 | 2.27 / 0.28 | 2.22 / 0.22 | **58.2** / **10.7** | **61.7** / **12.1** | 2.46 / 0.19 | 1.60 / 0.16 | 1.83 / 0.20 |
-| `visible_10_40km/fresh` | cold | 20 | 83.7 | 0.43 / 0.11 | 22.0 / 5.80 | 13.0 / 4.16 | 22.8 / 5.61 | 78.7 / 16.8 | 79.4 / 17.4 | 17.6 / 5.12 | 20.0 / 5.32 | 23.2 / 6.88 |
-| `radar_floor_20km` | cold | 300 | 1255.0 | 827 / 74.6 | 742 / 47.9 | 780 / 59.6 | **1316** / 105 | **4638** / **594** | **4511** / **565** | 802 / 65.0 | 746 / 49.3 | 928 / 78.3 |
-| `exposure_10_sites` | cold | 3000 | 12549.6 | 7635 / 515 | 6274 / 187 | 6018 / 183 | 9822 / 519 | **15303** / 2106 | **13162** / 1618 | 6347 / 202 | 6857 / 266 | 9106 / 452 |
-| `find_sites_20km` | cold | 500 | 2091.6 | 143 / 34.2 | 329 / 51.7 | 82.9 / 14.7 | 624 / 93.9 | 323 / 48.7 | 358 / 55.4 | 130 / 27.2 | 128 / 20.8 | 472 / 70.9 |
-| `find_sites_los_36` | cold | 10000 | 41832.0 | 23305 / 5563 | **115441** / **27559** | 5205 / 1238 | 6378 / 1515 | **293156** / **69950** | **343299** / **81917** | 27025 / 6449 | 4956 / 1178 | 6181 / 1474 |
-| `find_sites_horizon_first_touch` | cold | 5000 | 20916.0 | **36223** / 618 | 19243 / 463 | **99474** / 1670 | 10036 / 378 | 18695 / 391 | 18986 / 398 | 13962 / 423 | **25585** / 544 | **24702** / 577 |
-| `route_50km` | cold | 500 | 2091.6 | 0.38 / 0.10 | 15.2 / 4.40 | 5.06 / 2.06 | 25.8 / 6.61 | 3.23 / 0.78 | 131 / 31.6 | 24.3 / 8.71 | 3.90 / 1.59 | 36.7 / 8.83 |
-| `point_info/fresh` | cold | 20 | 83.7 | 2.43 / 0.60 | **345** / **52.9** | 58.9 / 13.7 | **765** / **118** | **104** / **22.6** | **103** / **21.6** | **87.5** / **20.1** | **133** / **24.9** | **608** / **95.9** |
-| `airfield_info/fresh` | cold | 20 | 83.7 | 0.41 / 0.10 | 64.6 / 16.7 | 31.1 / 8.77 | 70.9 / 18.0 | **122** / **32.4** | **90.7** / **22.7** | 42.8 / 11.6 | 38.6 / 10.6 | 55.2 / 14.9 |
-| `validate_1000` | cold | 3000 | 12549.6 | 401 / 95.8 | 2831 / 1322 | 3652 / 1635 | 6852 / **3003** | 3039 / 754 | 3705 / 915 | 1905 / 898 | 5178 / 1803 | 4140 / 2224 |
-| `cli_describe` | warm | 50 | 209.2 | 21.5 / 5.87 | 58.7 / 14.8 | 49.7 / 12.6 | 82.4 / 20.5 | 46.0 / 11.9 | 46.8 / 12.0 | 49.8 / 12.6 | 57.3 / 14.5 | 74.9 / 18.6 |
-| `cli_sample` | warm | 50 | 209.2 | 21.6 / 5.80 | 41.4 / 10.7 | 32.1 / 8.47 | 40.4 / 10.4 | 47.6 / 12.1 | 48.7 / 12.4 | 36.1 / 9.39 | 40.9 / 10.5 | 43.8 / 11.2 |
-| `cli_visible` | warm | 50 | 209.2 | 22.3 / 5.96 | 45.0 / 11.2 | 37.5 / 9.19 | 46.8 / 11.2 | 101 / 20.5 | 111 / 22.8 | 41.0 / 9.77 | 43.7 / 10.9 | 47.3 / 11.6 |
-| `index_empty_cache` | warm | 10000 | 41832.0 | 2.05 / 0.51 | 22438 / 8538 | 2822 / 1307 | **43971** / **10502** | 1779 / 453 | 1765 / 998 | 4645 / 2505 | 6308 / 3993 | 28793 / **10112** |
-| `find_sites_horizon` | cold | 500 | 2091.6 | — | 131 / 32.3 | 69.8 / 16.6 | 178 / 44.2 | 238 / 33.5 | 278 / 36.9 | 191 / 47.9 | 68.2 / 16.1 | 170 / 41.8 |
+| `open` | cold | 20 | 83.7 | 0.02 / 0.01 | 19.0 / 4.57 | 8.22 / 1.98 | 16.0 / 3.84 | 11.4 / 2.74 | 11.5 / 2.75 | 11.3 / 2.71 | 16.4 / 3.94 | 18.4 / 4.41 |
+| `describe` | cold | 20 | 83.7 | 0.07 / 0.02 | 8.13 / 1.95 | 7.58 / 1.82 | 11.6 / 2.78 | 6.96 / 1.67 | 6.94 / 1.66 | 7.50 / 1.80 | 8.02 / 1.93 | 11.0 / 2.64 |
+| `sample_10k_scattered` | cold | 3000 | 12549.6 | 52.3 / 12.5 | 2006 / 1598 | 1366 / 1040 | 3653 / 1794 | 378 / 95.0 | 397 / 98.8 | 1305 / 1239 | 1273 / 1145 | 2277 / 1706 |
+| `viewshed_20km` | cold | 300 | 10039.7 | 748 / 52.1 | 594 / 16.2 | 718 / 27.7 | 622 / 16.7 | 4375 / **541** | 4456 / **553** | 467 / 12.6 | 603 / 15.3 | 830 / 47.4 |
+| `sample_10k_lattice` | cold | 100 | 418.3 | 34.2 / 8.16 | 27.9 / 6.04 | 36.6 / 7.99 | 42.6 / 9.59 | 133 / 19.9 | 159 / 20.6 | 31.6 / 7.22 | 28.5 / 6.68 | 34.1 / 7.63 |
+| `visible_10_40km` | warm | 1 | 4.2 | 0.42 / 0.10 | 1.67 / 0.16 | 2.27 / 0.28 | 2.22 / 0.22 | **5.80** / **1.12** | **8.87** / **1.95** | 2.46 / 0.19 | 1.60 / 0.16 | 1.83 / 0.20 |
+| `visible_10_40km/fresh` | cold | 20 | 83.7 | 0.43 / 0.11 | 22.0 / 5.80 | 13.0 / 4.16 | 22.8 / 5.61 | 77.5 / 16.5 | 78.6 / 17.1 | 17.6 / 5.12 | 20.0 / 5.32 | 23.2 / 6.88 |
+| `radar_floor_20km` | cold | 300 | 10039.7 | 827 / 74.6 | 742 / 47.9 | 780 / 59.6 | 1316 / 105 | 4499 / **569** | 4501 / **569** | 802 / 65.0 | 746 / 49.3 | 928 / 78.3 |
+| `exposure_10_sites` | cold | 3000 | 100396.8 | 7635 / 515 | 6274 / 187 | 6018 / 183 | 9822 / 519 | 14337 / 1933 | 12159 / 1432 | 6347 / 202 | 6857 / 266 | 9106 / 452 |
+| `find_sites_20km` | cold | 500 | 2091.6 | 143 / 34.2 | 329 / 51.7 | 82.9 / 14.7 | 624 / 93.9 | 320 / 49.6 | 344 / 52.6 | 130 / 27.2 | 128 / 20.8 | 472 / 70.9 |
+| `find_sites_los_36` | cold | 10000 | 41832.0 | 23305 / 5563 | **115441** / **27559** | 5205 / 1238 | 6378 / 1515 | **293666** / **70068** | **344547** / **82206** | 27025 / 6449 | 4956 / 1178 | 6181 / 1474 |
+| `find_sites_horizon_first_touch` | cold | 5000 | 167328.0 | 36223 / 618 | 19243 / 463 | 99474 / 1670 | 10036 / 378 | 18655 / 391 | 18913 / 398 | 13962 / 423 | 25585 / 544 | 24702 / 577 |
+| `route_50km` | cold | 500 | 2091.6 | 0.38 / 0.10 | 15.2 / 4.40 | 5.06 / 2.06 | 25.8 / 6.61 | 3.15 / 0.76 | 51.1 / 12.2 | 24.3 / 8.71 | 3.90 / 1.59 | 36.7 / 8.83 |
+| `point_info/fresh` | cold | 150 | 627.5 | 2.43 / 0.60 | 345 / 52.9 | 58.9 / 13.7 | **765** / 118 | 96.1 / 20.7 | 96.4 / 20.5 | 87.5 / 20.1 | 133 / 24.9 | 608 / 95.9 |
+| `airfield_info/fresh` | cold | 20 | 83.7 | 0.41 / 0.10 | 64.6 / 16.7 | 31.1 / 8.77 | 70.9 / 18.0 | **123** / **33.1** | **86.0** / **21.2** | 42.8 / 11.6 | 38.6 / 10.6 | 55.2 / 14.9 |
+| `validate_1000` | cold | 3000 | 12549.6 | 401 / 95.8 | 2831 / 1322 | 3652 / 1635 | 6852 / **3003** | 3067 / 761 | 3732 / 922 | 1905 / 898 | 5178 / 1803 | 4140 / 2224 |
+| `cli_describe` | warm | 50 | 209.2 | 21.5 / 5.87 | 58.7 / 14.8 | 49.7 / 12.6 | 82.4 / 20.5 | 44.0 / 11.3 | 45.2 / 11.6 | 49.8 / 12.6 | 57.3 / 14.5 | 74.9 / 18.6 |
+| `cli_sample` | warm | 50 | 209.2 | 21.6 / 5.80 | 41.4 / 10.7 | 32.1 / 8.47 | 40.4 / 10.4 | 48.7 / 12.5 | 48.3 / 12.3 | 36.1 / 9.39 | 40.9 / 10.5 | 43.8 / 11.2 |
+| `cli_visible` | warm | 50 | 209.2 | 22.3 / 5.96 | 45.0 / 11.2 | 37.5 / 9.19 | 46.8 / 11.2 | 102 / 20.7 | 105 / 21.5 | 41.0 / 9.77 | 43.7 / 10.9 | 47.3 / 11.6 |
+| `index_empty_cache` | warm | 10000 | 41832.0 | 2.05 / 0.51 | 22438 / 8538 | 2822 / 1307 | **43971** / **10502** | 1772 / 449 | 1437 / 369 | 4645 / 2505 | 6308 / 3993 | 28793 / **10112** |
+| `find_sites_horizon` | cold | 500 | 2091.6 | — | 131 / 32.3 | 69.8 / 16.6 | 178 / 44.2 | 243 / 34.4 | 271 / 35.1 | 191 / 47.9 | 68.2 / 16.1 | 170 / 41.8 |
 
 `find_sites_horizon` has no `Synth` figure: `Synth` keeps no horizons, so each
 touch there is the first.
@@ -135,14 +139,14 @@ started once per request; each meets 50 ms on every terrain, the slowest
 22.8 ms. A batch of 100 lines (50 `visible`, 50 `sample`) through one process,
 warm, with its peak memory:
 
-| Terrain | Mc (no bound) | ms | Peak MiB (target 64) |
+| Terrain | Mc (no bound) | ms | Peak MiB (target 150) |
 |---|---|---|---|
 | `Synth` | 55.8 | 14.0 | 2.6 |
 | Afghanistan | 529 | 86.7 | 45.0 |
 | Caucasus | 483 | 88.1 | 40.7 |
-| GermanyCW | 1 274 | 204 | **65.6** |
-| MarianaIslands | 3 074 | 669 | **100** |
-| MarianaIslandsWWII | 3 535 | 752 | **125** |
+| GermanyCW | 1 274 | 204 | 65.6 |
+| MarianaIslands | 1 011 | 221 | 115 |
+| MarianaIslandsWWII | 1 078 | 235 | 118 |
 | Nevada | 471 | 76.7 | 26.3 |
 | PersianGulf | 386 | 75.0 | 21.0 |
 | Syria | 794 | 135 | 48.7 |
@@ -155,15 +159,13 @@ the measurement and taken out again.
 
 | Miss | Measured cause |
 |---|---|
-| The budget of a parallel operation: `find_sites_horizon_first_touch`, `radar_floor_20km` on GermanyCW, `exposure_10_sites` on the Marianas | The budget is one core, the work ran on 2–14 cores' worth (cycles ÷ rate ÷ wall). Each wall is inside its target: 0.38–1.7 s of 5 s, 105 ms of 300 ms, 1.6–2.1 s of 3 s. |
-| `visible_10_40km` on the Marianas, 14× | Blocks are 4.5 MiB against GermanyCW's 0.7, and each line turns over 5 of them in the 32 MiB block budget, read and prepared again. Over 200 lines the blocks read fall from 985 to 0 with 512 MiB, 13.8 → 0.9 ms a line. |
-| `viewshed_20km`, `radar_floor_20km` on the Marianas, 3.5–3.7× | Not the block budget: unchanged from 16 MiB to 1 GiB. They spread over 1.9 cores against 3–9 elsewhere. Those two facts are as far as this was taken. |
+| The wall of a parallel operation: `viewshed_20km`, `radar_floor_20km` on the Marianas, 1.8–1.9× | Within the 8-core budget. Not the block budget: unchanged from 16 MiB to 1 GiB. They spread over 1.9 cores against 3–9 elsewhere. Those two facts are as far as this was taken. |
+| `visible_10_40km` on the Marianas, 1.4–2.1× | Blocks are 4.5 MiB against GermanyCW's 0.7, so each line still turns over blocks at 64 MiB. Over 200 lines the blocks read fell from 985 at 32 MiB to 0 with 512 MiB, 13.8 → 0.9 ms a line. |
 | `find_sites_los_36`: Afghanistan 2.8×, MarianaIslands 7×, MarianaIslandsWWII 8× | One thread: cycles ÷ rate equals the wall. Reads do not matter: 42–87 blocks a request, the same at 32 and 256 MiB. It is sightlines × triangles: 811 k lines of 231 triangles on Afghanistan, 215 k of 620 on MarianaIslands, against 323 k of 41 on Caucasus. |
-| `point_info/fresh`, 1.05–9× | The first nearest road. Of 114 ms on GermanyCW, 91 ms are the per-point step, 47 of them loading the 144 MB road graph; of 52 ms on Afghanistan, 42 and 23. Warm and cold agree, so it is CPU, not the disk. Held, `point_info` takes 0.08–5.5 ms. |
+| `point_info/fresh` on GermanyCW, 1.2× on cycles alone | The first nearest road. Of 114 ms on GermanyCW, 91 ms are the per-point step, 47 of them loading the 144 MB road graph; of 52 ms on Afghanistan, 42 and 23. Warm and cold agree, so it is CPU, not the disk. Held, `point_info` takes 0.08–5.5 ms. |
 | `airfield_info/fresh` on the Marianas, 1.1–1.5× | Not split further. `data/airfield-info.md` has the runway width as the cost on those terrains. |
 | `index_empty_cache` on GermanyCW, 1.05× | The road build: `design.md` §8 has 9.8 s of it, against 10.5 s here. Syria is 1 % over on the wall alone. |
 | `validate_1000` on GermanyCW, wall 0.1 % over | Cold: half a core's worth of cycles over the wall, so most of the time is the disk's. 6.9 Gc against 12.5 Gc. |
-| Memory of the 100-line batch | Not the block budget, as below: on the Marianas a batch holds 100–125 MiB whatever the budget. GermanyCW is 1.6 MiB over. Not split further. |
 
 The block budget against the Mariana misses, MarianaIslands, warm, 2 rounds:
 
@@ -175,18 +177,22 @@ The block budget against the Mariana misses, MarianaIslands, warm, 2 rounds:
 | 256 | 3.6 / 0.81 | 4 562 / 541 | 14 274 / 1 895 | 769 / 168 | 108 |
 | 1024 | 3.7 / 0.80 | 4 392 / 526 | 14 327 / 1 898 | 767 / 168 | 107 |
 
-## Decisions open
+## Decided
 
-None of these is settled here, and no target has moved.
+ADR 0007 has the reasoning of 1, 4 and 5.
 
-1. **Whether a cycle budget is one core.** The targets are stated in time.
-   One core is the strict reading, and it marks parallel work as a miss that
-   no user would see.
-2. **The block budget.** 64 MiB takes the Mariana `visible` miss from 14× to
-   1.3× and speeds the batch 3×; peak memory stays 100–115 MiB at every
-   budget.
-3. **`find_sites` with sightlines runs on one thread.** Three terrains miss
-   10 s, the Marianas by 7–8×.
-4. **`point_info` in a fresh process** cannot meet 20 ms where the road graph
-   is large, while the first nearest road loads it.
-5. **The 64 MiB memory target** on the Marianas.
+1. **A cycle budget** is the target's time on 8 cores for `viewshed_20km`,
+   `radar_floor_20km`, `exposure_10_sites` and
+   `find_sites_horizon_first_touch`, whose answers are computed over the pool
+   on any source, and on one core for every other case. Where only an
+   install's reads of blocks fan out, as in `sample`, `visible` or
+   `point_info`, the case stays on one core. So does `index_empty_cache`:
+   two steps of its road build fan out, and it averaged at most one core.
+2. **The block budget** is 64 MiB, from the table above. The rerun at 64 MiB
+   took `visible_10_40km` warm from 14× to 1.4× on MarianaIslands and to 2.1×
+   on MarianaIslandsWWII.
+3. **`find_sites` with sightlines** goes parallel in plan task Q17.
+4. **`point_info` in a fresh process** has a target of 150 ms. Held, it keeps
+   its target.
+5. **The memory target** of a query process is 150 MiB. The Mariana cause
+   stays not split further.
