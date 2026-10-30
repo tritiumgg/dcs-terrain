@@ -712,3 +712,342 @@ mod tests {
     }
 }
 
+/// Opt-in: `airfield_info` for every airdrome of every terrain of a real
+/// install, each runway checked against its table row, its true course
+/// against Vincenty's geodesic, its width against a scan across it every
+/// 2 cm and the elevation against a scan along every centerline every
+/// meter. Set `DCSTERRAIN_INSTALL` to the install root; without it this
+/// passes reading nothing, which is what CI does. Run it with `--release`
+/// and `--nocapture` for the figures. The install is only read; the cache
+/// is a scratch directory.
+#[cfg(test)]
+mod install_tests {
+    use std::path::PathBuf;
+    use std::time::Instant;
+
+    use super::*;
+    use crate::cache::Cache;
+    use crate::crs::tests::{geodesic_azimuth, turn};
+    use crate::decode::install::terrains;
+    use crate::query::route::install_tests::percentile;
+    use crate::scratch::Scratch;
+    use crate::source::Ground;
+    use crate::threads::cpu_cycles;
+    use crate::types::AirdromeRef;
+
+    /// The scan across a runway steps this far.
+    const SCAN_STEP_M: f64 = 0.02;
+
+    /// Wall milliseconds and millions of CPU cycles since `since`.
+    fn spent(since: (Instant, u64)) -> (f64, f64) {
+        let cycles = cpu_cycles().saturating_sub(since.1) as f64 / 1e6;
+        (since.0.elapsed().as_secs_f64() * 1000.0, cycles)
+    }
+
+    fn now() -> (Instant, u64) {
+        (Instant::now(), cpu_cycles())
+    }
+
+    fn on(g: &Option<Ground>) -> bool {
+        g.is_some_and(|g| g.surface == SURFACE_RUNWAY)
+    }
+
+    /// Brute force: the run of runway surface through `c` along `n`,
+    /// sampled every `SCAN_STEP_M` out to the width search's reach and
+    /// across any seam narrower than `WIDTH_SEAM_M`, as many samples as it
+    /// spans times the step; `None` where `c` is off the runway or the run
+    /// reaches the reach.
+    fn scan_width(src: &dyn Source, c: [f64; 2], n: [f64; 2]) -> Option<f64> {
+        let k = ((WIDTH_REACH_M + WIDTH_SEAM_M) / SCAN_STEP_M).round() as i64;
+        let reach = (WIDTH_REACH_M / SCAN_STEP_M).round() as usize;
+        let seam = (WIDTH_SEAM_M / SCAN_STEP_M).round() as usize;
+        let pts: Vec<[f64; 2]> = (-k..=k)
+            .map(|i| {
+                let d = i as f64 * SCAN_STEP_M;
+                [c[0] + d * n[0], c[1] + d * n[1]]
+            })
+            .collect();
+        let g: Vec<bool> = src.points(&pts).unwrap().iter().map(on).collect();
+        let mid = k as usize;
+        if !g[mid] {
+            return None;
+        }
+        // The first sample off the paint that begins a seam's width off it,
+        // out from the center each way.
+        let out = |step: &dyn Fn(usize) -> usize| {
+            (1..=reach).find(|&d| (0..seam).all(|s| !g[step(d + s)]))
+        };
+        let lo = out(&|d| mid - d)?;
+        let hi = out(&|d| mid + d)?;
+        Some((lo + hi - 1) as f64 * SCAN_STEP_M)
+    }
+
+    /// The runway number a designator starts with, 1 to 36.
+    fn number(designator: &str) -> Option<f64> {
+        let digits: String = designator
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        let n: u32 = digits.parse().ok()?;
+        (1..=36).contains(&n).then_some(f64::from(n))
+    }
+
+    /// A signed angle in (-180, 180].
+    fn signed(deg: f64) -> f64 {
+        let d = deg.rem_euclid(360.0);
+        if d > 180.0 { d - 360.0 } else { d }
+    }
+
+    #[test]
+    fn every_airdrome_answers_on_every_installed_terrain() {
+        let Some(root) = std::env::var_os("DCSTERRAIN_INSTALL").map(PathBuf::from) else {
+            eprintln!("DCSTERRAIN_INSTALL is not set; skipped");
+            return;
+        };
+        // Five threads, so the runs beside this one keep their share.
+        crate::threads::init(Some(5));
+        println!(
+            "| terrain | build | airdromes | answered | no id | no runway | runways | course, length = tables | true off geodesic max ° | convergence max ° | widths | width p50 (min–max) m | width off scan max m | station spread p50 / max m | elevation over scan max m | declination from designators ° | designator off p95 / max ° | thresholds on runway | unnamed navaid kinds | stands |"
+        );
+        println!(
+            "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+        );
+        let mut timing = Vec::new();
+        let mut outliers = Vec::new();
+        let scratch = Scratch::new();
+        let cache = Cache::new(&scratch.0);
+        for listed in terrains(&root).unwrap() {
+            let Some(id) = listed.id else {
+                println!("| {} | declares no id |", listed.dir);
+                continue;
+            };
+            let clock = now();
+            let t = match Terrain::open(&root, &id, &cache, true) {
+                Ok(t) => t,
+                Err(e) => {
+                    println!("| {id} | refused: {} |", e.0);
+                    continue;
+                }
+            };
+            let src = t.source();
+            let opened = spent(clock);
+            let build = src.identity().dcs_build.clone();
+            let clock = now();
+            let tables = src.tables().unwrap();
+            let prime = spent(clock);
+            let tm = tables.crs.tmerc();
+
+            let (mut no_id, mut no_runway, mut n_runways, mut n_stands) = (0, 0, 0, 0);
+            let (mut true_off, mut convergence, mut width_off, mut elev_over) =
+                (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+            let (mut widths, mut spreads, mut residuals) = (Vec::new(), Vec::new(), Vec::new());
+            let (mut on_paint, mut ends, mut unnamed) = (0, 0, 0);
+            let (mut cold, mut warm) = (Vec::new(), Vec::new());
+            let mut width_spent = (0.0, 0.0);
+            for a in &tables.airdromes {
+                let by =
+                    a.id.map_or_else(|| AirdromeRef::Name(a.name_id.clone()), AirdromeRef::Id);
+                let q = AirfieldInfoRequest {
+                    airdrome: by,
+                    fits: None,
+                    geojson: false,
+                };
+                let clock = now();
+                let v = airfield_info(&t, q.clone())
+                    .unwrap_or_else(|e| panic!("{id} {}: {e:?}", a.name_id));
+                cold.push(spent(clock));
+                let clock = now();
+                let again = airfield_info(&t, q).unwrap();
+                warm.push(spent(clock));
+                assert_eq!(v.runways, again.runways, "{id} {}: twice alike", a.name_id);
+                let by_name = AirfieldInfoRequest {
+                    airdrome: AirdromeRef::Name(a.name_id.clone()),
+                    fits: None,
+                    geojson: false,
+                };
+                assert_eq!(airfield_info(&t, by_name).unwrap().name_id, a.name_id);
+                assert_eq!(v.name_id, a.name_id);
+                no_id += usize::from(a.id.is_none());
+                no_runway += usize::from(v.runways.is_empty());
+
+                let rows: Vec<_> = (tables.runways.iter())
+                    .filter(|r| r.airdrome_name_id == a.name_id)
+                    .collect();
+                assert_eq!(v.runways.len(), rows.len(), "{id} {}", a.name_id);
+                let mut along: Vec<[f64; 2]> = Vec::new();
+                for (r, row) in v.runways.iter().zip(&rows) {
+                    let (p1, p2) = ([row.edge1_x, row.edge1_z], [row.edge2_x, row.edge2_z]);
+                    let what = format!("{id} {} {}", a.name_id, r.designator);
+                    // The answer is the table's, and the table's course its
+                    // own ends'.
+                    assert_eq!(r.course_grid_deg, degrees(row.course), "{what}");
+                    assert!(
+                        turn(degrees(row.course), grid_bearing(p1, p2)) < 1e-9,
+                        "{what}"
+                    );
+                    assert_eq!(r.length, (p2[0] - p1[0]).hypot(p2[1] - p1[1]), "{what}");
+                    assert_eq!(r.designator, row.name, "{what}");
+                    let th = &r.thresholds;
+                    assert_eq!(
+                        [th[0].x, th[0].z, th[1].x, th[1].z],
+                        [p1[0], p1[1], p2[0], p2[1]]
+                    );
+                    for (k, (p, o)) in [(p1, p2), (p2, p1)].into_iter().enumerate() {
+                        let ((la, lo), (lb, lob)) =
+                            (tm.to_latlon(p[0], p[1]), tm.to_latlon(o[0], o[1]));
+                        let off = turn(th[k].course_true_deg, geodesic_azimuth(la, lo, lb, lob));
+                        assert!(off < 1e-5, "{what}: {off}");
+                        true_off = true_off.max(off);
+                        convergence =
+                            convergence.max(turn(th[k].course_true_deg, th[k].course_grid_deg));
+                        if let Some(n) = number(&th[k].designator) {
+                            residuals.push((
+                                signed(th[k].course_true_deg - 10.0 * n),
+                                format!("{what} {}", th[k].designator),
+                            ));
+                        }
+                        ends += 1;
+                        on_paint += usize::from(on(&src.point(p[0], p[1]).unwrap()));
+                    }
+                    // Width against the scan, station by station.
+                    let len = r.length;
+                    let n = [-(p2[1] - p1[1]) / len, (p2[0] - p1[0]) / len];
+                    let clock = now();
+                    let each = runway_widths(src, p1, p2, &WIDTH_STATIONS).unwrap();
+                    let w = spent(clock);
+                    width_spent = (width_spent.0 + w.0, width_spent.1 + w.1);
+                    for (&f, w) in WIDTH_STATIONS.iter().zip(&each) {
+                        let c = [p1[0] + f * (p2[0] - p1[0]), p1[1] + f * (p2[1] - p1[1])];
+                        let scan = scan_width(src, c, n);
+                        match (w, scan) {
+                            (Some(w), Some(s)) => {
+                                let off = (w - s).abs();
+                                assert!(
+                                    off <= WIDTH_TOLERANCE_M + SCAN_STEP_M + 1e-6,
+                                    "{what} at {f}: {w} against {s}"
+                                );
+                                width_off = width_off.max(off);
+                            }
+                            (None, None) => {}
+                            _ => panic!("{what} at {f}: {w:?} against the scan's {scan:?}"),
+                        }
+                    }
+                    let got: Vec<f64> = each.iter().flatten().copied().collect();
+                    if let Some(w) = r.width {
+                        widths.push(w);
+                        let (lo, hi) = got
+                            .iter()
+                            .fold((f64::MAX, f64::MIN), |(l, h), &v| (l.min(v), h.max(v)));
+                        spreads.push(hi - lo);
+                    }
+                    let steps = len.ceil() as usize;
+                    along.extend((0..=steps).map(|i| {
+                        let f = i as f64 / steps as f64;
+                        [p1[0] + f * (p2[0] - p1[0]), p1[1] + f * (p2[1] - p1[1])]
+                    }));
+                }
+                n_runways += rows.len();
+                // The elevation against a scan along every centerline, or
+                // over the stands where there is no runway.
+                let scan_at = |pts: &[[f64; 2]]| {
+                    (src.points(pts).unwrap().into_iter())
+                        .flatten()
+                        .map(|g| g.height)
+                        .reduce(f64::max)
+                };
+                if v.runways.is_empty() {
+                    let at: Vec<[f64; 2]> = v.stands.iter().map(|s| [s.x, s.z]).collect();
+                    assert_eq!(v.elevation, scan_at(&at), "{id} {}", a.name_id);
+                } else if let (Some(e), Some(s)) = (v.elevation, scan_at(&along)) {
+                    assert!(
+                        e >= s - 1e-6,
+                        "{id} {}: {e} under the scan's {s}",
+                        a.name_id
+                    );
+                    elev_over = elev_over.max(e - s);
+                }
+                let stands = (tables.stands.iter())
+                    .filter(|s| s.airdrome_name_id == a.name_id)
+                    .count();
+                assert_eq!(v.stands.len(), stands, "{id} {}", a.name_id);
+                n_stands += stands;
+                let beacons = (tables.beacons.iter())
+                    .filter(|b| {
+                        b.beacon_id
+                            .as_ref()
+                            .is_some_and(|i| a.beacon_ids.contains(i))
+                    })
+                    .count();
+                assert_eq!(v.navaids.len(), beacons, "{id} {}", a.name_id);
+                unnamed += v
+                    .navaids
+                    .iter()
+                    .filter(|n| n.kind_code.is_some() && n.kind.is_none())
+                    .count();
+            }
+            // The designators' declination: the median of each threshold's
+            // true course less its number's tens of degrees.
+            let decl = {
+                let mut r: Vec<f64> = residuals.iter().map(|r| r.0).collect();
+                r.sort_by(f64::total_cmp);
+                r.get(r.len() / 2).copied().unwrap_or(f64::NAN)
+            };
+            let offs: Vec<f64> = residuals.iter().map(|r| signed(r.0 - decl).abs()).collect();
+            for (r, off) in residuals.iter().zip(&offs) {
+                if *off > 5.0 {
+                    outliers.push(format!("{} off by {off:.1}°", r.1));
+                }
+            }
+            let mm = |v: &[f64]| {
+                if v.is_empty() {
+                    return "none".to_string();
+                }
+                let (lo, hi) = v
+                    .iter()
+                    .fold((f64::MAX, f64::MIN), |(l, h), &x| (l.min(x), h.max(x)));
+                format!("{:.1} ({lo:.1}–{hi:.1})", percentile(v, 0.5))
+            };
+            println!(
+                "| {id} | {build} | {} | {} | {no_id} | {no_runway} | {n_runways} | all | {true_off:.1e} | {convergence:.2} | {} of {n_runways} | {} | {width_off:.3} | {:.2} / {:.2} | {elev_over:.3} | {decl:+.1} | {:.1} / {:.1} | {on_paint} of {ends} | {unnamed} | {n_stands} |",
+                tables.airdromes.len(),
+                tables.airdromes.len(),
+                widths.len(),
+                mm(&widths),
+                percentile(&spreads, 0.5),
+                percentile(&spreads, 1.0),
+                percentile(&offs, 0.95),
+                percentile(&offs, 1.0),
+            );
+            let col = |v: &[(f64, f64)], k: usize, p: f64| {
+                percentile(
+                    &v.iter()
+                        .map(|t| if k == 0 { t.0 } else { t.1 })
+                        .collect::<Vec<_>>(),
+                    p,
+                )
+            };
+            timing.push(format!(
+                "| {id} | {:.0} / {:.0} | {:.0} / {:.0} | {:.1} / {:.1} | {:.1} / {:.1} | {:.1} / {:.1} | {:.1} / {:.1} | {:.0} % / {:.0} % |",
+                opened.0, opened.1, prime.0, prime.1,
+                col(&cold, 0, 0.5), col(&cold, 1, 0.5),
+                col(&cold, 0, 1.0), col(&cold, 1, 1.0),
+                col(&warm, 0, 0.5), col(&warm, 1, 0.5),
+                col(&warm, 0, 1.0), col(&warm, 1, 1.0),
+                100.0 * width_spent.0 / warm.iter().map(|t| t.0).sum::<f64>(),
+                100.0 * width_spent.1 / warm.iter().map(|t| t.1).sum::<f64>(),
+            ));
+        }
+        println!();
+        println!(
+            "| terrain | open ms / Mcycles | tables | cold p50 ms / Mcycles | cold max | warm p50 | warm max | widths of warm, wall / cycles |"
+        );
+        println!("|---|---|---|---|---|---|---|---|");
+        for row in timing {
+            println!("{row}");
+        }
+        println!();
+        for o in outliers {
+            println!("- {o}");
+        }
+    }
+}
