@@ -200,10 +200,10 @@ ADR 0007 has the reasoning of 1, 4 and 5.
    every terrain meets 10 s, Afghanistan at 2.5 s and the Marianas at 6.3 and
    7.3 s; the Marianas are over the 8-core cycle budget, for the reason above.
    A pool thread takes a line's blocks one at a time, and one thread reads at
-   a time, because each thread reading its own held 295 MiB on MarianaIslands
-   in one call: it now holds 112 MiB against 84 on one thread, in the same
-   5.0 s. Answers on Afghanistan and the Marianas match `--threads 1` byte for
-   byte.
+   a time. Over one 12 km square of 36 observers on MarianaIslands, each thread
+   reading its own held 295 MiB; this holds 112 MiB against 84 on one thread,
+   in the same 5.0 s. Answers on Afghanistan and the Marianas match
+   `--threads 1` byte for byte.
 4. **`point_info` in a fresh process** has a target of 150 ms. Held, it keeps
    its target.
 5. **The memory target** of a query process is 150 MiB. The Mariana cause
