@@ -793,7 +793,13 @@ impl Bench {
     fn round(&self, case: &Case) -> (Vec<Sample>, usize) {
         let mut out = Vec::new();
         let mut errors = 0;
-        let ask = |t: &Terrain, r: &Value| query::answer(t, case.op, r).is_ok();
+        let ask = |t: &Terrain, r: &Value| match query::answer(t, case.op, r) {
+            Ok(_) => true,
+            Err(issues) => {
+                eprintln!("{}: {}: {}", case.name, issues[0].code, issues[0].message);
+                false
+            }
+        };
         match case.mode {
             Mode::Held => {
                 let t = self.target.open(&self.cache);
