@@ -21,6 +21,9 @@ use crate::types::{
 
 /// The most places one request returns.
 const LIMIT_MAX: u32 = 1000;
+/// The most places one request outlines: each reads its box's scenery
+/// again, about 0.1 s for a large city.
+const OUTLINES_MAX: u32 = 100;
 /// A building's circle is buffered by half the linking gap, so the buffers
 /// of two linked buildings meet.
 const BUFFER_M: f64 = GAP_M / 2.0;
@@ -173,6 +176,13 @@ pub fn towns(terrain: &Terrain, q: TownsRequest) -> Result<TownsResponse, Vec<Is
             "limit",
         )]);
     }
+    if q.outlines && q.limit > OUTLINES_MAX {
+        return Err(vec![Issue::new(
+            "invalid_request",
+            &format!("with outlines, must be 1 to {OUTLINES_MAX}"),
+            "limit",
+        )]);
+    }
     let src = terrain.source();
     let area = q
         .region
@@ -273,6 +283,8 @@ pub(super) struct Lookup<'a> {
     cells: HashMap<(i64, i64), Vec<u32>>,
     /// Each place's buildings' ids, read once for the request.
     members: HashMap<u32, HashSet<u64>>,
+    /// Each 50 m cell's answer, so points sharing a cell read once.
+    answered: HashMap<(i64, i64), Option<&'a Place>>,
 }
 
 /// The side of the cells places are looked up in.
@@ -301,6 +313,7 @@ impl<'a> Lookup<'a> {
             places,
             cells,
             members: HashMap::new(),
+            answered: HashMap::new(),
         }
     }
 
@@ -311,6 +324,16 @@ impl<'a> Lookup<'a> {
         x: f64,
         z: f64,
     ) -> Result<Option<&'a Place>, Vec<Issue>> {
+        let cell = ((x / CELL_M).floor() as i64, (z / CELL_M).floor() as i64);
+        if let Some(&p) = self.answered.get(&cell) {
+            return Ok(p);
+        }
+        let p = self.find(src, x, z)?;
+        self.answered.insert(cell, p);
+        Ok(p)
+    }
+
+    fn find(&mut self, src: &dyn Source, x: f64, z: f64) -> Result<Option<&'a Place>, Vec<Issue>> {
         let center = |v: f64| ((v / CELL_M).floor() + 0.5) * CELL_M;
         let (cx, cz) = (center(x), center(z));
         let e = BUFFER_M + RADIUS_CAP_M;
@@ -532,6 +555,8 @@ mod tests {
         assert!(f.windows(2).all(|w| w[0] >= w[1]), "{f:?}");
         let issue = answer(&t, "towns", &json!({"limit": 0})).unwrap_err();
         assert_eq!(issue[0].code, "invalid_request");
+        let issue = answer(&t, "towns", &json!({"limit": 101, "outlines": true})).unwrap_err();
+        assert_eq!(issue[0].path, "limit");
     }
 
     #[test]

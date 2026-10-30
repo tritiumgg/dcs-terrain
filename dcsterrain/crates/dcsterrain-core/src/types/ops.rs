@@ -1095,7 +1095,7 @@ pub struct TownsRequest {
     pub min_buildings: u32,
     #[serde(default)]
     pub sort: TownsSort,
-    /// At most 1 000.
+    /// At most 1 000, or 100 with outlines.
     #[serde(default = "default_towns_limit")]
     pub limit: u32,
     /// Each place's outline: its buildings buffered by 100 m, rasterized at

@@ -4685,7 +4685,7 @@
         },
         "limit": {
           "default": 50,
-          "description": "At most 1 000.",
+          "description": "At most 1 000, or 100 with outlines.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"

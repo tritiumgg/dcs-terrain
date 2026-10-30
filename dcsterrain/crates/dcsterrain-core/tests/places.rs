@@ -253,6 +253,9 @@ fn every_installed_terrain_records_its_places() {
                 json!({"x": b[0] + unit() * (b[2] - b[0]), "z": b[1] + unit() * (b[3] - b[1])})
             })
             .collect();
+        // The road graph and the tables read first, which a first request
+        // pays for whatever it asks.
+        answer(&tq, "point_info", &json!({"points": [pts[0]]})).unwrap();
         let (c, s) = (cpu_cycles(), Instant::now());
         let v = answer(&tq, "point_info", &json!({"points": pts})).unwrap();
         let (pi_ms, pi_mc) = (
