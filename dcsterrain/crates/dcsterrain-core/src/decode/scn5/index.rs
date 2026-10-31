@@ -15,6 +15,7 @@
 
 use std::io::{self, Read, Seek};
 
+use super::tree::Groups;
 use super::{
     Error, GroupRecord, MAX_MODELS, Model, Pool, PoolToc, Scene, layout, locate, malformed, placed,
 };
@@ -108,6 +109,7 @@ pub struct Index {
     pub models: Vec<Model>,
     pub nodes: Nodes,
     pub group: Vec<GroupRecord>,
+    pub(super) groups: Groups,
     /// Objects, lines, trees.
     pub pools: [PoolToc; 3],
 }
@@ -142,6 +144,7 @@ impl Scene {
             models: self.models.clone(),
             nodes: Nodes::of(&nodes),
             group: self.group.clone(),
+            groups: Groups::default(),
             pools: self.pools,
         })
     }
@@ -392,6 +395,7 @@ impl Index {
             models,
             nodes,
             group,
+            groups: Groups::default(),
             pools,
         })
     }

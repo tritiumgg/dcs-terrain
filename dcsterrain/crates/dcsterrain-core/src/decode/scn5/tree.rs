@@ -3,8 +3,11 @@
 //! node of each box that meets it. Every read is positional, so a query
 //! touches only the bytes it needs.
 
+use std::sync::OnceLock;
+
 use super::{
-    Error, Index, Instance, Pool, f32_at, heading_of, layout, malformed, model_of, u32_at,
+    Error, GroupRecord, Index, Instance, Pool, f32_at, heading_of, layout, malformed, model_of,
+    u32_at,
 };
 use crate::decode::surface5::ReadAt;
 
@@ -19,6 +22,129 @@ fn meets(a: [f64; 4], b: [f64; 4]) -> bool {
 /// The x, z of a world box stored as f32 min x, y, z, max x, y, z at `at`.
 fn flat(b: &[u8], at: usize) -> [f64; 4] {
     [0, 2, 3, 5].map(|k| f64::from(f32_at(b, at + 4 * k)))
+}
+
+/// The side of a cell of the group records' grid, in meters.
+const GROUP_CELL_M: f64 = 1024.0;
+/// The most cells that grid has: its cell doubles until it fits.
+const GROUP_CELLS: f64 = (1 << 20) as f64;
+
+/// The group records by where they may reach, built when first asked: every
+/// box a query asks of a scene met every record, each a sine and a cosine.
+#[derive(Debug, Clone)]
+struct GroupGrid {
+    x0: f64,
+    z0: f64,
+    cell: f64,
+    rows: usize,
+    cols: usize,
+    /// Cell k's records are `ids[start[k]..start[k + 1]]`.
+    start: Vec<u32>,
+    ids: Vec<u32>,
+}
+
+impl GroupGrid {
+    fn new(index: &Index) -> GroupGrid {
+        // However a record is turned its footprint lies within its reach.
+        let reach = |g: &GroupRecord| {
+            let b = &index.models[g.model as usize].bbox;
+            let far = |lo: f32, hi: f32| f64::from(lo.abs().max(hi.abs()));
+            let r = far(b[0], b[3]).hypot(far(b[2], b[5])) + 1.0;
+            [g.pos[0] - r, g.pos[2] - r, g.pos[0] + r, g.pos[2] + r]
+        };
+        let mut all = [
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        ];
+        for g in &index.group {
+            let r = reach(g);
+            all = [
+                all[0].min(r[0]),
+                all[1].min(r[1]),
+                all[2].max(r[2]),
+                all[3].max(r[3]),
+            ];
+        }
+        let mut out = GroupGrid {
+            x0: all[0],
+            z0: all[1],
+            cell: GROUP_CELL_M,
+            rows: 0,
+            cols: 0,
+            start: vec![0],
+            ids: Vec::new(),
+        };
+        if index.group.is_empty() {
+            return out;
+        }
+        let (w, h) = (all[2] - all[0], all[3] - all[1]);
+        while (w / out.cell + 1.0) * (h / out.cell + 1.0) > GROUP_CELLS {
+            out.cell *= 2.0;
+        }
+        out.rows = (w / out.cell) as usize + 1;
+        out.cols = (h / out.cell) as usize + 1;
+        let mut start = vec![0u32; out.rows * out.cols + 1];
+        for g in &index.group {
+            out.each_cell(reach(g), |k| start[k + 1] += 1);
+        }
+        for k in 1..start.len() {
+            start[k] += start[k - 1];
+        }
+        let mut fill = start.clone();
+        let mut ids = vec![0u32; start[start.len() - 1] as usize];
+        for (i, g) in index.group.iter().enumerate() {
+            out.each_cell(reach(g), |k| {
+                ids[fill[k] as usize] = i as u32;
+                fill[k] += 1;
+            });
+        }
+        (out.start, out.ids) = (start, ids);
+        out
+    }
+
+    /// Calls `f` with each cell the box meets.
+    fn each_cell(&self, b: [f64; 4], mut f: impl FnMut(usize)) {
+        if self.rows == 0 {
+            return;
+        }
+        let at = |v: f64, o: f64, n: usize| (((v - o) / self.cell).max(0.0) as usize).min(n - 1);
+        let (r0, r1) = (at(b[0], self.x0, self.rows), at(b[2], self.x0, self.rows));
+        let (c0, c1) = (at(b[1], self.z0, self.cols), at(b[3], self.z0, self.cols));
+        for r in r0..=r1 {
+            for c in c0..=c1 {
+                f(r * self.cols + c);
+            }
+        }
+    }
+
+    /// The records that may reach into the box, each cell's, a record perhaps
+    /// more than once.
+    fn near(&self, b: [f64; 4]) -> Vec<u32> {
+        let mut out = Vec::new();
+        self.each_cell(b, |k| {
+            out.extend_from_slice(&self.ids[self.start[k] as usize..self.start[k + 1] as usize]);
+        });
+        out
+    }
+}
+
+/// The group grid of an index, which follows from its records and so takes
+/// no part in comparing two.
+#[derive(Debug, Clone, Default)]
+pub struct Groups(OnceLock<GroupGrid>);
+
+impl Groups {
+    fn get(&self, index: &Index) -> &GroupGrid {
+        self.0.get_or_init(|| GroupGrid::new(index))
+    }
+}
+
+impl PartialEq for Groups {
+    fn eq(&self, _: &Groups) -> bool {
+        true
+    }
 }
 
 /// The ground a model covers, as a box: its model-local box turned by
@@ -223,11 +349,15 @@ impl Index {
         }
         if pool == Pool::Objects {
             let first = (self.nodes.len() as u64) << self.shift;
-            for (i, g) in self.group.iter().enumerate() {
+            let mut near = self.groups.get(self).near(b);
+            near.sort_unstable();
+            near.dedup();
+            for i in near {
+                let g = &self.group[i as usize];
                 let bbox = &self.models[g.model as usize].bbox;
                 if meets(footprint(bbox, g.pos, g.rotation), b) {
                     f(&Instance {
-                        id: first + i as u64,
+                        id: first + u64::from(i),
                         pool,
                         model: g.model,
                         pos: g.pos,
