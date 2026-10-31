@@ -30,7 +30,7 @@ const MATERIAL_WINDOW: usize = 160;
 const BOX_SLACK_M: f32 = 0.01;
 /// A block with fewer bytes of arrays is copied: a view costs more than
 /// reading this little, and such a block is rarely kept.
-const VIEW_MIN: u64 = 1 << 20;
+const VIEW_MIN: u64 = 64 << 10;
 
 #[derive(Debug)]
 pub enum Error {

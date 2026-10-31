@@ -18,10 +18,14 @@
 //! its floor's error is larger than the floor's distance from the target
 //! height.
 
+use std::collections::BTreeMap;
+use std::fmt;
 use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 use rayon::prelude::*;
-use serde_json::json;
+use serde::Serialize;
+use serde::ser::{SerializeMap, Serializer};
+use serde_json::{Value, json};
 
 use super::floor::{check_bands, floats32, site};
 use super::geojson::{Features, props};
@@ -71,7 +75,77 @@ impl Reduced {
     }
 }
 
-pub fn exposure(terrain: &Terrain, q: ExposureRequest) -> Result<ExposureResponse, Vec<Issue>> {
+/// `exposure`'s answer with its rasters still numbers: at the limit their
+/// text is 21 MiB each, so an answer written out is encoded as it goes.
+#[derive(Debug)]
+pub struct Rasters {
+    /// The answer, `raster` without its floors.
+    pub value: Value,
+    agl: Vec<f32>,
+    msl: Vec<f32>,
+}
+
+/// Floats as `floats` gives them, written a few at a time.
+struct Text<'a>(&'a [f32]);
+
+impl fmt::Display for Text<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Whole groups of three bytes in each run, so runs join seamlessly.
+        for run in self.0.chunks(3 << 10) {
+            f.write_str(&floats32(run))?;
+        }
+        Ok(())
+    }
+}
+
+impl Serialize for Text<'_> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
+/// A raster's member of the answer, written as `serde_json` would sort it.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum Member<'a> {
+    Plain(&'a Value),
+    Text(Text<'a>),
+}
+
+impl Serialize for Rasters {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let (Value::Object(top), mut out) = (&self.value, s.serialize_map(None)?) else {
+            panic!("an answer is an object");
+        };
+        for (k, v) in top {
+            if k != "raster" {
+                out.serialize_entry(k, v)?;
+                continue;
+            }
+            let Value::Object(raster) = v else {
+                panic!("a raster is an object");
+            };
+            let mut all: BTreeMap<&str, Member> = (raster.iter())
+                .map(|(k, v)| (k.as_str(), Member::Plain(v)))
+                .collect();
+            all.insert("floor_agl", Member::Text(Text(&self.agl)));
+            all.insert("floor_msl", Member::Text(Text(&self.msl)));
+            out.serialize_entry(k, &all)?;
+        }
+        out.end()
+    }
+}
+
+impl Rasters {
+    /// The whole answer in memory.
+    pub fn into_value(mut self) -> Value {
+        self.value["raster"]["floor_agl"] = floats32(&self.agl).into();
+        self.value["raster"]["floor_msl"] = floats32(&self.msl).into();
+        self.value
+    }
+}
+
+pub fn exposure(terrain: &Terrain, q: ExposureRequest) -> Result<Rasters, Vec<Issue>> {
     let src = terrain.source();
     let mut issues: Vec<Issue> = check_bands(&[q.target_alt_agl], "target_alt_agl")
         .into_iter()
@@ -126,7 +200,10 @@ pub fn exposure(terrain: &Terrain, q: ExposureRequest) -> Result<ExposureRespons
     if !issues.is_empty() {
         return Err(issues);
     }
-    let mut r = reduce(terrain, &q, &area.expect("no issues, so a region"))?;
+    src.tight(true);
+    let r = reduce(terrain, &q, &area.expect("no issues, so a region"));
+    src.tight(false);
+    let r = r?;
     let mut heights = q.bands_agl.clone();
     heights.sort_unstable_by(f64::total_cmp);
     heights.dedup();
@@ -162,16 +239,7 @@ pub fn exposure(terrain: &Terrain, q: ExposureRequest) -> Result<ExposureRespons
     };
     let target = q.target_alt_agl;
     let seen_fraction = r.share(|v| v as f32 <= target as f32);
-    src.release();
-    // Each raster goes as its text is made: at the limit they are 16 MiB
-    // each, and their text 21.
-    let seen_count = base64(&r.seen);
-    r.seen = Vec::new();
-    let floor_msl = floats32(&r.msl);
-    r.msl = Vec::new();
-    let floor_agl = floats32(&r.agl);
-    r.agl = Vec::new();
-    Ok(ExposureResponse {
+    let response = ExposureResponse {
         provenance: terrain.provenance(),
         raster: ExposureRaster {
             origin_x: r.origin.0,
@@ -179,14 +247,25 @@ pub fn exposure(terrain: &Terrain, q: ExposureRequest) -> Result<ExposureRespons
             cell: r.res,
             width: r.cols as u32,
             height: r.rows as u32,
-            floor_agl,
-            floor_msl,
-            seen_count,
+            floor_agl: String::new(),
+            floor_msl: String::new(),
+            seen_count: base64(&r.seen),
         },
         target_alt_agl: target,
         seen_fraction,
         bands,
         geojson,
+    };
+    let mut value = serde_json::to_value(response).expect("a response serializes");
+    let Value::Object(raster) = &mut value["raster"] else {
+        panic!("a raster is an object");
+    };
+    raster.remove("floor_agl");
+    raster.remove("floor_msl");
+    Ok(Rasters {
+        value,
+        agl: r.agl,
+        msl: r.msl,
     })
 }
 
@@ -400,6 +479,19 @@ mod tests {
     use super::super::{Terrain, answer};
     use crate::synth::{HILL_A_EAST_M, HILL_A_NORTH_M, HILL_B_EAST_M, HILL_B_NORTH_M};
     use serde_json::{Value, json};
+
+    #[test]
+    fn an_answer_written_out_is_the_answer_in_memory() {
+        let t = synth();
+        let q = json!({"sites": sites(), "region": region(), "target_alt_agl": 30});
+        let whole = answer(&t, "exposure", &q).unwrap();
+        let written = crate::query::answer_to_write(&t, "exposure", &q).unwrap();
+        let mut back: Value = serde_json::to_value(&written).unwrap();
+        let text = serde_json::to_string(&written).unwrap();
+        assert!(text.find("\"elapsed_ms\"").unwrap() < text.find("\"raster\"").unwrap());
+        back["elapsed_ms"] = whole["elapsed_ms"].clone();
+        assert_eq!(back, whole);
+    }
 
     /// West of the big hill, east of the small one, and south of the big
     /// one, each with its own radius, so their disks overlap in part.

@@ -8,13 +8,28 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use dcsterrain_core::query::{self, Terrain};
+use dcsterrain_core::query::{self, Answer, Terrain};
 use dcsterrain_core::synth::{self, Synth};
 use dcsterrain_core::types::{BatchOutcome, BatchRequest, BatchResponse, Issue};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::{CacheDir, install_root, refuse};
+
+/// A line of a batch's answer: a `BatchResponse` on the wire, with a result
+/// that need not be whole in memory.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum Reply {
+    Answered {
+        line: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<Value>,
+        op: String,
+        result: Answer,
+    },
+    Refused(BatchResponse),
+}
 
 /// The terrain a command names and how to open it, opened when first
 /// needed and held from then on.
@@ -79,14 +94,14 @@ impl Opener {
     /// One answer. A panic is one request's failure and not the batch's; the
     /// terrain it passed through is dropped, its locks perhaps poisoned, and
     /// the next request opens it again.
-    fn answer(&mut self, op: &str, request: &Value) -> Result<Value, Vec<Issue>> {
-        self.contained(|terrain| query::answer(terrain, op, request))
+    fn answer(&mut self, op: &str, request: &Value) -> Result<Answer, Vec<Issue>> {
+        self.contained(|terrain| query::answer_to_write(terrain, op, request))
     }
 
     fn contained(
         &mut self,
-        ask: impl FnOnce(&Terrain) -> Result<Value, Vec<Issue>>,
-    ) -> Result<Value, Vec<Issue>> {
+        ask: impl FnOnce(&Terrain) -> Result<Answer, Vec<Issue>>,
+    ) -> Result<Answer, Vec<Issue>> {
         let answered = catch_unwind(AssertUnwindSafe(|| ask(self.current()?)));
         answered.unwrap_or_else(|panic| {
             self.terrain = None;
@@ -100,12 +115,14 @@ impl Opener {
     }
 
     /// The response to one line of a batch.
-    fn line(&mut self, line: u64, text: &[u8]) -> BatchResponse {
-        let refused = |id, op, message: String| BatchResponse {
-            line,
-            id,
-            op,
-            outcome: BatchOutcome::Issues(issue("invalid_request", &message)),
+    fn line(&mut self, line: u64, text: &[u8]) -> Reply {
+        let refused = |id, op, message: String| {
+            Reply::Refused(BatchResponse {
+                line,
+                id,
+                op,
+                outcome: BatchOutcome::Issues(issue("invalid_request", &message)),
+            })
         };
         let value: Value = match serde_json::from_slice(text) {
             Ok(v) => v,
@@ -119,15 +136,19 @@ impl Opener {
                 return refused(id, op, format!("the line is not a request: {e}"));
             }
         };
-        let outcome = match self.answer(&asked.op, &asked.request) {
-            Ok(v) => BatchOutcome::Result(v),
-            Err(issues) => BatchOutcome::Issues(issues),
-        };
-        BatchResponse {
-            line,
-            id: asked.id,
-            op: Some(asked.op),
-            outcome,
+        match self.answer(&asked.op, &asked.request) {
+            Ok(result) => Reply::Answered {
+                line,
+                id: asked.id,
+                op: asked.op,
+                result,
+            },
+            Err(issues) => Reply::Refused(BatchResponse {
+                line,
+                id: asked.id,
+                op: Some(asked.op),
+                outcome: BatchOutcome::Issues(issues),
+            }),
         }
     }
 }
@@ -144,8 +165,16 @@ pub fn one(mut opener: Opener, op: &str, request: Option<String>) -> ExitCode {
     };
     match opener.answer(op, &request) {
         Ok(v) => {
-            println!("{v}");
-            ExitCode::SUCCESS
+            let mut out = std::io::BufWriter::new(std::io::stdout().lock());
+            let written = serde_json::to_writer(&mut out, &v)
+                .map_err(std::io::Error::from)
+                .and_then(|()| out.write_all(b"\n"))
+                .and_then(|()| out.flush());
+            match written {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) if e.kind() == ErrorKind::BrokenPipe => ExitCode::SUCCESS,
+                Err(e) => refuse(issue("internal_error", &e.to_string())),
+            }
         }
         Err(issues) => refuse(issues),
     }
@@ -195,12 +224,12 @@ pub fn batch(opener: &mut Opener, input: impl BufRead, output: impl Write) -> En
             opener.line(line, body)
         } else {
             let message = format!("the line is over {MAX_LINE} bytes");
-            BatchResponse {
+            Reply::Refused(BatchResponse {
                 line,
                 id: None,
                 op: None,
                 outcome: BatchOutcome::Issues(issue("too_large", &message)),
-            }
+            })
         };
         let written = serde_json::to_writer(&mut output, &response)
             .map_err(std::io::Error::from)

@@ -455,6 +455,12 @@ impl Graph {
         })
     }
 
+    /// The adjacency of the network of `kind`.
+    pub fn adjacency(&self, kind: u8) -> &Adjacency {
+        self.index.adjacent[usize::from(kind == KIND_RAIL)]
+            .get_or_init(|| Adjacency::new(self, kind))
+    }
+
     pub fn class(&self, e: &Edge) -> &str {
         &self.classes[usize::from(e.class)]
     }
@@ -735,6 +741,9 @@ fn split<T: Send>(n: usize, parallel_from: usize, f: impl Fn(Range<usize>) -> T 
 struct Indexes {
     bounds: OnceLock<[f64; 4]>,
     nets: [OnceLock<Index>; 2],
+    /// Each network's adjacency, made the first time one is searched: it
+    /// takes longer than most routes.
+    adjacent: [OnceLock<Adjacency>; 2],
 }
 
 impl Indexes {
@@ -954,6 +963,7 @@ fn spread_sources(nodes: &[u32], n: usize) -> Vec<u32> {
 
 /// One network's adjacency, compressed: node `v`'s neighbors are
 /// `to[off[v]..off[v + 1]]`, reached along `via` edges of `len`.
+#[derive(Clone)]
 pub struct Adjacency {
     off: Vec<u32>,
     to: Vec<u32>,

@@ -160,6 +160,8 @@ pub struct Prepared {
     origin: [f64; 2],
     /// Whether any vertex has water depth: most land blocks have none.
     wet: bool,
+    /// Whether it has no hierarchy and is scanned, for one tile.
+    bare: bool,
     bvh: Bvh,
     /// The triangles of the block's runway subsets, searched as `tri` is: an
     /// airfield block holds tens of thousands.
@@ -190,10 +192,52 @@ impl Prepared {
             cell: f64::from(g.cell_size),
             origin: [g.origin_x, g.origin_z],
             wet: b.depth.iter().any(|&d| d != 0.0),
+            bare: false,
             bvh: Bvh::new(&b.p, &b.tri, all),
             runway_bvh: Bvh::new(&b.p, &runway, all),
             runway,
             block: b,
+        }
+    }
+
+    /// A block read for one tile and dropped: building a hierarchy costs ten
+    /// scans of it, which only a block asked many times repays.
+    pub fn bare(mut b: Block, g: &Grid) -> Prepared {
+        let runway: Vec<[u32; 3]> = b
+            .subsets
+            .iter()
+            .filter(|s| s.material == RUNWAY_MATERIAL)
+            .flat_map(|s| s.tri.iter().copied())
+            .collect();
+        b.subsets = Vec::new();
+        Prepared {
+            index: b.index,
+            t: b.t.map(f64::from),
+            cell: f64::from(g.cell_size),
+            origin: [g.origin_x, g.origin_z],
+            wet: b.depth.iter().any(|&d| d != 0.0),
+            bare: true,
+            bvh: Bvh::with_pad(),
+            runway_bvh: Bvh::with_pad(),
+            runway,
+            block: b,
+        }
+    }
+
+    /// Calls `f` with triangles of `bvh`, of which there are `n`, among them
+    /// every one whose box meets `q`.
+    fn each_near(&self, bvh: &Bvh, n: usize, q: [f32; 4], mut f: impl FnMut(&[u32])) {
+        if !self.bare {
+            bvh.search(|node| node.meets(q), f);
+            return;
+        }
+        let mut ids = [0u32; 256];
+        for start in (0..n).step_by(ids.len()) {
+            let m = ids.len().min(n - start);
+            for (k, id) in ids[..m].iter_mut().enumerate() {
+                *id = (start + k) as u32;
+            }
+            f(&ids[..m]);
         }
     }
 
@@ -750,60 +794,57 @@ pub fn tile(blocks: &[&Prepared], g: &Grid, tx: u32, tz: u32) -> Tile {
 
     for b in blocks {
         let q = b.around_box(around, &b.bvh);
-        b.bvh.search(
-            |n| n.meets(q),
-            |leaf| {
-                for &t in leaf {
-                    let tri = b.block.tri[t as usize];
-                    let e = b.box_of(tri);
-                    if !meet(e, q) || b.between_cells(e) {
-                        continue;
-                    }
-                    let p = b.corners(tri);
-                    let Some((rr, cc)) = cells(p, rows, cols) else {
-                        continue;
-                    };
-                    let k = rank(b.block.tritype[t as usize], b.index, t as usize);
-                    let near = Near::new(p);
-                    for r in rr {
-                        for c in cc.clone() {
-                            let i = at(r, c);
-                            let cell = [r as f64, c as f64];
-                            if (best[i] != NONE && k <= best[i]) || near.off(cell) {
-                                continue;
-                            }
-                            let Some((u, v)) = cover(p[0], p[1], p[2], cell) else {
-                                continue;
-                            };
-                            best[i] = k;
-                            h[i] = b.height(tri, u, v);
-                            ty[i] = b.block.tritype[t as usize];
+        b.each_near(&b.bvh, b.block.tri.len(), q, |leaf| {
+            for &t in leaf {
+                let tri = b.block.tri[t as usize];
+                let e = b.box_of(tri);
+                if !meet(e, q) || b.between_cells(e) {
+                    continue;
+                }
+                let p = b.corners(tri);
+                let Some((rr, cc)) = cells(p, rows, cols) else {
+                    continue;
+                };
+                let k = rank(b.block.tritype[t as usize], b.index, t as usize);
+                let near = Near::new(p);
+                for r in rr {
+                    for c in cc.clone() {
+                        let i = at(r, c);
+                        let cell = [r as f64, c as f64];
+                        if (best[i] != NONE && k <= best[i]) || near.off(cell) {
+                            continue;
                         }
+                        let Some((u, v)) = cover(p[0], p[1], p[2], cell) else {
+                            continue;
+                        };
+                        best[i] = k;
+                        h[i] = b.height(tri, u, v);
+                        ty[i] = b.block.tritype[t as usize];
                     }
                 }
-            },
-        );
+            }
+        });
         let q = b.around_box(around, &b.runway_bvh);
-        b.runway_bvh.search(
-            |n| n.meets(q),
-            |leaf| {
-                for &t in leaf {
-                    let p = b.corners(b.runway[t as usize]);
-                    let Some((rr, cc)) = cells(p, rows, cols) else {
-                        continue;
-                    };
-                    let near = Near::new(p);
-                    for r in rr {
-                        for c in cc.clone() {
-                            let cell = [r as f64, c as f64];
-                            if !near.off(cell) && cover(p[0], p[1], p[2], cell).is_some() {
-                                runway[at(r, c)] = true;
-                            }
+        b.each_near(&b.runway_bvh, b.runway.len(), q, |leaf| {
+            for &t in leaf {
+                if !meet(b.box_of(b.runway[t as usize]), q) {
+                    continue;
+                }
+                let p = b.corners(b.runway[t as usize]);
+                let Some((rr, cc)) = cells(p, rows, cols) else {
+                    continue;
+                };
+                let near = Near::new(p);
+                for r in rr {
+                    for c in cc.clone() {
+                        let cell = [r as f64, c as f64];
+                        if !near.off(cell) && cover(p[0], p[1], p[2], cell).is_some() {
+                            runway[at(r, c)] = true;
                         }
                     }
                 }
-            },
-        );
+            }
+        });
     }
 
     let mut out = Tile {
@@ -1361,6 +1402,22 @@ mod tests {
                 })
                 .collect();
             assert_eq!(a, every, "{s:?} to {e:?}");
+        }
+    }
+
+    #[test]
+    fn a_tile_from_a_scan_is_the_tile_from_the_hierarchy() {
+        let g = grid(810);
+        let f = file(&[mixed()], 1);
+        let s = Surface5::open(&f[..], "t").unwrap();
+        let read = || s.read_block(&f[..], 0, &[RUNWAY_MATERIAL]).unwrap();
+        let (held, bare) = (Prepared::new(read(), &g), Prepared::bare(read(), &g));
+        let (ntx, ntz) = g.tiles();
+        for tx in 0..ntx {
+            for tz in 0..ntz {
+                let t = tile(&[&held], &g, tx, tz);
+                assert_eq!(t, tile(&[&bare], &g, tx, tz), "({tx}, {tz})");
+            }
         }
     }
 

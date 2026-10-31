@@ -163,16 +163,9 @@ fn run<Q: DeserializeOwned, A: Serialize>(
     Ok(serde_json::to_value(f(terrain, read(request)?)?).expect("a response serializes"))
 }
 
-/// `exposure`, whose rasters move into the answer: serializing one would
-/// copy tens of MiB of text.
+/// `exposure` as a value.
 fn run_exposure(terrain: &Terrain, request: &Value) -> Result<Value, Vec<Issue>> {
-    let mut a = exposure(terrain, read(request)?)?;
-    let agl = std::mem::take(&mut a.raster.floor_agl);
-    let msl = std::mem::take(&mut a.raster.floor_msl);
-    let mut v = serde_json::to_value(a).expect("a response serializes");
-    v["raster"]["floor_agl"] = agl.into();
-    v["raster"]["floor_msl"] = msl.into();
-    Ok(v)
+    Ok(exposure(terrain, read(request)?)?.into_value())
 }
 
 /// The request as `Q`.
@@ -208,6 +201,25 @@ pub(crate) fn refused(e: Refusal) -> Vec<Issue> {
 /// A request that cannot be answered as given, at `path` in it.
 pub(crate) fn invalid(message: &str, path: &str) -> Vec<Issue> {
     vec![Issue::new("invalid_request", message, path)]
+}
+
+/// An answer on its way out: only `exposure`'s differs from its value.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum Answer {
+    Value(Value),
+    Rasters(exposure::Rasters),
+}
+
+/// `answer`, ready to write out with no second copy of a large answer.
+pub fn answer_to_write(terrain: &Terrain, op: &str, request: &Value) -> Result<Answer, Vec<Issue>> {
+    if op != "exposure" {
+        return answer(terrain, op, request).map(Answer::Value);
+    }
+    let started = Instant::now();
+    let mut out = exposure(terrain, read(request)?)?;
+    out.value["elapsed_ms"] = (started.elapsed().as_millis() as u64).into();
+    Ok(Answer::Rasters(out))
 }
 
 /// Answers one request, `op` with its JSON, timing it from here.

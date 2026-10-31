@@ -32,6 +32,8 @@ use crate::threads::try_map;
 
 /// The bytes of prepared blocks kept between requests.
 pub const BLOCK_BUDGET: usize = 16 << 20;
+/// The bytes kept while a request itself holds tens of MiB.
+const TIGHT_BLOCK_BUDGET: usize = 4 << 20;
 /// Up to this many points on a block not held, `points` tests its
 /// triangles directly rather than preparing it.
 const FEW_POINTS: usize = 32;
@@ -175,6 +177,16 @@ impl<K: Eq + Hash + Copy, V: Clone> Lru<K, V> {
         })
     }
 
+    /// A budget of `budget` from now on, what is over it dropped.
+    fn set_budget(&mut self, budget: usize) {
+        self.budget = budget;
+        while self.used > self.budget && self.items.len() > 1 {
+            let (&oldest, _) = self.items.iter().min_by_key(|(_, (_, _, t))| *t).unwrap();
+            let (_, size, _) = self.items.remove(&oldest).unwrap();
+            self.used -= size;
+        }
+    }
+
     fn clear(&mut self) {
         self.items.clear();
         self.used = 0;
@@ -291,6 +303,8 @@ pub struct Install {
     /// Held while a large block is prepared.
     reading: Mutex<()>,
     tiles: Mutex<Lru<(u32, u32), Arc<Tile>>>,
+    /// Blocks read and dropped, the last few.
+    met: Mutex<Lru<usize, ()>>,
     cache: TerrainCache,
     /// Opened the first time scenery is asked for, so a scene file no
     /// decoder reads refuses scenery and nothing else. A failure is not
@@ -372,6 +386,7 @@ impl Install {
             idle: OnceLock::new(),
             reading: Mutex::new(()),
             tiles: Mutex::new(Lru::new(TILE_COUNT)),
+            met: Mutex::new(Lru::new(TILE_COUNT)),
             cache: terrain,
             scenery: OnceLock::new(),
             tables: OnceLock::new(),
@@ -576,6 +591,15 @@ impl Install {
         });
     }
 
+    /// Whether block `i` has been read and dropped lately, marking it so:
+    /// met again, it is worth its hierarchy.
+    fn met_before(&self, i: usize) -> bool {
+        let mut met = self.met.lock().unwrap();
+        let again = met.get(&i).is_some();
+        met.put(i, (), 1);
+        again
+    }
+
     /// The blocks under tile `(tx, tz)`, in block order; none off the grid.
     fn tile_under(&self, tx: u32, tz: u32) -> Vec<usize> {
         let g = &self.grid;
@@ -644,7 +668,24 @@ impl Install {
         if let Some(t) = self.tiles.lock().unwrap().get(&(tx, tz)) {
             return Ok(t);
         }
-        let under = self.blocks_of(&self.tile_under(tx, tz))?;
+        let ids = self.tile_under(tx, tz);
+        // A block met for the first time is scanned for this tile and
+        // dropped, the tile being what is kept; met again, it is worth its
+        // hierarchy.
+        let again: Vec<bool> = ids.iter().map(|&i| self.met_before(i)).collect();
+        let under = try_map(&ids, ids.len() >= PARALLEL_MIN, |i| {
+            let k = ids.iter().position(|j| j == i).expect("one of ids");
+            if again[k] {
+                return self.block(*i);
+            }
+            if let Some(b) = self.blocks.lock().unwrap().get(i) {
+                return Ok(b);
+            }
+            (self.toc)
+                .read_block_copied(&self.file, *i, &[RUNWAY_MATERIAL])
+                .map(|b| Arc::new(Prepared::bare(b, &self.grid)))
+                .map_err(|e| refusal(&self.path, e))
+        })?;
         let refs: Vec<&Prepared> = under.iter().map(|b| b.as_ref()).collect();
         let t = Arc::new(ground::tile(&refs, &self.grid, tx, tz));
         self.tiles.lock().unwrap().put((tx, tz), t.clone(), 1);
@@ -661,9 +702,13 @@ impl Source for Install {
         self.grid
     }
 
-    fn release(&self) {
-        self.blocks.lock().unwrap().clear();
-        self.tiles.lock().unwrap().clear();
+    fn tight(&self, tight: bool) {
+        let budget = if tight {
+            TIGHT_BLOCK_BUDGET
+        } else {
+            BLOCK_BUDGET
+        };
+        self.blocks.lock().unwrap().set_budget(budget);
     }
 
     fn tile(&self, layer: Layer, tx: u32, tz: u32) -> Result<Vec<i32>, Refusal> {
@@ -760,7 +805,7 @@ impl Source for Install {
                 // A block few points fall on is answered without binning
                 // it, and not kept: preparing it would cost more than the
                 // points save.
-                None if ks.len() <= FEW_POINTS => {
+                None if ks.len() <= FEW_POINTS && !self.met_before(i) => {
                     let raw = (self.toc)
                         .read_block_copied(&self.file, i, &[RUNWAY_MATERIAL])
                         .map_err(|e| refusal(&self.path, e))?;

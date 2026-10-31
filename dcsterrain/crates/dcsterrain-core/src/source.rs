@@ -49,9 +49,11 @@ pub trait Source: Sync {
     /// The cells the tiles cover.
     fn grid(&self) -> Grid;
 
-    /// Lets go of whatever is held to speed later requests, ahead of a step
-    /// that needs the memory.
-    fn release(&self) {}
+    /// Holds less to speed later requests, from now until asked to stop:
+    /// for a request that itself needs the memory.
+    fn tight(&self, tight: bool) {
+        let _ = tight;
+    }
 
     /// One tile of a layer, `tile_size` squared samples, row-major with
     /// columns fastest. A cell past the grid, or one no mesh triangle covers,

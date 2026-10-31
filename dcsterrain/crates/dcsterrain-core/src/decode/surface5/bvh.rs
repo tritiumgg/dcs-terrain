@@ -268,6 +268,15 @@ impl Bvh {
         }
     }
 
+    /// No triangles, for a block that is scanned, and a question widened as
+    /// one is widened for a hierarchy over the largest block.
+    pub fn with_pad() -> Bvh {
+        Bvh {
+            pad: 1.0,
+            ..Bvh::default()
+        }
+    }
+
     /// How far a question must widen itself, in meters.
     pub fn pad(&self) -> f32 {
         self.pad

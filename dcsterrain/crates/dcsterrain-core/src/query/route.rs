@@ -119,7 +119,7 @@ fn issue(code: &str, message: &str, path: &str) -> Vec<Issue> {
 struct Planner<'a> {
     src: &'a dyn Source,
     g: &'a Graph,
-    adj: Adjacency,
+    adj: &'a Adjacency,
     from: Snap,
     to: Snap,
     avoid: Vec<Area>,
@@ -217,7 +217,7 @@ impl<'a> Planner<'a> {
         Ok(Planner {
             src,
             g,
-            adj: Adjacency::new(g, kind),
+            adj: g.adjacency(kind),
             from,
             to,
             avoid,
@@ -1303,7 +1303,7 @@ mod tests {
         let mut p = Planner {
             src,
             g: &g,
-            adj: Adjacency::new(&g, KIND_ROAD),
+            adj: g.adjacency(KIND_ROAD),
             from,
             to,
             avoid,
