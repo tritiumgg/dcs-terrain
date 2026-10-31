@@ -150,11 +150,17 @@ A failed check refuses the terrain the same way.
   with the same precedence, at each cell's center, and kept in a tile LRU.
   Height is `floor(h + 0.5)` of the f32 interpolated height. There is no
   coarser base.
-- **Positional reads.** The engine reads only the block arrays a query touches,
-  prepares each block (vertices to world coordinates, its triangles and its
-  runway triangles binned, so a point over an airfield tests a few) into a
-  small LRU, and never memory-maps a whole terrain file: on Windows that costs
-  about 2 MiB of commit per GiB mapped (123 MiB for Germany's `.surface5`).
+- **Bounded views.** The engine touches only the block arrays a query needs,
+  and never maps a whole terrain file: on Windows that costs about 2 MiB of
+  commit per GiB mapped (123 MiB for Germany's `.surface5`). A block kept for
+  repeated use is a read-only view of its own arrays and a private hierarchy
+  of boxes over its triangles, about 7 bytes a triangle, in a small LRU; one of
+  under 64 KiB of arrays is copied, and one met once for a few points or one
+  tile is copied, scanned and dropped (ADR 0008). A terrain with no block asked
+  for in a second drops them all, so a batch waiting on its caller holds no
+  view of an install file. A view stops an updater truncating that file;
+  replacing it by rename works. On Linux and macOS a file truncated under a
+  view kills the process with SIGBUS.
 - **Scenery is read the same way.** `scene.nodes` keeps where each
   instancer node's arrays lie. A box descends each pool's own tree, tests
   the boxes each meeting node owns, and reads each hit's position, model
@@ -251,8 +257,9 @@ opening the install files it was derived from, except once after an update.
   a header: an 8-byte magic, the entry's u32 format version, its key as
   length-prefixed text, and the u64 length of the payload that follows. The key
   covers only the install files of the roles the entry reads (§5), so a
-  changed road file leaves `mesh.toc` alone. It is memory-mapped read-only;
-  mapping a 200 MiB entry costs about 0.4 MiB of commit.
+  changed road file leaves `mesh.toc` alone. `roads.graph`, flat arrays since
+  its version 2, and `scene.nodes` are read through read-only views; mapping a
+  200 MiB entry costs about 0.4 MiB of commit.
 - `tables.json` cannot open with that header and stay JSON, so it is one
   object whose first three members are the version, the key and the payload,
   and a check reads it only as far as the payload.
@@ -575,7 +582,8 @@ from the query benchmark, which spreads large work over every core of an
 correctness rule: a miss is a decision about the target. Every target on
 every terrain, in cycles with the wall beside them, and why each miss, is in
 `data/targets.md`. A target is time; its budget in cycles is that time on one
-core, or on 8 for an operation computed over the pool (ADR 0007).
+core, or on 8 for an operation computed over the pool (ADR 0007). The
+single-thread baseline of each operation is in `data/q18-performance.md`.
 
 | Operation | Measured | Target |
 |---|---|---|
@@ -593,7 +601,7 @@ core, or on 8 for an operation computed over the pool (ADR 0007).
 | `validate_placements`, 1 000 placements | 1 000 of every shape, a third near structures and a third by runways, scattered over each of 8 terrains: 0.76–2.5 s warm, GermanyCW the slowest, and 1.0–4.4 s cold, Syria over the target on first touch, at 5 threads, on 2.9.30.28738 (`data/placements.md`) | 3 s |
 | `point_info`, `airfield_info` | µs to a few ms; `point_info` 0.4–3.9 ms a point warm over 3 000 uniform points on each of 8 terrains, most of it the nearest road from points far out at sea, so 10 000 points at sea take about 20 s, on 2.9.30.28738 (`data/point-info.md`); `airfield_info` 0.8–16.5 ms p50 cold, 0.6–5.1 ms warm, over every airdrome of 8 terrains at 5 threads, most of it the runway width; worst 23 ms cold off the Mariana terrains and 44 and 109 ms on them, on 2.9.30.28738 (`data/airfield-info.md`) | `point_info` 150 ms cold in a fresh process, 20 ms held; `airfield_info` 20 ms cold |
 | cache build, all but betweenness and places | < 2 s; roads 0.5 / 9.8 s (Caucasus / GermanyCW, 2.9.30.28738), 3.1 s of it the GermanyCW scan and 4.6 s its water | 10 s |
-| private memory per query process | 15–66 MiB, up to 118 MiB on the Marianas (`data/targets.md`) | 150 MiB |
+| peak commit of a query process, mapped file pages not counted; a request that builds a cache entry is exempt and measured beside it (ADR 0008) | PEAKFIGURE (`data/targets.md`) | 64 MiB |
 
 Accuracy:
 

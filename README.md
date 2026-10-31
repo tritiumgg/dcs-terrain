@@ -78,6 +78,11 @@ printf '%s\n' '{"id": 1, "op": "nearest", "request": {"kind": "airdrome", "x": -
 A failed request prints `{"issues": [{"code", "message", "path"}]}` and exits
 1; a batch exits 0 unless its streams fail.
 
+Large terrain blocks are read through file views. On Windows a view stops an
+updater truncating that file for at most a request and a second, and a rename
+over it still works. On Linux and macOS, a terrain file truncated while a query
+reads it ends the process with a bus error: run the query again.
+
 `dcsterrain index --terrain Caucasus` builds a cache ahead of time, among it
 the road betweenness and the places, which take minutes and which a query never
 builds: until then `chokepoints` and `towns` say so. `dcsterrain check`

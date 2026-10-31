@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted. Its memory target is superseded by [ADR 0008](0008-hold-a-query-to-64-mib-by-reading-through-bounded-views.md).
 
 ## Context
 
