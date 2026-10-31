@@ -54,7 +54,7 @@ const PARALLEL_MIN: usize = 2;
 /// thread: a block a point or two falls on reads only what they need, in
 /// less time than waking the other threads takes.
 const POINTS_PARALLEL_MIN: usize = 8;
-/// A block of this many bytes or more is prepared by one thread at a time.
+/// A block of this many bytes or more is prepared under one of few locks.
 const LARGE_BLOCK: u64 = 4 << 20;
 /// How long a terrain keeps blocks with none asked for.
 const IDLE: Duration = Duration::from_secs(1);
@@ -329,8 +329,8 @@ pub struct Install {
     /// of views when it stops.
     used: Arc<AtomicU64>,
     idle: OnceLock<()>,
-    /// Held while a large block is prepared.
-    reading: Mutex<()>,
+    /// Held while a large block is prepared, by its index.
+    reading: [Mutex<()>; 4],
     tiles: Mutex<Lru<(u32, u32), Arc<Tile>>>,
     /// Blocks read and dropped, the last few.
     met: Mutex<Lru<usize, ()>>,
@@ -413,7 +413,7 @@ impl Install {
             blocks: Arc::new(Mutex::new(Lru::new(BLOCK_BUDGET))),
             used: Arc::new(AtomicU64::new(0)),
             idle: OnceLock::new(),
-            reading: Mutex::new(()),
+            reading: Default::default(),
             tiles: Mutex::new(Lru::new(TILE_COUNT)),
             met: Mutex::new(Lru::new(TILE_COUNT)),
             cache: terrain,
@@ -574,10 +574,10 @@ impl Install {
         if let Some(b) = self.blocks.lock().unwrap().get(&i) {
             return Ok(b);
         }
-        // One large block at a time: its hierarchy takes 16 bytes a triangle
+        // Few large blocks at a time: a hierarchy takes 16 bytes a triangle
         // to sort, and two threads would each build the same one.
-        let _one =
-            (self.toc.blocks[i].read_len() >= LARGE_BLOCK).then(|| self.reading.lock().unwrap());
+        let _one = (self.toc.blocks[i].read_len() >= LARGE_BLOCK)
+            .then(|| self.reading[i % 4].lock().unwrap());
         if _one.is_some()
             && let Some(b) = self.blocks.lock().unwrap().get(&i)
         {
@@ -704,7 +704,9 @@ impl Install {
         let again: Vec<bool> = ids.iter().map(|&i| self.met_before(i)).collect();
         let under = try_map(&ids, ids.len() >= PARALLEL_MIN, |i| {
             let k = ids.iter().position(|j| j == i).expect("one of ids");
-            if again[k] {
+            // A scan of a block this large costs more than its hierarchy
+            // repays only after many tiles, and it is read for many.
+            if again[k] || self.toc.blocks[*i].read_len() >= LARGE_BLOCK {
                 return self.block(*i);
             }
             if let Some(b) = self.blocks.lock().unwrap().get(i) {

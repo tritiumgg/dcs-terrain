@@ -4,6 +4,7 @@
 //! touches only the bytes it needs.
 
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::{
     Error, GroupRecord, Index, Instance, Pool, f32_at, heading_of, layout, malformed, model_of,
@@ -29,6 +30,12 @@ const GROUP_CELL_M: f64 = 1024.0;
 /// The most cells that grid has: its cell doubles until it fits.
 const GROUP_CELLS: f64 = (1 << 20) as f64;
 
+/// How far past its place a model can reach, however it is turned.
+fn reach(b: &[f32; 6]) -> f64 {
+    let far = |lo: f32, hi: f32| f64::from(lo.abs().max(hi.abs()));
+    far(b[0], b[3]) + far(b[2], b[5]) + 1.0
+}
+
 /// The group records by where they may reach, built when first asked: every
 /// box a query asks of a scene met every record, each a sine and a cosine.
 #[derive(Debug, Clone)]
@@ -47,9 +54,7 @@ impl GroupGrid {
     fn new(index: &Index) -> GroupGrid {
         // However a record is turned its footprint lies within its reach.
         let reach = |g: &GroupRecord| {
-            let b = &index.models[g.model as usize].bbox;
-            let far = |lo: f32, hi: f32| f64::from(lo.abs().max(hi.abs()));
-            let r = far(b[0], b[3]).hypot(far(b[2], b[5])) + 1.0;
+            let r = reach(&index.models[g.model as usize].bbox);
             [g.pos[0] - r, g.pos[2] - r, g.pos[0] + r, g.pos[2] + r]
         };
         let mut all = [
@@ -132,12 +137,25 @@ impl GroupGrid {
 
 /// The group grid of an index, which follows from its records and so takes
 /// no part in comparing two.
-#[derive(Debug, Clone, Default)]
-pub struct Groups(OnceLock<GroupGrid>);
+#[derive(Debug, Default)]
+pub struct Groups {
+    grid: OnceLock<GroupGrid>,
+    asked: AtomicBool,
+}
+
+impl Clone for Groups {
+    fn clone(&self) -> Groups {
+        Groups::default()
+    }
+}
 
 impl Groups {
-    fn get(&self, index: &Index) -> &GroupGrid {
-        self.0.get_or_init(|| GroupGrid::new(index))
+    /// The grid, from the second time it is asked for.
+    fn get(&self, index: &Index) -> Option<&GroupGrid> {
+        if !self.asked.swap(true, Ordering::Relaxed) {
+            return None;
+        }
+        Some(self.grid.get_or_init(|| GroupGrid::new(index)))
     }
 }
 
@@ -349,20 +367,35 @@ impl Index {
         }
         if pool == Pool::Objects {
             let first = (self.nodes.len() as u64) << self.shift;
-            let mut near = self.groups.get(self).near(b);
-            near.sort_unstable();
-            near.dedup();
-            for i in near {
-                let g = &self.group[i as usize];
+            let mut each = |i: usize| {
+                let g = &self.group[i];
                 let bbox = &self.models[g.model as usize].bbox;
                 if meets(footprint(bbox, g.pos, g.rotation), b) {
                     f(&Instance {
-                        id: first + u64::from(i),
+                        id: first + i as u64,
                         pool,
                         model: g.model,
                         pos: g.pos,
                         rotation: g.rotation,
                     });
+                }
+            };
+            // A process that asks once should not pay for the grid.
+            match self.groups.get(self) {
+                Some(grid) => {
+                    let mut near = grid.near(b);
+                    near.sort_unstable();
+                    near.dedup();
+                    near.into_iter().for_each(|i| each(i as usize));
+                }
+                None => {
+                    let reach = |i: &usize| {
+                        let g = &self.group[*i];
+                        let r = reach(&self.models[g.model as usize].bbox);
+                        let at = [g.pos[0] - r, g.pos[2] - r, g.pos[0] + r, g.pos[2] + r];
+                        meets(at, b)
+                    };
+                    (0..self.group.len()).filter(reach).for_each(&mut each);
                 }
             }
         }
