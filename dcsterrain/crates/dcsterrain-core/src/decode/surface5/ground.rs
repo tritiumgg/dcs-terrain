@@ -6,7 +6,7 @@
 //! costs its hierarchy and no second copy of its vertices. A box in the
 //! block's meters rules out nearly every triangle before one is converted.
 
-use super::bvh::{Bvh, Line, tri_box};
+use super::bvh::{Bvh, Line, spread, tri_box};
 use super::mesh::Block;
 use super::sample::{EDGE_TOLERANCE, ROAD_STRIP, cover, rank, round_height, water_class};
 use crate::extract::Bounds;
@@ -448,6 +448,101 @@ impl Prepared {
     }
 }
 
+/// Points taken together through a block's hierarchy.
+const POINT_CHUNK: usize = 16;
+/// The most triangles near a chunk that are worth testing it against.
+const NEAR_MOST: usize = 256;
+
+impl Prepared {
+    /// `point` and `on_runway` of each of `ps`, in order. Many points go
+    /// nearest one another a chunk at a time: the chunk asks the hierarchy
+    /// once, and each triangle near it is converted once.
+    pub fn points(&self, ps: &[[f64; 2]]) -> Vec<(Option<Ground>, bool)> {
+        if ps.len() < POINT_CHUNK {
+            return ps
+                .iter()
+                .map(|&p| (self.point(p), self.on_runway(p)))
+                .collect();
+        }
+        let local: Vec<[f32; 2]> = ps.iter().map(|&p| self.local(p)).collect();
+        let [x0, z0, x1, z1] = self.bvh.bounds();
+        let (sx, sz) = (1023.0 / (x1 - x0).max(1.0), 1023.0 / (z1 - z0).max(1.0));
+        let key = |l: [f32; 2]| {
+            let q = |v: f32, lo: f32, s: f32| (((v - lo) * s) as u32).min(1023);
+            spread(q(l[0], x0, sx)) | (spread(q(l[1], z0, sz)) << 1)
+        };
+        let mut order: Vec<(u32, u32)> = (local.iter().enumerate())
+            .map(|(i, &l)| (key(l), i as u32))
+            .collect();
+        order.sort_unstable();
+        let pad = self.bvh.pad();
+        let mut out: Vec<(Option<Ground>, bool)> = vec![(None, false); ps.len()];
+        let mut near: Vec<(u32, [f32; 4], [[f64; 2]; 3])> = Vec::new();
+        for chunk in order.chunks(POINT_CHUNK) {
+            let mut q = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+            for &(_, i) in chunk {
+                let l = local[i as usize];
+                q = [
+                    q[0].min(l[0]),
+                    q[1].min(l[1]),
+                    q[2].max(l[0]),
+                    q[3].max(l[1]),
+                ];
+            }
+            let q = [q[0] - pad, q[1] - pad, q[2] + pad, q[3] + pad];
+            near.clear();
+            self.bvh.search(
+                |n| n.meets(q),
+                |leaf| {
+                    for &t in leaf {
+                        let tri = self.block.tri[t as usize];
+                        let e = self.box_of(tri);
+                        if meet(e, q) {
+                            near.push((t, e, self.corners(tri)));
+                        }
+                    }
+                },
+            );
+            // Over a dense mesh a chunk's box holds more than each point
+            // would look at alone.
+            if near.len() > NEAR_MOST {
+                for &(_, i) in chunk {
+                    let p = ps[i as usize];
+                    out[i as usize] = (self.point(p), self.on_runway(p));
+                }
+                continue;
+            }
+            for &(_, i) in chunk {
+                let (p, l) = (ps[i as usize], local[i as usize]);
+                let around = [l[0] - pad, l[1] - pad, l[0] + pad, l[1] + pad];
+                let mut best: Option<Ground> = None;
+                for &(t, e, [a, b, c]) in &near {
+                    if !meet(e, around) {
+                        continue;
+                    }
+                    let Some((u, v)) = cover(a, b, c, p) else {
+                        continue;
+                    };
+                    let tri = self.block.tri[t as usize];
+                    let g = Ground {
+                        h: self.height(tri, u, v),
+                        depth: self.depth(tri, u, v),
+                        tritype: self.block.tritype[t as usize],
+                        runway: false,
+                        block: self.index,
+                        tri: t as usize,
+                    };
+                    if best.is_none_or(|cur| g.rank() > cur.rank()) {
+                        best = Some(g);
+                    }
+                }
+                out[i as usize] = (best, self.on_runway(p));
+            }
+        }
+        out
+    }
+}
+
 /// Whether two boxes, `[min_x, min_z, max_x, max_z]`, meet.
 #[inline]
 fn meet(a: [f32; 4], b: [f32; 4]) -> bool {
@@ -474,7 +569,10 @@ impl Prepared {
         self.bvh.search(
             |n| n.crosses(&line),
             |leaf| {
-                let near = |t: &&u32| line.meets(self.box_of(self.block.tri[**t as usize]));
+                let near = |t: &&u32| {
+                    let c = self.block.tri[**t as usize].map(|k| self.block.p[k as usize]);
+                    !line.clear_of(c)
+                };
                 seen.extend(leaf.iter().filter(near));
             },
         );
@@ -770,15 +868,119 @@ impl Near {
     }
 }
 
+/// Cells of a row taken together.
+const ROW_CHUNK: usize = 16;
+
+/// What rasterizing a triangle writes to.
+struct Cells<'a> {
+    best: &'a mut [u64],
+    h: &'a mut [f64],
+    ty: &'a mut [u32],
+}
+
+/// Writes triangle `p`, heights `z`, of rank `k` and type `tritype` to each
+/// cell of `rr` by `cc` it wins, a chunk of a row at a time so that the
+/// weights compile to wide registers where the machine has them. The
+/// arithmetic is `cover`'s and `lerp`'s, term for term and with no fused
+/// multiply, so each cell gets what they give.
+#[inline(always)]
+fn fill(
+    p: [[f64; 2]; 3],
+    z: [f64; 3],
+    (k, tritype): (u64, u32),
+    (rr, cc): (std::ops::RangeInclusive<i64>, std::ops::RangeInclusive<i64>),
+    at: impl Fn(i64, i64) -> usize,
+    out: &mut Cells,
+) {
+    let (v0x, v0z) = (p[1][0] - p[0][0], p[1][1] - p[0][1]);
+    let (v1x, v1z) = (p[2][0] - p[0][0], p[2][1] - p[0][1]);
+    let d = v0x * v1z - v1x * v0z;
+    if d == 0.0 {
+        return;
+    }
+    let e = EDGE_TOLERANCE;
+    let (mut u, mut v) = ([0f64; ROW_CHUNK], [0f64; ROW_CHUNK]);
+    let (mut value, mut inside) = ([0f64; ROW_CHUNK], [false; ROW_CHUNK]);
+    let (c0, c1) = (*cc.start(), *cc.end());
+    // Each weight is linear along a row, so the columns a triangle can cover
+    // there follow from where each crosses zero, a cell to spare. Half of a
+    // large triangle's box lies outside it; a small one is not worth it.
+    const WIDE_ROW: i64 = 8;
+    let span = |w: f64, dw: f64, lo: &mut f64, hi: &mut f64| {
+        // `w + dw c` at least zero, near enough.
+        if dw > 0.0 {
+            *lo = lo.max(-w / dw - 1.0);
+        } else if dw < 0.0 {
+            *hi = hi.min(-w / dw + 1.0);
+        }
+    };
+    for r in rr {
+        let px = r as f64 - p[0][0];
+        let (mut c, mut c1) = (c0, c1);
+        if c1 - c >= WIDE_ROW {
+            let (mut lo, mut hi) = (c as f64, c1 as f64);
+            let (u0, du) = ((px * v1z + v1x * p[0][1]) / d, -v1x / d);
+            let (v0, dv) = ((-v0x * p[0][1] - px * v0z) / d, v0x / d);
+            let slack = 1e-6;
+            span(u0 + slack, du, &mut lo, &mut hi);
+            span(v0 + slack, dv, &mut lo, &mut hi);
+            span(1.0 + slack - u0 - v0, -du - dv, &mut lo, &mut hi);
+            if lo > hi {
+                continue;
+            }
+            (c, c1) = ((lo.ceil() as i64).max(c), (hi.floor() as i64).min(c1));
+        }
+        while c <= c1 {
+            let m = (c1 - c + 1).min(ROW_CHUNK as i64) as usize;
+            for j in 0..m {
+                let pz = (c + j as i64) as f64 - p[0][1];
+                u[j] = (px * v1z - v1x * pz) / d;
+                v[j] = (v0x * pz - px * v0z) / d;
+                value[j] = z[0] + u[j] * (z[1] - z[0]) + v[j] * (z[2] - z[0]);
+                inside[j] = (u[j] >= -e) & (v[j] >= -e) & (u[j] + v[j] <= 1.0 + e);
+            }
+            for j in 0..m {
+                if inside[j] {
+                    let i = at(r, c + j as i64);
+                    // `u64::MAX` for a cell no triangle has won, which no
+                    // rank reaches.
+                    if out.best[i] == u64::MAX || k > out.best[i] {
+                        out.best[i] = k;
+                        out.h[i] = value[j];
+                        out.ty[i] = tritype;
+                    }
+                }
+            }
+            c += m as i64;
+        }
+    }
+}
+
 /// Rasterizes tile `(tx, tz)` of `g` from the blocks under it, each cell
 /// the winning triangle at its center.
 pub fn tile(blocks: &[&Prepared], g: &Grid, tx: u32, tz: u32) -> Tile {
+    #[cfg(target_arch = "x86_64")]
+    if std::arch::is_x86_feature_detected!("avx2") {
+        // SAFETY: the machine has just been seen to have AVX2.
+        return unsafe { tile_avx2(blocks, g, tx, tz) };
+    }
+    tile_any(blocks, g, tx, tz)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+fn tile_avx2(blocks: &[&Prepared], g: &Grid, tx: u32, tz: u32) -> Tile {
+    tile_any(blocks, g, tx, tz)
+}
+
+#[inline(always)]
+fn tile_any(blocks: &[&Prepared], g: &Grid, tx: u32, tz: u32) -> Tile {
     let ts = i64::from(g.tile_size);
     let n = (ts * ts) as usize;
     const NONE: u64 = u64::MAX;
     let mut best = vec![NONE; n];
     let mut h = vec![0f64; n];
-    let mut ty = vec![0u32; n];
+    let mut tys = vec![0u32; n];
     let mut runway = vec![false; n];
     let (tr0, tc0) = (i64::from(tx) * ts, i64::from(tz) * ts);
     // The tile's cells on the grid.
@@ -805,23 +1007,14 @@ pub fn tile(blocks: &[&Prepared], g: &Grid, tx: u32, tz: u32) -> Tile {
                 let Some((rr, cc)) = cells(p, rows, cols) else {
                     continue;
                 };
-                let k = rank(b.block.tritype[t as usize], b.index, t as usize);
-                let near = Near::new(p);
-                for r in rr {
-                    for c in cc.clone() {
-                        let i = at(r, c);
-                        let cell = [r as f64, c as f64];
-                        if (best[i] != NONE && k <= best[i]) || near.off(cell) {
-                            continue;
-                        }
-                        let Some((u, v)) = cover(p[0], p[1], p[2], cell) else {
-                            continue;
-                        };
-                        best[i] = k;
-                        h[i] = b.height(tri, u, v);
-                        ty[i] = b.block.tritype[t as usize];
-                    }
-                }
+                let ty = b.block.tritype[t as usize];
+                let k = rank(ty, b.index, t as usize);
+                let mut out = Cells {
+                    best: &mut best,
+                    h: &mut h,
+                    ty: &mut tys,
+                };
+                fill(p, tri.map(|v| b.h(v)), (k, ty), (rr, cc), at, &mut out);
             }
         });
         let q = b.around_box(around, &b.runway_bvh);
@@ -858,9 +1051,9 @@ pub fn tile(blocks: &[&Prepared], g: &Grid, tx: u32, tz: u32) -> Tile {
             continue;
         }
         out.height[i] = round_height(h[i]);
-        out.water[i] = water_class(ty[i]);
-        out.surface[i] = surface_of(ty[i], runway[i]);
-        out.cover[i] = cover_of(ty[i]).code() as u8;
+        out.water[i] = water_class(tys[i]);
+        out.surface[i] = surface_of(tys[i], runway[i]);
+        out.cover[i] = cover_of(tys[i]).code() as u8;
     }
     out
 }
@@ -1403,6 +1596,20 @@ mod tests {
                 .collect();
             assert_eq!(a, every, "{s:?} to {e:?}");
         }
+    }
+
+    #[test]
+    fn many_points_answer_as_each_alone_does() {
+        let g = grid(810);
+        let b = &prepared(&[mixed()], &g)[0];
+        let mut pts = b.vertices();
+        for k in 0..40000 {
+            let (x, y) = (f64::from(k % 200), f64::from(k / 200));
+            pts.push([x * 4.07 - 3.0, y * 4.11 - 3.0]);
+            pts.push([100.0 + x * 0.23, 100.0 + y * 0.21]);
+        }
+        let alone: Vec<_> = pts.iter().map(|&p| (b.point(p), b.on_runway(p))).collect();
+        assert_eq!(b.points(&pts), alone);
     }
 
     #[test]

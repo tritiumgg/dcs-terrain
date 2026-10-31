@@ -79,6 +79,30 @@ impl Node {
     }
 
     /// Which of the boxes meet `[min_x, min_z, max_x, max_z]`, a bit each.
+    #[cfg(target_arch = "x86_64")]
+    #[inline]
+    pub fn meets(&self, b: [f32; 4]) -> u32 {
+        use core::arch::x86_64::*;
+        // SAFETY: SSE2 is part of x86-64, and an unaligned load reads the
+        // four floats of each array.
+        unsafe {
+            let load = |v: &[f32; WIDE]| _mm_loadu_ps(v.as_ptr());
+            let hit = _mm_and_ps(
+                _mm_and_ps(
+                    _mm_cmple_ps(load(&self.min_x), _mm_set1_ps(b[2])),
+                    _mm_cmpge_ps(load(&self.max_x), _mm_set1_ps(b[0])),
+                ),
+                _mm_and_ps(
+                    _mm_cmple_ps(load(&self.min_z), _mm_set1_ps(b[3])),
+                    _mm_cmpge_ps(load(&self.max_z), _mm_set1_ps(b[1])),
+                ),
+            );
+            _mm_movemask_ps(hit) as u32
+        }
+    }
+
+    /// Which of the boxes meet `[min_x, min_z, max_x, max_z]`, a bit each.
+    #[cfg(not(target_arch = "x86_64"))]
     #[inline]
     pub fn meets(&self, b: [f32; 4]) -> u32 {
         let mut m = 0;
@@ -93,6 +117,47 @@ impl Node {
     }
 
     /// Which of the boxes meet `line`.
+    #[cfg(target_arch = "x86_64")]
+    #[inline]
+    pub fn crosses(&self, line: &Line) -> u32 {
+        use core::arch::x86_64::*;
+        // SAFETY: SSE2 is part of x86-64, and an unaligned load reads the
+        // four floats of each array.
+        unsafe {
+            let load = |v: &[f32; WIDE]| _mm_loadu_ps(v.as_ptr());
+            let set = _mm_set1_ps;
+            let abs = |v| _mm_andnot_ps(set(-0.0), v);
+            let (x0, x1) = (load(&self.min_x), load(&self.max_x));
+            let (z0, z1) = (load(&self.min_z), load(&self.max_z));
+            let half = set(0.5);
+            // A box misses a segment only if an axis of the box or the
+            // segment's normal parts them.
+            let cx = _mm_sub_ps(_mm_mul_ps(_mm_add_ps(x0, x1), half), set(line.a[0]));
+            let cz = _mm_sub_ps(_mm_mul_ps(_mm_add_ps(z0, z1), half), set(line.a[1]));
+            let hx = _mm_mul_ps(_mm_sub_ps(x1, x0), half);
+            let hz = _mm_mul_ps(_mm_sub_ps(z1, z0), half);
+            let (nx, nz) = (set(line.n[0]), set(line.n[1]));
+            let off = abs(_mm_add_ps(_mm_mul_ps(nx, cx), _mm_mul_ps(nz, cz)));
+            let reach = _mm_add_ps(
+                _mm_add_ps(_mm_mul_ps(abs(nx), hx), _mm_mul_ps(abs(nz), hz)),
+                set(line.pad),
+            );
+            let hull = _mm_and_ps(
+                _mm_and_ps(
+                    _mm_cmple_ps(x0, set(line.hull[2])),
+                    _mm_cmpge_ps(x1, set(line.hull[0])),
+                ),
+                _mm_and_ps(
+                    _mm_cmple_ps(z0, set(line.hull[3])),
+                    _mm_cmpge_ps(z1, set(line.hull[1])),
+                ),
+            );
+            _mm_movemask_ps(_mm_and_ps(hull, _mm_cmple_ps(off, reach))) as u32
+        }
+    }
+
+    /// Which of the boxes meet `line`.
+    #[cfg(not(target_arch = "x86_64"))]
     #[inline]
     pub fn crosses(&self, line: &Line) -> u32 {
         let mut m = 0;
@@ -145,18 +210,25 @@ impl Line {
         Line { a, n, hull, pad }
     }
 
-    /// Whether the box `[min_x, min_z, max_x, max_z]` meets this segment.
+    /// Whether the corners `c`, `[x, y, z]`, lie clear of this segment: all
+    /// past one side of its box, or of its line.
     #[inline]
-    pub fn meets(&self, b: [f32; 4]) -> bool {
-        let mut n = EMPTY;
-        n.set(0, b);
-        n.crosses(self) != 0
+    pub fn clear_of(&self, c: [[f32; 3]; 3]) -> bool {
+        let off = |v: [f32; 3]| self.n[0] * (v[0] - self.a[0]) + self.n[1] * (v[2] - self.a[1]);
+        let (a, b, e) = (off(c[0]), off(c[1]), off(c[2]));
+        let box_of = tri_box(c);
+        (a > self.pad && b > self.pad && e > self.pad)
+            || (a < -self.pad && b < -self.pad && e < -self.pad)
+            || box_of[0] > self.hull[2]
+            || box_of[2] < self.hull[0]
+            || box_of[1] > self.hull[3]
+            || box_of[3] < self.hull[1]
     }
 }
 
 /// Spreads the low 12 bits of `v` to the even bits.
 #[inline]
-fn spread(v: u32) -> u32 {
+pub fn spread(v: u32) -> u32 {
     let v = (v | (v << 8)) & 0x00ff_00ff;
     let v = (v | (v << 4)) & 0x0f0f_0f0f;
     let v = (v | (v << 2)) & 0x3333_3333;
@@ -274,6 +346,15 @@ impl Bvh {
         Bvh {
             pad: 1.0,
             ..Bvh::default()
+        }
+    }
+
+    /// The box of all its triangles, `[min_x, min_z, max_x, max_z]`, empty
+    /// but finite when it has none.
+    pub fn bounds(&self) -> [f32; 4] {
+        match self.nodes.first() {
+            Some(n) => n.union(),
+            None => [0.0; 4],
         }
     }
 

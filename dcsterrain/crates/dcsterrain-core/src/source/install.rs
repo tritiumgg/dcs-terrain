@@ -845,7 +845,7 @@ impl Source for Install {
                         Some(b) => b.clone(),
                         None => self.block(i)?,
                     };
-                    ps.iter().map(|&p| (b.point(p), b.on_runway(p))).collect()
+                    b.points(&ps)
                 }
             })
         };

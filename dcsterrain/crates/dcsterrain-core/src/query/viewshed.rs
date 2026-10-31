@@ -366,30 +366,6 @@ pub(super) struct Sweep {
     near: Vec<Vec<f64>>,
 }
 
-/// The bearing of `(x, y)` from the x axis to within about 1e-5 radians.
-#[inline]
-fn rough_atan2(y: f64, x: f64) -> f64 {
-    let (ax, ay) = (x.abs(), y.abs());
-    if ax == 0.0 && ay == 0.0 {
-        return 0.0;
-    }
-    let t = ax.min(ay) / ax.max(ay);
-    let t2 = t * t;
-    let p = -0.011_721_20;
-    let p = p * t2 + 0.052_653_32;
-    let p = p * t2 - 0.116_432_87;
-    let p = p * t2 + 0.193_543_46;
-    let p = p * t2 - 0.332_623_47;
-    let mut a = t * (p * t2 + 0.999_977_26);
-    if ay > ax {
-        a = FRAC_PI_2 - a;
-    }
-    if x < 0.0 {
-        a = PI - a;
-    }
-    if y < 0.0 { -a } else { a }
-}
-
 /// Fills `out` with the raster's slope from the eye at each step of a radial
 /// running `cos` north and `sin` east, from step `first`, a chunk at a time
 /// so that the arithmetic compiles to wide registers where the machine has
@@ -412,73 +388,93 @@ fn slopes_avx2(s: &Sweep, first: u64, cos: f64, sin: f64, out: &mut [f64]) {
     slopes_any(s, first, cos, sin, out);
 }
 
-/// Steps of a radial taken together.
+/// Steps of a radial, or cells of one, taken together.
 const CHUNK: usize = 32;
+
+/// The raster's bilinear height at the first `m` of `x` and `z`, each lane
+/// `good` only where four cells with ground lie around it in the window, as
+/// `Window::value_at` would then find; another lane is left to it.
+#[inline(always)]
+fn heights(
+    s: &Sweep,
+    (x, z): (&[f64; CHUNK], &[f64; CHUNK]),
+    m: usize,
+    h: &mut [f64; CHUNK],
+    good: &mut [bool; CHUNK],
+) {
+    let g = &s.g;
+    let c = f64::from(g.cell_size);
+    let (rows, cols) = (f64::from(g.height), f64::from(g.width));
+    let (r0, c0) = (s.w.row0 as i32, s.w.col0 as i32);
+    let (wr, wc) = (s.w.rows as i32, s.w.cols as i32);
+    let (mut at, mut tr, mut tc) = ([0i32; CHUNK], [0f64; CHUNK], [0f64; CHUNK]);
+    for j in 0..m {
+        let (qx, qz) = ((x[j] - g.origin_x) / c, (z[j] - g.origin_z) / c);
+        let (fr, fc) = (
+            (qx - 0.5).clamp(0.0, rows - 1.0),
+            (qz - 0.5).clamp(0.0, cols - 1.0),
+        );
+        let (ir, ic) = (fr as i32, fc as i32);
+        tr[j] = fr - f64::from(ir);
+        tc[j] = fc - f64::from(ic);
+        let (r, k) = (ir - r0, ic - c0);
+        let inside = (qx >= 0.0) & (qx < rows) & (qz >= 0.0) & (qz < cols);
+        let held = (r >= 0) & (k >= 0) & (r + 1 < wr) & (k + 1 < wc);
+        good[j] = inside & held;
+        // A lane off the window reads cell 0, and is not good.
+        at[j] = if good[j] { r * wc + k } else { 0 };
+    }
+    let data = &s.w.data[..];
+    assert!(data.len() > (wr * wc) as usize - 1 && wc > 0);
+    let nodata = Layer::Height.nodata();
+    let stride = wc as usize;
+    let mut v = [[0i32; CHUNK]; 4];
+    for (o, v) in [0, 1, stride, stride + 1].into_iter().zip(&mut v) {
+        for j in 0..m {
+            // `at` is 0, or lies a row and a column inside the window.
+            *v.get_mut(j).expect("under a chunk") = data[(at[j] as usize + o).min(data.len() - 1)];
+        }
+    }
+    for j in 0..m {
+        good[j] &=
+            (v[0][j] != nodata) & (v[1][j] != nodata) & (v[2][j] != nodata) & (v[3][j] != nodata);
+        h[j] = (1.0 - tr[j]) * (1.0 - tc[j]) * f64::from(v[0][j])
+            + (1.0 - tr[j]) * tc[j] * f64::from(v[1][j])
+            + tr[j] * (1.0 - tc[j]) * f64::from(v[2][j])
+            + tr[j] * tc[j] * f64::from(v[3][j]);
+    }
+}
 
 #[inline(always)]
 fn slopes_any(s: &Sweep, first: u64, cos: f64, sin: f64, out: &mut [f64]) {
-    let g = &s.g;
-    let c = f64::from(g.cell_size);
     let (o, step, eye) = (s.o, s.step, s.eye);
-    let (rows, cols) = (f64::from(g.height), f64::from(g.width));
-    let (w0, wc) = ((s.w.row0, s.w.col0), i64::from(s.w.cols));
-    let wrows = i64::from(s.w.rows);
-    let (mut d, mut qx, mut qz) = ([0f64; CHUNK], [0f64; CHUNK], [0f64; CHUNK]);
-    let (mut ir, mut ic) = ([0i32; CHUNK], [0i32; CHUNK]);
-    let (mut tr, mut tc) = ([0f64; CHUNK], [0f64; CHUNK]);
+    let (mut d, mut x, mut z) = ([0f64; CHUNK], [0f64; CHUNK], [0f64; CHUNK]);
     let (mut h, mut good) = ([0f64; CHUNK], [true; CHUNK]);
-    let nodata = Layer::Height.nodata();
     for (n, out) in out.chunks_mut(CHUNK).enumerate() {
         let from = first + (n * CHUNK) as u64;
         let m = out.len();
         for j in 0..m {
             d[j] = (from + j as u64) as f64 * step;
-            qx[j] = (o.0 + d[j] * cos - g.origin_x) / c;
-            qz[j] = (o.1 + d[j] * sin - g.origin_z) / c;
+            x[j] = o.0 + d[j] * cos;
+            z[j] = o.1 + d[j] * sin;
+        }
+        heights(s, (&x, &z), m, &mut h, &mut good);
+        for j in 0..m {
+            out[j] = (h[j] - eye) / d[j];
         }
         for j in 0..m {
-            good[j] = (qx[j] >= 0.0) & (qx[j] < rows) & (qz[j] >= 0.0) & (qz[j] < cols);
-            let (fr, fc) = (
-                (qx[j] - 0.5).clamp(0.0, rows - 1.0),
-                (qz[j] - 0.5).clamp(0.0, cols - 1.0),
-            );
-            ir[j] = fr as i32;
-            ic[j] = fc as i32;
-            tr[j] = fr - f64::from(ir[j]);
-            tc[j] = fc - f64::from(ic[j]);
-        }
-        for j in 0..m {
-            let (r, c) = (i64::from(ir[j]) - w0.0, i64::from(ic[j]) - w0.1);
-            if !good[j] || r < 0 || c < 0 || r + 1 >= wrows || c + 1 >= wc {
-                good[j] = false;
-                continue;
-            }
-            let at = (r * wc + c) as usize;
-            let v = [
-                s.w.data[at],
-                s.w.data[at + 1],
-                s.w.data[at + wc as usize],
-                s.w.data[at + wc as usize + 1],
-            ];
-            good[j] = !v.contains(&nodata);
-            h[j] = (1.0 - tr[j]) * (1.0 - tc[j]) * f64::from(v[0])
-                + (1.0 - tr[j]) * tc[j] * f64::from(v[1])
-                + tr[j] * (1.0 - tc[j]) * f64::from(v[2])
-                + tr[j] * tc[j] * f64::from(v[3]);
-        }
-        for j in 0..m {
-            out[j] = if good[j] {
-                (h[j] - eye) / d[j]
-            } else {
+            if !good[j] {
                 // Near an edge of the grid or of the ground.
-                s.height(o.0 + d[j] * cos, o.1 + d[j] * sin)
-                    .map_or(f64::NEG_INFINITY, |h| (h - eye) / d[j])
-            };
+                out[j] = s
+                    .height(x[j], z[j])
+                    .map_or(f64::NEG_INFINITY, |h| (h - eye) / d[j]);
+            }
         }
     }
 }
 
 /// What a cell of the mask asks of the sweep.
+#[cfg(test)]
 enum Ask {
     /// Out of the radius or off the ground: never set, never counted.
     Out,
@@ -534,15 +530,13 @@ impl Sweep {
         )
     }
 
+    /// One cell as the sweep sees it, by the C runtime's `hypot` and `atan2`:
+    /// what `ask_row` must give.
+    #[cfg(test)]
     fn ask(&self, r: i64, c: i64) -> Ask {
         let (x, z) = self.centre(r, c);
         let (dx, dz) = (x - self.o.0, z - self.o.1);
-        // The square root in place of the C runtime's `hypot`: they differ in
-        // the last bits, which only a range on a step or on the radius sees.
-        let s = (dx * dx + dz * dz).sqrt();
-        let q = s / self.step;
-        let close = (q - q.round()).abs() < 1e-7 || (s - self.radius).abs() < 1e-6;
-        let d = if close { dx.hypot(dz) } else { s };
+        let d = dx.hypot(dz);
         // The cell holding the observer counts however small the radius.
         let own = r == self.n && c == self.n;
         if (d > self.radius && !own) || self.height(x, z).is_none() {
@@ -553,21 +547,130 @@ impl Sweep {
         if last == 0 {
             return Ask::Near;
         }
-        let k = self.nearest_radial(dx, dz);
+        let k = (dz.atan2(dx).rem_euclid(TAU) / self.bearing).round() as u64 % self.radials;
         Ask::Swept((k << 44) | (last << 24) | i as u64)
     }
 
-    /// The radial nearest in bearing to `(dx, dz)` from the site. A cheap
-    /// arctangent settles it unless the bearing lies near halfway between
-    /// two radials, where the C runtime's decides.
-    #[inline]
-    fn nearest_radial(&self, dx: f64, dz: f64) -> u64 {
-        let at = rough_atan2(dz, dx).rem_euclid(TAU) / self.bearing;
-        let round = at.round();
-        if (at - round).abs() < 0.45 {
-            return round as u64 % self.radials;
+    /// The keys of row `r` into `keys`, calling `near` with each counted cell
+    /// too close for a step between it and the site; returns how many it
+    /// called. Square roots and a rough arctangent, in wide registers where
+    /// the machine has them, stand for the C runtime's `hypot` and `atan2`
+    /// until a value lies near where the last bits could tell.
+    #[inline(always)]
+    fn row_any<N: Fn(i64, f64)>(&self, r: i64, near: &N, keys: &mut Vec<u64>) -> u64 {
+        const WIDTH: usize = 16;
+        let g = &self.g;
+        let cell = f64::from(g.cell_size);
+        let (x, _) = self.centre(r, 0);
+        let dx = x - self.o.0;
+        let first = (((x - g.origin_x) / cell - 0.5).floor()) as i64;
+        let wr = first - self.w.row0;
+        let row_ok = first >= 0
+            && first + 1 < i64::from(g.height)
+            && wr >= 0
+            && wr + 1 < i64::from(self.w.rows);
+        let wc = i64::from(self.w.cols);
+        let nodata = Layer::Height.nodata();
+        let (mut z, mut dz, mut s) = ([0f64; WIDTH], [0f64; WIDTH], [0f64; WIDTH]);
+        let (mut steps, mut up, mut at, mut round) =
+            ([0f64; WIDTH], [0f64; WIDTH], [0f64; WIDTH], [0f64; WIDTH]);
+        let (mut ic, mut close) = ([0i32; WIDTH], [false; WIDTH]);
+        let mut near_count = 0;
+        let mut c = 0;
+        while c < self.side {
+            let m = (self.side - c).min(WIDTH as i64) as usize;
+            for j in 0..m {
+                z[j] = self.origin.1 + ((c + j as i64) as f64 + 0.5) * self.res;
+                dz[j] = z[j] - self.o.1;
+                s[j] = (dx * dx + dz[j] * dz[j]).sqrt();
+                steps[j] = s[j] / self.step;
+                up[j] = steps[j].ceil();
+                close[j] = ((steps[j] - (steps[j] + 0.5).floor()).abs() < 1e-7)
+                    | ((s[j] - self.radius).abs() < 1e-6);
+                let (ax, az) = (dx.abs(), dz[j].abs());
+                let t = ax.min(az) / ax.max(az);
+                let t2 = t * t;
+                let p = -0.011_721_20;
+                let p = p * t2 + 0.052_653_32;
+                let p = p * t2 - 0.116_432_87;
+                let p = p * t2 + 0.193_543_46;
+                let p = p * t2 - 0.332_623_47;
+                let a = t * (p * t2 + 0.999_977_26);
+                let a = if az > ax { FRAC_PI_2 - a } else { a };
+                let a = if dx < 0.0 { PI - a } else { a };
+                let a = if dz[j] < 0.0 { TAU - a } else { a };
+                at[j] = a / self.bearing;
+                round[j] = (at[j] + 0.5).floor();
+                ic[j] = ((z[j] - g.origin_z) / cell - 0.5).floor() as i32;
+            }
+            for j in 0..m {
+                let cc = c + j as i64;
+                let wide = (close[j]).then(|| dx.hypot(dz[j]));
+                let d = wide.unwrap_or(s[j]);
+                // The cell holding the observer counts however small the
+                // radius.
+                let own = r == self.n && cc == self.n;
+                if d > self.radius && !own {
+                    continue;
+                }
+                // Four cells with ground give the bilinear ground, whatever
+                // its weights; anything else takes the long way.
+                let w = i64::from(ic[j]) - self.w.col0;
+                let ground = row_ok
+                    && ic[j] >= 0
+                    && i64::from(ic[j]) + 1 < i64::from(g.width)
+                    && w >= 0
+                    && w + 1 < wc
+                    && {
+                        let at = (wr * wc + w) as usize;
+                        let d = &self.w.data;
+                        let e = at + wc as usize;
+                        d[at] != nodata
+                            && d[at + 1] != nodata
+                            && d[e] != nodata
+                            && d[e + 1] != nodata
+                    };
+                if !ground && self.height(x, z[j]).is_none() {
+                    continue;
+                }
+                let i = r * self.side + cc;
+                let last = if wide.is_some() {
+                    (d / self.step).ceil()
+                } else {
+                    up[j]
+                };
+                let last = (last as u64).max(1) - 1;
+                if last == 0 {
+                    near(i, self.height(x, z[j]).expect("kept for its ground"));
+                    near_count += 1;
+                    continue;
+                }
+                // A bearing near halfway between radials goes to the exact.
+                let k = if (at[j] - round[j]).abs() < 0.45 {
+                    round[j] as u64 % self.radials
+                } else {
+                    (dz[j].atan2(dx).rem_euclid(TAU) / self.bearing).round() as u64 % self.radials
+                };
+                keys.push((k << 44) | (last << 24) | i as u64);
+            }
+            c += m as i64;
         }
-        (dz.atan2(dx).rem_euclid(TAU) / self.bearing).round() as u64 % self.radials
+        near_count
+    }
+
+    fn row<N: Fn(i64, f64)>(&self, r: i64, near: &N, keys: &mut Vec<u64>) -> u64 {
+        #[cfg(target_arch = "x86_64")]
+        if std::arch::is_x86_feature_detected!("avx2") {
+            // SAFETY: the machine has just been seen to have AVX2.
+            return unsafe { self.row_avx2(r, near, keys) };
+        }
+        self.row_any(r, near, keys)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    fn row_avx2<N: Fn(i64, f64)>(&self, r: i64, near: &N, keys: &mut Vec<u64>) -> u64 {
+        self.row_any(r, near, keys)
     }
 
     /// `f` over `items`, over every core when the mask is large enough.
@@ -583,7 +686,29 @@ impl Sweep {
     /// `far` with each cell's index, range and ground, and the steepest
     /// slope from the site to the ground short of it; returns how many
     /// cells `far` said yes to.
-    fn radial<F>(&self, k: u64, cells: &mut [u64], far: &F) -> u64
+    fn radial<F>(&self, k: u64, cells: &mut [u64], far: &F, exact: bool) -> u64
+    where
+        F: Fn(i64, f64, f64, f64) -> bool,
+    {
+        #[cfg(target_arch = "x86_64")]
+        if std::arch::is_x86_feature_detected!("avx2") {
+            // SAFETY: the machine has just been seen to have AVX2.
+            return unsafe { self.radial_avx2(k, cells, far, exact) };
+        }
+        self.radial_any(k, cells, far, exact)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    fn radial_avx2<F>(&self, k: u64, cells: &mut [u64], far: &F, exact: bool) -> u64
+    where
+        F: Fn(i64, f64, f64, f64) -> bool,
+    {
+        self.radial_any(k, cells, far, exact)
+    }
+
+    #[inline(always)]
+    fn radial_any<F>(&self, k: u64, cells: &mut [u64], far: &F, exact: bool) -> u64
     where
         F: Fn(i64, f64, f64, f64) -> bool,
     {
@@ -593,13 +718,33 @@ impl Sweep {
         let top = cells.last().map_or(0, |key| key >> 24);
         let steepest = self.steepest(k, top, cos, sin);
         let mut yes = 0u64;
-        for &key in cells.iter() {
-            let (last, i) = (key >> 24, (key & 0xFFFFFF) as i64);
-            let steepest = steepest[last as usize];
-            let (x, z) = self.centre(i / self.side, i % self.side);
-            let d = (x - o.0).hypot(z - o.1);
-            let ground = self.height(x, z).expect("kept for its ground");
-            yes += u64::from(far(i, d, ground, steepest));
+        let (mut x, mut z, mut d) = ([0f64; CHUNK], [0f64; CHUNK], [0f64; CHUNK]);
+        let (mut h, mut good) = ([0f64; CHUNK], [true; CHUNK]);
+        for chunk in cells.chunks(CHUNK) {
+            let m = chunk.len();
+            for (j, &key) in chunk.iter().enumerate() {
+                let i = (key & 0xFFFFFF) as i64;
+                (x[j], z[j]) = self.centre(i / self.side, i % self.side);
+            }
+            heights(self, (&x, &z), m, &mut h, &mut good);
+            for j in 0..m {
+                let (dx, dz) = (x[j] - o.0, z[j] - o.1);
+                d[j] = (dx * dx + dz * dz).sqrt();
+            }
+            for (j, &key) in chunk.iter().enumerate() {
+                let (last, i) = (key >> 24, (key & 0xFFFFFF) as i64);
+                let d = if exact {
+                    (x[j] - o.0).hypot(z[j] - o.1)
+                } else {
+                    d[j]
+                };
+                let ground = if good[j] {
+                    h[j]
+                } else {
+                    self.height(x[j], z[j]).expect("kept for its ground")
+                };
+                yes += u64::from(far(i, d, ground, steepest[last as usize]));
+            }
         }
         yes
     }
@@ -617,24 +762,21 @@ impl Sweep {
         N: Fn(i64, f64) + Sync,
         F: Fn(i64, f64, f64, f64) -> bool + Sync,
     {
+        self.sweeping(near, far, true)
+    }
+
+    /// `sweep`, `far` given a range to the last bits only if `exact`: a
+    /// square root otherwise, in place of the C runtime's `hypot`.
+    fn sweeping<N, F>(&self, near: &N, far: &F, exact: bool) -> (u64, u64)
+    where
+        N: Fn(i64, f64) + Sync,
+        F: Fn(i64, f64, f64, f64) -> bool + Sync,
+    {
         let side = self.side;
         // Each row's swept keys, and how many of its cells are near.
         let rows = self.map((0..side).collect(), |r| {
-            let (mut keys, mut near_count) = (Vec::with_capacity(side as usize), 0u64);
-            for c in 0..side {
-                match self.ask(r, c) {
-                    Ask::Out => {}
-                    Ask::Near => {
-                        let (x, z) = self.centre(r, c);
-                        near(
-                            r * side + c,
-                            self.height(x, z).expect("kept for its ground"),
-                        );
-                        near_count += 1;
-                    }
-                    Ask::Swept(key) => keys.push(key),
-                }
-            }
+            let mut keys = Vec::with_capacity(side as usize);
+            let near_count = self.row(r, near, &mut keys);
             (keys, near_count)
         });
         // The keys bucketed by radial, in place of a sort of them all.
@@ -665,7 +807,7 @@ impl Sweep {
             }
             rest = more;
         }
-        let swept = self.map(radials, |(k, cells)| self.radial(k, cells, far));
+        let swept = self.map(radials, |(k, cells)| self.radial(k, cells, far, exact));
         let near_count: u64 = rows.iter().map(|r| r.1).sum();
         (
             near_count + swept.iter().sum::<u64>(),
@@ -681,13 +823,22 @@ impl Sweep {
             .map(|_| AtomicU8::new(0))
             .collect();
         let eye = self.eye;
-        let (seen, total) = self.sweep(&|i, _| set(&bits, i), &|i, d, ground, steepest| {
-            let seen = (ground + target - eye) / d >= steepest;
+        let far = |i: i64, d: f64, ground: f64, steepest: f64| {
+            let slope = (ground + target - eye) / d;
+            // Only a slope within rounding of the steepest needs the range
+            // to the last bit.
+            let seen = if (slope - steepest).abs() > 1e-12 * slope.abs() {
+                slope >= steepest
+            } else {
+                let (x, z) = self.centre(i / side, i % side);
+                (ground + target - eye) / (x - self.o.0).hypot(z - self.o.1) >= steepest
+            };
             if seen {
                 set(&bits, i);
             }
             seen
-        });
+        };
+        let (seen, total) = self.sweeping(&|i, _| set(&bits, i), &far, false);
         (
             bits.into_iter().map(AtomicU8::into_inner).collect(),
             seen,

@@ -196,10 +196,10 @@ pub fn horizon(pieces: &[Piece], eye: f64, length: f64, step: f64) -> Vec<f64> {
         let slope = |t: f64| (ground(t) - eye - BLOCK_TOLERANCE_M / 2.0) / (t * length);
         let first = (s * length / step).floor() as usize + 1;
         let last = ((e * length / step).ceil() as usize).min(n + 1);
-        for t in [s, e] {
-            if t > 0.0 {
-                marks.push((t * length, slope(t)));
-            }
+        // In order along the segment, as the stretches come, so the marks
+        // need no sort.
+        if s > 0.0 {
+            marks.push((s * length, slope(s)));
         }
         for k in first..last {
             let t = k as f64 * step / length;
@@ -207,11 +207,13 @@ pub fn horizon(pieces: &[Piece], eye: f64, length: f64, step: f64) -> Vec<f64> {
                 marks.push((t * length, slope(t)));
             }
         }
+        if e > 0.0 {
+            marks.push((e * length, slope(e)));
+        }
     });
     if under {
         return vec![f64::INFINITY; n];
     }
-    marks.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
     let (mut at, mut steepest) = (0, f64::NEG_INFINITY);
     for (k, b) in best.iter_mut().enumerate() {
         let end = (k + 1) as f64 * step;
@@ -228,28 +230,41 @@ pub fn horizon(pieces: &[Piece], eye: f64, length: f64, step: f64) -> Vec<f64> {
 /// the pieces, and the ground over it, the plane of the piece of highest
 /// rank that covers it; stretches no piece covers are skipped.
 fn spans(pieces: &[Piece], mut f: impl FnMut(f64, f64, &dyn Fn(f64) -> f64)) {
-    let mut ts: Vec<f64> = pieces.iter().flat_map(|p| p.t).collect();
-    ts.sort_unstable_by(f64::total_cmp);
+    let mut order: Vec<u32> = (0..pieces.len() as u32).collect();
+    order.sort_unstable_by(|&i, &j| pieces[i as usize].t[0].total_cmp(&pieces[j as usize].t[0]));
+    // Pieces in order of their starts have their ends nearly in order too,
+    // so an insertion sort finds little to move.
+    let mut ts: Vec<f64> = Vec::with_capacity(2 * pieces.len());
+    for &i in &order {
+        for t in pieces[i as usize].t {
+            let mut at = ts.len();
+            while at > 0 && ts[at - 1].total_cmp(&t).is_gt() {
+                at -= 1;
+            }
+            ts.insert(at, t);
+        }
+    }
     ts.dedup();
-    let mut order: Vec<usize> = (0..pieces.len()).collect();
-    order.sort_unstable_by(|&i, &j| pieces[i].t[0].total_cmp(&pieces[j].t[0]));
     let mut next = order.into_iter().peekable();
     // The pieces begun so far, highest rank on top; one that has ended is
     // dropped when it reaches the top, since the sweep never goes back.
-    let mut live: BinaryHeap<(u64, usize)> = BinaryHeap::new();
+    let mut live: BinaryHeap<(u64, u32)> = BinaryHeap::new();
     for w in ts.windows(2) {
         let (s, e) = (w[0], w[1]);
         let m = 0.5 * (s + e);
-        while let Some(i) = next.next_if(|&i| pieces[i].t[0] <= m) {
-            live.push((pieces[i].rank, i));
+        while let Some(i) = next.next_if(|&i| pieces[i as usize].t[0] <= m) {
+            live.push((pieces[i as usize].rank, i));
         }
-        while live.peek().is_some_and(|&(_, i)| pieces[i].t[1] < m) {
+        while live
+            .peek()
+            .is_some_and(|&(_, i)| pieces[i as usize].t[1] < m)
+        {
             live.pop();
         }
         let Some(&(_, i)) = live.peek() else {
             continue;
         };
-        let p = &pieces[i];
+        let p = &pieces[i as usize];
         let ground = |t: f64| p.h[0] + (t - p.t[0]) / (p.t[1] - p.t[0]) * (p.h[1] - p.h[0]);
         f(s, e, &ground);
     }
