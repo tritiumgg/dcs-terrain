@@ -781,9 +781,9 @@ impl Surface5 {
                 & (v[0] - b[3] <= BOX_SLACK_M)
                 & (b[2] - v[2] <= BOX_SLACK_M)
                 & (v[2] - b[5] <= BOX_SLACK_M);
-            ok & inside & (v[1] - v[1] == 0.0)
+            ok & inside & v[1].is_finite()
         });
-        let dry = depth.iter().fold(true, |ok, d| ok & (d - d == 0.0));
+        let dry = depth.iter().fold(true, |ok, d| ok & d.is_finite());
         if !(within && dry) {
             return Err(self.what_is_wrong(index, &p, &depth));
         }

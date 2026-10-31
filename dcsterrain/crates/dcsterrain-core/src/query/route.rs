@@ -1278,7 +1278,7 @@ mod tests {
             at: 0.8,
             point: [400.0, 0.0],
         };
-        let west = g.edges[other].clone();
+        let west = g.edges[other];
         let to = Snap {
             edge: other,
             at: if g.nodes[west.b as usize][0] < 0.0 {

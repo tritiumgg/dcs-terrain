@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::hash::Hash;
+use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -149,13 +149,42 @@ impl Entry for MeshToc {
     }
 }
 
+/// A hasher for a few small integers: a read of a scene chunk asks for one,
+/// and the default costs as much as the rest of the read.
+#[derive(Default)]
+struct Mixer(u64);
+
+impl Hasher for Mixer {
+    fn finish(&self) -> u64 {
+        self.0 ^ (self.0 >> 29)
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for b in bytes {
+            self.write_u64(u64::from(*b));
+        }
+    }
+
+    fn write_u32(&mut self, v: u32) {
+        self.write_u64(u64::from(v));
+    }
+
+    fn write_u64(&mut self, v: u64) {
+        self.0 = (self.0.rotate_left(5) ^ v).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    }
+
+    fn write_usize(&mut self, v: usize) {
+        self.write_u64(v as u64);
+    }
+}
+
 /// Least recently used values within a budget of their sizes. The last
 /// value put is kept whatever its size.
 struct Lru<K, V> {
     budget: usize,
     used: usize,
     tick: u64,
-    items: HashMap<K, (V, usize, u64)>,
+    items: HashMap<K, (V, usize, u64), BuildHasherDefault<Mixer>>,
 }
 
 impl<K: Eq + Hash + Copy, V: Clone> Lru<K, V> {
@@ -164,7 +193,7 @@ impl<K: Eq + Hash + Copy, V: Clone> Lru<K, V> {
             budget,
             used: 0,
             tick: 0,
-            items: HashMap::new(),
+            items: HashMap::default(),
         }
     }
 

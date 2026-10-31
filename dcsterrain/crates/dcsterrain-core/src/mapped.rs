@@ -50,13 +50,13 @@ impl View {
 fn prefetch(map: &Mmap) {
     use windows_sys::Win32::System::Memory::{PrefetchVirtualMemory, WIN32_MEMORY_RANGE_ENTRY};
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
-    let mut range = WIN32_MEMORY_RANGE_ENTRY {
+    let range = WIN32_MEMORY_RANGE_ENTRY {
         VirtualAddress: map.as_ptr() as *mut _,
         NumberOfBytes: map.len(),
     };
     // SAFETY: the range is this mapping. It is only a hint: on failure the
     // pages are read as they are touched.
-    unsafe { PrefetchVirtualMemory(GetCurrentProcess(), 1, &mut range, 0) };
+    unsafe { PrefetchVirtualMemory(GetCurrentProcess(), 1, &range, 0) };
 }
 
 #[cfg(unix)]

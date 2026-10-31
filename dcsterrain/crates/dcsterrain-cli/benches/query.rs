@@ -624,7 +624,7 @@ const TARGETS: &[(&str, f64, bool)] = &[
 const COUNTABLE_MS: f64 = 10.0;
 
 /// The most memory a call of the binary may hold.
-const TARGET_PEAK_MIB: f64 = 150.0;
+const TARGET_PEAK_MIB: f64 = 64.0;
 
 /// The headroom the bounds leave: the machine running them need not be the
 /// one the targets were measured on.

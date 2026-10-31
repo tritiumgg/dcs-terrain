@@ -1288,7 +1288,7 @@ pub(crate) mod tests {
         }
         for i in 0..900 {
             if i % 10 == 9 {
-                let copy = g.edges[i - 1 - (u.next() * 5.0) as usize].clone();
+                let copy = g.edges[i - 1 - (u.next() * 5.0) as usize];
                 g.edges.to_mut().push(copy);
                 continue;
             }
@@ -1424,7 +1424,7 @@ pub(crate) mod tests {
         )];
         let mut g = build(classes(), s, &mut dry).unwrap();
         g.nodes.to_mut()[1] = [100.0, 100.0];
-        let e = g.edges[0].clone();
+        let e = g.edges[0];
         let (p, at) = g.locate(&e, [-5.0, 50.0]);
         assert_eq!(p, [0.0, 50.0]);
         assert!((at - 0.25).abs() < 1e-12, "{at}");

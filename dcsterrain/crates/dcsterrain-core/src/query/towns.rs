@@ -204,7 +204,14 @@ pub fn towns(terrain: &Terrain, q: TownsRequest) -> Result<TownsResponse, Vec<Is
         TownsSort::ResidentialFloor => p.residential_floor,
         TownsSort::ApartmentShare => p.apartment_share(),
     };
-    found.sort_by(|a, b| key(b).total_cmp(&key(a)).then(a.id.cmp(&b.id)));
+    // Ids are unique, so the order is total, and only those kept need it.
+    let order = |a: &&Place, b: &&Place| key(b).total_cmp(&key(a)).then(a.id.cmp(&b.id));
+    if (q.limit as usize) < found.len() {
+        found.select_nth_unstable_by(q.limit as usize, order);
+        found[..q.limit as usize].sort_unstable_by(order);
+    } else {
+        found.sort_unstable_by(order);
+    }
     let matched = found.len() as u32;
     found.truncate(q.limit as usize);
 
