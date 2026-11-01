@@ -4,7 +4,7 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `design.md` and `queries.md` hold the design.
 
-**Last updated:** 2026-11-01T20:44Z
+**Last updated:** 2026-11-01T20:51Z
 
 ## Done
 
@@ -12,7 +12,7 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
 1. **C1 on Caucasus: the screenshot method.** Camera and screenshot calls
    proven, 241 models shot and judged, a rule that a name saying no building
-   makes `misc`, 15 models moved, method in `plan.md`
+   makes `misc`, 17 models moved, method in `plan.md`
    (`data/scenery-review.md`). *Verified by:* live: an agent drove the capture
    and read every frame with the user at DCS, on 2.9.31.29434.
 2. **V1: the sortie, first run.** `tools/validate` plans, runs and scores it.

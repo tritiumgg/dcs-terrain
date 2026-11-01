@@ -113,7 +113,8 @@ capture:
    trees by `tree_density`.
 3. The user starts a one-aircraft mission on the terrain, presses F11 and leaves
    the mouse alone. Shoot one frame of each model, 5 s a model, at 40°, and
-   models with no box from about 300 m.
+   models with no box from about 300 m: a large one is a footprint the tool
+   cannot see, so name it in the pull request.
 4. Read every frame, in contact sheets. Retake what trees hide or what shows
    water, at 60° from another side. A neighbor in frame must not decide a class.
 5. Judge each model by eye, looking for what the rules get wrong:

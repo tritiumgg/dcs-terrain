@@ -54,14 +54,13 @@ the last column by objects.
 
 | Rule added | building P / R | industrial P / R | misc P / R | Models right | Objects right |
 |---|---|---|---|---|---|
-| None | 65 / 100 | 100 / 74 | 96 / 37 | 74.7 | 89.6 |
-| Slender: at most 7 m wide, 10 m or taller, is `misc` | 67 / 100 | 100 / 72 | 91 / 41 | 75.5 | 89.6 |
-| Long: 5:1 or more and 30 m or longer is `misc` | 70 / 95 | 100 / 74 | 83 / 55 | 77.6 | 88.4 |
-| **No family by name is `misc`** | **88 / 100** | **100 / 74** | **93 / 94** | **91.7** | **90.2** |
+| None | 65 / 98 | 100 / 74 | 89 / 35 | 73.9 | 89.6 |
+| Slender: at most 7 m wide, 10 m or taller, is `misc` | 67 / 98 | 100 / 72 | 84 / 39 | 74.7 | 89.6 |
+| Long: 5:1 or more and 30 m or longer is `misc` | 70 / 93 | 100 / 74 | 79 / 54 | 76.8 | 88.4 |
+| **No family by name is `misc`** | **88 / 98** | **100 / 74** | **90 / 94** | **90.9** | **90.1** |
 
 A model with no box, 0 x 0, is already `misc` by the 4 m² rule, so that rule
-adds nothing. Among them are `nasos`, a pump jack, and the two shelters, which
-no footprint check can see.
+adds nothing, and it is wrong for `nasos`, a pump jack, and the two shelters.
 
 **Adopted: a `building` the family rules leave without a family is `misc`.**
 Those rules already name bridges, cranes, masts and debris, and leave a flat box
@@ -99,7 +98,7 @@ Objects that changed class, by terrain, rule and overrides together.
 | Terrain | Models | Objects | Of | `building` before → after | `misc` before → after |
 |---|---|---|---|---|---|
 | Afghanistan | 42 | 1 039 635 | 10 447 341 | 10 139 288 → 9 099 653 | 67 → 1 039 702 |
-| Caucasus | 15 | 1 783 | 936 823 | 461 614 → 459 872 | 325 367 → 325 494 |
+| Caucasus | 17 | 2 123 | 936 823 | 461 614 → 460 212 | 325 367 → 325 154 |
 | GermanyCW | 98 | 59 736 | 8 687 758 | 7 828 128 → 7 768 392 | 190 079 → 249 815 |
 | MarianaIslands | 18 | 11 778 | 191 999 | 157 476 → 145 698 | 26 330 → 38 108 |
 | MarianaIslandsWWII | 12 | 8 051 | 51 008 | 47 900 → 39 849 | 1 729 → 9 780 |
@@ -116,8 +115,33 @@ Afghanistan most of the change is debris, garbage and sand-block walls.
 
 ## What the review changed on Caucasus
 
-Fifteen models changed class, and none of them among the 20 most placed: the
+Seventeen models changed class, and none of them among the 20 most placed: the
 top of the catalog was already right. `korpus_a`, `_b`, `_a1`, `_d` and `korpus`
 look more like offices than flats, but they settle either way, so their family
-stands. `ukrytie` and `air_closedguardhouse_03a` are aircraft shelters, kept
-`misc`: with no box they have no footprint, whatever their class.
+stands.
+
+## Models with no box
+
+The scene file gives some models a 0 x 0 box. `ukrytie` and
+`air_closedguardhouse_03a` are earth-covered aircraft shelters, 340 objects, now
+`building` in the military family by the user's judgment. An override fixes the
+class only: with no box a shelter has no footprint, so a placement or a clearing
+sees it as a point and can sit on top of it. It counts as built-up and does not
+settle.
+
+The other 24 Caucasus models with no box are parked vehicles, trailers and
+`nasos`, 1 493 objects. Models with no box, placed, by terrain:
+
+| Terrain | Models | Objects | What they are, by name |
+|---|---|---|---|
+| Afghanistan | 14 | 59 | Stones, vehicles |
+| Caucasus | 26 | 1 833 | Shelters, vehicles, trailers, `nasos` |
+| GermanyCW | 8 | 164 | Cones, trees, an aircraft, `rsbn` |
+| MarianaIslands | 0 | 0 | |
+| MarianaIslandsWWII | 0 | 0 | |
+| Nevada | 0 | 0 | |
+| PersianGulf | 7 | 57 282 | Lights |
+| Syria | 8 | 340 | Generators, aircraft, `surface` |
+
+A large structure among them is a footprint the tool cannot see, so each
+terrain's review shoots these from far out and says which are large.
