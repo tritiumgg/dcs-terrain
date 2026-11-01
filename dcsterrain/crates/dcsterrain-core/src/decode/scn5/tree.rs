@@ -29,6 +29,9 @@ fn flat(b: &[u8], at: usize) -> [f64; 4] {
 const GROUP_CELL_M: f64 = 1024.0;
 /// The most cells that grid has: its cell doubles until it fits.
 const GROUP_CELLS: f64 = (1 << 20) as f64;
+/// The most places the grid lists records in, all told: a model with an absurd
+/// box would otherwise put a record in every cell.
+const GROUP_ENTRIES: f64 = (1 << 24) as f64;
 
 /// How far past its place a model can reach, however it is turned.
 fn reach(b: &[f32; 6]) -> f64 {
@@ -85,7 +88,13 @@ impl GroupGrid {
             return out;
         }
         let (w, h) = (all[2] - all[0], all[3] - all[1]);
-        while (w / out.cell + 1.0) * (h / out.cell + 1.0) > GROUP_CELLS {
+        let entries = |cell: f64| -> f64 {
+            let span = |r: [f64; 4]| ((r[2] - r[0]) / cell + 2.0) * ((r[3] - r[1]) / cell + 2.0);
+            index.group.iter().map(|g| span(reach(g))).sum()
+        };
+        while (w / out.cell + 1.0) * (h / out.cell + 1.0) > GROUP_CELLS
+            || entries(out.cell) > GROUP_ENTRIES
+        {
             out.cell *= 2.0;
         }
         out.rows = (w / out.cell) as usize + 1;
@@ -541,6 +550,24 @@ mod tests {
             assert_eq!(got, all, "v{version}");
             assert!(query(&b, &idx, Pool::Trees, [0.0, 0.0, 1.0, 1.0]).is_empty());
         }
+    }
+
+    #[test]
+    fn a_group_of_absurd_boxes_stays_within_its_grid() {
+        let mut built = scene(9);
+        built.models[0].1 = [-3e6, 0.0, -3e6, 3e6, 1.0, 3e6];
+        built.group = (0..6000)
+            .map(|i| Record {
+                model: 0,
+                pos: [f64::from(i), 40.0, 470_000.0],
+                heading: 0.0,
+            })
+            .collect();
+        let (bytes, _, idx) = open(&built);
+        let ask = || query(&bytes, &idx, Pool::Objects, [0.0, 470_000.0, 1.0, 470_001.0]);
+        let (scan, grid) = (ask(), ask());
+        assert_eq!(scan.len(), 6000);
+        assert_eq!(scan, grid);
     }
 
     #[test]

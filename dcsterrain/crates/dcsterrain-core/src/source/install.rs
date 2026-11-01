@@ -596,8 +596,9 @@ impl Install {
     }
 
     /// Starts the thread that drops every held block after `IDLE` with none
-    /// asked for: a view of a file stops an updater truncating it, so a
-    /// batch waiting on its caller must hold none.
+    /// asked for: a view of an install file stops an updater truncating it,
+    /// so a batch waiting on its caller must hold none. Views of cache
+    /// entries stay, which only this tool rewrites, and by rename.
     fn watch_idle(&self) {
         self.idle.get_or_init(|| {
             let (blocks, used) = (Arc::downgrade(&self.blocks), self.used.clone());
