@@ -11,8 +11,7 @@ use dcsterrain_core::query::{Terrain, answer};
 use dcsterrain_validate::plan::Plan;
 use serde_json::{Value, json};
 
-/// How much longer than the game's a route may be: rounding of the game's
-/// path and of where it starts and stops, which is not a longer way.
+/// How much longer than the game's a route may be, twice the most measured.
 const LONGER_AT_MOST: f64 = 0.005;
 
 fn recorded(dir: &std::path::Path) -> Vec<Value> {

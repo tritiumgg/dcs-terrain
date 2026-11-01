@@ -114,6 +114,9 @@ pub struct RouteCase {
     pub to: [f64; 2],
     /// The tool's length; none where it refuses the route.
     pub length: Option<f64>,
+    /// Whether every step between its legs is a passage the road file lists.
+    #[serde(default)]
+    pub listed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -466,6 +469,31 @@ fn sights(
     Ok(out)
 }
 
+/// Whether each step of a route's legs from one edge to another is a passage
+/// in the graph, read apart from the search that found the route.
+fn listed(terrain: &Terrain, route: &Value) -> bool {
+    let Ok(g) = terrain.source().road_graph() else {
+        return false;
+    };
+    let p = &g.passages;
+    let Some(legs) = route["legs"].as_array() else {
+        return false;
+    };
+    let edges: Vec<usize> = legs
+        .iter()
+        .filter_map(|l| l["edge_id"].as_u64())
+        .map(|e| e as usize)
+        .collect();
+    edges.windows(2).all(|w| {
+        w[0] == w[1]
+            || p.on_edge(w[0]).flat_map(|r| [r * 2, r * 2 + 1]).any(|end| {
+                p.out_of(end)
+                    .iter()
+                    .any(|pass| p.edge(pass.to as usize) == w[1])
+            })
+    })
+}
+
 fn routes(terrain: &Terrain, rows: &[Row], rng: &mut Rng, sizes: &Sizes) -> Vec<RouteCase> {
     let mut out = Vec::new();
     for (network, quota) in [
@@ -519,6 +547,7 @@ fn routes(terrain: &Terrain, rows: &[Row], rng: &mut Rng, sizes: &Sizes) -> Vec<
                     continue;
                 };
                 let length = reply.as_ref().and_then(|r| r["length"].as_f64());
+                let listed = reply.as_ref().is_none_or(|r| listed(terrain, r));
                 found += 1;
                 out.push(RouteCase {
                     network: network.to_string(),
@@ -526,6 +555,7 @@ fn routes(terrain: &Terrain, rows: &[Row], rng: &mut Rng, sizes: &Sizes) -> Vec<
                     from,
                     to,
                     length,
+                    listed,
                 });
             }
         }

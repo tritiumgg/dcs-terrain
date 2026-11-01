@@ -15,8 +15,7 @@ use crate::stats::{distribution, wilson};
 pub const HEIGHT_MAX_M: f64 = 0.5;
 pub const WATER_AGREEMENT: f64 = 1.0;
 pub const SIGHT_AGREEMENT: f64 = 0.99;
-pub const ROUTE_WITHIN: f64 = 0.05;
-pub const ROUTE_SHARE: f64 = 0.95;
+pub const ROUTE_LONGER: f64 = 0.005;
 pub const MGRS_MAX_M: f64 = 2.0;
 
 const EARTH_RADIUS_M: f64 = 6_371_008.8;
@@ -142,7 +141,7 @@ fn sights(cases: &[SightCase], live: &[Value]) -> Value {
 fn routes(cases: &[RouteCase], live: &[Value]) -> Value {
     let mut errors: BTreeMap<String, Vec<f64>> = BTreeMap::new();
     let (mut none, mut refused_both, mut tool_only) = (0, 0, 0);
-    let mut within = 0;
+    let (mut within, mut unlisted) = (0, 0);
     let mut all = Vec::new();
     let mut worst = Vec::new();
     for (c, v) in cases.iter().zip(live) {
@@ -164,7 +163,8 @@ fn routes(cases: &[RouteCase], live: &[Value]) -> Value {
         };
         let e = tool / length - 1.0;
         all.push(e);
-        within += usize::from(e.abs() <= ROUTE_WITHIN);
+        within += usize::from(e <= ROUTE_LONGER);
+        unlisted += usize::from(e < 0.0 && !c.listed);
         errors
             .entry(format!("{}/{}", c.network, c.stratum))
             .or_default()
@@ -183,9 +183,9 @@ fn routes(cases: &[RouteCase], live: &[Value]) -> Value {
         })
         .collect();
     json!({"ratio_minus_1": distribution(&all), "strata": strata, "no_path": none, "tool_no_path": tool_only, "refused_by_both": refused_both,
-           "share_within": share, "worst": worst,
-           "target_within": ROUTE_WITHIN, "target_share": ROUTE_SHARE,
-           "pass": !all.is_empty() && none == 0 && tool_only == 0 && share >= ROUTE_SHARE})
+           "share_not_longer": share, "worst": worst,
+           "shorter_unlisted": unlisted, "target_longer": ROUTE_LONGER,
+           "pass": !all.is_empty() && none == 0 && tool_only == 0 && unlisted == 0 && within == all.len()})
 }
 
 /// The ground distance between a reference and a zone, easting and northing,
@@ -337,5 +337,44 @@ mod tests {
     fn a_degree_of_latitude_is_about_111_km() {
         let d = great_circle((0.0, 0.0), (1.0, 0.0));
         assert!((d - 111_195.0).abs() < 1.0, "{d}");
+    }
+}
+
+#[cfg(test)]
+mod route_tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn pass(tool: Option<f64>, listed: bool, game: Value) -> bool {
+        let case = RouteCase {
+            network: "roads".to_string(),
+            stratum: "x".to_string(),
+            from: [0.0; 2],
+            to: [0.0; 2],
+            length: tool,
+            listed,
+        };
+        let answered = RouteCase {
+            length: Some(100.0),
+            listed: true,
+            ..case.clone()
+        };
+        routes(&[answered, case], &[json!([100.0]), game])["pass"] == true
+    }
+
+    #[test]
+    fn a_route_passes_up_to_half_a_percent_longer_or_shorter_on_listed_passages() {
+        assert!(pass(Some(100.4), true, json!([100.0])));
+        assert!(!pass(Some(100.6), true, json!([100.0])));
+        assert!(pass(Some(50.0), true, json!([100.0])));
+        assert!(!pass(Some(50.0), false, json!([100.0])));
+    }
+
+    #[test]
+    fn both_sides_must_refuse_the_same_routes() {
+        assert!(pass(None, true, Value::Null));
+        assert!(!pass(Some(100.0), true, Value::Null));
+        assert!(!pass(None, true, json!([100.0])));
     }
 }

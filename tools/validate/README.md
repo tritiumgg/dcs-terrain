@@ -19,7 +19,9 @@ mise exec -- cargo run --manifest-path dcsterrain/Cargo.toml --release -p dcster
 ```
 
 Routes are asked with no bound on the detour, and a route either side refuses
-is kept in the sample: `pass` needs both to refuse the same ones.
+is kept in the sample: `pass` needs both to refuse the same ones, no route
+over 0.5 % longer than the game's, and a shorter one to take only passages the
+road file lists.
 
 `pass` judges the random sightlines; the marginal ones, within 1 m of grazing,
 and each stratum are reported beside it. Planning clears `replies/`, so a plan
