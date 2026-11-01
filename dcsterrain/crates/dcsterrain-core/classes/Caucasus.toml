@@ -2,7 +2,8 @@
 # the live catalog spells it, matched without regard to case; each value
 # names its class (building, industrial, wall, misc or effect), an optional
 # settlement family, and the reason. Drafted from the live catalog of
-# 2026-09-02: 888 859 objects over 263 models.
+# 2026-09-02: 888 859 objects over 263 models. Reviewed from screenshots of
+# one placement of each model on 2.9.31.29434; a reason names what was seen.
 #
 # A `misc` object still vetoes a footprint; it is kept out of the built-up
 # density only.
@@ -21,11 +22,13 @@
 "MSTIK" = { class = "misc", reason = "small bridge" }
 "ONE_PIECE_BRIDGE" = { class = "misc", reason = "bridge 21 x 560 m" }
 "ONE_PIECE_BRIDGE02" = { class = "misc", reason = "bridge 21 x 1360 m" }
-"PEREHOD" = { class = "misc", reason = "footbridge 5 x 60 m" }
+"PEREHOD" = { class = "misc", reason = "short pier on a lake, 5 x 60 m, moored boats beside it" }
 "TUNNEL_ENTRANCE_CAUC_01" = { class = "misc", reason = "tunnel portal" }
 "ROKITUNNELENTRANCE01" = { class = "misc", reason = "tunnel portal" }
 
 # --- Harbour and offshore works
+"KOMPLEX" = { class = "misc", reason = "beach lookout on two long walkways; the 16 x 51 m box is mostly walkway" }
+"KOMPLEX_BIG" = { class = "misc", reason = "beach lookout on long walkways; the 34 x 90 m box is mostly walkway" }
 "VOLNOREZ" = { class = "misc", reason = "breakwater 60 x 5 m" }
 "PRICHAL" = { class = "misc", reason = "pier 66 x 10 m" }
 "MBY_13" = { class = "misc", reason = "offshore platform" }
@@ -46,7 +49,13 @@
 # --- Small structures the size rule leaves as buildings
 "OHR-VYSHKA" = { class = "misc", reason = "guard tower 3 x 3 m" }
 "AIRBASE_VOR" = { class = "misc", reason = "VOR antenna ring, no walls" }
-"LOKATOR" = { class = "misc", reason = "radar antenna" }
+"LOKATOR" = { class = "misc", reason = "radar dome on a low base" }
+"AIRBASE_METEO_TBILISI_01" = { class = "misc", reason = "radar dome on a lattice mast" }
+"AIRBASE_METEO_TBILISI_02" = { class = "misc", reason = "radar dome 43 m wide on a low base, no stories" }
+"TELE_BASH_NEW" = { class = "misc", reason = "lattice mast standing alone, no plant around it" }
+"TELE_BASH_M_NEW" = { class = "misc", reason = "lattice mast; the 98 x 98 m box is far wider than the mast" }
+"MAJAK" = { class = "misc", reason = "lighthouse standing alone" }
+"MAJAK-1" = { class = "misc", reason = "lighthouse on a breakwater" }
 "MIG19-MONUMENT" = { class = "misc", reason = "monument" }
 
 # --- Parked vehicles and radars placed as scenery at airbases. They return
@@ -81,7 +90,7 @@
 "GRADIR" = { class = "industrial", reason = "cooling tower" }
 "TEC_A_NEW" = { class = "industrial", reason = "power station 80 x 66 m" }
 "STANCIJA3" = { class = "industrial", reason = "substation" }
-"NASOS" = { class = "industrial", reason = "pump house, no footprint" }
+"NASOS" = { class = "industrial", reason = "oil pump jack on a pad, no footprint" }
 "PAR_GSM" = { class = "industrial", reason = "fuel store" }
 "PAR_AGREGATNAYA" = { class = "industrial", reason = "plant room" }
 "PAR_APPARATNAYA" = { class = "industrial", reason = "plant room" }
@@ -95,18 +104,14 @@
 "WODOKACHKA_A_NEW" = { class = "industrial", reason = "water tower" }
 "WODOKACHKA_B" = { class = "industrial", reason = "water tower" }
 "WODOKACHKA_C" = { class = "industrial", reason = "water tower" }
-"DOK_S_NEW" = { class = "industrial", reason = "dock shed 35 x 94 m" }
+"DOK_S_NEW" = { class = "industrial", reason = "dry dock: open brick basin with cranes, 35 x 94 m" }
 "TUAPSE_TOWERA" = { class = "industrial", reason = "refinery tower" }
 "TUAPSE_TOWERB" = { class = "industrial", reason = "refinery tower" }
 "TUAPSE_TOWERC" = { class = "industrial", reason = "refinery tower" }
 "TUAPSE_DEOILER" = { class = "industrial", reason = "refinery plant" }
-"AIRBASE_BARRELS_01" = { class = "industrial", reason = "fuel barrels" }
-"AIRBASE_BARRELS_02" = { class = "industrial", reason = "fuel barrels" }
+"AIRBASE_BARRELS_01" = { class = "industrial", reason = "three fuel cylinders on racks" }
+"AIRBASE_BARRELS_02" = { class = "industrial", reason = "three fuel cylinders on racks" }
 "KORPUS_ATOM" = { class = "industrial", reason = "reactor hall 65 x 120 m" }
-"TELE_BASH_NEW" = { class = "industrial", reason = "TV tower" }
-"TELE_BASH_M_NEW" = { class = "industrial", reason = "TV tower 98 x 98 m footprint" }
-"MAJAK" = { class = "industrial", reason = "lighthouse" }
-"MAJAK-1" = { class = "industrial", reason = "lighthouse" }
 
 # --- Walls
-"BASHNJA-STENA" = { class = "wall", reason = "fortress wall tower 5.5 x 5.4 m, 3 097 instances in a line" }
+"BASHNJA-STENA" = { class = "wall", reason = "stone tower 5.5 x 5.4 m, 3 097 instances in a line along the old fortified wall" }
