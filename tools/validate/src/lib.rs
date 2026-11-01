@@ -4,4 +4,6 @@
 //! `validation.json`.
 
 pub mod plan;
+pub mod report;
 pub mod sortie;
+pub mod stats;
