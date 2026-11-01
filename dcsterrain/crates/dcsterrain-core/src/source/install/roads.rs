@@ -22,7 +22,8 @@ pub struct RoadsGraph;
 
 pub static ROADS_GRAPH: RoadsGraph = RoadsGraph;
 
-/// 2 lays the arrays out flat, to be read where they lie.
+/// 2 lays the arrays out flat, to be read where they lie, with each
+/// network's grid.
 const GRAPH_VERSION: u32 = 2;
 
 impl Entry for RoadsGraph {

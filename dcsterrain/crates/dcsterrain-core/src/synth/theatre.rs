@@ -605,7 +605,7 @@ mod tests {
         });
         assert_eq!(ends, junctions);
         assert_eq!(
-            bridge.length,
+            { bridge.length },
             ROAD_EAST_EAST_M - ROAD_LOOP_EAST_M,
             "the bridge's whole length and the road either side"
         );

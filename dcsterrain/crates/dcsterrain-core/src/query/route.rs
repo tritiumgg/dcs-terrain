@@ -683,10 +683,11 @@ fn top_decile(
         .filter(|(e, _)| e.kind == kind)
         .map(|(_, &v)| v)
         .collect();
-    mine.sort_unstable_by(f32::total_cmp);
-    let Some(&cut) = mine.get(mine.len() * 9 / 10) else {
+    let at = mine.len() * 9 / 10;
+    if at >= mine.len() {
         return Ok(vec![Some(Vec::new()); found.len()]);
-    };
+    }
+    let (_, &mut cut, _) = mine.select_nth_unstable_by(at, f32::total_cmp);
     Ok(found
         .iter()
         .map(|f| {

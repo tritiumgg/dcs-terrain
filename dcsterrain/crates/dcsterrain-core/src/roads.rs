@@ -44,7 +44,7 @@ pub struct Stretch {
 
 /// One edge of the graph, between two nodes, as `roads.graph` lays it out.
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[repr(C)]
+#[repr(C, packed(4))]
 pub struct Edge {
     pub kind: u8,
     pub class: u8,
@@ -56,14 +56,12 @@ pub struct Edge {
     /// end to `b`'s, through each contracted node.
     start: u32,
     end: u32,
-    pad_: u32,
     /// Meters along the polyline and the gaps from its ends to its nodes, so
     /// the straight line between two nodes is never longer than a path.
     pub length: f64,
 }
 
-// SAFETY: integers and an f64, laid out by `repr(C)` with no gap, the two
-// fields that would have been gaps being declared.
+// SAFETY: integers and an f64, packed to 4 bytes with no gap.
 unsafe impl bytemuck::Zeroable for Edge {}
 unsafe impl bytemuck::Pod for Edge {}
 
@@ -84,7 +82,6 @@ impl Edge {
             b,
             start: points.start,
             end: points.end,
-            pad_: 0,
             length,
         }
     }
@@ -389,6 +386,23 @@ impl Graph {
         b.extend_from_slice(bytemuck::cast_slice(&self.edges));
         b.extend_from_slice(bytemuck::cast_slice(&self.points));
         b.extend_from_slice(&names);
+        // The grid of each network, so a process that wants one nearest edge
+        // does not list half a million of them first, each on 8 bytes from
+        // the counts, as the arrays are.
+        let pad = |len: usize| n + (len - n).next_multiple_of(8);
+        b.resize(pad(b.len()), 0);
+        for kind in [KIND_ROAD, KIND_RAIL] {
+            let ix = self.index.of(self, kind);
+            for v in [ix.x0, ix.z0, ix.cell] {
+                b.extend_from_slice(&v.to_le_bytes());
+            }
+            for v in [ix.rows, ix.cols, ix.start.len(), ix.ids.len()] {
+                b.extend_from_slice(&(v as u64).to_le_bytes());
+            }
+            b.extend_from_slice(bytemuck::cast_slice(&ix.start));
+            b.extend_from_slice(bytemuck::cast_slice(&ix.ids));
+            b.resize(pad(b.len()), 0);
+        }
         b
     }
 
@@ -409,9 +423,6 @@ impl Graph {
         if size > b.len() as u64 {
             return Err(short("arrays"));
         }
-        if size < b.len() as u64 {
-            return Err(Refusal("the road graph has bytes past its classes".into()));
-        }
         let (n, e, p) = (n as usize, e as usize, p as usize);
         let nodes_at = lead + 32;
         let edges_at = nodes_at + n * 16;
@@ -421,7 +432,7 @@ impl Graph {
         let edges: Column<Edge> = Column::in_view(view, edges_at, e).ok_or_else(cut)?;
         let points = Column::in_view(view, points_at, p).ok_or_else(cut)?;
         let mut classes = Vec::new();
-        let mut at = &b[points_at + p * 8..];
+        let mut at = &b[points_at + p * 8..size as usize];
         while !at.is_empty() {
             let len = at.get(..4).ok_or_else(|| short("class table"))?;
             let len = u32::from_le_bytes(len.try_into().unwrap()) as usize;
@@ -429,6 +440,17 @@ impl Graph {
             classes.push(String::from_utf8_lossy(name).into_owned());
             at = &at[4 + len..];
         }
+        let pad = |len: usize| lead + (len - lead).next_multiple_of(8);
+        let mut at = pad(size as usize);
+        let mut nets = [Index::empty(), Index::empty()];
+        for net in &mut nets {
+            *net = Index::read(view, &mut at, e as u32)?;
+            at = pad(at);
+        }
+        if at != b.len() {
+            return Err(Refusal("the road graph has bytes past its index".into()));
+        }
+        let [roads, rails] = nets;
         for edge in edges.iter() {
             if edge.a as usize >= n || edge.b as usize >= n {
                 return Err(Refusal("a road graph edge names no node".into()));
@@ -446,12 +468,15 @@ impl Graph {
                 )));
             }
         }
+        let index = Indexes::default();
+        let _ = index.nets[0].set(roads);
+        let _ = index.nets[1].set(rails);
         Ok(Graph {
             classes,
             nodes,
             edges,
             points,
-            index: Indexes::default(),
+            index,
         })
     }
 
@@ -574,7 +599,6 @@ impl Graph {
         let before = |a: &(f64, usize, [f64; 2]), b: &(f64, usize, [f64; 2])| {
             a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)).is_lt()
         };
-        let mut seen = Seen::new(self.edges.len());
         let (r, c) = ix.cell_of(p);
         let (rows, cols) = (ix.rows as i64, ix.cols as i64);
         // The first ring that reaches the grid.
@@ -582,42 +606,44 @@ impl Graph {
             .into_iter()
             .max()
             .unwrap_or(0);
-        for k in k0.. {
-            ix.ring(r, c, k, &mut |cell| {
-                for &i in ix.cell(cell) {
-                    if !seen.first(i as usize) {
-                        continue;
+        Seen::with(self.edges.len(), |seen| {
+            for k in k0.. {
+                ix.ring(r, c, k, &mut |cell| {
+                    for &i in ix.cell(cell) {
+                        if !seen.first(i as usize) {
+                            continue;
+                        }
+                        let q = self.closest(&self.edges[i as usize], p);
+                        let found = ((q[0] - p[0]).hypot(q[1] - p[1]), i as usize, q);
+                        if best.len() == n && !before(&found, &best[n - 1]) {
+                            continue;
+                        }
+                        let at = best.partition_point(|b| before(b, &found));
+                        best.insert(at, found);
+                        best.truncate(n);
                     }
-                    let q = self.closest(&self.edges[i as usize], p);
-                    let found = ((q[0] - p[0]).hypot(q[1] - p[1]), i as usize, q);
-                    if best.len() == n && !before(&found, &best[n - 1]) {
-                        continue;
-                    }
-                    let at = best.partition_point(|b| before(b, &found));
-                    best.insert(at, found);
-                    best.truncate(n);
-                }
-            });
-            if r - k <= 0 && r + k >= rows - 1 && c - k <= 0 && c + k >= cols - 1 {
-                break;
-            }
-            // Every edge not yet found lies wholly outside the rings so far,
-            // so no nearer than their edge.
-            if best.len() == n {
-                let (x0, z0) = (
-                    ix.x0 + (r - k) as f64 * ix.cell,
-                    ix.z0 + (c - k) as f64 * ix.cell,
-                );
-                let (x1, z1) = (
-                    x0 + (2 * k + 1) as f64 * ix.cell,
-                    z0 + (2 * k + 1) as f64 * ix.cell,
-                );
-                let clear = (p[0] - x0).min(x1 - p[0]).min(p[1] - z0).min(z1 - p[1]);
-                if clear - SLACK_M > best[n - 1].0 {
+                });
+                if r - k <= 0 && r + k >= rows - 1 && c - k <= 0 && c + k >= cols - 1 {
                     break;
                 }
+                // Every edge not yet found lies wholly outside the rings so far,
+                // so no nearer than their edge.
+                if best.len() == n {
+                    let (x0, z0) = (
+                        ix.x0 + (r - k) as f64 * ix.cell,
+                        ix.z0 + (c - k) as f64 * ix.cell,
+                    );
+                    let (x1, z1) = (
+                        x0 + (2 * k + 1) as f64 * ix.cell,
+                        z0 + (2 * k + 1) as f64 * ix.cell,
+                    );
+                    let clear = (p[0] - x0).min(x1 - p[0]).min(p[1] - z0).min(z1 - p[1]);
+                    if clear - SLACK_M > best[n - 1].0 {
+                        break;
+                    }
+                }
             }
-        }
+        });
         best.into_iter().map(|(_, i, q)| (i, q)).collect()
     }
 
@@ -632,16 +658,17 @@ impl Graph {
         let (r1, c1) = ix.cell_of([b[2], b[3]]);
         let (r0, c0) = (r0.max(0), c0.max(0));
         let (r1, c1) = (r1.min(ix.rows as i64 - 1), c1.min(ix.cols as i64 - 1));
-        let mut seen = Seen::new(self.edges.len());
-        for r in r0..=r1 {
-            for c in c0..=c1 {
-                for &i in ix.cell(r as usize * ix.cols + c as usize) {
-                    if seen.first(i as usize) {
-                        f(i as usize);
+        Seen::with(self.edges.len(), |seen| {
+            for r in r0..=r1 {
+                for c in c0..=c1 {
+                    for &i in ix.cell(r as usize * ix.cols + c as usize) {
+                        if seen.first(i as usize) {
+                            f(i as usize);
+                        }
                     }
                 }
             }
-        }
+        });
     }
 }
 
@@ -692,18 +719,42 @@ const MAX_CELLS: f64 = (1 << 22) as f64;
 const SLACK_M: f64 = 1e-3;
 
 /// Which edges a search has met, so each is looked at once.
-struct Seen(Vec<u64>);
+#[derive(Default)]
+struct Seen {
+    words: Vec<u64>,
+    /// The words written, so the next search clears only those: zeroing a
+    /// bit for each of half a million edges cost more than the search.
+    touched: Vec<u32>,
+}
+
+thread_local! {
+    static SEEN: std::cell::RefCell<Seen> = std::cell::RefCell::default();
+}
 
 impl Seen {
-    fn new(n: usize) -> Seen {
-        Seen(vec![0; n.div_ceil(64)])
+    /// `f` with this thread's set, empty, for `n` edges.
+    fn with<T>(n: usize, f: impl FnOnce(&mut Seen) -> T) -> T {
+        SEEN.with_borrow_mut(|s| {
+            for &w in &s.touched {
+                s.words[w as usize] = 0;
+            }
+            s.touched.clear();
+            if s.words.len() < n.div_ceil(64) {
+                s.words.resize(n.div_ceil(64), 0);
+            }
+            f(s)
+        })
     }
 
     /// Whether `i` is met for the first time.
     fn first(&mut self, i: usize) -> bool {
         let (w, bit) = (i / 64, 1u64 << (i % 64));
-        let new = self.0[w] & bit == 0;
-        self.0[w] |= bit;
+        let word = &mut self.words[w];
+        if *word == 0 {
+            self.touched.push(w as u32);
+        }
+        let new = *word & bit == 0;
+        *word |= bit;
         new
     }
 }
@@ -805,29 +856,78 @@ struct Index {
     rows: usize,
     cols: usize,
     /// Cell k's edges are `ids[start[k]..start[k + 1]]`.
-    start: Vec<u32>,
-    ids: Vec<u32>,
+    start: Column<u32>,
+    ids: Column<u32>,
 }
 
 impl Index {
+    fn empty() -> Index {
+        Index {
+            x0: 0.0,
+            z0: 0.0,
+            cell: MIN_CELL_M,
+            rows: 0,
+            cols: 0,
+            start: vec![0].into(),
+            ids: Column::default(),
+        }
+    }
+
+    /// The index `encode` wrote at byte `at` of `view`, of a graph of `edges`
+    /// edges, moving `at` past it.
+    fn read(view: &View, at: &mut usize, edges: u32) -> Result<Index, Refusal> {
+        let b = view.bytes();
+        let head = b.get(*at..*at + 56).ok_or_else(|| short("index"))?;
+        let word = |k: usize| u64::from_le_bytes(head[k * 8..k * 8 + 8].try_into().unwrap());
+        let float = |k: usize| f64::from_bits(word(k));
+        let (x0, z0, cell) = (float(0), float(1), float(2));
+        let (rows, cols) = (word(3) as usize, word(4) as usize);
+        let (starts, ids) = (word(5) as usize, word(6) as usize);
+        let cut = || short("index");
+        let bytes = starts.checked_add(ids).and_then(|n| n.checked_mul(4));
+        let end = bytes
+            .and_then(|n| n.checked_add(*at + 56))
+            .ok_or_else(cut)?;
+        let start: Column<u32> = Column::in_view(view, *at + 56, starts).ok_or_else(cut)?;
+        let list: Column<u32> =
+            Column::in_view(view, *at + 56 + starts * 4, ids).ok_or_else(cut)?;
+        *at = end;
+        let cells = rows.checked_mul(cols).and_then(|n| n.checked_add(1));
+        let rising = start.windows(2).all(|w| w[0] <= w[1]);
+        if cells != Some(starts)
+            || !(rising && start.first() == Some(&0) && start.last() == Some(&(ids as u32)))
+            || !cell.is_finite()
+            || cell <= 0.0
+            || list.iter().any(|&i| i >= edges)
+        {
+            return Err(Refusal("the road graph's index does not fit it".into()));
+        }
+        Ok(Index {
+            x0,
+            z0,
+            cell,
+            rows,
+            cols,
+            start,
+            ids: list,
+        })
+    }
     /// The index of `kind`'s edges over a grid covering `all`.
     fn new(g: &Graph, kind: u8, all: [f64; 4]) -> Index {
         let count = g.edges.iter().filter(|e| e.kind == kind).count();
         let mut ix = Index {
             x0: all[0],
             z0: all[1],
-            cell: MIN_CELL_M,
-            rows: 0,
-            cols: 0,
-            start: vec![0],
-            ids: Vec::new(),
+            ..Index::empty()
         };
         if count == 0 || !all.iter().all(|v| v.is_finite()) {
             return ix;
         }
         let (w, h) = (all[2] - all[0], all[3] - all[1]);
-        // About one edge to a cell, were they spread evenly.
-        ix.cell = (w * h / count as f64).sqrt().max(MIN_CELL_M);
+        // About four edges to a cell, were they spread evenly: the grid is
+        // kept in the cache, and four times the cells cost it more than they
+        // save a search.
+        ix.cell = (4.0 * w * h / count as f64).sqrt().max(MIN_CELL_M);
         while (w / ix.cell + 1.0) * (h / ix.cell + 1.0) > MAX_CELLS {
             ix.cell *= 2.0;
         }
@@ -847,7 +947,7 @@ impl Index {
             ids[fill[k as usize] as usize] = i;
             fill[k as usize] += 1;
         }
-        (ix.start, ix.ids) = (start, ids);
+        (ix.start, ix.ids) = (start.into(), ids.into());
         ix
     }
 
@@ -1184,7 +1284,7 @@ pub(crate) mod tests {
         assert_eq!(g.nodes.len(), 4);
         assert_eq!(g.nodes[1], [102.0, 0.0]);
         // The polyline and the two-meter gaps to the junction it stops short of.
-        assert_eq!(g.edges[0].length, 102.0);
+        assert_eq!({ g.edges[0].length }, 102.0);
         assert_eq!((g.edges[2].a, g.edges[2].b), (3, 2));
     }
 
@@ -1212,7 +1312,7 @@ pub(crate) mod tests {
         let g = build(classes(), s, &mut dry).unwrap();
         let ends: Vec<_> = g.edges.iter().map(|e| (e.a, e.b, e.class)).collect();
         assert_eq!(ends, [(0, 1, 0), (1, 2, 0), (2, 3, 1)]);
-        assert_eq!(g.edges[0].length, 200.0);
+        assert_eq!({ g.edges[0].length }, 200.0);
         assert_eq!(
             g.line(&g.edges[0]),
             [
