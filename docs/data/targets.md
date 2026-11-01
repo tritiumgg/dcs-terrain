@@ -213,3 +213,6 @@ ADR 0007 has the reasoning of 1, 4 and 5.
    its target.
 5. **The memory target** of a query process is 150 MiB. The Mariana cause
    stays not split further.
+
+Q18 moved these figures on 2.9.31.29434: every operation against its single-thread
+baseline, and the memory target of 64 MiB, are in `q18-performance.md`.
