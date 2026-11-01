@@ -140,10 +140,25 @@ fn sights(cases: &[SightCase], live: &[Value]) -> Value {
            "pass": n > 0 && same as f64 / n as f64 >= SIGHT_AGREEMENT})
 }
 
+/// How much longer than the game's a route may be, in meters: `ROUTE_LONGER`
+/// of the game's length, and what the game left out by starting and stopping
+/// off the ends asked, since it snaps them to another road than the nearest.
+/// `reply` is `[length, points, first x, first z, last x, last z]`.
+pub fn route_allowance(c: &RouteCase, reply: &Value) -> f64 {
+    let off = |k: usize, [x, z]: [f64; 2]| match (reply[k].as_f64(), reply[k + 1].as_f64()) {
+        (Some(a), Some(b)) => (a - x).hypot(b - z),
+        _ => 0.0,
+    };
+    let length = reply[0].as_f64().unwrap_or(0.0);
+    ROUTE_LONGER * length + off(2, c.from) + off(4, c.to)
+}
+
 fn routes(cases: &[RouteCase], live: &[Value]) -> Value {
     let mut errors: BTreeMap<String, Vec<f64>> = BTreeMap::new();
     let (mut none, mut refused_both, mut tool_only) = (0, 0, 0);
     let (mut within, mut unlisted) = (0, 0);
+    // The least room any route left under its allowance, in meters.
+    let mut margin = f64::INFINITY;
     let mut all = Vec::new();
     let mut worst = Vec::new();
     for (c, v) in cases.iter().zip(live) {
@@ -165,7 +180,9 @@ fn routes(cases: &[RouteCase], live: &[Value]) -> Value {
         };
         let e = tool / length - 1.0;
         all.push(e);
-        within += usize::from(e <= ROUTE_LONGER);
+        let room = route_allowance(c, v) - (tool - length);
+        margin = margin.min(room);
+        within += usize::from(room >= 0.0);
         unlisted += usize::from(e < -ROUTE_SAME && !c.listed);
         errors
             .entry(format!("{}/{}", c.network, c.stratum))
@@ -186,7 +203,7 @@ fn routes(cases: &[RouteCase], live: &[Value]) -> Value {
         .collect();
     json!({"ratio_minus_1": distribution(&all), "strata": strata, "no_path": none, "tool_no_path": tool_only, "refused_by_both": refused_both,
            "share_not_longer": share, "worst": worst,
-           "shorter_unlisted": unlisted, "target_longer": ROUTE_LONGER,
+           "shorter_unlisted": unlisted, "target_longer": ROUTE_LONGER, "worst_margin_m": margin,
            "pass": !all.is_empty() && none == 0 && tool_only == 0 && unlisted == 0 && within == all.len()})
 }
 
@@ -378,5 +395,14 @@ mod route_tests {
         assert!(pass(None, true, Value::Null));
         assert!(!pass(Some(100.0), true, Value::Null));
         assert!(!pass(None, true, json!([100.0])));
+    }
+
+    #[test]
+    fn what_the_game_left_out_at_its_ends_is_allowed_and_no_more() {
+        // The asked ends are at the origin; the game starts 30 m and stops
+        // 40 m off them, on a path of 1000 m.
+        let game = json!([1000.0, 2, 30.0, 0.0, 0.0, 40.0]);
+        assert!(pass(Some(1074.0), true, game.clone()));
+        assert!(!pass(Some(1076.0), true, game));
     }
 }
