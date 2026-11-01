@@ -4,7 +4,8 @@
 //! The class, in order: a hand override for the terrain, else one for every
 //! terrain; `effect` for a `smoke#` model, a smoke column 200–600 m tall that
 //! is not a structure; `wall` for a box under 1 m thin and 4 m or more long;
-//! `misc` under 4 m²; `industrial` by name; else `building`.
+//! `misc` under 4 m²; `industrial` by name; `misc` for what the family
+//! rules name as no building, such as a bridge or a crane; else `building`.
 //!
 //! The family groups settlements: houses, apartments, shops, civic and
 //! industrial buildings make a place, and garages, sheds, farm and military
@@ -198,6 +199,7 @@ const EFFECT: &str = "a smoke volume";
 const WALL: &str = "thinner than 1 m and 4 m or longer";
 const MISC: &str = "under 4 m²";
 const INDUSTRIAL: &str = "an industrial name";
+const NOT_BUILDING: &str = "a name that says it is no building";
 const BUILDING: &str = "no other rule";
 
 static INDUSTRIAL_NAME: LazyLock<Regex> = LazyLock::new(|| {
@@ -618,6 +620,14 @@ impl Classes {
                     }
                 } else {
                     let (c, says) = class(&name, &m.bbox);
+                    // The family rules know bridges, cranes and masts by
+                    // name. Box size cannot tell those from buildings: a
+                    // slender tower and a transformer booth, or a long pier
+                    // and an apartment block, share their proportions.
+                    let (c, says) = match (c, family) {
+                        (Class::Building, None) => (Class::Misc, NOT_BUILDING),
+                        _ => (c, says),
+                    };
                     a.class = c;
                     a.class_by = Source::rule(says);
                 }
@@ -784,6 +794,23 @@ mod tests {
     }
 
     #[test]
+    fn a_name_that_says_it_is_no_building_makes_it_misc() {
+        for name in ["rw_bridge_2line", "port_gantry_crane", "lattice_tower"] {
+            let r = row("Synth", model(name, 20.0, 60.0, 20.0));
+            assert_eq!(r.assignment.class, Class::Misc, "{name}");
+            assert!(by_rule(&r, NOT_BUILDING), "{name}");
+        }
+        // Unnamed, or named as a building, the same box stays a building.
+        for name in ["xyzzy", "home1_a_new"] {
+            let r = row("Synth", model(name, 20.0, 60.0, 20.0));
+            assert_eq!(r.assignment.class, Class::Building, "{name}");
+        }
+        // An industrial name keeps its class, whatever the family says.
+        let r = row("Synth", model("tuapse_towera", 11.0, 20.0, 48.0));
+        assert_eq!(r.assignment.class, Class::Industrial);
+    }
+
+    #[test]
     fn a_short_thin_box_is_misc_not_wall() {
         let r = row("Nowhere", model("plain", 0.5, 3.9, 2.0));
         assert_eq!(r.assignment.class, Class::Misc);
@@ -791,22 +818,18 @@ mod tests {
 
     #[test]
     fn a_terrains_override_applies_on_that_terrain_alone() {
-        // A Caucasus bridge, misc there; a building by its size elsewhere.
-        let bridge = model("most(road)big", 15.0, 141.0, 9.0);
-        let r = row("Caucasus", bridge.clone());
-        assert_eq!(r.assignment.class, Class::Misc);
+        // A Caucasus fuel store, industrial there; a building elsewhere.
+        let store = model("par_gsm", 27.0, 32.0, 6.0);
+        let r = row("Caucasus", store.clone());
+        assert_eq!(r.assignment.class, Class::Industrial);
         let Source::Override { file, reason } = &r.assignment.class_by else {
             panic!("{:?}", r.assignment);
         };
-        assert_eq!(
-            (file.as_str(), reason.as_str()),
-            ("Caucasus", "road bridge 15 x 141 m")
-        );
-        let r = row("Syria", bridge);
+        assert_eq!((file.as_str(), reason.as_str()), ("Caucasus", "fuel store"));
+        let r = row("Syria", store);
         assert_eq!(r.assignment.class, Class::Building);
         assert!(by_rule(&r, BUILDING), "{:?}", r.assignment);
-        // Its name still says it is no settlement building.
-        assert_eq!(r.assignment.family, None);
+        assert_eq!(r.assignment.family, Some(Family::Military));
     }
 
     #[test]
