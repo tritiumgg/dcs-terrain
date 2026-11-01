@@ -47,8 +47,8 @@ arrays, through `memmap2`, and never a view of a whole file; a block of under
 stays private: a four-way bounding volume hierarchy over triangles in Morton
 order, about 7 bytes a triangle against the 33 the prepared form took. The
 hierarchy is built in memory and adds nothing to the cache. `roads.graph`
-becomes flat arrays, and it and `scene.nodes` are read through views of their
-cache entries. A terrain with no block asked for in a second drops every block
+becomes flat arrays with each network's search grid, and it and `scene.nodes`
+are read through views of their cache entries. A terrain with no block asked for in a second drops every block
 it holds, so a batch waiting on its caller holds no view of an install file.
 
 ### Alternatives considered
@@ -65,8 +65,10 @@ it holds, so a batch waiting on its caller holds no view of an install file.
 
 ## Consequences
 
-Peak commit falls to 72 MiB or less on every case, and to 64 or less on all but
-those `data/targets.md` names. Cold reads of a large block go through
+Peak commit is under 64 MiB on every case of every terrain
+(`data/q18-performance.md`), `exposure` included: at the limit its answer is
+47 MiB of text, so an answer written out is encoded as it goes rather than held.
+Cold reads of a large block go through
 `PrefetchVirtualMemory` or `madvise`, so a view is not read page by page.
 
 A view of an install file stops an updater that truncates that file in place,
@@ -80,8 +82,8 @@ On Linux and macOS a terrain file truncated while a query reads it kills the
 process with SIGBUS, with no error and no cache written. This is accepted and
 documented in the README.
 
-`roads.graph` grows by 8 bytes an edge, 2.3 % of GermanyCW's cache, and
-rebuilds once. Its arrays must lie on 8 bytes in the entry's file, which its
+`roads.graph` grows by 4 bytes an edge and its grid, at most 3.8 % of a
+terrain's cache, and rebuilds once. Its arrays must lie on 8 bytes in the entry's file, which its
 head is padded for; an entry re-stamped with a key of another length is copied
 into memory until it next rebuilds, which costs the target on that terrain only.
 
