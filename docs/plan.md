@@ -102,32 +102,33 @@ a valid RFC 7946 `FeatureCollection` whose features match its JSON response.
 
 | Id | Deliverable | Done | Depends on | Verified by |
 |---|---|---|---|---|
-| C1 | Review the scenery catalog of every terrain with no override file — Afghanistan, GermanyCW, MarianaIslands, MarianaIslandsWWII, Nevada, PersianGulf and Syria after N7 — each into its own classes file, each terrain its own pull request, following the review below | Every terrain has an override file whose keys all apply; no top-100 model is classed building unless it is one | N7 | agent for the clear cases; live for the ambiguous models |
+| C1 | Review the scenery catalog of every terrain with no override file — Afghanistan, GermanyCW, MarianaIslands, MarianaIslandsWWII, Nevada, PersianGulf and Syria — from screenshots of its models, each into its own classes file, each terrain its own pull request, following the review below. Caucasus is done and set the method | Every terrain has an override file whose keys all apply; no top-100 model is classed building unless it is one | N7 | live: an agent drives the capture with the user at DCS and judges the screenshots |
 
-How to review one terrain:
+How to review one terrain, with `data/scenery-review.md` beside you for the
+capture:
 
-1. Print the catalog with `dcsterrain check --terrain <id> --top 100`. It
-   lists the 100 models placed most and the 10 tallest structures, each with
-   its count, class, family, box and the source that decided it.
-2. Read the models placed most first: the top 50 to 100 hold most objects.
-   Look for four faults:
-   - a large box that is not a building — a bridge, pier, pitch or parked
-     vehicle — which should be `misc`;
-   - an industrial structure the name rule misses — a tank, cooling tower or
-     substation — which should be `industrial`;
-   - a wrong family, or `unknown` where it should be house, apartment or
-     shop (PersianGulf's top houses are `unknown` after N7);
-   - terrain totals that look off: Afghanistan has 67 `misc` and 0 `wall`
-     after N7, which suggests oversized boxes, so check a few of its models
-     by hand.
-3. Write `dcsterrain/crates/dcsterrain-core/classes/<terrain id>.toml`, one
+1. Print the catalog with `dcsterrain check --terrain <id> --top 100000 --json`.
+   List every placed model that is not plainly a marker or light.
+2. From `scenery_in` choose a placement of each: clear of other boxes, fewest
+   trees by `tree_density`.
+3. The user starts a one-aircraft mission on the terrain, presses F11 and leaves
+   the mouse alone. Shoot one frame of each model, 5 s a model, at 40°.
+4. Read every frame, in contact sheets. Retake what trees hide or what shows
+   water, at 60° from another side. A neighbor in frame must not decide a class.
+5. Judge each model by eye, looking for what the rules get wrong:
+   - a large box that is not a building, which should be `misc`;
+   - an industrial structure no name catches, which should be `industrial`;
+   - a building the no-building rule took because a name pattern happens to
+     match, such as `2-floor_house_clay_walls`;
+   - a wrong family, where it changes whether the model settles.
+6. Write `dcsterrain/crates/dcsterrain-core/classes/<terrain id>.toml`, one
    line per model: `"model" = { class = "...", family = "...", reason = "..." }`.
-   Keys match in any case. Never name a `smoke#` model; a test refuses it.
-   Register the file in `OVERRIDES` in `classes.rs`.
-4. Run the test again. It fails on a key that names no model on the
-   terrain. Check that the class counts moved as expected.
-5. List the ambiguous models, such as Caucasus's `korpus_*` blocks, for the
-   user to judge in the Mission Editor. Do not guess them.
+   The reason says what was seen. Keys match in any case. Never name a `smoke#`
+   model; a test refuses it. Register the file in `OVERRIDES` in `classes.rs`.
+7. Run the test again. It fails on a key that names no model on the terrain.
+   Check that the class counts moved as expected, and describe what moved.
+8. Send the user one list of the models you cannot judge, each with its
+   screenshot. Do not guess those. Screenshots stay out of the repository.
 
 ## Milestones
 

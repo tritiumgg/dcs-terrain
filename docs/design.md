@@ -466,8 +466,9 @@ the core crate, built into the binary, else `classes/common.toml`; a key
 matches a model in any case); `effect` for a model named `smoke#…` — 17 143
 objects 200–600 m tall on Caucasus, smoke columns not structures; `wall` when
 `min(w, d) < 1 m` and `max(w, d) ≥ 4 m`; `misc` under 4 m²; `industrial` by a
-name pattern list; else `building`. An override names a class and, when it
-wants one, a family.
+name pattern list; `misc` when the family rules below say the name is no
+building; else `building`. An override names a class and, when it wants one, a
+family. Box shape does not tell these apart (`data/scenery-review.md`).
 
 A `building` or `industrial` model also has the settlement family of §6.3 (a
 model of another class has one only when its override names one):
