@@ -47,6 +47,8 @@
 "PLATFORMA_AKACYA" = { class = "misc", reason = "railway platform 3.6 x 20 m" }
 
 # --- Small structures the size rule leaves as buildings
+"UKRYTIE" = { class = "misc", reason = "earth-covered aircraft shelter, no footprint" }
+"AIR_CLOSEDGUARDHOUSE_03A" = { class = "misc", reason = "earth-covered aircraft shelter despite its name, no footprint" }
 "OHR-VYSHKA" = { class = "misc", reason = "guard tower 3 x 3 m" }
 "AIRBASE_VOR" = { class = "misc", reason = "VOR antenna ring, no walls" }
 "LOKATOR" = { class = "misc", reason = "radar dome on a low base" }
@@ -112,6 +114,10 @@
 "AIRBASE_BARRELS_01" = { class = "industrial", reason = "three fuel cylinders on racks" }
 "AIRBASE_BARRELS_02" = { class = "industrial", reason = "three fuel cylinders on racks" }
 "KORPUS_ATOM" = { class = "industrial", reason = "reactor hall 65 x 120 m" }
+
+# --- Blocks the family rule reads as flats, by the user's judgment
+"KORPUS_B1" = { class = "industrial", family = "industrial", reason = "three-story front on a long gabled hall; large windows read as a factory, though hard to tell" }
+"KORPUS_C" = { class = "industrial", family = "industrial", reason = "three stories over a low wing with big windows, 102 x 38 m, a factory or works office" }
 
 # --- Walls
 "BASHNJA-STENA" = { class = "wall", reason = "stone tower 5.5 x 5.4 m, 3 097 instances in a line along the old fortified wall" }
