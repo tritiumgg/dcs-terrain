@@ -170,55 +170,55 @@ u32 5                         version
 names                         road classes: Caucasus 14 (road rdb tunnel_hose rw tunnel_hose_rail
                               roki_tunnel_road vpp_center vpp_border vpp_border_big taxiway taxiway_border
                               stopline stand_border vpp_border_vbig); Nevada and Syria 23 each
-node table                    Caucasus: u32 30548, then records {u32 1, u32 id, u32 ?, u32 k, k × (u32, u32)}.
-                              Not decoded (guessed: nodes and their links)
-edges and polylines           packed with no alignment
+table                         u32 count (Caucasus 30548), then ends
+                              {u32 1, u32 junction, u32 edge, u32 k, k × (u32 end, u32 cost)}
+edges                         u32 count (Caucasus 15274), then edges, packed with no alignment
+connectors                    u32 3, u32 edge a, u32 edge b, u32 n, n × f64[3]; 3 to 5 points
 spatial index                 last ~10 MB: dense f32 (x, z) pairs (guessed)
 ```
 
-Edge record, as seen around each polyline (`q` = offset of the point count):
+Edge record:
 
 ```
-…      not decoded
-q-14   u8   kind: 2 road, 1 rail, 0 airfield line
-q-13   u8   class: index into the class table
-q-12   u32  node at the first vertex, or 0xFFFFFFFF for none
-q-8    u32  node at the last vertex, likewise
-q-4    u32  0           (this zero is what marks a run as a graph edge)
-q      u32  n
-       n × f64[3]  points (x, y, z)
-       u32 n, n × f64[3]  unit tangents (dx, dy, dz)
-       u32 m, m × f64  cumulative length          (seen in airfield files; guessed here)
-       …              further per-vertex data, not decoded
+u32 6
+u8  kind: 2 road, 1 rail, 0 airfield line
+u8  class: index into the class table
+u32 node at the first vertex, or 0xFFFFFFFF for none
+u32 node at the last vertex, likewise
+u32 p, p × (str key, str value)     seen: oneway=true, inversetraffic=true
+u32 n, n × f64[3]                   points (x, y, z)
+u32 n, n × f64[3]                   unit tangents (dx, dy, dz)
+…                                   further per-vertex data, not decoded
 ```
 
-Runs that are not edges (no zero at `q-4`) are short connectors. In airfield files they read
-`u32 3, u32 a, u32 b, u32 n, points`. The terrain file has them too, after the edges: Caucasus 27 955 of 3 to 5
-points, framed `u32 3, u32, u32, u32 n`, whose two u32 range over the edge count. They draw the inside of
-junctions, and nearly all join two edges sharing a junction id (`validation.md`).
+On all eight installed terrains of 2.9.31.29434 each edge has exactly two table
+ends. An end is one edge at one junction. A link to the edge's other end runs
+along it, its cost the whole meters between the two connection points. A link
+to an end of the same junction on another edge is a passage, its cost the
+connector's length in whole meters. An edge whose end names no junction has that
+end at the catch-all id in the table. A `oneway` edge has its along-link one way
+only: the asymmetric links equal the `oneway` count on every terrain, GermanyCW
+one under. Connector `a` and `b` are edge numbers, every kind counted, and its
+ends lie on the two polylines to 0.00 m. On Caucasus 27 959 connectors draw all
+25 048 passages, some both ways, and each end has one connection point; a 27 960th
+frame is bytes elsewhere in the file, off its edges. 31 connectors there join a
+rail to a road, and no route takes one.
 
+### Finding the edges
 
-### Finding the polylines
-
-The record framing between polylines is not fully decoded, so the decoder scans for runs instead:
-
-1. Build a plausibility box from the surface5 finest mesh: its x–z extent ± 20 000 m, and its y range (min of
-   the block bbox `miny`, max of `maxy`) ± 500 m.
-2. At every byte offset `i`, a candidate is `u32 n` with `2 ≤ n ≤ 100 000`, followed by `n` consecutive f64
-   triples at stride 24 from `i + 4`. Every triple must lie inside the box, with `y` strictly inside and
-   `|x| > 1`, and the run must end within the file.
-3. Accept candidates greedily from left to right, skipping every candidate that starts inside an accepted run.
-
-This reproduces the earlier fixed-box scan exactly: Caucasus 43 010 runs and 1 184 993 vertices. The
-data-derived box finds 43 224 runs; the extra runs are airfield-line edges whose y alternates ±524.825.
-Of the 43 224, 15 267 are edges (12 221 roads and rail), 27 955 connectors and 2 neither.
+What follows an edge's points is not decoded, so the decoder walks forward to the
+next edge's head: `u32 6`, a kind and class in range, the two ids the table gives
+that edge's ends, and a property list that frames. Every declared edge is found
+on all eight terrains. A connector is found by its frame, its edges in range and
+its points within the mesh's extent ± 20 000 m. Vertices may lie anywhere, and a
+vertex at x near 0 is an ordinary vertex: Caucasus has 9 such edges.
 
 ### Deriving the extract
 
 A road or rail polyline is an edge with kind 2 or 1. Its class name is `classes[class]`, and its vertices are
 the points. `y` is a height for kinds 1 and 2 only. For kind 0 it is not: the median is -200 m.
 
-The node ids name junctions, and an edge stops short of its junction: the ends naming one id lie p50 27 m,
+The node ids name junctions, and an edge's end need not meet its junction: the ends naming one id lie p50 27 m,
 p99 176 m from their mean on Caucasus roads, and at most 2.2 km on any of the eight installed terrains. Each
 terrain also has one catch-all id, named by dozens to hundreds of ends spread across the whole terrain (Caucasus 1697),
 which is no junction; the extract writes it, and 0xFFFFFFFF, as null.
@@ -230,8 +230,7 @@ Syria 4 701). On all eight installed terrains every kind-1 edge has a rail class
 MarianasWWII, whose 1 401 `rail_narrow` edges are kind 2 and are written as roads.
 **Confirmed (Caucasus):** `a` is the node at the first vertex: of 35 places where two edge ends coincide,
 34 name one id read that way and none read the other way.
-**Guessed:** the node table, the connectors, the spatial index, the bytes before `kind`, and the per-vertex data after the
-tangents.
+**Guessed:** the spatial index and the per-vertex data after the tangents.
 
 ## `landscape4::lRoadNetwork`, airfield (`AirfieldsTaxiways/<name>.rn4`)
 

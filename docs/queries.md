@@ -292,8 +292,11 @@ descent, max_grade_pct, legs: [{from, to, edge_id, class, length, ascent,
 descent, max_grade_pct, exposure}], snapped_from, snapped_to, straight_line}`.
 
 Each end snaps to the nearest point of its network, part way along an edge.
-`length` is the planar length of the road geometry between the snapped ends,
-the edges' own lengths; a leg is one edge, or the part of it at an end;
+`length` is the planar length of the way between the snapped ends, as the
+game's router runs it: along a stretch as far as a passage leaves it, through
+the passage, and on, never back along a stretch and never through a turn the
+road file does not list. A leg is the part of one edge between two passages,
+with the passage that led onto it;
 ascent and descent are summed from the mesh height every 25 m along each leg;
 `max_grade_pct` is the steepest 100 m window, or the whole of a shorter leg;
 `length / straight_line` is the detour factor, `straight_line` running between

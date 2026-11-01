@@ -26,38 +26,48 @@ The two largest height errors, 0.18 m and 0.08 m, are lake points; the next is
 words: `land` and `sea` were seen. A chunk of 25 routes took up to 3.1 s of the
 hook's CPU, a chunk of any other kind at most 100 ms.
 
-### Why routes miss
+### Why routes missed
 
-The tool is longer in 189 of the 198 routes compared, and the
-game's path lies on the decoded roads: routing each step of three of its paths
-through the tool, every step snapped within 5 m. Those steps show the excess is
-at junctions: a 5 m step of the game's path is 184 m in the tool.
+The tool was longer in 189 of the 198 routes compared, and the game's path lies
+on the decoded roads, within 5 m at every step of the three read. The tool joined
+stretches at nodes, so a route walked out along a polyline's overrun and back,
+and it could reverse through a rail switch by walking a stem out and back.
 
-At the one junction read in detail, id 3359 near x 12476, z 470208, edge 1681
-runs about 90 m past the junction to its last vertex, and the graph joins the
-junction at that vertex, so a route walks out to it and back. The ends naming
-one id were read as stopping short of the junction; this one overruns it.
+The router's table and connectors explain both (ADR 0009, `file-formats.md`).
+The replies recorded above, routed offline by `tools/validate`'s `recorded` test
+over the same snapped ends with no bound on the detour:
 
-On rail the tool finds routes the game refuses. Asked for three refused routes
-from their first point to each of the tool's waypoints in turn, the game
-answers up to one waypoint and for none after it.
+| Check | Cases | Before | Over the passages | Target |
+|---|---|---|---|---|
+| Longer than the game | 198 | 189 longer, largest +22.3 %, p50 +2.0 % | 180 longer, largest +0.24 %, p50 +0.03 % | none over 0.5 % |
+| Routes the game refuses | 22 | 0 refused | 22 refused | all |
+| Routes the game answers | 198 | all answered | all answered | all |
 
-### Connectors
+18 routes are shorter than the game's and all take only passages the file lists.
+In 15 the difference is within how far the game's path starts and stops from the
+ends asked: route 22, the largest at -0.97 %, runs one stretch and the game's path
+stops 66 m past the end asked. Routes 56, 127 and 131 are shorter by more than
+that, 0.02–0.04 %, and are untraced.
 
-Measured from the road file with a throwaway scan, 2.9.31.29434:
+`route_alternatives` improves with it, on the 160 road routes at `k` 3: the first
+route goes from p50 +2.3 % and largest +22.3 % of the game's length to +0.03 % and
++0.23 %, and the alternates from p50 +19 %, p90 +44 % to +15 %, +37 %, 137 of them
+then and 134 now.
 
-- 27 955 runs framed `u32 3, u32 a, u32 b, u32 n`, points. Of 15 262 values of
-  `a` and `b`, 15 259 map by geometry to an edge whose polyline holds the run's
-  end within 3 m.
-- That edge's file ordinal is the value less an offset that climbs from 0 to 9
-  through the file, not always evenly. Why is not known.
-- 27 819 connectors join two edges sharing a junction id, 125 do not, 11 did
-  not map.
-- At a junction, pairs of edges with no connector: rail 390 of 2 003, road 471
-  of 20 096.
+Against main, on every benchmark case of the 8 terrains, 56 of 547 answers change,
+all reading roads: `route`, `route_alternatives`, `nearest` road and rail,
+`point_info`, `describe` and `chokepoints`. Failing requests are the same before
+and after. FARP and SAM still replay.
 
-The reading that fits is that a connector is a permitted passage through a
-junction, attached where the road really reaches it: the overrun would end at
-the attachment, and a rail switch would forbid some turns, which a graph of
-nodes cannot express. That is not proved: no refused route has been tied to a
-pair without a connector.
+What each rule is worth, from a throwaway model of the same routes:
+
+- Without the rule against turning back along a stretch, all 22 route: a route
+  out along a stem and back passes a forbidden
+  branch-to-branch turn.
+- Without keeping passes to one network, 1 of the 22 routes, by a passage from
+  rail to road.
+- Reading a connector as one way refuses 166 of the routes the game answers, so
+  connectors are not directed.
+
+These are the same replies the design was fitted to. V1's re-run tests it on a
+sample it has not seen, with the routes either side refuses kept in the sample.

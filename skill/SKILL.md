@@ -191,7 +191,7 @@ Mind these:
 | `too_many_rows` | Raise `max_rows` on `sample` or `scenery_in`, or narrow the request. An answer is never cut short |
 | `too_large` | Coarsen `step` or `resolution`, or split the region |
 | `off_terrain` | A point lies off the mesh. Drop it and say so; a ring near an edge hits this |
-| `no_route` | Nothing joins the ends: an `avoid` cut the network, the ends are on separate networks, or the route would pass `max_detour_factor` (3) times the straight line, which you can raise |
+| `no_route` | Nothing joins the ends: an `avoid` cut the network, the ends are on separate networks, a rail route would have to reverse at a switch, or the route would pass `max_detour_factor` (3) times the straight line, which you can raise |
 | `too_far` | `trafficability`: the nearest road is over 20 km away |
 | `unknown_airdrome` | List the airdromes with `nearest` |
 | `terrain_refused`, `refused` | The terrain cannot be read: an unknown file format, or a projection that misses a beacon by over 2 m. Report the message. `--allow-crs-residual` accepts the projection, but only do that if the user agrees |

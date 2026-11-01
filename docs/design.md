@@ -111,7 +111,7 @@ A failed check refuses the terrain the same way.
 | File | Yields | Settled rules |
 |---|---|---|
 | `.surface5` (`landscape5::Surface5File`) | Finest-mesh triangles: height, water, ground type | §3.3 |
-| `.rn4` | Road and rail polylines with class names and node ids | A node id names a **junction**, not a point: an edge end's id joins it to other ends with the same id. An id of `0xFFFFFFFF`, or one whose ends over the terrain's roads and rails do not all lie within 10 km of their mean, joins nothing. The router's own points lie within 2 m of a decoded road edge and 3 m of a rail edge at p90 |
+| `.rn4` | Road and rail polylines with class names and node ids, the router's table of edge ends and the connectors | A node id names a **junction**, not a point: an edge end's id joins it to other ends with the same id. An id of `0xFFFFFFFF`, or one whose ends over the terrain's roads and rails do not all lie within 10 km of their mean, joins nothing. The table has two ends to an edge, and links them along it and to the passages through their junctions, which connectors draw (ADR 0009). The router's own points lie within 2 m of a decoded road edge and 3 m of a rail edge at p90 |
 | `.scn5` | Scenery: objects, trees and lines pools, each over its own quadtree, and the model table | §3.3. An instance id splits at bit 13 when every node holds at most 8 192 instances, at bit 15 when the largest holds at most 32 768; a larger node refuses the file. At least 99 % of 1 000 sampled ids per pool, split that way, must land within 0.5 m of the pool's own box for that id |
 | `.rn5`, `assets.assets` | Airfields: runways, taxiways, stands | A named node that is not a runway end is a stand only when its class has a stand record in `assets.assets`. A node with no class at all is a stand with null class fields; no installed terrain has one |
 | `Beacons.lua`, `Radio.lua`, `Map/towns.lua`, `MissionGenerator/nodes.lua` | Beacons, radio, towns, mission nodes | §3.4 |
@@ -245,7 +245,7 @@ opening the install files it was derived from, except once after an update.
 | `mesh.toc` | The `.surface5` table of contents can only be pattern-scanned: 21 ms (MarianasWWII) to 0.7 s (GermanyCW) per open | 0.05–1.5 MB, every block's arrays and its runway subsets, the one material read | < 1 s |
 | `scene.nodes` | Parsing the `.scn5` head costs 2 s and 559 MiB on Germany | 0.35 MiB (MarianaIslands) to 24.5 MiB (GermanyCW): each node's array offsets, the model table, the group and the pools | 0.05–1.8 s |
 | `tables.json` | Airfields, stands, Lua tables, and the fitted projection each cost a full decode; together they are small | 0.1 MB (MarianaIslands) to 2.4 MB (GermanyCW), read back in 1–10 ms | 47–450 ms, after `scene.nodes`, which it reads to place the towers |
-| `roads.graph` | The `.rn4` has no spatial order: a 3.1 s scan on GermanyCW, and the water under 23 M samples | 8.6 MiB (Caucasus) to 137 MiB (GermanyCW) | 0.5 s (Caucasus) to 9.8 s (GermanyCW) |
+| `roads.graph` | The `.rn4` has no spatial order: a 3.1 s scan on GermanyCW, and the water under 23 M samples | 6.5 MiB (MarianaIslandsWWII) to 234 MiB (GermanyCW), its passages among them (ADR 0009) | 0.8 s (Caucasus) to 22 s (GermanyCW) |
 | `roads.betweenness` | Betweenness is global | 0.04 MiB (Caucasus) to 1.9 MiB (GermanyCW) | 0.4 s (Caucasus) to 29 s (GermanyCW) on two threads |
 | `places` | Settlements need every building on the terrain (§6.3) | 123 (MarianaIslandsWWII) to 21 788 (GermanyCW) places of about 100 bytes, read back in 0.5–1.7 ms | a whole objects-pool walk and the grouping, one thread at low priority: 0.5 s (MarianaIslandsWWII) to 28 s (GermanyCW), 2.9 s on Caucasus, on 2.9.30.28738 (`data/places.md`) |
 | `horizon/` | 3.4–4.9 s per 20 × 20 km region on one core, 0.24 s for one cell in a new area (Caucasus) | 8.4 KiB a tile; about 290 MiB (Caucasus) / ~740 MiB (Afghanistan) if every tile were touched | per tile, the first time a query touches it; never by `index` |
@@ -511,6 +511,16 @@ roads prepared once with its water triangles alone, so a sample tests the
 few near it. Class names include tunnels (`tunnel_hose`,
 `roki_tunnel_road`).
 
+A route runs the game's own graph, not the nodes (ADR 0009). The `.rn4`'s table
+gives each stretch two ends, each at one junction, and a connector fixes where
+on the stretch that end lies; the polyline runs on past it, 37 m at p50 and
+382 m at p99 on Caucasus, which is no road. The graph's file holds a run for
+each stretch and the passes between ends, and a route alternates the two: so
+it never turns back along a stretch, and takes no way through a junction the
+file does not list. A rail switch has no pass from branch to branch. Passes
+stay within one network, and a stretch `oneway` in the file has its run one
+way. A network with no connectors, as on `Synth`, joins at its nodes.
+
 Betweenness is its own entry, `roads.betweenness`, built from the graph so a
 route never waits for it: Brandes over each network's largest component from
 at most 2 000 sources spread through it, on at most two threads at
@@ -611,7 +621,7 @@ Accuracy:
 | Point height | within 0.5 m of live `terrain.GetHeight` at 200 points | the mesh is the ground DCS uses |
 | Water class | 100 % at cell centers | measured |
 | `visible` vs `terrain.isVisible` | ≥ 99 % of 300 pairs | live validation |
-| Route length vs `findPathOnRoads` | 95 % of routes within 5 %, and no route the game refuses | live validation; missed on Caucasus (`data/validation.md`) |
+| Route against `findPathOnRoads` | The least-cost route among those the game accepts: every route the game refuses refused, every route it answers answered, none more than 0.5 % longer than the game's | live validation |
 | MGRS vs `coord.LLtoMGRS` | within 2 m | live validation; the game's references are whole meters |
 
 ## 9. Testing
@@ -673,9 +683,10 @@ Each names what settles it.
    an export to one file is then its own design.
 8. **CPU beside DCS.** Betweenness is minutes of CPU on Germany, the places
    walk about one. *Mitigation:* low priority, two threads, once per build.
-9. **Road graph fidelity.** Built from junction ids, and measured short of
-   the game: roads run long at junctions and rail finds routes the game
-   refuses (`data/validation.md`). *Settles it:* N13, then V1's re-run.
+9. **Road graph fidelity.** Routes run the game's own graph, and match the
+   replies of the first sortie offline (`data/validation.md`). *Settles it:*
+   V1's re-run. A `oneway` stretch is read from the table but has been seen
+   only there: Caucasus has none.
 10. **Per-call cost.** Every `query` call is a fresh process. *Settled:* one
     call takes 8–23 ms on every installed terrain (`data/targets.md`);
     batches remain the fallback.
