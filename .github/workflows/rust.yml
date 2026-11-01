@@ -1,17 +1,20 @@
 name: rust
 
-# Runs only when Rust sources or the toolchain pin change. Most commits in this
-# repository touch documentation only, and those must not start a runner.
+# Runs only when Rust sources, the skill their tests hold, or the toolchain pin
+# change. Most commits in this repository touch documentation only, and those
+# must not start a runner.
 on:
   push:
     branches: [main]
     paths:
       - "dcsterrain/**"
+      - "skill/**"
       - "rust-toolchain.toml"
       - ".github/workflows/rust.yml"
   pull_request:
     paths:
       - "dcsterrain/**"
+      - "skill/**"
       - "rust-toolchain.toml"
       - ".github/workflows/rust.yml"
   workflow_dispatch:
