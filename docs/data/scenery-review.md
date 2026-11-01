@@ -57,16 +57,17 @@ the last column by objects.
 A model with no box, 0 x 0, is already `misc` by the 4 m² rule, so that rule
 adds nothing. One of them is `nasos`, a pump jack, which is an override.
 
-**Adopted: a `building` whose name the family rules place as no building is
-`misc`.** Those rules already name bridges, cranes, masts and debris, and such
-models were counting as built-up.
+**Adopted: a `building` the family rules leave without a family is `misc`.**
+Those rules already name bridges, cranes, masts and debris, and leave a flat box
+no name tells without one too; such models were counting as built-up.
 
 - **On Caucasus** it fires on 45 labeled models and is right on 41. The 4 wrong
   ones, `bashnja-stena`, `airbase_barrels_01`, `airbase_barrels_02` and
   `dok_s_new`, keep their overrides.
 - **On all 8 terrains** it fires on 324 models. Only Caucasus has labels, so
   elsewhere this is a reading of names: about 10 of the 324 look like buildings
-  caught by a name pattern, namely `2-floor_house_clay_walls` and `_2` (`wall`),
+  caught by a name pattern, and the flat, unnamed models are rocks, sports cars
+and a road crossover. The buildings are `2-floor_house_clay_walls` and `_2` (`wall`),
   `guam_memorial_hospital` (`memorial`), `mandalaybay` (`mandal`), `boat_house`,
   `monorail_parking_building`, `haifa_university_parking`, `vegas_parking_01`,
   `afb_buildings_01` and `breakwater_building`. Each terrain's review settles

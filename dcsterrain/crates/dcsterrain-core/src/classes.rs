@@ -5,7 +5,8 @@
 //! terrain; `effect` for a `smoke#` model, a smoke column 200–600 m tall that
 //! is not a structure; `wall` for a box under 1 m thin and 4 m or more long;
 //! `misc` under 4 m²; `industrial` by name; `misc` for what the family
-//! rules name as no building, such as a bridge or a crane; else `building`.
+//! rules leave without a family, such as a bridge, a crane or a flat slab;
+//! else `building`.
 //!
 //! The family groups settlements: houses, apartments, shops, civic and
 //! industrial buildings make a place, and garages, sheds, farm and military
@@ -180,6 +181,7 @@ fn digest_rules() -> u32 {
         eat(text);
     }
     eat(INDUSTRIAL_NAME.as_str());
+    eat(NOT_BUILDING);
     for r in FAMILY_RULES {
         eat(&format!("{:?}", r.family));
         eat(r.pattern);
@@ -199,7 +201,7 @@ const EFFECT: &str = "a smoke volume";
 const WALL: &str = "thinner than 1 m and 4 m or longer";
 const MISC: &str = "under 4 m²";
 const INDUSTRIAL: &str = "an industrial name";
-const NOT_BUILDING: &str = "a name that says it is no building";
+const NOT_BUILDING: &str = "a name or a flat box that says it is no building";
 const BUILDING: &str = "no other rule";
 
 static INDUSTRIAL_NAME: LazyLock<Regex> = LazyLock::new(|| {
@@ -800,7 +802,10 @@ mod tests {
             assert_eq!(r.assignment.class, Class::Misc, "{name}");
             assert!(by_rule(&r, NOT_BUILDING), "{name}");
         }
-        // Unnamed, or named as a building, the same box stays a building.
+        // A flat box no name tells is no building either.
+        let r = row("Synth", model("xyzzy", 10.0, 10.0, 1.0));
+        assert_eq!(r.assignment.class, Class::Misc);
+        // Unnamed, or named as a building, a full box stays a building.
         for name in ["xyzzy", "home1_a_new"] {
             let r = row("Synth", model(name, 20.0, 60.0, 20.0));
             assert_eq!(r.assignment.class, Class::Building, "{name}");
