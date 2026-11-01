@@ -15,7 +15,7 @@ Timestamp 20261027-141234, seed 1, fingerprint
 | Water against `terrain.GetSurfaceType` | 2 168 | 100 % | 100 % |
 | `visible` against `terrain.isVisible` | 600 random, 241 within 1 m of grazing | 100 %, 95 % interval from 99.4 % and 98.4 % | ≥ 99 % |
 | MGRS against `coord.LOtoLL` and `coord.LLtoMGRS` | 460, seams included | largest 1.41 m, letters all equal, the projection alone 0.03 m | within 2 m |
-| Route length against `terrain.findPathOnRoads` | 198 of 220 | 90.9 % within 5 %, p50 +2.0 %, p95 +6.5 %, largest +22.3 % | 95 % within 5 % |
+| Route length against `terrain.findPathOnRoads` | 198 of 220 | 90.9 % within 5 %, p50 2.0 %, p95 6.5 %, largest 22.3 %, mean +2.4 % | 95 % within 5 % |
 | Routes the game answers | 220 | 198: 22 refused, all rail | all |
 
 The two largest height errors, 0.18 m and 0.08 m, are lake points; the next is
@@ -28,7 +28,7 @@ hook's CPU, a chunk of any other kind at most 100 ms.
 
 ### Why routes miss
 
-The tool is longer in 186 of the 192 routes compared to the meter, and the
+The tool is longer in 189 of the 198 routes compared, and the
 game's path lies on the decoded roads: routing each step of three of its paths
 through the tool, every step snapped within 5 m. Those steps show the excess is
 at junctions: a 5 m step of the game's path is 184 m in the tool.
