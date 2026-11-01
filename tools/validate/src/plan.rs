@@ -280,7 +280,16 @@ fn at_points(terrain: &Terrain, points: &[[f64; 2]]) -> Result<Vec<Option<[f64; 
             "sample",
             &json!({"points": request, "layers": ["height", "water", "surface"]}),
         )?;
-        for r in reply["rows"].as_array().ok_or("sample gave no rows")? {
+        let rows = reply["rows"].as_array().ok_or("sample gave no rows")?;
+        // The cases pair with these rows by position.
+        if rows.len() != chunk.len() {
+            return Err(format!(
+                "sample gave {} rows of {}",
+                rows.len(),
+                chunk.len()
+            ));
+        }
+        for r in rows {
             let v = &r["values"];
             out.push(
                 match (

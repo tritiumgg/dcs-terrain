@@ -55,6 +55,12 @@ fn replies(dir: &Path, kind: &str, plan: &Plan, want: usize) -> Result<Vec<Value
     Ok(out)
 }
 
+/// Whether a distribution's largest error is at most `max`. An error that is
+/// no number is not within anything.
+fn at_most(d: &Value, max: f64) -> bool {
+    d["max"].as_f64().is_some_and(|m| m <= max)
+}
+
 /// Whether DCS's name or number for a surface is water.
 fn is_water(surface: &str) -> bool {
     matches!(surface, "water" | "sea" | "lake" | "river" | "2" | "3")
@@ -66,10 +72,11 @@ fn heights(cases: &[HeightCase], live: &[Value]) -> Value {
     let (mut same, mut n, mut missing) = (0, 0, 0);
     let mut worst = Vec::new();
     for (c, v) in cases.iter().zip(live) {
-        if let Some(surface) = v[1].as_str() {
-            n += 1;
-            same += usize::from(is_water(surface) == (c.water != 0.0));
-        }
+        n += 1;
+        same += usize::from(
+            v[1].as_str()
+                .is_some_and(|s| is_water(s) == (c.water != 0.0)),
+        );
         let Some(h) = v[0].as_f64() else {
             missing += 1;
             continue;
@@ -82,7 +89,7 @@ fn heights(cases: &[HeightCase], live: &[Value]) -> Value {
     worst.sort_by(|a, b| b.0.total_cmp(&a.0));
     let strata: BTreeMap<&str, Value> = strata.iter().map(|(k, v)| (*k, distribution(v))).collect();
     let d = distribution(&all);
-    let height_pass = !all.is_empty() && missing == 0 && d["max"].as_f64() <= Some(HEIGHT_MAX_M);
+    let height_pass = !all.is_empty() && missing == 0 && at_most(&d, HEIGHT_MAX_M);
     let water = same as f64 / n.max(1) as f64;
     let (lo, hi) = wilson(same, n);
     let worst: Vec<Value> = worst
@@ -185,6 +192,17 @@ fn gap(tool: &str, zone: &str, e: f64, n: f64) -> Option<f64> {
     Some(de.hypot(dn))
 }
 
+/// Whether a reference and DCS's digits lie across a 100 km square's edge, the
+/// one place their letters may rightly differ.
+fn across_edge(tool: &str, e: f64, n: f64) -> bool {
+    let mut p = tool.split(' ').skip(2);
+    let digits = |t: Option<&str>| t.and_then(|t| t.parse::<f64>().ok());
+    let (Some(te), Some(tn)) = (digits(p.next()), digits(p.next())) else {
+        return false;
+    };
+    (te - e.floor()).abs() > SQUARE_M / 2.0 || (tn - n.floor()).abs() > SQUARE_M / 2.0
+}
+
 fn great_circle(a: (f64, f64), b: (f64, f64)) -> f64 {
     let (la, lb) = (a.0.to_radians(), b.0.to_radians());
     let (dla, dlo) = (lb - la, (b.1 - a.1).to_radians());
@@ -194,13 +212,15 @@ fn great_circle(a: (f64, f64), b: (f64, f64)) -> f64 {
 
 fn mgrs(cases: &[MgrsCase], live: &[Value]) -> Value {
     let (mut ends, mut projection, mut converter) = (Vec::new(), Vec::new(), Vec::new());
-    let (mut other_zone, mut same_letters) = (0, 0);
+    let (mut other_zone, mut same_letters, mut wrong_letters) = (0, 0, 0);
     let num = |v: &Value, i: usize| v[i].as_f64().unwrap_or(f64::NAN);
     for (c, v) in cases.iter().zip(live) {
         projection.push(great_circle((c.lat, c.lon), (num(v, 0), num(v, 1))));
         let zone = v[2].as_str().unwrap_or("");
         let square = v[3].as_str().unwrap_or("");
-        same_letters += usize::from(c.mgrs.starts_with(&format!("{zone} {square} ")));
+        let same = c.mgrs.starts_with(&format!("{zone} {square} "));
+        same_letters += usize::from(same);
+        wrong_letters += usize::from(!same && !across_edge(&c.mgrs, num(v, 4), num(v, 5)));
         match gap(&c.mgrs, zone, num(v, 4), num(v, 5)) {
             Some(g) => ends.push(g),
             None => other_zone += 1,
@@ -209,10 +229,10 @@ fn mgrs(cases: &[MgrsCase], live: &[Value]) -> Value {
         converter.push(gap(&c.mgrs, zone, num(v, 8), num(v, 9)).unwrap_or(f64::MAX));
     }
     let d = distribution(&ends);
-    let pass = !ends.is_empty() && other_zone == 0 && d["max"].as_f64() <= Some(MGRS_MAX_M);
+    let pass = !ends.is_empty() && other_zone == 0 && wrong_letters == 0 && at_most(&d, MGRS_MAX_M);
     json!({"end_to_end_m": d, "projection_m": distribution(&projection),
            "converter_m": distribution(&converter), "other_zone": other_zone,
-           "same_letters": same_letters, "n": cases.len(),
+           "same_letters": same_letters, "wrong_letters": wrong_letters, "n": cases.len(),
            "target_max_m": MGRS_MAX_M, "pass": pass})
 }
 
@@ -287,6 +307,18 @@ mod tests {
     fn gap_measures_across_a_square_edge() {
         assert_eq!(gap("37T GG 99999 00000", "37T", 0.0, 0.0), Some(1.0));
         assert_eq!(gap("37T GG 1 1", "38T", 1.0, 1.0), None);
+    }
+
+    #[test]
+    fn only_digits_that_wrap_lie_across_an_edge() {
+        assert!(across_edge("37T GG 99999 00000", 0.0, 0.0));
+        assert!(!across_edge("37T GG 12345 00000", 12_345.5, 0.0));
+    }
+
+    #[test]
+    fn no_number_is_within_a_target() {
+        assert!(!at_most(&json!({"max": null}), 2.0));
+        assert!(at_most(&json!({"max": 2.0}), 2.0));
     }
 
     #[test]

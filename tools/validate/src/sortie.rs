@@ -171,6 +171,10 @@ return reply({name:?}, out)
 pub fn write(plan: &Plan, dir: &Path) -> Result<Vec<String>, String> {
     let chunks = dir.join("chunks");
     let replies = dir.join("replies");
+    // A reply left by an earlier plan would be scored against this one's cases.
+    if replies.exists() {
+        fs::remove_dir_all(&replies).map_err(|e| format!("{}: {e}", replies.display()))?;
+    }
     for d in [&chunks, &replies] {
         fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
     }

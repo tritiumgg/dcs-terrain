@@ -18,5 +18,9 @@ mise exec -- cargo run --manifest-path dcsterrain/Cargo.toml --release -p dcster
 mise exec -- cargo run --manifest-path dcsterrain/Cargo.toml --release -p dcsterrain-validate -- report --out <dir>
 ```
 
+`pass` judges the random sightlines; the marginal ones, within 1 m of grazing,
+and each stratum are reported beside it. Planning clears `replies/`, so a plan
+is run whole.
+
 `--install` names the install where there is no registry, and `--cache` the
 cache. It reads no data file from this repository.

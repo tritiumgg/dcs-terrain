@@ -212,6 +212,101 @@ fn a_height_past_the_target_fails_the_sortie() {
     assert_eq!(figures["los_agreement"], 1.0);
 }
 
+/// The figures of a sortie by a DCS on the plan's terrain and build, once
+/// `patch` has changed it.
+fn sortie_with(name: &str, offset: f64, patch: &str) -> serde_json::Value {
+    let plan = the_plan();
+    let dir = scratch(name);
+    let lua = stand_in(plan, Some(&plan.terrain), &plan.dcs_build, offset);
+    lua.load(patch).exec().unwrap();
+    for name in sortie::write(plan, &dir).unwrap() {
+        run(&lua, &dir, &name).unwrap();
+    }
+    report::report(plan, &dir).unwrap()
+}
+
+#[test]
+fn a_height_too_low_fails_as_one_too_high_does() {
+    assert_eq!(sortie_with("low", -0.75, "")["height"]["pass"], false);
+}
+
+#[test]
+fn another_surface_fails_the_water_target() {
+    let f = sortie_with(
+        "surface",
+        0.0,
+        "terrain.GetSurfaceType = function() return 'land' end",
+    );
+    assert_eq!(f["water"]["pass"], false);
+    assert_eq!(f["pass"], false);
+}
+
+#[test]
+fn an_opposite_sightline_fails_the_target() {
+    let f = sortie_with(
+        "sight",
+        0.0,
+        "local f = terrain.isVisible
+         terrain.isVisible = function(...) return not f(...) end",
+    );
+    assert_eq!(f["los_agreement"], 0.0);
+    assert_eq!(f["pass"], false);
+}
+
+#[test]
+fn a_route_the_game_refuses_fails_the_target() {
+    let f = sortie_with(
+        "refused",
+        0.0,
+        "terrain.findPathOnRoads = function() return nil end",
+    );
+    assert_eq!(f["route"]["pass"], false);
+    assert_eq!(f["route"]["no_path"], the_plan().routes.len());
+}
+
+#[test]
+fn another_square_with_the_same_digits_fails_the_target() {
+    let f = sortie_with(
+        "square",
+        0.0,
+        "local f = coord.LLtoMGRS
+         coord.LLtoMGRS = function(...)
+           local m = f(...)
+           m.MGRSDigraph = 'ZZ'
+           return m
+         end",
+    );
+    assert_eq!(f["mgrs"]["end_to_end_m"]["max"], 0.0);
+    assert_eq!(f["mgrs"]["pass"], false);
+}
+
+#[test]
+fn another_terrain_is_refused_in_the_report() {
+    let plan = the_plan();
+    let dir = scratch("terrain");
+    let names = sortie::write(plan, &dir).unwrap();
+    let lua = stand_in(plan, Some(&plan.terrain), &plan.dcs_build, 0.0);
+    run(&lua, &dir, &names[0]).unwrap();
+    let mut other = plan.clone();
+    other.terrain = "Nevada".to_string();
+    assert!(
+        report::report(&other, &dir)
+            .unwrap_err()
+            .contains("the plan is")
+    );
+}
+
+#[test]
+fn planning_again_leaves_no_reply_of_the_last_plan() {
+    let plan = the_plan();
+    let dir = scratch("again");
+    let names = sortie::write(plan, &dir).unwrap();
+    let lua = stand_in(plan, Some(&plan.terrain), &plan.dcs_build, 0.0);
+    run(&lua, &dir, &names[0]).unwrap();
+    sortie::write(plan, &dir).unwrap();
+    assert!(fs::read_dir(dir.join("replies")).unwrap().next().is_none());
+}
+
 #[test]
 fn no_call_runs_until_the_planned_terrain_is_loaded() {
     let plan = the_plan();
