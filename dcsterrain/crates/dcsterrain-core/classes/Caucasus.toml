@@ -47,8 +47,6 @@
 "PLATFORMA_AKACYA" = { class = "misc", reason = "railway platform 3.6 x 20 m" }
 
 # --- Small structures the size rule leaves as buildings
-"UKRYTIE" = { class = "misc", reason = "earth-covered aircraft shelter, no footprint" }
-"AIR_CLOSEDGUARDHOUSE_03A" = { class = "misc", reason = "earth-covered aircraft shelter despite its name, no footprint" }
 "OHR-VYSHKA" = { class = "misc", reason = "guard tower 3 x 3 m" }
 "AIRBASE_VOR" = { class = "misc", reason = "VOR antenna ring, no walls" }
 "LOKATOR" = { class = "misc", reason = "radar dome on a low base" }
@@ -118,6 +116,11 @@
 # --- Blocks the family rule reads as flats, by the user's judgment
 "KORPUS_B1" = { class = "industrial", family = "industrial", reason = "three-story front on a long gabled hall; large windows read as a factory, though hard to tell" }
 "KORPUS_C" = { class = "industrial", family = "industrial", reason = "three stories over a low wing with big windows, 102 x 38 m, a factory or works office" }
+
+# --- Aircraft shelters. The file gives them no box, so no footprint check sees
+# them, whatever their class.
+"UKRYTIE" = { class = "building", family = "military", reason = "earth-covered aircraft shelter; the file gives it no box" }
+"AIR_CLOSEDGUARDHOUSE_03A" = { class = "building", family = "military", reason = "earth-covered aircraft shelter despite its name; the file gives it no box" }
 
 # --- Walls
 "BASHNJA-STENA" = { class = "wall", reason = "stone tower 5.5 x 5.4 m, 3 097 instances in a line along the old fortified wall" }
