@@ -16,6 +16,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 use regex::Regex;
 use schemars::JsonSchema;
@@ -162,6 +163,11 @@ pub fn override_files() -> impl Iterator<Item = &'static str> {
 /// models settle rebuilds it. A rule changed in code alone, such as the
 /// box split's sizes, still has to raise that entry's own version.
 pub fn rules_digest() -> u32 {
+    static DIGEST: OnceLock<u32> = OnceLock::new();
+    *DIGEST.get_or_init(digest_rules)
+}
+
+fn digest_rules() -> u32 {
     let mut h: u32 = 0x811c_9dc5;
     let mut eat = |s: &str| {
         for b in s.bytes().chain([0]) {
