@@ -35,6 +35,8 @@ const SIGHT_BANDS: [(&str, f64, f64); 4] = [
 /// Heights above the ground of the two ends: troops to troops, a mast, an
 /// aircraft.
 const SIGHT_AGL: [(f64, f64); 3] = [(2.0, 2.0), (2.0, 100.0), (2.0, 500.0)];
+/// A detour no road takes: the game bounds none.
+const ANY_DETOUR: f64 = 1e6;
 const ROUTE_BANDS: [(&str, f64, f64); 4] = [
     ("2-10km", 2_000.0, 10_000.0),
     ("10-40km", 10_000.0, 40_000.0),
@@ -106,10 +108,12 @@ pub struct SightCase {
 pub struct RouteCase {
     pub network: String,
     pub stratum: String,
-    /// The tool's snapped ends, so both answers run between the same points.
+    /// The tool's snapped ends, so both answers run between the same points,
+    /// or the points asked where it refuses the route and snaps none.
     pub from: [f64; 2],
     pub to: [f64; 2],
-    pub length: f64,
+    /// The tool's length; none where it refuses the route.
+    pub length: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -489,25 +493,32 @@ fn routes(terrain: &Terrain, rows: &[Row], rng: &mut Rng, sizes: &Sizes) -> Vec<
                 if !(near..far).contains(&straight) {
                     continue;
                 }
+                // Far past any detour, so a refusal is the network's own.
                 let reply = answer(
                     terrain,
                     "route",
                     &json!({"network": network,
                             "from": {"x": a.x, "z": a.z},
-                            "to": {"x": b.x, "z": b.z}}),
+                            "to": {"x": b.x, "z": b.z},
+                            "max_detour_factor": ANY_DETOUR}),
                 );
-                let Ok(reply) = reply else { continue };
-                let point = |k: &str| {
-                    let p = &reply[k];
+                let reply = match reply {
+                    Ok(reply) => Some(reply),
+                    Err(e) if e.iter().any(|i| i.code == "no_route") => None,
+                    Err(_) => continue,
+                };
+                let point = |k: &str, or: [f64; 2]| {
+                    let Some(r) = &reply else { return Some(or) };
+                    let p = &r[k];
                     Some([p["x"].as_f64()?, p["z"].as_f64()?])
                 };
-                let (Some(from), Some(to), Some(length)) = (
-                    point("snapped_from"),
-                    point("snapped_to"),
-                    reply["length"].as_f64(),
+                let (Some(from), Some(to)) = (
+                    point("snapped_from", [a.x, a.z]),
+                    point("snapped_to", [b.x, b.z]),
                 ) else {
                     continue;
                 };
+                let length = reply.as_ref().and_then(|r| r["length"].as_f64());
                 found += 1;
                 out.push(RouteCase {
                     network: network.to_string(),

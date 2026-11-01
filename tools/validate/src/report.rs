@@ -141,16 +141,28 @@ fn sights(cases: &[SightCase], live: &[Value]) -> Value {
 
 fn routes(cases: &[RouteCase], live: &[Value]) -> Value {
     let mut errors: BTreeMap<String, Vec<f64>> = BTreeMap::new();
-    let mut none = 0;
+    let (mut none, mut refused_both, mut tool_only) = (0, 0, 0);
     let mut within = 0;
     let mut all = Vec::new();
     let mut worst = Vec::new();
     for (c, v) in cases.iter().zip(live) {
-        let Some(length) = v[0].as_f64().filter(|l| *l > 0.0) else {
-            none += 1;
-            continue;
+        let game = v[0].as_f64().filter(|l| *l > 0.0);
+        let (tool, length) = match (c.length, game) {
+            (Some(tool), Some(length)) => (tool, length),
+            (None, None) => {
+                refused_both += 1;
+                continue;
+            }
+            (Some(_), None) => {
+                none += 1;
+                continue;
+            }
+            (None, Some(_)) => {
+                tool_only += 1;
+                continue;
+            }
         };
-        let e = c.length / length - 1.0;
+        let e = tool / length - 1.0;
         all.push(e);
         within += usize::from(e.abs() <= ROUTE_WITHIN);
         errors
@@ -170,10 +182,10 @@ fn routes(cases: &[RouteCase], live: &[Value]) -> Value {
             json!({"network": c.network, "from": c.from, "to": c.to, "tool": c.length, "dcs": l})
         })
         .collect();
-    json!({"ratio_minus_1": distribution(&all), "strata": strata, "no_path": none,
+    json!({"ratio_minus_1": distribution(&all), "strata": strata, "no_path": none, "tool_no_path": tool_only, "refused_by_both": refused_both,
            "share_within": share, "worst": worst,
            "target_within": ROUTE_WITHIN, "target_share": ROUTE_SHARE,
-           "pass": !all.is_empty() && none == 0 && share >= ROUTE_SHARE})
+           "pass": !all.is_empty() && none == 0 && tool_only == 0 && share >= ROUTE_SHARE})
 }
 
 /// The ground distance between a reference and a zone, easting and northing,

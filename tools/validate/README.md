@@ -18,6 +18,9 @@ mise exec -- cargo run --manifest-path dcsterrain/Cargo.toml --release -p dcster
 mise exec -- cargo run --manifest-path dcsterrain/Cargo.toml --release -p dcsterrain-validate -- report --out <dir>
 ```
 
+Routes are asked with no bound on the detour, and a route either side refuses
+is kept in the sample: `pass` needs both to refuse the same ones.
+
 `pass` judges the random sightlines; the marginal ones, within 1 m of grazing,
 and each stratum are reported beside it. Planning clears `replies/`, so a plan
 is run whole.

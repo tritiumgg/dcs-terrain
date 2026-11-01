@@ -103,7 +103,7 @@ fn stand_in(plan: &Plan, loaded: Option<&str>, build: &str, offset: f64) -> Lua 
     let routes: HashMap<_, _> = plan
         .routes
         .iter()
-        .map(|c| (key(c.from[0], c.to[1]), c.length))
+        .map(|c| (key(c.from[0], c.to[1]), c.length.unwrap_or(0.0)))
         .collect();
     t.set(
         "findPathOnRoads",
