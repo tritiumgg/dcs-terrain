@@ -14,7 +14,7 @@ use crate::decode::surface5::{ROAD_STRIP, Surface5, water_class};
 use crate::extract::FileEntry;
 use crate::grid::Grid;
 use crate::mapped::View;
-use crate::roads::{self, Graph, Stretch, Water};
+use crate::roads::{self, Graph, Joins, Stretch, Water};
 use crate::source::{CELL_SIZE, Refusal, TILE_SIZE};
 
 /// The graph of the road file, with each edge's water.
@@ -23,7 +23,7 @@ pub struct RoadsGraph;
 pub static ROADS_GRAPH: RoadsGraph = RoadsGraph;
 
 /// 2 lays the arrays out flat, to be read where they lie, with each
-/// network's grid. 3 adds the edges the old scan missed.
+/// network's grid. 3 adds the passages, and the edges the old scan missed.
 const GRAPH_VERSION: u32 = 3;
 
 impl Entry for RoadsGraph {
@@ -49,15 +49,19 @@ impl Entry for RoadsGraph {
         let (toc, surface) = ground(cache)?;
         let file = File::open(root.join(&f.path)).map_err(|e| refusal(&f.path, e))?;
         let mut stretches = Vec::new();
+        let mut stretch_of = Vec::new();
         let mut ends = Vec::new();
-        let (classes, _) = rn4::scan(
+        let mut connectors = Vec::new();
+        let (classes, table) = rn4::scan(
             file,
             &f.path,
             &Reach::around(&toc),
             |e| {
                 if e.kind != KIND_ROAD && e.kind != KIND_RAIL {
+                    stretch_of.push(None);
                     return;
                 }
+                stretch_of.push(Some(stretches.len() as u32));
                 ends.extend(rn4::ends(e.a, e.b, &e.points));
                 stretches.push(Stretch {
                     kind: e.kind,
@@ -67,7 +71,7 @@ impl Entry for RoadsGraph {
                     points: e.points.iter().map(|p| [p[0], p[2]]).collect(),
                 });
             },
-            |_| {},
+            |c| connectors.push(c),
         )
         .map_err(|e| refusal(&f.path, e))?;
         // Each map has one id whose ends are spread across it; joined
@@ -80,6 +84,7 @@ impl Entry for RoadsGraph {
                 }
             }
         }
+        let joins = Joins::read(&table, &connectors, &stretch_of, &stretches);
         let mut water = Blocks {
             toc: &toc,
             file: &surface,
@@ -88,7 +93,7 @@ impl Entry for RoadsGraph {
         // The magic, the version, the length of the key, the key and the
         // length of the payload lead the payload in the entry's file.
         let head = 24 + cache.key(self)?.len() as u64;
-        Ok(roads::build(classes, stretches, &mut water)?.encode(head))
+        Ok(roads::build_joined(classes, stretches, Some(joins), &mut water)?.encode(head))
     }
 }
 

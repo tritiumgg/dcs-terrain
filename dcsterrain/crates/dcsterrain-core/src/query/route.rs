@@ -2,15 +2,17 @@
 //! rail network between two points, each snapped to the nearest point of
 //! its network, part way along an edge.
 //!
-//! The search is A* over the network's nodes and the two snapped ends. An
-//! edge costs its length times one plus the exposure weight times the share
-//! of it the observers see, and times any penalty an earlier alternative put
-//! on it, so no edge costs less than its length, and the straight line to
-//! the far end is a consistent estimate: the route is the least-cost one,
-//! exactly. Nodes are searched only within the ellipse whose foci are the
-//! snapped ends and on which every point lies `max_detour_factor` times the
-//! straight line between them, summed to both: no route longer than that
-//! passes outside it.
+//! The search is A* over the ends of the network's stretches and the two
+//! snapped ends, as the game's own router runs: from an end through a passage
+//! a junction allows and along the stretch beyond, in turn, so it never turns
+//! back along a stretch. A stretch costs its length times one plus the
+//! exposure weight times the share of its edge the observers see, and times
+//! any penalty an earlier alternative put on the edge, so no way costs less
+//! than its length, and a little under the straight line to the far end is a
+//! consistent estimate: the route is the least-cost one, exactly. Ends are
+//! searched only within the ellipse whose foci are the snapped ends and on
+//! which every point lies `max_detour_factor` times the straight line between
+//! them, summed to both: no route longer than that passes outside it.
 //!
 //! Alternatives come by the penalty method: each route found has its edges'
 //! costs multiplied by `penalty`, and the search runs again. A route is kept
@@ -28,7 +30,7 @@ use super::region::{Area, resolve};
 use super::sightline::{Heights, walk};
 use super::{Terrain, refused};
 use crate::decode::rn4::{KIND_RAIL, KIND_ROAD};
-use crate::roads::{Adjacency, Edge, Graph, dist};
+use crate::roads::{Edge, Graph, Pass, dist};
 use crate::search;
 use crate::source::{Refusal, Source};
 use crate::types::{
@@ -58,6 +60,13 @@ const SEARCHES_PER_K: u32 = 4;
 const EXPOSURE_WEIGHT_MAX: f64 = 1000.0;
 const PENALTY_MAX: f64 = 10.0;
 
+/// The share of the straight line the search estimates is left: an end's
+/// place is rounded to centimeters, so the line itself may overstate a short
+/// stretch.
+const ESTIMATE_SHARE: f64 = 0.99;
+/// How near two lengths are that are one length measured twice.
+const JOINED_M: f64 = 1e-3;
+
 /// The edge kind a request's network names.
 pub(super) fn kind_of(n: Network) -> u8 {
     match n {
@@ -66,27 +75,47 @@ pub(super) fn kind_of(n: Network) -> u8 {
     }
 }
 
-/// Where a point snapped to: an edge, how far along it from its node `a`,
-/// as a share of its path, and the point there.
+/// Where a point snapped to: an edge, the stretch on it, how far along the
+/// edge from its node `a`, as a share of its path, and the point there.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Snap {
     edge: usize,
+    run: usize,
     at: f64,
     point: [f64; 2],
 }
 
+/// A pass through a junction: its two ends and its meters.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Lead {
+    line: [[f64; 2]; 2],
+    length: f64,
+}
+
 /// Part of one edge, between two shares of the way along it from `a`, in
-/// the order the route runs.
+/// the order the route runs, and the pass that led onto it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Piece {
     edge: usize,
     from: f64,
     to: f64,
+    pass: Option<Lead>,
 }
 
 impl Piece {
     fn length(&self, g: &Graph) -> f64 {
         g.edges[self.edge].length * (self.to - self.from).abs()
+            + self.pass.map_or(0.0, |p| p.length)
+    }
+
+    /// Its line, from the start of its pass.
+    fn line(&self, g: &Graph) -> Vec<[f64; 2]> {
+        let mut line = g.piece(&g.edges[self.edge], self.from, self.to);
+        if let Some(p) = self.pass {
+            line.splice(0..0, p.line);
+            line.dedup();
+        }
+        line
     }
 
     fn span(&self) -> (f64, f64) {
@@ -119,7 +148,6 @@ fn issue(code: &str, message: &str, path: &str) -> Vec<Issue> {
 struct Planner<'a> {
     src: &'a dyn Source,
     g: &'a Graph,
-    adj: &'a Adjacency,
     from: Snap,
     to: Snap,
     avoid: Vec<Area>,
@@ -202,7 +230,13 @@ impl<'a> Planner<'a> {
                 ));
             };
             let (point, at) = g.locate(&g.edges[edge], [p.x, p.z]);
-            Ok(Snap { edge, at, point })
+            let run = run_at(g, edge, at);
+            Ok(Snap {
+                edge,
+                run,
+                at,
+                point,
+            })
         };
         let (from, to) = (snap(&q.from, "from")?, snap(&q.to, "to")?);
         let mut blocked = vec![false; g.edges.len()];
@@ -217,7 +251,6 @@ impl<'a> Planner<'a> {
         Ok(Planner {
             src,
             g,
-            adj: g.adjacency(kind),
             from,
             to,
             avoid,
@@ -238,6 +271,11 @@ impl<'a> Planner<'a> {
         }
         let edge = &self.g.edges[e];
         !self.avoid.iter().any(|a| meets(self.g, edge, from, to, a))
+    }
+
+    /// Whether a pass between two points runs through a region avoided.
+    fn closed(&self, a: [f64; 2], b: [f64; 2]) -> bool {
+        self.avoid.iter().any(|r| r.meets(a, b))
     }
 
     /// The share of `e` the observers see, found the first time it is asked
@@ -263,7 +301,8 @@ impl<'a> Planner<'a> {
         estimate: bool,
     ) -> Result<Option<Found>, Refusal> {
         let g = self.g;
-        let n = g.nodes.len();
+        let p = &g.passages;
+        let n = p.ends();
         let (s, t) = (n, n + 1);
         let (from, to, bound) = (self.from, self.to, self.bound);
         let place = move |v: usize| -> [f64; 2] {
@@ -272,7 +311,7 @@ impl<'a> Planner<'a> {
             } else if v == t {
                 to.point
             } else {
-                g.nodes[v]
+                p.place(v)
             }
         };
         let inside = move |v: usize| dist(from.point, place(v)) + dist(place(v), to.point) <= bound;
@@ -299,45 +338,43 @@ impl<'a> Planner<'a> {
                 }
                 if v == s {
                     let e = from.edge;
-                    let (a, b, len) = (
-                        g.edges[e].a as usize,
-                        g.edges[e].b as usize,
-                        g.edges[e].length,
-                    );
+                    let len = g.edges[e].length;
                     let r = rate_of(me, e);
-                    if me.open(e, from.at, 0.0) && inside(a) {
-                        f(a, len * from.at * r);
+                    for end in [from.run * 2, from.run * 2 + 1] {
+                        let share = p.share(end);
+                        if p.runs_from(end ^ 1) && me.open(e, from.at, share) && inside(end) {
+                            f(end, len * (from.at - share).abs() * r);
+                        }
                     }
-                    if me.open(e, from.at, 1.0) && inside(b) {
-                        f(b, len * (1.0 - from.at) * r);
-                    }
-                    if e == to.edge && me.open(e, from.at, to.at) {
+                    if to.run == from.run
+                        && p.runs_between(from.run, from.at, to.at)
+                        && me.open(e, from.at, to.at)
+                    {
                         f(t, len * (to.at - from.at).abs() * r);
                     }
                     return;
                 }
-                for (w, e) in me.adj.neighbors(v as u32).collect::<Vec<_>>() {
-                    let (w, e) = (w as usize, e as usize);
-                    if me.blocked[e] || !inside(w) {
+                for pass in p.out_of(v) {
+                    let reached = pass.to as usize;
+                    if !p.runs_from(reached) || me.closed(p.place(v), p.place(reached)) {
                         continue;
                     }
+                    let (e, share) = (p.edge(reached), p.share(reached));
+                    let len = g.edges[e].length;
                     let r = rate_of(me, e);
-                    f(w, g.edges[e].length * r);
-                }
-                let e = to.edge;
-                let edge = &g.edges[e];
-                if v == edge.a as usize || v == edge.b as usize {
-                    let r = rate_of(me, e);
-                    if v == edge.a as usize && me.open(e, 0.0, to.at) {
-                        f(t, edge.length * to.at * r);
+                    let hop = f64::from(pass.length) * r;
+                    if reached / 2 == to.run && me.open(e, share, to.at) {
+                        f(t, hop + len * (share - to.at).abs() * r);
                     }
-                    if v == edge.b as usize && me.open(e, 1.0, to.at) {
-                        f(t, edge.length * (1.0 - to.at) * r);
+                    let (next, along) = (reached ^ 1, p.share(reached ^ 1));
+                    if me.open(e, share, along) && inside(next) {
+                        f(next, hop + len * (share - along).abs() * r);
                     }
                 }
             };
             if estimate {
-                search::astar(n + 2, s, t, neighbors, |v| dist(place(v), to.point))
+                let left = |v: usize| dist(place(v), to.point) * ESTIMATE_SHARE;
+                search::astar(n + 2, s, t, neighbors, left)
             } else {
                 search::dijkstra(n + 2, s, t, neighbors)
             }
@@ -355,68 +392,86 @@ impl<'a> Planner<'a> {
         }))
     }
 
-    /// The end, 0 for `a` or 1 for `b`, by which the piece of a snapped
-    /// edge between `end` and node `v` runs, as the search took it: of the
-    /// open ends at `v`, the nearer, which on an edge from a node to itself
-    /// may be either.
-    fn side(&self, end: Snap, v: usize) -> f64 {
-        let e = &self.g.edges[end.edge];
-        [(0.0, e.a, end.at), (1.0, e.b, 1.0 - end.at)]
-            .into_iter()
-            .filter(|&(share, node, _)| node as usize == v && self.open(end.edge, end.at, share))
-            .min_by(|x, y| x.2.total_cmp(&y.2))
-            .map_or(0.0, |(share, _, _)| share)
-    }
-
-    /// The pieces a search's nodes ran along: between two graph nodes the
-    /// edge that costs least, as the search took it.
+    /// The pieces a search's ends ran along, each the pass into a stretch and
+    /// the run along it, as the search took them.
     fn pieces(&self, nodes: &[usize], rate: &HashMap<usize, f64>) -> Vec<Piece> {
         let g = self.g;
-        let n = g.nodes.len();
+        let p = &g.passages;
+        let n = p.ends();
         let (s, t) = (n, n + 1);
         let (from, to) = (self.from, self.to);
-        let cost = |e: usize| g.edges[e].length * rate.get(&e).copied().unwrap_or(1.0);
-        let mut out = Vec::new();
+        let along = |e: usize, a: f64, b: f64| {
+            g.edges[e].length * (a - b).abs() * rate.get(&e).copied().unwrap_or(1.0)
+        };
+        let mut out: Vec<Piece> = Vec::new();
         for w in nodes.windows(2) {
             let (u, v) = (w[0], w[1]);
-            if u == s && v == t {
+            if u == s {
+                let end = if v == t { to.at } else { p.share(v) };
                 out.push(Piece {
                     edge: from.edge,
                     from: from.at,
-                    to: to.at,
+                    to: end,
+                    pass: None,
                 });
-            } else if u == s {
-                out.push(Piece {
-                    edge: from.edge,
-                    from: from.at,
-                    to: self.side(from, v),
-                });
-            } else if v == t {
-                out.push(Piece {
-                    edge: to.edge,
-                    from: self.side(to, u),
-                    to: to.at,
-                });
-            } else {
-                let e = self
-                    .adj
-                    .neighbors(u as u32)
-                    .filter(|&(w, e)| w as usize == v && !self.blocked[e as usize])
-                    .map(|(_, e)| e as usize)
-                    .min_by(|&a, &b| cost(a).total_cmp(&cost(b)).then(a.cmp(&b)))
-                    .expect("the search ran along an edge between them");
-                let forward = g.edges[e].a as usize == u;
-                out.push(Piece {
-                    edge: e,
-                    from: if forward { 0.0 } else { 1.0 },
-                    to: if forward { 1.0 } else { 0.0 },
-                });
+                continue;
             }
+            let ends = |r: usize| -> (f64, usize) {
+                let e = p.edge(r);
+                if v == t {
+                    (to.at, e)
+                } else {
+                    (p.share(r ^ 1), e)
+                }
+            };
+            let cost = |pass: &Pass| {
+                let r = pass.to as usize;
+                let (end, e) = ends(r);
+                f64::from(pass.length) * rate.get(&e).copied().unwrap_or(1.0)
+                    + along(e, p.share(r), end)
+            };
+            let pass = p
+                .out_of(u)
+                .iter()
+                .filter(|q| {
+                    let r = q.to as usize;
+                    p.runs_from(r)
+                        && if v == t { r / 2 == to.run } else { r ^ 1 == v }
+                        && !self.closed(p.place(u), p.place(r))
+                })
+                .min_by(|a, b| cost(a).total_cmp(&cost(b)).then(a.to.cmp(&b.to)))
+                .expect("the search took a pass between them");
+            let r = pass.to as usize;
+            let (end, e) = ends(r);
+            let share = p.share(r);
+            let meters = f64::from(pass.length);
+            // A pass along the line of a contracted edge, or of no length, is
+            // no piece of its own.
+            let gap = out
+                .last()
+                .filter(|l| l.edge == e)
+                .map(|l| (l.to - share).abs());
+            if let Some(last) = out
+                .last_mut()
+                .filter(|_| gap.is_some_and(|d| (d * g.edges[e].length - meters).abs() < JOINED_M))
+            {
+                last.to = end;
+                continue;
+            }
+            out.push(Piece {
+                edge: e,
+                from: share,
+                to: end,
+                pass: (meters > 0.0).then(|| Lead {
+                    line: [p.place(u), p.place(r)],
+                    length: meters,
+                }),
+            });
         }
         // An end snapped onto a node leaves a piece of no length, which no
         // leg should report.
-        if out.iter().any(|p| p.from != p.to) {
-            out.retain(|p| p.from != p.to);
+        if out.iter().any(|p| p.from != p.to || p.pass.is_some()) {
+            out.retain(|p| p.from != p.to || p.pass.is_some());
         }
         out
     }
@@ -424,11 +479,7 @@ impl<'a> Planner<'a> {
     /// The route the pieces make, with its legs measured.
     fn describe(&mut self, found: &Found, straight_line: f64) -> Result<Route, Vec<Issue>> {
         let g = self.g;
-        let lines: Vec<Vec<[f64; 2]>> = found
-            .pieces
-            .iter()
-            .map(|p| g.piece(&g.edges[p.edge], p.from, p.to))
-            .collect();
+        let lines: Vec<Vec<[f64; 2]>> = found.pieces.iter().map(|p| p.line(g)).collect();
         // Every leg sampled from its start, its end included; the samples
         // of the whole route are the legs' joined.
         let per_leg: Vec<Vec<[f64; 2]>> = lines.iter().map(|l| samples_along(l)).collect();
@@ -481,6 +532,19 @@ impl<'a> Planner<'a> {
             straight_line,
         })
     }
+}
+
+/// The stretch on edge `e` that holds the share `at`, or lies nearest it: it
+/// may lie past both ends of a stretch, on a line that runs on beyond them.
+fn run_at(g: &Graph, e: usize, at: f64) -> usize {
+    let p = &g.passages;
+    let off = |r: usize| {
+        let (a, b) = (p.share(r * 2), p.share(r * 2 + 1));
+        (a.min(b) - at).max(at - a.max(b)).max(0.0)
+    };
+    p.on_edge(e)
+        .min_by(|&x, &y| off(x).total_cmp(&off(y)).then(x.cmp(&y)))
+        .expect("every edge holds a stretch")
 }
 
 /// Whether the piece of `e`'s path between the shares `from` and `to`
@@ -746,7 +810,7 @@ fn draw(
     let mut line: Vec<[f64; 2]> = Vec::new();
     let mut legs = Vec::new();
     for p in &found.pieces {
-        let l = g.piece(&g.edges[p.edge], p.from, p.to);
+        let l = p.line(g);
         for &q in &l {
             if line.last() != Some(&q) {
                 line.push(q);
@@ -1130,21 +1194,31 @@ mod tests {
     /// edges: nothing of the search under test.
     fn oracle(p: &Planner) -> Option<f64> {
         let g = p.g;
-        let n = g.nodes.len();
-        let kind = g.edges[p.from.edge].kind;
-        let mut d = vec![f64::INFINITY; n];
-        let (fe, te) = (&g.edges[p.from.edge], &g.edges[p.to.edge]);
-        d[fe.a as usize] = d[fe.a as usize].min(fe.length * p.from.at);
-        d[fe.b as usize] = d[fe.b as usize].min(fe.length * (1.0 - p.from.at));
+        let net = &g.passages;
+        let along = |e: usize, a: f64, b: f64| g.edges[e].length * (a - b).abs();
+        let mut d = vec![f64::INFINITY; net.ends()];
+        for end in [p.from.run * 2, p.from.run * 2 + 1] {
+            d[end] = along(p.from.edge, p.from.at, net.share(end));
+        }
+        let mut best = f64::INFINITY;
+        if p.from.run == p.to.run {
+            best = along(p.from.edge, p.from.at, p.to.at);
+        }
         loop {
             let mut changed = false;
-            for (i, e) in g.edges.iter().enumerate() {
-                if e.kind != kind || p.blocked[i] {
-                    continue;
-                }
-                for (u, v) in [(e.a as usize, e.b as usize), (e.b as usize, e.a as usize)] {
-                    if d[u] + e.length < d[v] {
-                        d[v] = d[u] + e.length;
+            for v in 0..net.ends() {
+                for pass in net.out_of(v) {
+                    let r = pass.to as usize;
+                    let (e, hop) = (net.edge(r), d[v] + f64::from(pass.length));
+                    if p.blocked[e] {
+                        continue;
+                    }
+                    if r / 2 == p.to.run {
+                        best = best.min(hop + along(e, net.share(r), p.to.at));
+                    }
+                    let next = hop + along(e, net.share(r), net.share(r ^ 1));
+                    if next < d[r ^ 1] {
+                        d[r ^ 1] = next;
                         changed = true;
                     }
                 }
@@ -1152,11 +1226,6 @@ mod tests {
             if !changed {
                 break;
             }
-        }
-        let mut best = (d[te.a as usize] + te.length * p.to.at)
-            .min(d[te.b as usize] + te.length * (1.0 - p.to.at));
-        if p.from.edge == p.to.edge {
-            best = best.min(fe.length * (p.from.at - p.to.at).abs());
         }
         best.is_finite().then_some(best)
     }
@@ -1274,14 +1343,17 @@ mod tests {
         // way back to it through a box avoided.
         let loop_edge = g.edges.iter().position(|e| e.a == e.b).unwrap();
         let other = 1 - loop_edge;
+        let run = |e: usize| g.passages.on_edge(e).start;
         let from = Snap {
             edge: loop_edge,
+            run: run(loop_edge),
             at: 0.8,
             point: [400.0, 0.0],
         };
         let west = g.edges[other];
         let to = Snap {
             edge: other,
+            run: run(other),
             at: if g.nodes[west.b as usize][0] < 0.0 {
                 1.0
             } else {
@@ -1304,7 +1376,6 @@ mod tests {
         let mut p = Planner {
             src,
             g: &g,
-            adj: g.adjacency(KIND_ROAD),
             from,
             to,
             avoid,
@@ -1322,6 +1393,191 @@ mod tests {
             "{}",
             found.length(&g)
         );
+    }
+
+    /// A planner over `g`, on the synthetic terrain's ground, between the
+    /// road points nearest `from` and `to`.
+    fn over<'a>(t: &'a Terrain, g: &'a Graph, from: [f64; 2], to: [f64; 2]) -> Planner<'a> {
+        let src = t.source();
+        let snap = |p: [f64; 2]| {
+            let edge = g.nearest(KIND_ROAD, p, 1)[0].0;
+            let (point, at) = g.locate(&g.edges[edge], p);
+            let run = run_at(g, edge, at);
+            Snap {
+                edge,
+                run,
+                at,
+                point,
+            }
+        };
+        Planner {
+            src,
+            g,
+            from: snap(from),
+            to: snap(to),
+            avoid: Vec::new(),
+            blocked: vec![false; g.edges.len()],
+            observers: Vec::new(),
+            exposure_weight: 0.0,
+            exposure: vec![f32::NAN; g.edges.len()],
+            heights: Heights::new(src),
+            bound: f64::INFINITY,
+        }
+    }
+
+    /// Roads west, east and south of a junction at the origin, and a bypass
+    /// from the west road's far end to the south road's. Ends 0 and 1 are the
+    /// west road's, 2 and 3 the east's, 4 and 5 the south's, 6 and 7 the
+    /// bypass's.
+    fn fork() -> Vec<crate::roads::Stretch> {
+        let road = |a, b, points: &[[f64; 2]]| crate::roads::Stretch {
+            kind: KIND_ROAD,
+            class: 0,
+            a: Some(a),
+            b: Some(b),
+            points: points.to_vec(),
+        };
+        vec![
+            road(1, 2, &[[-1000.0, 0.0], [0.0, 0.0]]),
+            road(2, 3, &[[0.0, 0.0], [1000.0, 0.0]]),
+            road(2, 4, &[[0.0, 0.0], [0.0, -1000.0]]),
+            road(1, 4, &[[-1000.0, 0.0], [0.0, -1000.0]]),
+        ]
+    }
+
+    fn joined(stretches: Vec<crate::roads::Stretch>, passes: &[(u32, u32)]) -> Graph {
+        let stations = stretches
+            .iter()
+            .map(|s| [0.0, dist(s.points[0], s.points[1])])
+            .collect();
+        let joins = crate::roads::Joins {
+            stations,
+            one_way: vec![[false; 2]; stretches.len()],
+            passes: passes
+                .iter()
+                .flat_map(|&(a, b)| [(a, b, 0.0), (b, a, 0.0)])
+                .collect(),
+        };
+        let dry = &mut |_: f64, _: f64| false;
+        crate::roads::build_joined(vec!["road".into()], stretches, Some(joins), dry).unwrap()
+    }
+
+    /// From the middle of the west road to the middle of the south road.
+    fn west_to_south(t: &Terrain, g: &Graph) -> Option<f64> {
+        let mut p = over(t, g, [-500.0, 0.0], [0.0, -500.0]);
+        let a = p.search(&HashMap::new(), true).unwrap();
+        let d = p.search(&HashMap::new(), false).unwrap();
+        assert_eq!(a.is_some(), d.is_some());
+        a.map(|f| f.length(g))
+    }
+
+    #[test]
+    fn a_junction_with_a_forbidden_turn_routes_around_it() {
+        let t = synth();
+        let open = joined(fork(), &[(1, 2), (1, 4), (2, 4), (0, 6), (7, 5)]);
+        assert!(close(west_to_south(&t, &open).unwrap(), 1000.0));
+        // West to south is forbidden, west to east and east to south are not.
+        let turn = joined(fork(), &[(1, 2), (2, 4), (0, 6), (7, 5)]);
+        let round = 1000.0 + 1000.0 * 2f64.sqrt();
+        assert!(close(west_to_south(&t, &turn).unwrap(), round));
+    }
+
+    #[test]
+    fn a_route_never_turns_back_along_a_stretch_to_reach_a_forbidden_turn() {
+        let t = synth();
+        // With no bypass, only going out along the east road and back would
+        // reach the south road, as a train cannot.
+        let g = joined(fork()[..3].to_vec(), &[(1, 2), (2, 4)]);
+        assert_eq!(west_to_south(&t, &g), None);
+    }
+
+    #[test]
+    fn a_one_way_stretch_runs_one_way() {
+        let t = synth();
+        let mut joins = crate::roads::Joins {
+            stations: vec![[0.0, 1000.0]; 2],
+            one_way: vec![[false; 2]; 2],
+            passes: vec![(1, 2, 0.0), (2, 1, 0.0)],
+        };
+        let two: Vec<_> = fork()[..2].to_vec();
+        let dry = &mut |_: f64, _: f64| false;
+        let build = |j: &crate::roads::Joins, dry: &mut dyn crate::roads::Water| {
+            crate::roads::build_joined(vec!["road".into()], two.clone(), Some(j.clone()), dry)
+                .unwrap()
+        };
+        let length = |g: &Graph, a: [f64; 2], b: [f64; 2]| {
+            let found = over(&t, g, a, b).search(&HashMap::new(), true).unwrap();
+            found.map(|f| f.length(g))
+        };
+        let (west, east) = ([-500.0, 0.0], [500.0, 0.0]);
+        let g = build(&joins, dry);
+        assert_eq!(g.edges.len(), 1, "they are contracted");
+        assert!(close(length(&g, east, west).unwrap(), 1000.0));
+        // No way from the east road's far end back to the junction.
+        joins.one_way[1] = [false, true];
+        let g = build(&joins, dry);
+        assert!(close(length(&g, west, east).unwrap(), 1000.0));
+        assert_eq!(length(&g, east, west), None);
+    }
+
+    #[test]
+    fn a_line_past_its_connector_is_no_road() {
+        // The west road runs 30 m past the connector to a road north, whose
+        // own line starts 20 m back from it.
+        use crate::decode::rn4::{self, Reach, build};
+        let e = |a, b, points: Vec<[f64; 3]>| build::Edge {
+            kind: rn4::KIND_ROAD,
+            class: 0,
+            a,
+            b,
+            points,
+        };
+        let edges = [
+            e(1, 2, vec![[-1000.0, 5.0, 0.0], [30.0, 5.0, 0.0]]),
+            e(2, 3, vec![[0.0, 5.0, -20.0], [0.0, 5.0, 1000.0]]),
+        ];
+        let bytes: Vec<Vec<u8>> = edges.iter().map(build::edge).collect();
+        let connector = vec![[0.0, 5.0, 0.0], [0.0, 5.0, 10.0]];
+        let file = build::file_of(&["road"], &edges, &bytes, &[(0, 1)], &[(0, 1, connector)]);
+        let far = 1e6;
+        let reach = Reach {
+            min_x: -far,
+            max_x: far,
+            min_y: -100.0,
+            max_y: 100.0,
+            min_z: -far,
+            max_z: far,
+        };
+        let net = rn4::parse(&file, "X.rn4", &reach).unwrap();
+        let stretches: Vec<crate::roads::Stretch> = net
+            .edges
+            .iter()
+            .map(|e| crate::roads::Stretch {
+                kind: e.kind,
+                class: e.class,
+                a: e.a,
+                b: e.b,
+                points: e.points.iter().map(|p| [p[0], p[2]]).collect(),
+            })
+            .collect();
+        let of = [Some(0), Some(1)];
+        let joins = crate::roads::Joins::read(&net.table, &net.connectors, &of, &stretches);
+        assert_eq!(joins.stations, [[0.0, 1000.0], [30.0, 1020.0]]);
+        assert_eq!(joins.passes, [(1, 2, 10.0), (2, 1, 10.0)]);
+        let dry = &mut |_: f64, _: f64| false;
+        let g = crate::roads::build_joined(net.classes, stretches, Some(joins), dry).unwrap();
+        let t = synth();
+        let mut p = over(&t, &g, [-500.0, 0.0], [0.0, 500.0]);
+        let found = p.search(&HashMap::new(), true).unwrap().unwrap();
+        // 500 m to the connector, its 10 m, and 490 m on: nothing of the 30 m
+        // past it, or of the 30 m behind it.
+        assert!(close(found.length(&g), 1000.0), "{}", found.length(&g));
+        assert!(close(found.cost, 1000.0));
+        let route = p.describe(&found, 0.0).unwrap();
+        assert_eq!(route.legs.len(), 2);
+        assert!(close(route.legs[1].length, 500.0));
+        assert_eq!((route.legs[1].from.x, route.legs[1].from.z), (0.0, 0.0));
+        assert!(route.waypoints.iter().all(|w| w.x < 0.1));
     }
 
     #[test]

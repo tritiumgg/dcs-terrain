@@ -8,6 +8,10 @@
 //! one. Each edge keeps its polyline, class, length and whether it crosses
 //! water; betweenness, computed apart because it takes minutes on the largest
 //! terrains, ranks the edges each network's shortest paths lean on.
+//!
+//! A route needs more than nodes: a stretch runs on past where the game joins
+//! it, and a junction allows only some ways through. So the graph also holds
+//! the passages, stretch by stretch: see `Passages`.
 
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
@@ -15,7 +19,7 @@ use std::ops::Range;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use crate::decode::rn4::{KIND_RAIL, KIND_ROAD};
+use crate::decode::rn4::{Connector, KIND_RAIL, KIND_ROAD, Table};
 use crate::mapped::{Column, View};
 use crate::source::Refusal;
 
@@ -37,9 +41,353 @@ pub struct Stretch {
     pub class: u8,
     pub a: Option<u32>,
     pub b: Option<u32>,
-    /// `[x, z]`, from the end at `a` to the end at `b`. It stops short of
-    /// each junction.
+    /// `[x, z]`, from the end at `a` to the end at `b`.
     pub points: Vec<[f64; 2]>,
+}
+
+/// Where a stretch's end is reached and how the ends join, as the road file
+/// tells it. End `2s` and end `2s + 1` are stretch `s`'s two ends.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Joins {
+    /// Meters along each stretch's polyline to its two ends' connection
+    /// points. A polyline runs on past them, which is no road a route takes.
+    pub stations: Vec<[f64; 2]>,
+    /// For each stretch, whether a route may not run from each end to the
+    /// other.
+    pub one_way: Vec<[bool; 2]>,
+    /// Each way through a junction: the end left, the end reached, and the
+    /// meters between them.
+    pub passes: Vec<(u32, u32, f64)>,
+}
+
+/// How far from its edges a connector's ends may lie: they lie on them.
+const CONNECTOR_REACH_M: f64 = 1.0;
+
+/// How far `p` lies from `line`, and how many meters along it its closest
+/// point is.
+fn station(line: &[[f64; 2]], p: [f64; 2]) -> (f64, f64) {
+    let (mut best, mut best_at, mut walked) = (f64::INFINITY, 0.0, 0.0);
+    for s in line.windows(2) {
+        let c = closest_on(s[0], s[1], p);
+        let d = dist(c, p);
+        if d < best {
+            (best, best_at) = (d, walked + dist(s[0], c));
+        }
+        walked += dist(s[0], s[1]);
+    }
+    (best, best_at)
+}
+
+/// The point `s` meters along `line`, or its last.
+fn point_at(line: &[[f64; 2]], s: f64) -> [f64; 2] {
+    let mut walked = 0.0;
+    for w in line.windows(2) {
+        let l = dist(w[0], w[1]);
+        if walked + l >= s && l > 0.0 {
+            let t = ((s - walked) / l).clamp(0.0, 1.0);
+            return [
+                w[0][0] + t * (w[1][0] - w[0][0]),
+                w[0][1] + t * (w[1][1] - w[0][1]),
+            ];
+        }
+        walked += l;
+    }
+    line[line.len() - 1]
+}
+
+impl Joins {
+    /// What `table` and `connectors` say of `stretches`, `stretch_of` naming
+    /// the stretch of each edge of the file that has one. A connector's ends
+    /// fix where its two ends lie on their edges; a passage between two
+    /// networks is left out, since no search crosses between them.
+    pub fn read(
+        table: &Table,
+        connectors: &[Connector],
+        stretch_of: &[Option<u32>],
+        stretches: &[Stretch],
+    ) -> Joins {
+        let ends = table.ends(stretch_of.len()).unwrap_or_default();
+        let totals: Vec<f64> = stretches
+            .iter()
+            .map(|s| polyline_length(&s.points))
+            .collect();
+        let mut at: HashMap<u32, f64> = HashMap::new();
+        let mut lengths: HashMap<(u32, u32), f64> = HashMap::new();
+        for c in connectors {
+            let of = |e: u32| stretch_of[e as usize].map(|s| (s as usize, ends[e as usize]));
+            let (Some((sa, ea)), Some((sb, eb))) = (of(c.a), of(c.b)) else {
+                continue;
+            };
+            let (da, at_a) = station(&stretches[sa].points, c.ends[0]);
+            let (db, at_b) = station(&stretches[sb].points, c.ends[1]);
+            if da > CONNECTOR_REACH_M || db > CONNECTOR_REACH_M {
+                continue;
+            }
+            // How far from the stretch's end at that junction the point lies:
+            // two edges may share both their junctions.
+            let off = |s: usize, end: u32, along: f64| {
+                let id = Some(table.junction[end as usize]);
+                let from_a = if stretches[s].a == id {
+                    along
+                } else {
+                    f64::MAX
+                };
+                let from_b = if stretches[s].b == id {
+                    totals[s] - along
+                } else {
+                    f64::MAX
+                };
+                from_a.min(from_b)
+            };
+            let best = ea
+                .iter()
+                .flat_map(|&p| {
+                    table
+                        .links(p as usize)
+                        .map(move |(q, _)| (p, q as u32))
+                        .filter(|&(p, q)| {
+                            eb.contains(&q)
+                                && table.junction[p as usize] == table.junction[q as usize]
+                        })
+                })
+                .min_by(|x, y| {
+                    let cost = |&(p, q): &(u32, u32)| {
+                        off(sa, p, at_a).min(1e12) + off(sb, q, at_b).min(1e12)
+                    };
+                    cost(x).total_cmp(&cost(y))
+                });
+            let Some((p, q)) = best else { continue };
+            at.insert(p, at_a);
+            at.insert(q, at_b);
+            lengths.insert((p, q), c.length);
+            lengths.insert((q, p), c.length);
+        }
+        let mut joins = Joins {
+            stations: vec![[0.0; 2]; stretches.len()],
+            one_way: vec![[false; 2]; stretches.len()],
+            passes: Vec::new(),
+        };
+        let mut end_of = vec![u32::MAX; table.edge.len()];
+        for (edge, pair) in ends.iter().enumerate() {
+            let Some(s) = stretch_of[edge] else { continue };
+            let i = s as usize;
+            let total = totals[i];
+            let [p, q] = pair.map(|e| at.get(&e).copied());
+            // An end no connector reaches lies at the end of the line, past
+            // the other from it.
+            let far = |o: f64| if o < total / 2.0 { total } else { 0.0 };
+            let stations = match (p, q) {
+                (Some(p), Some(q)) => [p, q],
+                (Some(p), None) => [p, far(p)],
+                (None, Some(q)) => [far(q), q],
+                (None, None) => {
+                    if stretches[i].b == Some(table.junction[pair[0] as usize])
+                        && stretches[i].a != stretches[i].b
+                    {
+                        [total, 0.0]
+                    } else {
+                        [0.0, total]
+                    }
+                }
+            };
+            joins.stations[i] = stations;
+            let linked = |a: u32, b: u32| table.links(a as usize).any(|(t, _)| t == b as usize);
+            joins.one_way[i] = [!linked(pair[0], pair[1]), !linked(pair[1], pair[0])];
+            end_of[pair[0] as usize] = s * 2;
+            end_of[pair[1] as usize] = s * 2 + 1;
+        }
+        for from in 0..table.edge.len() {
+            let f = end_of[from];
+            if f == u32::MAX {
+                continue;
+            }
+            for (to, cost) in table.links(from) {
+                let t = end_of[to];
+                let through = table.junction[from] == table.junction[to]
+                    && table.edge[from] != table.edge[to];
+                if t == u32::MAX
+                    || !through
+                    || stretches[(f / 2) as usize].kind != stretches[(t / 2) as usize].kind
+                {
+                    continue;
+                }
+                let length = lengths.get(&(from as u32, to as u32));
+                joins
+                    .passes
+                    .push((f, t, length.copied().unwrap_or(f64::from(cost))));
+            }
+        }
+        joins
+    }
+
+    /// Stretches that join wherever two ends name one junction, for a network
+    /// with no connectors: each reached at its polyline's end, and every way
+    /// through a node open, by way of the node.
+    fn open(stretches: &[Stretch], nodes: &[[f64; 2]], ends: &[(usize, usize)]) -> Joins {
+        let totals = stretches.iter().map(|s| polyline_length(&s.points));
+        let mut at: Vec<Vec<(u32, f64)>> = vec![Vec::new(); nodes.len()];
+        for (i, (s, &(a, b))) in stretches.iter().zip(ends).enumerate() {
+            let last = s.points[s.points.len() - 1];
+            at[a].push((2 * i as u32, dist(s.points[0], nodes[a])));
+            at[b].push((2 * i as u32 + 1, dist(last, nodes[b])));
+        }
+        let mut passes = Vec::new();
+        for here in &at {
+            for &(f, gap) in here {
+                for &(t, on) in here {
+                    if f != t {
+                        passes.push((f, t, gap + on));
+                    }
+                }
+            }
+        }
+        Joins {
+            stations: totals.map(|t| [0.0, t]).collect(),
+            one_way: vec![[false; 2]; stretches.len()],
+            passes,
+        }
+    }
+}
+
+/// One stretch's way between its two ends, on the graph's edge that holds it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(C)]
+pub struct Run {
+    /// The edge, and in its top two bits `ONE_WAY`.
+    edge: u32,
+    /// The shares of the way along the edge's path of ends `2r` and `2r + 1`.
+    from: f32,
+    to: f32,
+}
+
+// SAFETY: three 4-byte numbers, with no gap.
+unsafe impl bytemuck::Zeroable for Run {}
+unsafe impl bytemuck::Pod for Run {}
+
+/// A run's bits for no way from end `2r`, and none from end `2r + 1`.
+const ONE_WAY: [u32; 2] = [1 << 31, 1 << 30];
+
+/// One way out of an end: the end reached, on another stretch, and the meters
+/// to it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(C)]
+pub struct Pass {
+    pub to: u32,
+    pub length: f32,
+}
+
+// SAFETY: two 4-byte numbers, with no gap.
+unsafe impl bytemuck::Zeroable for Pass {}
+unsafe impl bytemuck::Pod for Pass {}
+
+/// The network as a route runs it, in the graph's file: ends joined by runs
+/// along stretches and by passes through junctions, where a route alternates
+/// the two, so it never turns back along a stretch and never takes one
+/// passage straight onto another. A rail switch forbids its branch to branch
+/// that way, which a graph of nodes cannot say.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Passages {
+    runs: Column<Run>,
+    /// `[x, z]` of each end.
+    places: Column<[f32; 2]>,
+    /// End `e`'s passes are `passes[out[e]..out[e + 1]]`.
+    out: Column<u32>,
+    passes: Column<Pass>,
+    /// Edge `e`'s runs are `runs[first[e]..first[e + 1]]`, in order along it.
+    first: Column<u32>,
+}
+
+impl Passages {
+    /// How many ends there are, two to a run.
+    pub fn ends(&self) -> usize {
+        self.runs.len() * 2
+    }
+
+    /// The runs on edge `e`.
+    pub fn on_edge(&self, e: usize) -> Range<usize> {
+        self.first[e] as usize..self.first[e + 1] as usize
+    }
+
+    /// The edge end `e` lies on.
+    pub fn edge(&self, end: usize) -> usize {
+        (self.runs[end / 2].edge & !(ONE_WAY[0] | ONE_WAY[1])) as usize
+    }
+
+    /// The share of the way along its edge end `e` lies at.
+    pub fn share(&self, end: usize) -> f64 {
+        let r = &self.runs[end / 2];
+        f64::from(if end & 1 == 0 { r.from } else { r.to })
+    }
+
+    pub fn place(&self, end: usize) -> [f64; 2] {
+        self.places[end].map(f64::from)
+    }
+
+    /// Whether a route may run from end `e` to the other end of its stretch.
+    pub fn runs_from(&self, end: usize) -> bool {
+        self.runs[end / 2].edge & ONE_WAY[end % 2] == 0
+    }
+
+    /// Whether a route may run along stretch `run` from the share `from` of
+    /// its edge to the share `to`.
+    pub fn runs_between(&self, run: usize, from: f64, to: f64) -> bool {
+        let forward = (to > from) == (self.share(run * 2 + 1) > self.share(run * 2));
+        self.runs_from(run * 2 + usize::from(!forward))
+    }
+
+    pub fn out_of(&self, end: usize) -> &[Pass] {
+        &self.passes[self.out[end] as usize..self.out[end + 1] as usize]
+    }
+
+    /// The passages `encode` wrote at byte `at` of `view`, the last thing
+    /// there, in a graph of `edges` edges.
+    fn read(view: &View, at: usize, edges: usize) -> Result<Passages, Refusal> {
+        let b = view.bytes();
+        let cut = || short("passages");
+        let head = b.get(at..at + 32).ok_or_else(cut)?;
+        let word = |k: usize| u64::from_le_bytes(head[k * 8..k * 8 + 8].try_into().unwrap());
+        let (runs, out, passes, first) = (word(0), word(1), word(2), word(3));
+        let size = [(runs, 12), (runs * 2, 8), (out, 4), (passes, 8), (first, 4)]
+            .into_iter()
+            .try_fold(at as u64 + 32, |sum, (k, each): (u64, u64)| {
+                sum.checked_add(k.checked_mul(each)?)
+            })
+            .ok_or_else(cut)?;
+        if size != b.len() as u64 {
+            return Err(Refusal("the road graph's passages do not fill it".into()));
+        }
+        let (runs, out, passes, first) =
+            (runs as usize, out as usize, passes as usize, first as usize);
+        let mut from = at + 32;
+        let runs: Column<Run> = Column::in_view(view, from, runs).ok_or_else(cut)?;
+        from += runs.len() * 12;
+        let places = Column::in_view(view, from, runs.len() * 2).ok_or_else(cut)?;
+        from += runs.len() * 16;
+        let out: Column<u32> = Column::in_view(view, from, out).ok_or_else(cut)?;
+        from += out.len() * 4;
+        let passes: Column<Pass> = Column::in_view(view, from, passes).ok_or_else(cut)?;
+        from += passes.len() * 8;
+        let first: Column<u32> = Column::in_view(view, from, first).ok_or_else(cut)?;
+        let ends = runs.len() * 2;
+        let fits = (out.is_empty() && ends == 0 || out.len() == ends + 1)
+            && out.windows(2).all(|w| w[0] <= w[1])
+            && out.last().is_none_or(|&l| l as usize == passes.len())
+            && passes.iter().all(|p| (p.to as usize) < ends)
+            && (first.is_empty() || first.len() == edges + 1)
+            && first.windows(2).all(|w| w[0] <= w[1])
+            && first.last().is_none_or(|&l| l as usize == runs.len());
+        let p = Passages {
+            runs,
+            places,
+            out,
+            passes,
+            first,
+        };
+        if !fits || (0..ends).step_by(2).any(|e| p.edge(e) >= edges) {
+            return Err(Refusal("the road graph's passages do not fit it".into()));
+        }
+        Ok(p)
+    }
 }
 
 /// One edge of the graph, between two nodes, as `roads.graph` lays it out.
@@ -101,6 +449,7 @@ pub struct Graph {
     pub edges: Column<Edge>,
     /// Every edge's polyline, one after another in edge order.
     pub points: Column<[f32; 2]>,
+    pub passages: Passages,
     index: Indexes,
 }
 
@@ -136,18 +485,24 @@ struct Building {
     b: usize,
     length: f64,
     points: Vec<[f64; 2]>,
+    /// The stretches it holds in order, each with whether it runs backward.
+    stretches: Vec<(u32, bool)>,
 }
 
 impl Building {
     fn reverse(&mut self) {
         std::mem::swap(&mut self.a, &mut self.b);
         self.points.reverse();
+        self.stretches.reverse();
+        for s in &mut self.stretches {
+            s.1 = !s.1;
+        }
     }
 }
 
-/// The graph of `stretches`, whose classes index `classes`. Stretches of
-/// any kind but road and rail are left out. `water` tells which samples of
-/// each edge lie on water.
+/// The graph of `stretches`, whose classes index `classes`, joined wherever
+/// their ends name one junction. Stretches of any kind but road and rail are
+/// left out. `water` tells which samples of each edge lie on water.
 pub fn build(
     classes: Vec<String>,
     stretches: Vec<Stretch>,
@@ -157,6 +512,17 @@ pub fn build(
         .into_iter()
         .filter(|s| (s.kind == KIND_ROAD || s.kind == KIND_RAIL) && s.points.len() >= 2)
         .collect();
+    build_joined(classes, stretches, None, water)
+}
+
+/// As `build`, of stretches all road or rail of two points or more, joined as
+/// `joins` says when it says.
+pub fn build_joined(
+    classes: Vec<String>,
+    stretches: Vec<Stretch>,
+    joins: Option<Joins>,
+    water: &mut dyn Water,
+) -> Result<Graph, Refusal> {
     // A node per junction id, per network, at the mean of its ends.
     let mut junction: HashMap<(u8, u32), usize> = HashMap::new();
     let mut sums: Vec<[f64; 3]> = Vec::new();
@@ -183,10 +549,22 @@ pub fn build(
         ends.push((a, b));
     }
     let nodes: Vec<[f64; 2]> = sums.iter().map(|s| [s[0] / s[2], s[1] / s[2]]).collect();
+    let joins = joins.unwrap_or_else(|| Joins::open(&stretches, &nodes, &ends));
+    let totals: Vec<f64> = stretches
+        .iter()
+        .map(|s| polyline_length(&s.points))
+        .collect();
+    let counts: Vec<usize> = stretches.iter().map(|s| s.points.len()).collect();
+    let end_places: Vec<[[f64; 2]; 2]> = stretches
+        .iter()
+        .zip(&joins.stations)
+        .map(|(s, st)| st.map(|at| point_at(&s.points, at)))
+        .collect();
     let mut edges: Vec<Option<Building>> = stretches
         .into_iter()
         .zip(ends)
-        .map(|(s, (a, b))| {
+        .enumerate()
+        .map(|(i, (s, (a, b)))| {
             let length = dist(nodes[a], s.points[0])
                 + polyline_length(&s.points)
                 + dist(s.points[s.points.len() - 1], nodes[b]);
@@ -197,6 +575,7 @@ pub fn build(
                 b,
                 length,
                 points: s.points,
+                stretches: vec![(i as u32, false)],
             })
         })
         .collect();
@@ -229,6 +608,7 @@ pub fn build(
     for (k, w) in wet.into_iter().enumerate() {
         crosses[owner[k] as usize] |= w;
     }
+    let passages = passages(&built, &nodes, &joins, &totals, &counts, &end_places);
     let mut points = Vec::new();
     let mut edges = Vec::with_capacity(built.len());
     for ((e, (a, b)), crosses_water) in built.iter().zip(ends).zip(crosses) {
@@ -247,8 +627,98 @@ pub fn build(
         nodes: kept_nodes.into(),
         edges: edges.into(),
         points: points.into(),
+        passages,
         index: Indexes::default(),
     })
+}
+
+/// The passages of the edges `built`, each stretch's run where contraction
+/// left it, with its ends numbered in that order.
+fn passages(
+    built: &[Building],
+    nodes: &[[f64; 2]],
+    joins: &Joins,
+    totals: &[f64],
+    counts: &[usize],
+    end_places: &[[[f64; 2]; 2]],
+) -> Passages {
+    let mut runs = Vec::with_capacity(totals.len());
+    let mut places = Vec::with_capacity(totals.len() * 2);
+    let mut first = Vec::with_capacity(built.len() + 1);
+    let mut renumber = vec![u32::MAX; totals.len() * 2];
+    for (i, e) in built.iter().enumerate() {
+        first.push(runs.len() as u32);
+        // Meters along the edge's path to each of its polyline's points.
+        let mut along = Vec::with_capacity(e.points.len());
+        let mut walked = dist(nodes[e.a], e.points[0]);
+        along.push(walked);
+        for w in e.points.windows(2) {
+            walked += dist(w[0], w[1]);
+            along.push(walked);
+        }
+        let mut at = 0;
+        for &(s, backward) in &e.stretches {
+            let s = s as usize;
+            let start = along[at];
+            let share = |station: f64| {
+                let into = if backward {
+                    totals[s] - station
+                } else {
+                    station
+                };
+                if e.length > 0.0 {
+                    ((start + into) / e.length).clamp(0.0, 1.0) as f32
+                } else {
+                    0.0
+                }
+            };
+            let [from, to] = joins.stations[s].map(share);
+            let way = joins.one_way[s];
+            let bits = (u32::from(way[0]) * ONE_WAY[0]) | (u32::from(way[1]) * ONE_WAY[1]);
+            for k in 0..2 {
+                renumber[2 * s + k] = (runs.len() * 2 + k) as u32;
+                places.push(end_places[s][k].map(|v| v as f32));
+            }
+            runs.push(Run {
+                edge: i as u32 | bits,
+                from,
+                to,
+            });
+            // Its points, and the node contraction put after them.
+            at += counts[s] + 1;
+        }
+    }
+    first.push(runs.len() as u32);
+    let mut passes: Vec<(u32, Pass)> = joins
+        .passes
+        .iter()
+        .map(|&(f, t, length)| {
+            let to = renumber[t as usize];
+            (
+                renumber[f as usize],
+                Pass {
+                    to,
+                    length: length as f32,
+                },
+            )
+        })
+        .collect();
+    passes.sort_unstable_by_key(|p| (p.0, p.1.to));
+    let mut out = vec![0u32; runs.len() * 2 + 1];
+    for p in &passes {
+        out[p.0 as usize + 1] += 1;
+    }
+    for k in 1..out.len() {
+        out[k] += out[k - 1];
+    }
+    let passes: Vec<Pass> = passes.into_iter().map(|p| p.1).collect();
+    Passages {
+        runs: runs.into(),
+        places: places.into(),
+        out: out.into(),
+        passes: passes.into(),
+        first: first.into(),
+    }
 }
 
 /// Where a polyline starts in the graph's points, refused past what an
@@ -308,6 +778,7 @@ fn contract(nodes: &[[f64; 2]], edges: &mut [Option<Building>]) {
         e1.points.push(nodes[n]);
         e1.points.extend_from_slice(&e2.points);
         e1.length += e2.length;
+        e1.stretches.append(&mut e2.stretches);
         e1.b = far;
         edges[i] = Some(e1);
         for slot in at[far].iter_mut().filter(|s| **s == j) {
@@ -403,6 +874,16 @@ impl Graph {
             b.extend_from_slice(bytemuck::cast_slice(&ix.ids));
             b.resize(pad(b.len()), 0);
         }
+        // The passages, on 4 bytes, as their arrays are.
+        let p = &self.passages;
+        for v in [p.runs.len(), p.out.len(), p.passes.len(), p.first.len()] {
+            b.extend_from_slice(&(v as u64).to_le_bytes());
+        }
+        b.extend_from_slice(bytemuck::cast_slice(&p.runs));
+        b.extend_from_slice(bytemuck::cast_slice(&p.places));
+        b.extend_from_slice(bytemuck::cast_slice(&p.out));
+        b.extend_from_slice(bytemuck::cast_slice(&p.passes));
+        b.extend_from_slice(bytemuck::cast_slice(&p.first));
         b
     }
 
@@ -447,9 +928,7 @@ impl Graph {
             *net = Index::read(view, &mut at, e as u32)?;
             at = pad(at);
         }
-        if at != b.len() {
-            return Err(Refusal("the road graph has bytes past its index".into()));
-        }
+        let passages = Passages::read(view, at, e)?;
         let [roads, rails] = nets;
         for edge in edges.iter() {
             if edge.a as usize >= n || edge.b as usize >= n {
@@ -476,14 +955,9 @@ impl Graph {
             nodes,
             edges,
             points,
+            passages,
             index,
         })
-    }
-
-    /// The adjacency of the network of `kind`.
-    pub fn adjacency(&self, kind: u8) -> &Adjacency {
-        self.index.adjacent[usize::from(kind == KIND_RAIL)]
-            .get_or_init(|| Adjacency::new(self, kind))
     }
 
     pub fn class(&self, e: &Edge) -> &str {
@@ -792,9 +1266,6 @@ fn split<T: Send>(n: usize, parallel_from: usize, f: impl Fn(Range<usize>) -> T 
 struct Indexes {
     bounds: OnceLock<[f64; 4]>,
     nets: [OnceLock<Index>; 2],
-    /// Each network's adjacency, made the first time one is searched: it
-    /// takes longer than most routes.
-    adjacent: [OnceLock<Adjacency>; 2],
 }
 
 impl Indexes {
@@ -1368,6 +1839,7 @@ pub(crate) mod tests {
     /// `step` meters so that distances tie.
     pub(crate) fn random_graph(u: &mut Unit, o: [f64; 2], step: f64) -> Graph {
         let mut g = Graph {
+            passages: Passages::default(),
             classes: classes(),
             ..Graph::default()
         };
