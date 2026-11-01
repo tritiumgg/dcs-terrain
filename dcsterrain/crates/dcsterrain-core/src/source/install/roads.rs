@@ -23,8 +23,8 @@ pub struct RoadsGraph;
 pub static ROADS_GRAPH: RoadsGraph = RoadsGraph;
 
 /// 2 lays the arrays out flat, to be read where they lie, with each
-/// network's grid.
-const GRAPH_VERSION: u32 = 2;
+/// network's grid. 3 adds the edges the old scan missed.
+const GRAPH_VERSION: u32 = 3;
 
 impl Entry for RoadsGraph {
     fn name(&self) -> &str {
@@ -50,19 +50,25 @@ impl Entry for RoadsGraph {
         let file = File::open(root.join(&f.path)).map_err(|e| refusal(&f.path, e))?;
         let mut stretches = Vec::new();
         let mut ends = Vec::new();
-        let classes = rn4::scan(file, &f.path, &Reach::around(&toc), |e| {
-            if e.kind != KIND_ROAD && e.kind != KIND_RAIL {
-                return;
-            }
-            ends.extend(rn4::ends(e.a, e.b, &e.points));
-            stretches.push(Stretch {
-                kind: e.kind,
-                class: e.class,
-                a: e.a,
-                b: e.b,
-                points: e.points.iter().map(|p| [p[0], p[2]]).collect(),
-            });
-        })
+        let (classes, _) = rn4::scan(
+            file,
+            &f.path,
+            &Reach::around(&toc),
+            |e| {
+                if e.kind != KIND_ROAD && e.kind != KIND_RAIL {
+                    return;
+                }
+                ends.extend(rn4::ends(e.a, e.b, &e.points));
+                stretches.push(Stretch {
+                    kind: e.kind,
+                    class: e.class,
+                    a: e.a,
+                    b: e.b,
+                    points: e.points.iter().map(|p| [p[0], p[2]]).collect(),
+                });
+            },
+            |_| {},
+        )
         .map_err(|e| refusal(&f.path, e))?;
         // Each map has one id whose ends are spread across it; joined
         // through one node it would weld the map's dead ends together.
@@ -203,9 +209,9 @@ impl Entry for RoadsBetweenness {
     }
 
     /// Its rows follow the graph's edges, so a new order of them is a new
-    /// version of this entry too. The edges of graph 2 are those of graph 1.
+    /// version of this entry too.
     fn version(&self) -> u32 {
-        101
+        102
     }
 
     fn roles(&self) -> &[&str] {
