@@ -564,7 +564,14 @@ mod tests {
             })
             .collect();
         let (bytes, _, idx) = open(&built);
-        let ask = || query(&bytes, &idx, Pool::Objects, [0.0, 470_000.0, 1.0, 470_001.0]);
+        let ask = || {
+            query(
+                &bytes,
+                &idx,
+                Pool::Objects,
+                [0.0, 470_000.0, 1.0, 470_001.0],
+            )
+        };
         let (scan, grid) = (ask(), ask());
         assert_eq!(scan.len(), 6000);
         assert_eq!(scan, grid);
