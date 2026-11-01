@@ -114,7 +114,8 @@ pub struct RouteCase {
     pub to: [f64; 2],
     /// The tool's length; none where it refuses the route.
     pub length: Option<f64>,
-    /// Whether every step between its legs is a passage the road file lists.
+    /// Whether every step between its legs is a passage the road file lists:
+    /// false in a plan drawn before this was recorded, which must be redrawn.
     #[serde(default)]
     pub listed: bool,
 }
@@ -469,8 +470,8 @@ fn sights(
     Ok(out)
 }
 
-/// Whether each step of a route's legs from one edge to another is a passage
-/// in the graph, read apart from the search that found the route.
+/// Whether a passage in the graph joins each two edges a route's legs step
+/// between, read apart from the search that found the route.
 fn listed(terrain: &Terrain, route: &Value) -> bool {
     let Ok(g) = terrain.source().road_graph() else {
         return false;
@@ -485,12 +486,11 @@ fn listed(terrain: &Terrain, route: &Value) -> bool {
         .map(|e| e as usize)
         .collect();
     edges.windows(2).all(|w| {
-        w[0] == w[1]
-            || p.on_edge(w[0]).flat_map(|r| [r * 2, r * 2 + 1]).any(|end| {
-                p.out_of(end)
-                    .iter()
-                    .any(|pass| p.edge(pass.to as usize) == w[1])
-            })
+        p.on_edge(w[0]).flat_map(|r| [r * 2, r * 2 + 1]).any(|end| {
+            p.out_of(end)
+                .iter()
+                .any(|pass| p.edge(pass.to as usize) == w[1])
+        })
     })
 }
 

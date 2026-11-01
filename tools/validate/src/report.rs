@@ -16,6 +16,8 @@ pub const HEIGHT_MAX_M: f64 = 0.5;
 pub const WATER_AGREEMENT: f64 = 1.0;
 pub const SIGHT_AGREEMENT: f64 = 0.99;
 pub const ROUTE_LONGER: f64 = 0.005;
+/// How near two lengths are that are one length, by rounding.
+const ROUTE_SAME: f64 = 1e-6;
 pub const MGRS_MAX_M: f64 = 2.0;
 
 const EARTH_RADIUS_M: f64 = 6_371_008.8;
@@ -164,7 +166,7 @@ fn routes(cases: &[RouteCase], live: &[Value]) -> Value {
         let e = tool / length - 1.0;
         all.push(e);
         within += usize::from(e <= ROUTE_LONGER);
-        unlisted += usize::from(e < 0.0 && !c.listed);
+        unlisted += usize::from(e < -ROUTE_SAME && !c.listed);
         errors
             .entry(format!("{}/{}", c.network, c.stratum))
             .or_default()
