@@ -60,7 +60,8 @@ other use of the graph, and snapping stays on the edges.
 
 The cache bar for speed does not apply to this growth: it covers data needed for
 correct answers, and only that, since no version without it gives them. The growth
-is recorded per terrain below, and every operation stays within ADR 0008's 64 MiB.
+is recorded per terrain below, and every query stays within ADR 0008's 64 MiB;
+building `roads.graph` holds the table and every stretch, as it held the stretches.
 
 ### Alternatives considered
 
