@@ -32,30 +32,36 @@ model times: `LuaExportAfterNextFrame` moves, `onSimulationFrame` shoots.
   enough, because trees are a pool apart from the boxes: at 40° about a dozen
   models were hidden. Rank placements by `tree_density` and retake at 60° from
   another side.
+- **A model with no box has no size to frame by.** From about 30 m, `ukrytie`
+  and `air_closedguardhouse_03a` filled the frame with their grass roofs and
+  looked like empty ground. From about 290 m each was plainly an aircraft
+  shelter. Shoot no-box models from far out first.
 
 ## Coverage
 
 241 of the 284 placed models were shot, one placement each, with 38 retakes
-among 19 of them. Not shot: the 43 airfield markers, lights and
+among 19 of them and 6 wide shots of the two shelters. Not shot: the 43 airfield markers, lights and
 `blk_light_pole`, which their names and sizes settle.
 `directional_approach_lights_group`, a row of lights by name, is `wall` by its
-thin box and stays that way, unreviewed. 237 models have a label and 4 are left
-to the user. Family was judged only where it changes whether a model settles.
+thin box and stays that way, unreviewed. All 241 have a label; the user judged
+`korpus_b1` and `korpus_c`, which are hard to tell. Family was judged only where
+it changes whether a model settles.
 
 ## Heuristics
 
-Scored on the 237 labels, rules alone, no overrides. Percent of models, then
+Scored on the 241 labels, rules alone, no overrides. Percent of models, then
 the last column by objects.
 
 | Rule added | building P / R | industrial P / R | misc P / R | Models right | Objects right |
 |---|---|---|---|---|---|
-| None | 66 / 100 | 100 / 76 | 96 / 35 | 75.1 | 89.9 |
-| Slender: at most 7 m wide, 10 m or taller, is `misc` | 67 / 100 | 100 / 75 | 90 / 39 | 75.9 | 89.9 |
-| Long: 5:1 or more and 30 m or longer is `misc` | 71 / 95 | 100 / 76 | 82 / 54 | 78.1 | 88.7 |
-| **No family by name is `misc`** | **90 / 100** | **100 / 76** | **93 / 94** | **92.4** | **90.4** |
+| None | 65 / 100 | 100 / 74 | 96 / 37 | 74.7 | 89.6 |
+| Slender: at most 7 m wide, 10 m or taller, is `misc` | 67 / 100 | 100 / 72 | 91 / 41 | 75.5 | 89.6 |
+| Long: 5:1 or more and 30 m or longer is `misc` | 70 / 95 | 100 / 74 | 83 / 55 | 77.6 | 88.4 |
+| **No family by name is `misc`** | **88 / 100** | **100 / 74** | **93 / 94** | **91.7** | **90.2** |
 
 A model with no box, 0 x 0, is already `misc` by the 4 m² rule, so that rule
-adds nothing. One of them is `nasos`, a pump jack, which is an override.
+adds nothing. Among them are `nasos`, a pump jack, and the two shelters, which
+no footprint check can see.
 
 **Adopted: a `building` the family rules leave without a family is `misc`.**
 Those rules already name bridges, cranes, masts and debris, and leave a flat box
@@ -82,8 +88,8 @@ elsewhere, again by name:
   `saipan_int_terminal`, `greenhouse1`.
 
 What the rule still misses on Caucasus is `komplex`, `komplex_big` and two radar
-domes: nothing in a name or box tells those. `industrial` recall stays at 76 %
-because `garage_a_new`, `ferma_a_new`, `tr_budka_new` and the like carry no
+domes: nothing in a name or box tells those. `industrial` recall stays at 74 %
+because `garage_a_new`, `ferma_a_new`, `korpus_b1` and the like carry no
 industrial name. Those are all overrides.
 
 ## What moved
@@ -93,7 +99,7 @@ Objects that changed class, by terrain, rule and overrides together.
 | Terrain | Models | Objects | Of | `building` before → after | `misc` before → after |
 |---|---|---|---|---|---|
 | Afghanistan | 42 | 1 039 635 | 10 447 341 | 10 139 288 → 9 099 653 | 67 → 1 039 702 |
-| Caucasus | 13 | 127 | 936 823 | 461 614 → 461 528 | 325 367 → 325 494 |
+| Caucasus | 15 | 1 783 | 936 823 | 461 614 → 459 872 | 325 367 → 325 494 |
 | GermanyCW | 98 | 59 736 | 8 687 758 | 7 828 128 → 7 768 392 | 190 079 → 249 815 |
 | MarianaIslands | 18 | 11 778 | 191 999 | 157 476 → 145 698 | 26 330 → 38 108 |
 | MarianaIslandsWWII | 12 | 8 051 | 51 008 | 47 900 → 39 849 | 1 729 → 9 780 |
@@ -101,16 +107,17 @@ Objects that changed class, by terrain, rule and overrides together.
 | PersianGulf | 55 | 271 966 | 2 941 637 | 2 285 042 → 2 013 076 | 311 522 → 583 488 |
 | Syria | 122 | 441 068 | 6 328 726 | 5 471 009 → 5 029 941 | 604 538 → 1 045 606 |
 
-Caucasus also moved 41 `industrial` objects to `misc`: lattice masts and
-lighthouses, which are not plant. Places barely move: the rule touches only
+Caucasus also moved 41 `industrial` objects to `misc`, lattice masts and
+lighthouses, which are not plant, and 1 656 `korpus_b1` and `korpus_c` objects
+from `building` to `industrial`. Those keep settling, in the industrial family. Places barely move: the rule touches only
 models with no family, and only the override models lose one. `count_building`,
 the built-up layers and the placement check's building figures do move. On
 Afghanistan most of the change is debris, garbage and sand-block walls.
 
 ## What the review changed on Caucasus
 
-Thirteen models changed class, and none of them among the 20 most placed: the
+Fifteen models changed class, and none of them among the 20 most placed: the
 top of the catalog was already right. `korpus_a`, `_b`, `_a1`, `_d` and `korpus`
 look more like offices than flats, but they settle either way, so their family
-stands. Left to the user: `korpus_b1`, `korpus_c`, and `ukrytie` and
-`air_closedguardhouse_03a`, which showed nothing in any frame.
+stands. `ukrytie` and `air_closedguardhouse_03a` are aircraft shelters, kept
+`misc`: with no box they have no footprint, whatever their class.
