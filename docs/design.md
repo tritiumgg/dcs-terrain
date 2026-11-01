@@ -610,7 +610,8 @@ Accuracy:
 | Point height | within 0.5 m of live `terrain.GetHeight` at 200 points | the mesh is the ground DCS uses |
 | Water class | 100 % at cell centers | measured |
 | `visible` vs `terrain.isVisible` | ≥ 99 % of 300 pairs | live validation |
-| Route length vs `findPathOnRoads` | within 5 % | live validation; not yet compared |
+| Route length vs `findPathOnRoads` | 95 % of routes within 5 %, and no route the game refuses | live validation; missed on Caucasus (`data/validation.md`) |
+| MGRS vs `coord.LLtoMGRS` | within 2 m | live validation; the game's references are whole meters |
 
 ## 9. Testing
 
@@ -671,8 +672,9 @@ Each names what settles it.
    an export to one file is then its own design.
 8. **CPU beside DCS.** Betweenness is minutes of CPU on Germany, the places
    walk about one. *Mitigation:* low priority, two threads, once per build.
-9. **Road graph fidelity.** Built from junction ids; route lengths not yet
-   compared with `findPathOnRoads`. *Settles it:* V1.
+9. **Road graph fidelity.** Built from junction ids, and measured short of
+   the game: roads run long at junctions and rail finds routes the game
+   refuses (`data/validation.md`). *Settles it:* N13, then V1's re-run.
 10. **Per-call cost.** Every `query` call is a fresh process. *Settled:* one
     call takes 8–23 ms on every installed terrain (`data/targets.md`);
     batches remain the fallback.

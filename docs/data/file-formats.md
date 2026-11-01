@@ -195,7 +195,7 @@ q      u32  n
 Runs that are not edges (no zero at `q-4`) are short connectors. In airfield files they read
 `u32 3, u32 a, u32 b, u32 n, points`. The terrain file has them too, after the edges: Caucasus 27 955 of 3 to 5
 points, framed `u32 3, u32, u32, u32 n`, whose two u32 range over the edge count. They draw the inside of
-junctions (guessed: they join one edge to the next).
+junctions, and nearly all join two edges sharing a junction id (`validation.md`).
 
 
 ### Finding the polylines

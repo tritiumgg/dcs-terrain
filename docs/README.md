@@ -23,6 +23,7 @@ it.
 | [data/find-sites.md](data/find-sites.md) | A FARP-like `find_sites` on every installed terrain: each candidate rescored alone, the spacing, a brute-force search, and times |
 | [data/replay.md](data/replay.md) | The FARP and SAM examples replayed on Caucasus against the live probe, and the same requests on every other terrain |
 | [data/airdrome-ids.md](data/airdrome-ids.md) | Airdrome ids joined by position on every installed terrain, against the shipped missions and held out against the labels |
+| [data/validation.md](data/validation.md) | The tool against a running DCS: heights, water, sightlines, routes and MGRS, and why routes miss |
 | [data/placements.md](data/placements.md) | `validate_placements` on every installed terrain: a building, water and a runway, a random batch against brute force, and times |
 | [data/point-info.md](data/point-info.md) | `point_info` on every installed terrain: the nearest town against a scan of every town, bearings against the geodesic, and cost |
 | [data/places.md](data/places.md) | Places on every installed terrain: size classes, forms, build and query cost, each point's place against brute force, and Caucasus towns against their census |

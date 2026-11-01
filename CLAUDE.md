@@ -21,7 +21,7 @@ dcsterrain/            Cargo workspace: core, cli                    (partial)
 skill/                 the skill an assistant loads
 tools/                 statecheck.sh, nospecrefs.sh, readmeopen.sh,
                        hooktest.sh
-tools/validate/        the live validation sortie                    (empty)
+tools/validate/        the live validation sortie
 .claude/hooks/         the shell guard, the commit checks, the session start,
                        the stop check
 .github/workflows/     rust, docs
