@@ -39,7 +39,7 @@ over the same snapped ends with no bound on the detour:
 
 | Check | Cases | Before | Over the passages | Target |
 |---|---|---|---|---|
-| Longer than the game | 198 | 189 longer, largest +22.3 %, p50 +2.0 % | 180 longer, largest +0.24 %, p50 +0.03 % | none over 0.5 % |
+| Longer than the game | 198 | 189 longer, largest +22.3 %, p50 +2.0 % | 180 longer, largest +0.24 %, p50 +0.03 % | see below |
 | Routes the game refuses | 22 | 0 refused | 22 refused | all |
 | Routes the game answers | 198 | all answered | all answered | all |
 
@@ -71,3 +71,64 @@ What each rule is worth, from a throwaway model of the same routes:
 
 These are the same replies the design was fitted to. V1's re-run tests it on a
 sample it has not seen, with the routes either side refuses kept in the sample.
+
+## Caucasus, 2.9.31.29434, 2026-11-01, second sample
+
+Timestamp 20261027-141234, seed 2, the same fingerprint, a sample the design was
+not fitted to, with the routes either side refuses kept in it. Passed, on the
+route target as changed below.
+
+| Check | Cases | Measured | Target |
+|---|---|---|---|
+| Height against `terrain.GetHeight` | 2 168 in 11 strata | largest 0.08 m, RMSE 0.002 m, p99 0.003 m | within 0.5 m |
+| Water against `terrain.GetSurfaceType` | 2 168 | 100 % | 100 % |
+| `visible` against `terrain.isVisible` | 600 random, 225 within 1 m of grazing | 100 %, 95 % interval from 99.4 % and 98.3 % | ≥ 99 % |
+| MGRS against `coord.LOtoLL` and `coord.LLtoMGRS` | 460, seams included | largest 1.41 m, letters all equal, the projection alone 0.03 m | within 2 m |
+| Routes the game refuses | 15, all rail | 15 refused | all |
+| Routes the game answers | 205 | all answered | all |
+| Route length against `terrain.findPathOnRoads` | 205 | p50 +0.03 %, largest +0.69 %, worst margin 7.8 m | see below |
+
+### The route target changed after this sample missed
+
+The target was fitted to seed 1: no route over 0.5 % longer than the game's. On
+seed 2 two routes missed it, 1 and 71. So the rule below was written after seeing
+the miss, and seed 2 is not a clean test of it.
+
+A trace of four routes through the bridge shows why. The game does not start and
+stop at the nearest road point, as the tool does: it starts or stops on another
+road, and leaves out the stub and junction the tool drives to reach the point
+asked. Route 1's asked point lies on a side road, where the tool drives 53.7 m to
+the connection and about 15 m through it, and the game starts on the main road.
+Route 71's lies on a stub past a junction, where the tool's last leg is 71 m and it
+runs about 20 m past where the game stops.
+
+| Route | Ours − game, asked ends | Game's path off the asked end | Ours − game, between the game's own ends |
+|---|---|---|---|
+| 1 | +69.3 m, +0.69 % | 47.3 m at the start | +1.6 m, +0.02 % |
+| 71 | +97.3 m, +0.62 % | 25.3 m at the end | +5.3 m, +0.03 % |
+| 189 | +66.4 m, +0.42 % | 64.8 m at the end | +1.6 m, +0.01 % |
+| 20 | +69.1 m, +0.39 % | 5.9 m at the start | +17.0 m, +0.10 % |
+
+That is road the tool's route really drives, not a longer way through the network,
+and leaving it out would leave the point asked off the route, so the tool does not
+copy the game's snap. Routes are still scored between the ends asked. A route
+passes when ours − game is at most 0.5 % of the game's length plus the distances
+the game's path starts and stops off the ends asked.
+
+| Sample | Compared | Refused by both | Disagree | Worst margin under the allowance |
+|---|---|---|---|---|
+| Seed 1, the current tool | 198 | 22 | 0 | 11.3 m, route 19 |
+| Seed 2 | 205 | 15 | 0 | 7.8 m, route 71 |
+
+Seed 1 is scored by the opt-in `recorded` test, since its plan predates this tool;
+its plan holds no check of each route's passages. On seed 2 no shorter route takes
+an unlisted one.
+
+Asking the tool between the game's own end points gives within 0.5 % on all but one
+route of 403, but that test adds its own error by snapping the game's points anew,
+so it is not the score. The one is route 74 of seed 2, +1.17 % there and +0.03 %
+between the ends asked.
+
+Untraced: route 74 of seed 2, as above, and routes 133 of seed 2 and 131, 56 and
+127 of seed 1, shorter than the game by 0.02–0.04 % beyond its end offsets, which
+take only listed passages where that was checked.

@@ -20,11 +20,11 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    makes `misc`, 17 models moved, method in `plan.md`
    (`data/scenery-review.md`). *Verified by:* live: an agent drove the capture
    and read every frame with the user at DCS, on 2.9.31.29434.
-3. **V1: the sortie, first run.** `tools/validate` plans, runs and scores it.
-   Caucasus on 2.9.31.29434: heights, water, `visible` and MGRS pass; routes
-   miss, 90.9 % within 5 % and 22 rail routes the game refuses, so V1 stays
-   open behind N13 (`data/validation.md`). *Verified by:* live: an agent drove
-   the bridge with the user at DCS.
+3. **V1: the sortie.** `tools/validate` plans, runs and scores it. Caucasus on
+   2.9.31.29434, seed 2: every check passes; routes on a target changed after two
+   missed it, because the game snaps its ends to another road
+   (`data/validation.md`). *Verified by:* live: an agent drove the bridge with the
+   user at DCS.
 4. **S1: the skill.** `skill/SKILL.md` and two references, which operation
    answers which question, by example, with what the numbers mean. *Verified
    by:* an agent: 13 fresh subagents given only the skill reached the right
@@ -41,16 +41,15 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
 One task. The thing to pick up immediately.
 
-**V1** — re-run the routes on Caucasus, with the user at DCS.
-*Verified by:* live.
+**R1** — release builds for the three platforms.
+*Verified by:* CI, live.
 
 ## Then
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **R1** — release builds for the three platforms.
-2. **R2** — the guide a newcomer follows.
-3. **C1** — the other seven terrains, from screenshots; Caucasus is done.
+1. **R2** — the guide a newcomer follows.
+2. **C1** — the other seven terrains, from screenshots; Caucasus is done.
 
 Milestone in view: **MS3 Assistant and release**.
 

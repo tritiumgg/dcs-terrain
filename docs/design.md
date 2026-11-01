@@ -621,7 +621,7 @@ Accuracy:
 | Point height | within 0.5 m of live `terrain.GetHeight` at 200 points | the mesh is the ground DCS uses |
 | Water class | 100 % at cell centers | measured |
 | `visible` vs `terrain.isVisible` | ≥ 99 % of 300 pairs | live validation |
-| Route against `findPathOnRoads` | The least-cost route among those the game accepts: every route the game refuses refused, every route it answers answered, none more than 0.5 % longer than the game's | live validation |
+| Route against `findPathOnRoads` | The least-cost route among those the game accepts: every route the game refuses refused, every route it answers answered, none longer than the game's by more than 0.5 % of its length plus the distances the game's path starts and stops off the ends asked | live validation: passed on Caucasus (`data/validation.md`) |
 | MGRS vs `coord.LLtoMGRS` | within 2 m | live validation; the game's references are whole meters |
 
 ## 9. Testing
@@ -683,10 +683,10 @@ Each names what settles it.
    an export to one file is then its own design.
 8. **CPU beside DCS.** Betweenness is minutes of CPU on Germany, the places
    walk about one. *Mitigation:* low priority, two threads, once per build.
-9. **Road graph fidelity.** Routes run the game's own graph, and match the
-   replies of the first sortie offline (`data/validation.md`). *Settles it:*
-   V1's re-run. A `oneway` stretch is read from the table but has been seen
-   only there: Caucasus has none.
+9. **Road graph fidelity.** Routes run the game's own graph, and passed V1 on
+   two samples of Caucasus (`data/validation.md`). A `oneway` stretch is read
+   from the table but has been seen only there: Caucasus has none. *Settles it:*
+   a sortie on a terrain that has them.
 10. **Per-call cost.** Every `query` call is a fresh process. *Settled:* one
     call takes 8–23 ms on every installed terrain (`data/targets.md`);
     batches remain the fallback.
