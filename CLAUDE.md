@@ -18,7 +18,7 @@ docs/plan.md           the task graph. Tasks have ids
 docs/decisions/        ADRs: decisions that change the design
 docs/data/             measured reference data and a model census
 dcsterrain/            Cargo workspace: core, cli                    (partial)
-skill/                 the skill an assistant loads                  (planned)
+skill/                 the skill an assistant loads
 tools/                 statecheck.sh, nospecrefs.sh, readmeopen.sh,
                        hooktest.sh
 tools/validate/        the live validation sortie                    (empty)

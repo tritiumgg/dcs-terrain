@@ -4,59 +4,55 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `design.md` and `queries.md` hold the design.
 
-**Last updated:** 2026-11-01T07:30Z
+**Last updated:** 2026-11-01T08:51Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **Q18: performance.** Blocks, `roads.graph` and `scene.nodes` read through
+1. **S1: the skill.** `skill/SKILL.md` and two references, which operation
+   answers which question, by example, with what the numbers mean. *Verified
+   by:* an agent: 13 fresh subagents given only the skill reached the right
+   operations on Caucasus of 2.9.31.29434, and the FARP answer hashed equal to
+   the direct `query`; a test holds every example to the command line.
+2. **Q18: performance.** Blocks, `roads.graph` and `scene.nodes` read through
    bounded views, a 4-way hierarchy over Morton-sorted triangles, wide radials,
    64 MiB of peak commit (ADR 0008). *Verified by:* an agent, through
    `mise run check`, and opt-in on the 8 terrains of 2.9.31.29434: worst peak
    61.1 MiB, answers unchanged; 5 of 22 operations reached their speed goal, the
    rest are recorded with causes (`data/q18-performance.md`).
-2. **Q17: `find_sites` sightlines in parallel.** Each site on a free pool
+3. **Q17: `find_sites` sightlines in parallel.** Each site on a free pool
    thread below normal priority, gathered in candidate order. *Verified by:*
    an agent, through `mise run check` (the same bytes on 1, 2, 3 and 8
    threads on `Synth`, ties included), and opt-in on the 8 terrains of
    2.9.30.28738: 0.18–7.3 s against 10 s, MarianaIslands 112 MiB; the
    Marianas are 1.14–1.32× over the 8-core cycle budget (`data/targets.md`).
-3. **Benchmark decisions.** Cycle budgets on 8 cores for parallel cases,
+4. **Benchmark decisions.** Cycle budgets on 8 cores for parallel cases,
    a 64 MiB block budget, `point_info` fresh 150 ms, memory 150 MiB (ADR
    0007), Q17 added. *Verified by:* an agent, through
    `mise run bench-bounds`, and opt-in on the Marianas at 64 MiB.
-4. **Q8: benchmarks on cycles.** Every operation judged on reference cycles
+5. **Q8: benchmarks on cycles.** Every operation judged on reference cycles
    with the wall beside them, on each platform; `Synth` held to 3× the
    targets over 9 rounds by hand, not in CI; the install cold and warm, one
    call and a 100-line batch end to end. *Verified by:* an agent, through
    `mise run bench-bounds`, with 8 spinners beside it, and opt-in on the 8
    terrains of 2.9.30.28738. Targets missed, each with its cause and five
    decisions open (`data/targets.md`).
-5. **Q7: `query` over every operation, batches, `schema`.** With no
-   operation, JSON lines on stdin, each answered in order and flushed; a bad
-   line is that line's `issues`; the terrain opens once, again only when its
-   files change. `schema` adds batch lines and the issue codes; the README
-   pass drops the banner. *Verified by:* an agent, through `mise run check`
-   (goldens, one process per request, every answer against the schema), and
-   opt-in on the 8 terrains of 2.9.30.28738: the 22 operations each answer,
-   100 lines to one opening, 0.7–1.5 s. Kola's folder holds no terrain.
 
 ## Next
 
 One task. The thing to pick up immediately.
 
-**S1** — the skill an assistant loads.
-*Verified by:* an agent.
+**V1** — the live validation sortie.
+*Verified by:* live.
 
 ## Then
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-1. **V1** — the live validation sortie.
-2. **R1** — release builds for the three platforms.
-3. **R2** — the guide a newcomer follows.
-4. **C1** — review the scenery catalog of every terrain without overrides.
+1. **R1** — release builds for the three platforms.
+2. **R2** — the guide a newcomer follows.
+3. **C1** — review the scenery catalog of every terrain without overrides.
 
 Milestone in view: **MS3 Assistant and release**.
 

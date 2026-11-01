@@ -7,8 +7,8 @@ install, without DCS running and without DCS doing any terrain work while a
 campaign runs.
 
 Answers come back as JSON, with ranked candidates and the reasoning kept as
-separate fields, from one command line. An AI assistant with a shell will
-learn to use it from a skill shipped here (planned).
+separate fields, from one command line. Copy [skill/](skill/SKILL.md) to where
+an AI assistant reads skills, such as `~/.claude/skills/dcs-terrain`.
 
 **Tools only. No terrain data is shipped.** The tool reads your install in
 place and never writes to it. It keeps a small, rebuildable cache beside it in
