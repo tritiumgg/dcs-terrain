@@ -342,7 +342,10 @@ impl<'a> Planner<'a> {
                     let r = rate_of(me, e);
                     for end in [from.run * 2, from.run * 2 + 1] {
                         let share = p.share(end);
-                        if p.runs_from(end ^ 1) && me.open(e, from.at, share) && inside(end) {
+                        if p.runs_between(from.run, from.at, share)
+                            && me.open(e, from.at, share)
+                            && inside(end)
+                        {
                             f(end, len * (from.at - share).abs() * r);
                         }
                     }
@@ -356,18 +359,19 @@ impl<'a> Planner<'a> {
                 }
                 for pass in p.out_of(v) {
                     let reached = pass.to as usize;
-                    if !p.runs_from(reached) || me.closed(p.place(v), p.place(reached)) {
+                    if me.closed(p.place(v), p.place(reached)) {
                         continue;
                     }
                     let (e, share) = (p.edge(reached), p.share(reached));
                     let len = g.edges[e].length;
                     let r = rate_of(me, e);
                     let hop = f64::from(pass.length) * r;
-                    if reached / 2 == to.run && me.open(e, share, to.at) {
+                    let reaches_end = reached / 2 == to.run && p.runs_between(to.run, share, to.at);
+                    if reaches_end && me.open(e, share, to.at) {
                         f(t, hop + len * (share - to.at).abs() * r);
                     }
                     let (next, along) = (reached ^ 1, p.share(reached ^ 1));
-                    if me.open(e, share, along) && inside(next) {
+                    if p.runs_from(reached) && me.open(e, share, along) && inside(next) {
                         f(next, hop + len * (share - along).abs() * r);
                     }
                 }
@@ -435,9 +439,13 @@ impl<'a> Planner<'a> {
                 .iter()
                 .filter(|q| {
                     let r = q.to as usize;
-                    p.runs_from(r)
-                        && if v == t { r / 2 == to.run } else { r ^ 1 == v }
-                        && !self.closed(p.place(u), p.place(r))
+                    let (end, e) = ends(r);
+                    let way = if v == t {
+                        r / 2 == to.run && p.runs_between(to.run, p.share(r), end)
+                    } else {
+                        r ^ 1 == v && p.runs_from(r)
+                    };
+                    way && self.open(e, p.share(r), end) && !self.closed(p.place(u), p.place(r))
                 })
                 .min_by(|a, b| cost(a).total_cmp(&cost(b)).then(a.to.cmp(&b.to)))
                 .expect("the search took a pass between them");
@@ -1518,6 +1526,8 @@ mod tests {
         let g = build(&joins, dry);
         assert!(close(length(&g, west, east).unwrap(), 1000.0));
         assert_eq!(length(&g, east, west), None);
+        // A route of no length runs no way along it.
+        assert_eq!(length(&g, east, east), Some(0.0));
     }
 
     #[test]

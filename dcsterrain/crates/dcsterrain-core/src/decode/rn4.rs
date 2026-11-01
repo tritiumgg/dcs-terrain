@@ -189,6 +189,12 @@ impl Table {
 
     /// The two ends of each of `edges` edges, refused unless each has two.
     pub fn ends(&self, edges: usize) -> Result<Vec<[u32; 2]>, Error> {
+        if self.edge.len() != edges * 2 {
+            let ends = self.edge.len();
+            return Err(malformed(format!(
+                "the table has {ends} ends for {edges} edges"
+            )));
+        }
         let mut out = vec![[u32::MAX; 2]; edges];
         for (i, &e) in self.edge.iter().enumerate() {
             let slot = out
@@ -899,7 +905,7 @@ mod tests {
         }
         b.extend_from_slice(&1u32.to_le_bytes());
         let e = parse(&b, "X.rn4", &REACH).unwrap_err().to_string();
-        assert_eq!(e, "edge 0 has under two table ends");
+        assert_eq!(e, "the table has 1 ends for 1 edges");
     }
 
     #[test]

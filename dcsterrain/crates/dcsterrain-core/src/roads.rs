@@ -106,7 +106,9 @@ impl Joins {
         stretch_of: &[Option<u32>],
         stretches: &[Stretch],
     ) -> Joins {
-        let ends = table.ends(stretch_of.len()).unwrap_or_default();
+        let ends = table
+            .ends(stretch_of.len())
+            .expect("a table from the scan has two ends to an edge");
         let totals: Vec<f64> = stretches
             .iter()
             .map(|s| polyline_length(&s.points))
@@ -181,9 +183,11 @@ impl Joins {
                 (Some(p), None) => [p, far(p)],
                 (None, Some(q)) => [far(q), q],
                 (None, None) => {
-                    if stretches[i].b == Some(table.junction[pair[0] as usize])
-                        && stretches[i].a != stretches[i].b
-                    {
+                    // By the junction either end names: one of them may be
+                    // the catch-all, which names none.
+                    let [first, second] = pair.map(|e| Some(table.junction[e as usize]));
+                    let (a, b) = (stretches[i].a, stretches[i].b);
+                    if a != first && (b == first || a == second) {
                         [total, 0.0]
                     } else {
                         [0.0, total]
@@ -332,7 +336,7 @@ impl Passages {
     /// its edge to the share `to`.
     pub fn runs_between(&self, run: usize, from: f64, to: f64) -> bool {
         let forward = (to > from) == (self.share(run * 2 + 1) > self.share(run * 2));
-        self.runs_from(run * 2 + usize::from(!forward))
+        to == from || self.runs_from(run * 2 + usize::from(!forward))
     }
 
     pub fn out_of(&self, end: usize) -> &[Pass] {
@@ -347,7 +351,7 @@ impl Passages {
         let head = b.get(at..at + 32).ok_or_else(cut)?;
         let word = |k: usize| u64::from_le_bytes(head[k * 8..k * 8 + 8].try_into().unwrap());
         let (runs, out, passes, first) = (word(0), word(1), word(2), word(3));
-        let size = [(runs, 12), (runs * 2, 8), (out, 4), (passes, 8), (first, 4)]
+        let size = [(runs, 28), (out, 4), (passes, 8), (first, 4)]
             .into_iter()
             .try_fold(at as u64 + 32, |sum, (k, each): (u64, u64)| {
                 sum.checked_add(k.checked_mul(each)?)
@@ -373,7 +377,7 @@ impl Passages {
             && out.windows(2).all(|w| w[0] <= w[1])
             && out.last().is_none_or(|&l| l as usize == passes.len())
             && passes.iter().all(|p| (p.to as usize) < ends)
-            && (first.is_empty() || first.len() == edges + 1)
+            && (first.is_empty() && ends == 0 || first.len() == edges + 1)
             && first.windows(2).all(|w| w[0] <= w[1])
             && first.last().is_none_or(|&l| l as usize == runs.len());
         let p = Passages {
@@ -693,14 +697,12 @@ fn passages(
         .passes
         .iter()
         .map(|&(f, t, length)| {
+            let place = |e: u32| end_places[(e / 2) as usize][(e % 2) as usize];
+            // Never under the line between its ends, which the search's
+            // estimate takes as the least it can cost.
+            let length = length.max(dist(place(f), place(t))) as f32;
             let to = renumber[t as usize];
-            (
-                renumber[f as usize],
-                Pass {
-                    to,
-                    length: length as f32,
-                },
-            )
+            (renumber[f as usize], Pass { to, length })
         })
         .collect();
     passes.sort_unstable_by_key(|p| (p.0, p.1.to));
