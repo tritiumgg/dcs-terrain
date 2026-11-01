@@ -9,12 +9,14 @@ on:
     paths:
       - "dcsterrain/**"
       - "skill/**"
+      - "tools/validate/**"
       - "rust-toolchain.toml"
       - ".github/workflows/rust.yml"
   pull_request:
     paths:
       - "dcsterrain/**"
       - "skill/**"
+      - "tools/validate/**"
       - "rust-toolchain.toml"
       - ".github/workflows/rust.yml"
   workflow_dispatch:

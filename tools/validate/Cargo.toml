@@ -1,0 +1,19 @@
+[package]
+name = "dcsterrain-validate"
+description = "The live validation sortie: compares the tool's answers with a running DCS."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+workspace = "../../dcsterrain"
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+dcsterrain-core = { path = "../../dcsterrain/crates/dcsterrain-core" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
+
+[dev-dependencies]
+mlua = { version = "0.12.2", features = ["lua51", "vendored"] }
