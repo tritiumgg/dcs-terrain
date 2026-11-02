@@ -1,5 +1,5 @@
 //! Scenery classes over a terrain's model table: every model gets a class,
-//! and a building its settlement family, each with what decided it.
+//! and a building its family, each with what decided it.
 //!
 //! The class, in order: a hand override for the terrain, else one for every
 //! terrain; `effect` for a `smoke#` model, a smoke column 200–600 m tall that
@@ -8,9 +8,8 @@
 //! rules leave without a family, such as a bridge, a crane or a flat slab;
 //! else `building`.
 //!
-//! The family groups settlements: houses, apartments, shops, civic and
-//! industrial buildings make a place, and garages, sheds, farm and military
-//! buildings do not. It is decided by name, first match wins, and a family
+//! The family says what a building is, as far as a name can. Only farm,
+//! outbuilding and military matter to a place, which they stay out of. It is decided by name, first match wins, and a family
 //! of house-like models the name cannot split is split by its box.
 //!
 //! A terrain's models number from a few hundred to a few thousand, so the
@@ -286,7 +285,7 @@ const FAMILY_RULES: &[FamilyRule] = &[
     rule(
         None,
         "a rock or reef",
-        "^rock|_rocks$|^rifs|guam_fuha_rock|pagan_rocks|^bird_island$",
+        "^rocks?[_0-9]|^rocks?$|_rocks$|^rifs|guam_fuha_rock|pagan_rocks|^bird_island$",
     ),
     rule(
         None,

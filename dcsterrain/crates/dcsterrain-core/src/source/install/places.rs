@@ -22,8 +22,9 @@ impl Entry for PlacesEntry {
         "places"
     }
 
-    /// Raised past 2 with the layout or what a model does in a place; the
-    /// classes' rules are folded in, so a change to them rebuilds it too.
+    /// Raised past 2 with the layout, what a model does in a place, or the
+    /// box, size or form lines; the classes' rules are folded in, so a change
+    /// to them rebuilds it too.
     fn version(&self) -> u32 {
         2 ^ crate::classes::rules_digest()
     }

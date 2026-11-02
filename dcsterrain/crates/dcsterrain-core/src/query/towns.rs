@@ -417,7 +417,7 @@ mod tests {
         answer(t, "towns", &req).unwrap()
     }
 
-    /// The synthetic terrain's settlement buildings grouped by testing
+    /// The synthetic terrain's buildings grouped by testing
     /// every pair, groups of three or more, each as its sorted ids.
     fn every_pair(t: &Terrain) -> Vec<Vec<u64>> {
         let b = buildings_in(t.source(), [-1e7, -1e7, 1e7, 1e7]).unwrap();
@@ -600,6 +600,107 @@ mod tests {
             assert!(n > 100);
         }
         assert!(inside > 100 && outside > 100, "{inside} {outside}");
+    }
+
+    /// The synthetic terrain with its objects replaced: boxes of 10 × 10 m,
+    /// each `(id, x, z, industrial)`.
+    struct Laid<'a>(&'a dyn Source, Vec<(u64, f64, f64, bool)>);
+
+    impl Source for Laid<'_> {
+        fn identity(&self) -> &crate::source::Identity {
+            self.0.identity()
+        }
+        fn grid(&self) -> crate::grid::Grid {
+            self.0.grid()
+        }
+        fn tile(
+            &self,
+            layer: crate::source::Layer,
+            tx: u32,
+            tz: u32,
+        ) -> Result<Vec<i32>, crate::source::Refusal> {
+            self.0.tile(layer, tx, tz)
+        }
+        fn point(
+            &self,
+            x: f64,
+            z: f64,
+        ) -> Result<Option<crate::source::Ground>, crate::source::Refusal> {
+            self.0.point(x, z)
+        }
+        fn objects_in(
+            &self,
+            _: crate::decode::scn5::Pool,
+            b: [f64; 4],
+            f: &mut dyn FnMut(&crate::source::Object),
+        ) -> Result<(), crate::source::Refusal> {
+            use crate::classes::{Class, Family};
+            for &(id, x, z, link) in &self.1 {
+                if (b[0]..=b[2]).contains(&x) && (b[1]..=b[3]).contains(&z) {
+                    f(&crate::source::Object {
+                        id,
+                        model: "laid",
+                        class: if link {
+                            Class::Industrial
+                        } else {
+                            Class::Building
+                        },
+                        family: Some(Family::Unknown),
+                        pos: [x, 0.0, z],
+                        rotation: 0.0,
+                        bbox: [-5.0, 0.0, -5.0, 5.0, 6.0, 5.0],
+                    });
+                }
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_lookup_links_through_a_building_that_only_links_and_stands_on_none() {
+        let t = synth();
+        // A ring 3 km across, so what lies inside it is in its box. Inside,
+        // two houses joined by what only links, and then three.
+        let mut laid: Vec<_> = (0..4)
+            .flat_map(|k| {
+                (0..20).map(move |n| {
+                    let along = 150.0 * n as f64;
+                    let (x, z) = match k {
+                        0 => (along, 0.0),
+                        1 => (3000.0, along),
+                        2 => (3000.0 - along, 3000.0),
+                        _ => (0.0, 3000.0 - along),
+                    };
+                    (1 + k * 100 + n, x, z, false)
+                })
+            })
+            .collect();
+        laid.extend([
+            (1000, 1500.0, 1000.0, false),
+            (1001, 1500.0, 1200.0, true),
+            (1002, 1500.0, 1400.0, false),
+            (1100, 1500.0, 2000.0, false),
+            (1101, 1500.0, 2200.0, true),
+            (1102, 1500.0, 2400.0, false),
+            (1103, 1300.0, 2400.0, false),
+        ]);
+        let src = Laid(t.source(), laid);
+        let b = buildings_in(&src, [-1e7, -1e7, 1e7, 1e7]).unwrap();
+        let all = crate::places::group(&b, &[]);
+        assert_eq!(all.places.len(), 2);
+        let bridged = all.places.iter().find(|p| p.id == 1100).unwrap();
+        assert_eq!(bridged.buildings, 3);
+        assert_eq!(members(&src, bridged).unwrap().len(), 3);
+        let mut lookup = Lookup::new(&all);
+        let at = |l: &mut Lookup, x, z| l.at(&src, x, z).unwrap().map(|p| p.id);
+        // Two houses and a link make no place, though the ring's box holds them.
+        assert_eq!(at(&mut lookup, 1500.0, 1000.0), None);
+        // A house of the bridged group, across a link from the rest.
+        assert_eq!(at(&mut lookup, 1500.0, 2000.0), Some(1100));
+        assert_eq!(at(&mut lookup, 1300.0, 2400.0), Some(1100));
+        assert_eq!(at(&mut lookup, 100.0, 0.0), Some(1));
+        // Beside only the link, more than a buffer from any house.
+        assert_eq!(at(&mut lookup, 1500.0, 1200.0), None);
     }
 
     #[test]

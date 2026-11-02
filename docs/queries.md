@@ -588,8 +588,9 @@ place must be one of, any when empty; `min_buildings`; `sort`, `buildings`
 (the default) or `floor`, most first, ties to the least id; `limit` (default 50, max 1 000, or 100 with outlines); `outlines: bool`.
 Response: `matched`, how many places pass the region (by their center) and
 the filters before the limit, and the places (`design.md` §6.3), each with
-its id, name and other names, center, box, size class, form, buildings,
-floor and occupied hectares, and its outline when asked. Until the `places` entry exists, which `index` builds, the
+its id, name and other names, center, the box of its whole group (industrial
+buildings that only link it included, so it can reach past the place), size
+class, form, buildings, floor and occupied hectares, and its outline when asked. Until the `places` entry exists, which `index` builds, the
 answer is the issue `not_ready`; a query never builds it.
 
 An outline is the place's ground: every 50 m cell, on the cells of DCS x and

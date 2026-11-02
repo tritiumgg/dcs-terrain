@@ -75,7 +75,8 @@ impl Building {
         let role = settling(class, family)?;
         let (w, d, h) = dims(bbox);
         let (w, d) = (w.abs(), d.abs());
-        if w * d < MIN_FOOTPRINT_M2 || h < MIN_HEIGHT_M {
+        // Written so that a box with no extent to speak of, NaN included, fails.
+        if !(w * d >= MIN_FOOTPRINT_M2 && h >= MIN_HEIGHT_M) {
             return None;
         }
         let storeys = (h / STOREY_M).round().max(1.0);
@@ -686,7 +687,7 @@ mod tests {
     }
 
     #[test]
-    fn size_classes_follow_buildings_floor_and_apartments() {
+    fn size_classes_follow_buildings_and_floor() {
         use SizeClass::*;
         assert_eq!(SizeClass::of(3, 0.0), Hamlet);
         assert_eq!(SizeClass::of(49, 1e9), Hamlet);

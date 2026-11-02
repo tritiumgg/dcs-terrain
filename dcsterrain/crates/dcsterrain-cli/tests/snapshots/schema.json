@@ -2463,11 +2463,11 @@
       "type": "object"
     },
     "PlaceInfo": {
-      "description": "A place: settlement buildings each within 200 m of another, three or\nmore.",
+      "description": "A place: buildings each within 200 m of another, three or\nmore.",
       "properties": {
         "bbox": {
           "$ref": "#/$defs/Box",
-          "description": "Its buildings' positions' box."
+          "description": "The box of its whole group, buildings that only link included, so it\ncan reach well past the center, counts and outline."
         },
         "buildings": {
           "format": "uint32",
@@ -2489,7 +2489,7 @@
           "type": "integer"
         },
         "id": {
-          "description": "The least scenery object id among its buildings, stable while the\nscene file is.",
+          "description": "The least scenery object id among those that count, stable while the\nscene file is.",
           "format": "uint64",
           "minimum": 0,
           "type": "integer"

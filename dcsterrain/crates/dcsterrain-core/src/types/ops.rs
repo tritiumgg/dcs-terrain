@@ -1133,11 +1133,11 @@ pub struct TownsResponse {
     pub geojson: Option<serde_json::Value>,
 }
 
-/// A place: settlement buildings each within 200 m of another, three or
+/// A place: buildings each within 200 m of another, three or
 /// more.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PlaceInfo {
-    /// The least scenery object id among its buildings, stable while the
+    /// The least scenery object id among those that count, stable while the
     /// scene file is.
     pub id: u64,
     /// The town of the terrain's list that names it; null when none does.
@@ -1147,7 +1147,8 @@ pub struct PlaceInfo {
     /// The mean of its buildings' positions.
     pub x: f64,
     pub z: f64,
-    /// Its buildings' positions' box.
+    /// The box of its whole group, buildings that only link included, so it
+    /// can reach well past the center, counts and outline.
     pub bbox: BoundingBox,
     pub size: SizeClass,
     pub form: Form,

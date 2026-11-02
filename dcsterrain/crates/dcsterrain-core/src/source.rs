@@ -196,7 +196,7 @@ pub struct Object<'a> {
     /// As the scene file spells it, lowercase.
     pub model: &'a str,
     pub class: Class,
-    /// Its settlement family; none for a model that is not a building.
+    /// Its family; none for a model that is not a building.
     pub family: Option<Family>,
     /// World x, altitude, z.
     pub pos: [f64; 3],
