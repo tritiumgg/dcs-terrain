@@ -226,11 +226,11 @@ pub fn resolve(src: &dyn Source, r: &Region, path: &str) -> Result<Area, Vec<Iss
     }
 }
 
-/// The airdrome `r` names: a number is its id; a string is its `name_id`,
-/// spelled as the files spell it or, failing that, the one that differs from
-/// it only in case; failing that, its display name, matched the same way,
-/// because `nearest` and `airfield_info` show that name and a user passes it
-/// back; and failing any, its id written in digits.
+/// The airdrome `r` names: a number is its id; a string is its `name_id` or
+/// its display name, because `nearest` and `airfield_info` show the display
+/// name and a user passes it back. A spelling exactly as the files give it
+/// wins over one that differs only in case, and a `name_id` over a display
+/// name; failing any, the string is its id written in digits.
 pub(super) fn airdrome<'a>(tables: &'a Tables, r: &AirdromeRef) -> Option<&'a AirdromeRow> {
     let all = &tables.airdromes;
     let by_id = |id: i64| all.iter().find(|a| a.id == Some(id));
@@ -238,13 +238,16 @@ pub(super) fn airdrome<'a>(tables: &'a Tables, r: &AirdromeRef) -> Option<&'a Ai
         AirdromeRef::Id(id) => return by_id(*id),
         AirdromeRef::Name(name) => name,
     };
-    if let Some(a) = named(all.iter().map(|a| (a.name_id.as_str(), a)), name) {
+    let ids = || all.iter().map(|a| (a.name_id.as_str(), a));
+    let shown = || {
+        all.iter()
+            .filter_map(|a| a.display_name.as_deref().map(|n| (n, a)))
+    };
+    let exact = ids().chain(shown()).find(|(n, _)| *n == name.as_str());
+    if let Some(a) = exact.map(|(_, a)| a).or_else(|| named(ids(), name)) {
         return Some(a);
     }
-    let shown = all
-        .iter()
-        .filter_map(|a| a.display_name.as_deref().map(|n| (n, a)));
-    if let Some(a) = named(shown, name) {
+    if let Some(a) = named(shown(), name) {
         return Some(a);
     }
     let digits = !name.is_empty() && name.bytes().all(|c| c.is_ascii_digit());
@@ -388,6 +391,21 @@ mod tests {
         for n in ["99", "", "+1", "Nowhere"] {
             assert_eq!(name(n), None, "{n}");
         }
+    }
+
+    #[test]
+    fn an_exact_spelling_wins_over_one_that_differs_in_case() {
+        let mut t = synth().tables().unwrap().clone();
+        let mut b = t.airdromes[0].clone();
+        let a = i64::from(synth::AIRDROME_ID);
+        b.id = Some(a + 1);
+        b.name_id = "OTHER".into();
+        b.display_name = Some("synth".into());
+        t.airdromes.push(b);
+        let id = |n: &str| airdrome(&t, &AirdromeRef::Name(n.into())).and_then(|a| a.id);
+        assert_eq!(id("synth"), Some(a + 1));
+        assert_eq!(id("SYNTH"), Some(a));
+        assert_eq!(id("Synth"), Some(a));
     }
 
     #[test]
