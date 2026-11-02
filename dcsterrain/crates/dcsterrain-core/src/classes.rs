@@ -82,13 +82,25 @@ pub enum Family {
     Unknown,
 }
 
-impl Family {
-    /// Whether a building of this family is grouped into places.
-    pub fn settles(self) -> bool {
-        matches!(
-            self,
-            Family::House | Family::Apartment | Family::Shop | Family::Civic | Family::Industrial
-        )
+/// The part a model takes in a place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Settling {
+    /// It is one of the place's buildings.
+    Counts,
+    /// It joins buildings across the gap but adds nothing to the place: a
+    /// town does not fall apart at its factories, and a factory is no town.
+    Links,
+}
+
+/// The part a model of `class` and `family` takes in a place, or `None` for
+/// what no name shows to be a building, and for a farm, a shed or a base,
+/// which stand apart from a town and would make one of themselves.
+pub fn settling(class: Class, family: Option<Family>) -> Option<Settling> {
+    match (class, family?) {
+        (Class::Industrial, _) => Some(Settling::Links),
+        (Class::Building, Family::Farm | Family::Outbuilding | Family::Military) => None,
+        (Class::Building, _) => Some(Settling::Counts),
+        _ => None,
     }
 }
 
@@ -120,9 +132,9 @@ pub struct Assignment {
 }
 
 impl Assignment {
-    /// Whether an object of this model is grouped into places.
-    pub fn settles(&self) -> bool {
-        self.class.is_structure() && self.family.is_some_and(Family::settles)
+    /// The part an object of this model takes in a place.
+    pub fn settling(&self) -> Option<Settling> {
+        settling(self.class, self.family)
     }
 }
 
@@ -252,7 +264,7 @@ const FAMILY_RULES: &[FamilyRule] = &[
     rule(
         None,
         "a vehicle, aircraft or vessel",
-        "^(gaz[-_][0-9]|kamaz|ural|atz|btr|prw|rsp|rls|vaz|mi-8|an-2|an_26|il76|il-62|ikarus|\
+        "^(gaz[-_][0-9]|kamaz|american_truck|mv_krait|shuttle$|ural|atz|btr|prw|rsp|rls|vaz|mi-8|an-2|an_26|il76|il-62|ikarus|\
          trolebus|laz-|liaz|teplowoz|elektrowoz|kovatch|tu-134|boeing|airbus|learjet|hawker|\
          yak-52|f-4e|f-5e|mystereiv|vautour|meteor$|md500|a4skyhawk|su17|mig15|gannet|vw[-_]|\
          mrs[-_]|bmw|trabant|wartburg|ifa_|ursus|zil_|maz-|belaz|uaz_|faun_|man_|neoplan|\
@@ -270,6 +282,11 @@ const FAMILY_RULES: &[FamilyRule] = &[
          palm[0-9]|platan|orange$|pine|salsola|mandal|juniper|europeanlinden|europeanaspen|\
          kousa|reddelicious|riverbirch|blackelder|blackgum|azalea|hedgerow|poplar|fir$|spruce|\
          leafwall)",
+    ),
+    rule(
+        None,
+        "a rock or reef",
+        "^rock|_rocks$|^rifs|guam_fuha_rock|pagan_rocks|^bird_island$",
     ),
     rule(
         None,
@@ -294,7 +311,7 @@ const FAMILY_RULES: &[FamilyRule] = &[
     rule(
         None,
         "a pole, wire, antenna, navaid, small prop or container",
-        "(powertranspole|power_pole|pole_railway|^pole$|tram_pole|polegate|^wire|^tros|stolb|\
+        "(powertranspole|power_trans_hub|sattelite_dish|dish_array|radio_beacon|power_pole|pole_railway|^pole$|tram_pole|polegate|^wire|^tros|stolb|\
          power_line_pole|wooden_pole|^vyshka$|pylon|^mast|antenna|anten|lokator|radar|rsbn|\
          vhf_|vor_dme|^vor|tacan|papisystem|ndb_|direction_finder|localizer|vortac|\
          gsm_sattelite|^course|^zont|canopy_beach|umbrella|^barrel|wood_box|ventilation|\
@@ -345,7 +362,7 @@ const FAMILY_RULES: &[FamilyRule] = &[
     rule(
         Some(Military),
         "a military building",
-        "^(kazarma|aviashtab|ukrytie|barrack|kaserne|military_building|valentin|bunker|\
+        "^(kazarma|military_installation|undegraund_shelter|herat_bunker|k_troop_housing|b_hut_|airfield_building_tech|airfield_house|aviashtab|ukrytie|barrack|kaserne|military_building|valentin|bunker|\
          caponier|tankcover|tank_hangar|hangar_millitary|dot_ussr|tent_ussr|wuensdorf|\
          teufelsberg|bunkerhill|concretecover|checkpoint_post|us_border|brocken_radar|\
          brocken_small|airbase_tbilisi_tent|airbase_airport_tbilisi_checkpoint|\
@@ -384,7 +401,7 @@ const FAMILY_RULES: &[FamilyRule] = &[
     rule(
         None,
         "a prop, equipment, pad or minor structure",
-        "(rotunda|dome_of_the_rock_(well|arch)|tetrapylon|ruined_column|^arc1|konya_park|\
+        "(rotunda|pipe_construction|overhead_crossing|telebridge|^chimney$|dome_of_the_rock_(well|arch)|tetrapylon|ruined_column|^arc1|konya_park|\
          akrotiri_entrance|street_market|market_big_pillar|parking|fn_support|oldcity_gate|\
          jaffa_gate|golden_gate|damascus_gate|kinghusseingate|hangar_box|^bak12|tesla_rp3f|\
          grm_sp80|heliport|helipad|barrels|tbilisi_block|airbase_vor|ayia_napa|scoreboard|\
@@ -902,6 +919,7 @@ mod tests {
             ("azal_oil_tank", "azal_oil"),
             ("gaz-66", "gaz_station"),
             ("pine_01", "apine"),
+            ("rocks_in_water4", "hard_rock_market"),
             ("most(road)big", "almost"),
             ("port_crane", "cranberry"),
             ("street_lamp", "lam_house"),
@@ -1007,11 +1025,28 @@ mod tests {
         );
         assert_eq!(c.of(0).family, None);
         assert_eq!(c.of(1).family, None);
-        assert!(!c.of(1).settles());
+        assert_eq!(c.of(1).settling(), None);
         assert_eq!(c.of(2).family, Some(Family::House));
-        assert!(c.of(2).settles());
+        assert_eq!(c.of(2).settling(), Some(Settling::Counts));
         assert_eq!(c.of(3).family, Some(Family::Industrial));
-        assert!(c.of(3).settles());
+        assert_eq!(c.of(3).settling(), Some(Settling::Links));
+    }
+
+    #[test]
+    fn a_building_counts_unless_its_family_stands_apart_from_towns() {
+        use Settling::*;
+        let b = Class::Building;
+        assert_eq!(settling(b, Some(Family::Unknown)), Some(Counts));
+        assert_eq!(settling(b, Some(Family::House)), Some(Counts));
+        assert_eq!(settling(b, Some(Family::Industrial)), Some(Counts));
+        assert_eq!(settling(b, Some(Family::Farm)), None);
+        assert_eq!(settling(b, Some(Family::Outbuilding)), None);
+        assert_eq!(settling(b, Some(Family::Military)), None);
+        assert_eq!(settling(b, None), None);
+        assert_eq!(settling(Class::Industrial, Some(Family::Farm)), Some(Links));
+        assert_eq!(settling(Class::Industrial, None), None);
+        // An override may give a misc model a family; it is still no building.
+        assert_eq!(settling(Class::Misc, Some(Family::House)), None);
     }
 
     #[test]

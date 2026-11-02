@@ -164,7 +164,7 @@ fn every_installed_terrain_records_its_places() {
     let build = read_build(&root).unwrap();
     println!("build {} ({})", build.version, build.timestamp);
     println!(
-        "| terrain | buildings placed | places | {} | {} | build s / Gcycles | read ms |",
+        "| terrain | buildings placed | places | {} | {} | build s / Gcycles | read ms | bytes |",
         SizeClass::ALL.map(|s| s.name()).join(" | "),
         Form::ALL.map(|f| f.name()).join(" | "),
     );
@@ -192,6 +192,7 @@ fn every_installed_terrain_records_its_places() {
         let s = Instant::now();
         let p = fresh.places().unwrap().expect("built");
         let read_ms = s.elapsed().as_secs_f64() * 1e3;
+        let bytes = t.cache().get(&PLACES).unwrap().payload().unwrap().len();
         let placed: u64 = p.places.iter().map(|q| u64::from(q.buildings)).sum();
         let by_size: Vec<String> = SizeClass::ALL
             .iter()
@@ -202,7 +203,7 @@ fn every_installed_terrain_records_its_places() {
             .map(|&k| p.places.iter().filter(|q| q.form == k).count().to_string())
             .collect();
         println!(
-            "| {id} | {placed} | {} | {} | {} | {build_s:.1} / {gcycles:.1} | {read_ms:.1} |",
+            "| {id} | {placed} | {} | {} | {} | {build_s:.1} / {gcycles:.1} | {read_ms:.1} | {bytes} |",
             p.places.len(),
             by_size.join(" | "),
             by_form.join(" | "),
@@ -288,7 +289,7 @@ fn every_installed_terrain_records_its_places() {
                     let l = link(&b);
                     let first = b.iter().position(|b| b.id == q.id).unwrap();
                     (0..b.len())
-                        .filter(|&i| l[i] == l[first])
+                        .filter(|&i| l[i] == l[first] && b[i].counts)
                         .map(|i| b[i])
                         .collect()
                 });
@@ -320,14 +321,14 @@ fn every_installed_terrain_records_its_places() {
                 };
                 match named.get(&(n as u32)) {
                     Some(&k) => {
-                        floor.push(p.places[k].residential_floor);
+                        floor.push(p.places[k].floor);
                         count.push(f64::from(p.places[k].buildings));
                         real.push(pop);
                         let q = &p.places[k];
                         rows.push(format!(
                             "| {} | {pop:.0} | {:.0} | {} | {} | {} | {} |",
                             t.name,
-                            q.residential_floor,
+                            q.floor,
                             q.buildings,
                             q.names.len(),
                             q.size.name(),
@@ -341,12 +342,12 @@ fn every_installed_terrain_records_its_places() {
                 .iter()
                 .filter(|(n, _)| towns.iter().filter(|t| t.name == *n).count() == 1)
                 .count();
-            println!("| town | census | residential floor m² | buildings | names | size | form |");
+            println!("| town | census | floor m² | buildings | names | size | form |");
             rows.iter().for_each(|r| println!("{r}"));
             let (rho, rho_n) = (spearman(&floor, &real), spearman(&count, &real));
             println!(
                 "census: {} towns listed, {listed} found once in the towns, {} naming a \
-                 place ({} name none: {}); Spearman by residential floor {rho:.3}, by \
+                 place ({} name none: {}); Spearman by floor {rho:.3}, by \
                  building count {rho_n:.3}",
                 CENSUS.len(),
                 real.len(),

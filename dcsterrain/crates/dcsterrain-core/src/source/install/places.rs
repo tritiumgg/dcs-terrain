@@ -1,5 +1,5 @@
-//! An install terrain's places: `places`, built from every settlement
-//! building of the objects pool at low priority, which takes up to a minute
+//! An install terrain's places: `places`, built from every building of
+//! the objects pool at low priority, which takes up to a minute
 //! on the largest terrains.
 
 use super::{Scenery, Tables, refusal};
@@ -22,10 +22,10 @@ impl Entry for PlacesEntry {
         "places"
     }
 
-    /// Raised past 1 with the layout; the classes' rules are folded in, so a
-    /// change to which models settle rebuilds it too.
+    /// Raised past 2 with the layout or what a model does in a place; the
+    /// classes' rules are folded in, so a change to them rebuilds it too.
     fn version(&self) -> u32 {
-        1 ^ crate::classes::rules_digest()
+        2 ^ crate::classes::rules_digest()
     }
 
     /// The scene for the buildings, and the Lua tables for the towns that
@@ -46,10 +46,10 @@ impl Entry for PlacesEntry {
                 let models = &scenery.index().models;
                 let mut all = Vec::new();
                 scenery.each_structure_in(Pool::Objects, EVERYWHERE, |i, a| {
-                    if let Some(f) = a.family {
-                        let m = &models[i.model as usize];
-                        all.extend(Building::new(i.id, i.pos[0], i.pos[2], f, &m.bbox));
-                    }
+                    let bbox = &models[i.model as usize].bbox;
+                    all.extend(Building::new(
+                        i.id, i.pos[0], i.pos[2], a.class, a.family, bbox,
+                    ));
                 })?;
                 all.sort_by_key(|b| b.id);
                 all.dedup_by_key(|b| b.id);

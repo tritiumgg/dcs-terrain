@@ -47,9 +47,10 @@ pub(super) fn places_of(src: &dyn Source) -> Result<&Places, Vec<Issue>> {
     })
 }
 
-/// The buildings of `p`: those in its box that link to its least-id
-/// building. No building outside the box belongs to it, and none inside
-/// that does not link to it can, so linking the box alone is exact.
+/// The buildings of `p` that count: those in its box that link to its
+/// least-id building. No building of its group lies outside the box, and
+/// none inside that does not link to it can belong, so linking the box alone
+/// is exact.
 pub(super) fn members(src: &dyn Source, p: &Place) -> Result<Vec<Building>, Vec<Issue>> {
     let [x0, z0, x1, z1] = p.bbox;
     let mut b = buildings_in(src, p.bbox).map_err(refused)?;
@@ -64,7 +65,7 @@ pub(super) fn members(src: &dyn Source, p: &Place) -> Result<Vec<Building>, Vec<
     let mine = label[first];
     Ok(b.into_iter()
         .zip(label)
-        .filter(|(_, l)| *l == mine)
+        .filter(|(b, l)| *l == mine && b.counts)
         .map(|(b, _)| b)
         .collect())
 }
@@ -201,8 +202,7 @@ pub fn towns(terrain: &Terrain, q: TownsRequest) -> Result<TownsResponse, Vec<Is
         .collect();
     let key = |p: &Place| match q.sort {
         TownsSort::Buildings => f64::from(p.buildings),
-        TownsSort::ResidentialFloor => p.residential_floor,
-        TownsSort::ApartmentShare => p.apartment_share(),
+        TownsSort::Floor => p.floor,
     };
     // Ids are unique, so the order is total, and only those kept need it.
     let order = |a: &&Place, b: &&Place| key(b).total_cmp(&key(a)).then(a.id.cmp(&b.id));
@@ -238,13 +238,7 @@ pub fn towns(terrain: &Terrain, q: TownsRequest) -> Result<TownsResponse, Vec<Is
             size: p.size,
             form: p.form,
             buildings: p.buildings,
-            houses: p.houses,
-            apartments: p.apartments,
-            shops: p.shops,
-            civic: p.civic,
-            industrial: p.industrial,
-            residential_floor: p.residential_floor,
-            apartment_share: p.apartment_share(),
+            floor: p.floor,
             hectares: p.hectares,
             outline,
         });
@@ -345,11 +339,11 @@ impl<'a> Lookup<'a> {
         let (cx, cz) = (center(x), center(z));
         let e = BUFFER_M + RADIUS_CAP_M;
         let near = buildings_in(src, [cx - e, cz - e, cx + e, cz + e]).map_err(refused)?;
-        // A building whose buffer holds the cell's center. Every building
-        // whose does is of one group, since two groups' buffers are apart.
+        // A building that counts whose buffer holds the cell's center. Every
+        // one whose does is of one group, since two groups' buffers are apart.
         let Some(b) = near
             .into_iter()
-            .find(|b| (b.x - cx).hypot(b.z - cz) <= BUFFER_M + f64::from(b.r))
+            .find(|b| b.counts && (b.x - cx).hypot(b.z - cz) <= BUFFER_M + f64::from(b.r))
         else {
             return Ok(None);
         };
@@ -388,19 +382,21 @@ impl<'a> Lookup<'a> {
     }
 }
 
-/// Whether `b` links, directly or through others, to at least `n - 1`
-/// other buildings: a walk out from it that stops at `n`.
+/// Whether `b`, which counts, links, directly or through others, to at
+/// least `n - 1` others that count: a walk out from it that stops at `n`.
 fn in_a_group_of(src: &dyn Source, b: &Building, n: usize) -> Result<bool, Vec<Issue>> {
     let mut seen = vec![*b];
-    let mut next = 0;
+    let mut ids = HashSet::from([b.id]);
+    let (mut next, mut counted) = (0, 1);
     while next < seen.len() {
         let at = seen[next];
         next += 1;
         let e = GAP_M + f64::from(at.r) + RADIUS_CAP_M;
         for o in buildings_in(src, [at.x - e, at.z - e, at.x + e, at.z + e]).map_err(refused)? {
-            if at.links(&o) && !seen.iter().any(|s| s.id == o.id) {
+            if at.links(&o) && ids.insert(o.id) {
                 seen.push(o);
-                if seen.len() >= n {
+                counted += usize::from(o.counts);
+                if counted >= n {
                     return Ok(true);
                 }
             }
@@ -552,12 +548,12 @@ mod tests {
             ask(&t, json!({"size": [p["size"]], "form": [p["form"]]}))["places"][0]["id"],
             p["id"]
         );
-        let ranked = ask(&t, json!({"sort": "residential_floor", "limit": 1000}));
+        let ranked = ask(&t, json!({"sort": "floor", "limit": 1000}));
         let f: Vec<f64> = ranked["places"]
             .as_array()
             .unwrap()
             .iter()
-            .map(|p| p["residential_floor"].as_f64().unwrap())
+            .map(|p| p["floor"].as_f64().unwrap())
             .collect();
         assert!(f.windows(2).all(|w| w[0] >= w[1]), "{f:?}");
         let issue = answer(&t, "towns", &json!({"limit": 0})).unwrap_err();

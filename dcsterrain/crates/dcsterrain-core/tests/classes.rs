@@ -136,7 +136,7 @@ fn no_caucasus_smoke_volume_is_a_structure() {
     assert!(placed > 0);
     for r in smoke {
         assert_eq!(r.assignment.class, Class::Effect, "{}", r.model);
-        assert!(!r.assignment.settles(), "{}", r.model);
+        assert!(r.assignment.settling().is_none(), "{}", r.model);
     }
     assert_eq!(cat.counts_by_class[&Class::Effect], placed);
 }

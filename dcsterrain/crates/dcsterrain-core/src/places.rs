@@ -1,10 +1,14 @@
-//! Places: settlement buildings grouped by the gap between them, each
-//! group sized, given a form and named from the terrain's towns.
+//! Places: buildings grouped by the gap between them, each group sized,
+//! given a form and named from the terrain's towns. A place is told by its
+//! cluster, not by what its buildings are: terrains share too few models for
+//! names to say which are houses, so a name only rules models out.
 //!
 //! The grouping is single linkage: two buildings join when the gap between
 //! their circles, each half its box's longer side, is at most 200 m, and a
 //! place is a connected set of them, the UK statistics office's built-up
-//! area rule. A union-find over a grid hash finds every such pair, and only
+//! area rule. Industrial buildings only link: a town does not fall apart at
+//! its factories, and a factory does not make a town. A union-find over a
+//! grid hash finds every such pair, and only
 //! those: a cell is wider than the farthest two buildings can be and still
 //! link, so the 3 × 3 cells about a building hold every partner it has, and
 //! the result is exactly the brute-force linkage of every pair.
@@ -14,7 +18,7 @@ use std::collections::HashMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::classes::{Family, dims};
+use crate::classes::{Class, Family, Settling, dims, settling};
 use crate::decode::scn5::Pool;
 use crate::source::{Object, Refusal, Source};
 
@@ -25,6 +29,10 @@ pub const GAP_M: f64 = 200.0;
 pub const RADIUS_CAP_M: f64 = 60.0;
 /// A group of fewer buildings is no place.
 pub const MIN_BUILDINGS: u32 = 3;
+/// A smaller box is a shed or a part of a house.
+pub const MIN_FOOTPRINT_M2: f64 = 60.0;
+/// A lower box is a slab or a pad.
+pub const MIN_HEIGHT_M: f64 = 2.0;
 /// A town point names the place holding most buildings within this of it.
 pub const NAME_REACH_M: f64 = 1000.0;
 /// A storey's height, which turns a box's height into storeys.
@@ -32,7 +40,7 @@ const STOREY_M: f64 = 3.0;
 /// The side of the cells occupied area is counted in: a hectare.
 const HECTARE_M: f64 = 100.0;
 
-/// One settlement building as places are made from it.
+/// One building as places are made from it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Building {
     /// Its scenery object's id.
@@ -41,36 +49,42 @@ pub struct Building {
     pub z: f64,
     /// Half its box's longer side, capped at `RADIUS_CAP_M`.
     pub r: f32,
-    pub family: Family,
+    /// Counts towards its place, rather than only linking others.
+    pub counts: bool,
     /// Footprint times storeys, a storey 3 m of its box's height and at
     /// least one, in square meters.
     pub floor: f32,
 }
 
 impl Building {
-    /// The object as a building, or `None` when its family makes no place.
+    /// The object as a building, or `None` when it takes no part in a place.
     pub fn of(o: &Object) -> Option<Building> {
-        if !o.class.is_structure() {
-            return None;
-        }
-        Building::new(o.id, o.pos[0], o.pos[2], o.family?, &o.bbox)
+        Building::new(o.id, o.pos[0], o.pos[2], o.class, o.family, &o.bbox)
     }
 
-    /// An object of `family` whose model's box is `bbox`, or `None` when
-    /// the family makes no place.
-    pub fn new(id: u64, x: f64, z: f64, family: Family, bbox: &[f32; 6]) -> Option<Building> {
-        if !family.settles() {
-            return None;
-        }
+    /// An object of `class` and `family` whose model's box is `bbox`, or
+    /// `None` when it takes no part in a place.
+    pub fn new(
+        id: u64,
+        x: f64,
+        z: f64,
+        class: Class,
+        family: Option<Family>,
+        bbox: &[f32; 6],
+    ) -> Option<Building> {
+        let role = settling(class, family)?;
         let (w, d, h) = dims(bbox);
         let (w, d) = (w.abs(), d.abs());
+        if w * d < MIN_FOOTPRINT_M2 || h < MIN_HEIGHT_M {
+            return None;
+        }
         let storeys = (h / STOREY_M).round().max(1.0);
         Some(Building {
             id,
             x,
             z,
             r: (w.max(d) / 2.0).min(RADIUS_CAP_M) as f32,
-            family,
+            counts: role == Settling::Counts,
             floor: (w * d * storeys) as f32,
         })
     }
@@ -79,10 +93,6 @@ impl Building {
     /// most `GAP_M`.
     pub fn links(&self, o: &Building) -> bool {
         (self.x - o.x).hypot(self.z - o.z) <= GAP_M + f64::from(self.r) + f64::from(o.r)
-    }
-
-    fn residential(&self) -> bool {
-        matches!(self.family, Family::House | Family::Apartment)
     }
 }
 
@@ -183,8 +193,7 @@ pub fn link(b: &[Building]) -> Vec<u32> {
     (0..b.len() as u32).map(|i| sets.find(i)).collect()
 }
 
-/// A place's size, in the terrain's own units: buildings, residential
-/// floor and the share of apartment blocks.
+/// A place's size, from its buildings and its floor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SizeClass {
@@ -217,17 +226,19 @@ impl SizeClass {
         }
     }
 
-    /// Fitted on 47 Caucasus towns against their census populations.
-    pub fn of(buildings: u32, apartment_share: f64, residential_floor: f64) -> SizeClass {
+    /// Floor stands for people at about 100 m² each, which is what modeled
+    /// floor per person comes to across the terrains, so the lines are 5 000
+    /// people for a town, 30 000 for a city and 200 000 for a large city.
+    pub fn of(buildings: u32, floor: f64) -> SizeClass {
         if buildings < 50 {
             SizeClass::Hamlet
         } else if buildings < 200 {
             SizeClass::Village
-        } else if residential_floor >= 20e6 {
+        } else if floor >= 20e6 {
             SizeClass::LargeCity
-        } else if residential_floor >= 3e6 && apartment_share >= 0.10 {
+        } else if floor >= 3e6 {
             SizeClass::City
-        } else if apartment_share >= 0.05 || residential_floor >= 1e6 {
+        } else if floor >= 0.5e6 {
             SizeClass::Town
         } else {
             SizeClass::LargeVillage
@@ -240,7 +251,7 @@ impl SizeClass {
 #[serde(rename_all = "snake_case")]
 pub enum Form {
     Compact,
-    /// A strung-out spread of houses no gap separates.
+    /// A strung-out spread of buildings no gap separates.
     Dispersed,
     /// Several named towns grown together.
     Agglomeration,
@@ -257,13 +268,13 @@ impl Form {
         }
     }
 
-    /// Dispersed is 1 000 buildings or more, under 8 % apartments and under
-    /// 1 500 m² of residential floor per occupied hectare: the lowland
-    /// villages of western Georgia, which run on for kilometers.
-    pub fn of(names: usize, buildings: u32, apartment_share: f64, floor_per_ha: f64) -> Form {
+    /// Dispersed is 1 000 buildings or more and under 2 500 m² of floor per
+    /// occupied hectare, half of what the median place of that size holds
+    /// on most terrains: farm belts that run on for kilometers.
+    pub fn of(names: usize, buildings: u32, floor_per_ha: f64) -> Form {
         if names > 1 {
             Form::Agglomeration
-        } else if buildings >= 1000 && apartment_share < 0.08 && floor_per_ha < 1500.0 {
+        } else if buildings >= 1000 && floor_per_ha < 2500.0 {
             Form::Dispersed
         } else {
             Form::Compact
@@ -271,37 +282,29 @@ impl Form {
     }
 }
 
-/// One place: a group of `MIN_BUILDINGS` or more settlement buildings.
+/// One place: a group holding `MIN_BUILDINGS` or more buildings that count.
+/// What only links adds nothing here but its share of the box.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Place {
-    /// The least scenery object id among its buildings: stable for as long
+    /// The least scenery object id among the buildings that count: stable for as long
     /// as the scene file is.
     pub id: u64,
-    /// The mean of its buildings' positions.
+    /// The mean of the positions of the buildings that count.
     pub x: f64,
     pub z: f64,
-    /// Its buildings' positions' box, min x, min z, max x, max z.
+    /// The box of the positions of its whole group, what only links
+    /// included, min x, min z, max x, max z.
     pub bbox: [f64; 4],
+    /// The buildings that count.
     pub buildings: u32,
-    pub houses: u32,
-    pub apartments: u32,
-    pub shops: u32,
-    pub civic: u32,
-    pub industrial: u32,
-    /// The floor of its houses and apartments, square meters.
-    pub residential_floor: f64,
-    /// The 100 m cells holding one of its buildings.
+    /// Their floor, square meters.
+    pub floor: f64,
+    /// The 100 m cells holding one that counts.
     pub hectares: u32,
     /// Indices into the terrain's towns, the one it is named by first.
     pub names: Vec<u32>,
     pub size: SizeClass,
     pub form: Form,
-}
-
-impl Place {
-    pub fn apartment_share(&self) -> f64 {
-        f64::from(self.apartments) / f64::from(self.buildings.max(1))
-    }
 }
 
 /// Every place of a terrain, in id order.
@@ -312,7 +315,7 @@ pub struct Places {
 
 /// The places `buildings` make, named from `towns`, each town `(x, z)` in
 /// the terrain's table order. A town point names the place holding most
-/// buildings within `NAME_REACH_M` of it, ties to the place of least id; a
+/// buildings that count within `NAME_REACH_M` of it, ties to the place of least id; a
 /// place several points name takes the name of the one with most of its
 /// buildings within reach, ties to the first in table order, and lists the
 /// others after it.
@@ -323,7 +326,8 @@ pub fn group(buildings: &[Building], towns: &[(f64, f64)]) -> Places {
     for (i, &l) in label.iter().enumerate() {
         members.entry(l).or_default().push(i as u32);
     }
-    members.retain(|_, m| m.len() >= MIN_BUILDINGS as usize);
+    let counting = |m: &[u32]| m.iter().filter(|&&i| buildings[i as usize].counts).count();
+    members.retain(|_, m| counting(m) >= MIN_BUILDINGS as usize);
 
     // Buildings within reach of each town, by group.
     let buckets = Buckets::new(NAME_REACH_M, buildings.iter().map(|b| (b.x, b.z)));
@@ -332,13 +336,21 @@ pub fn group(buildings: &[Building], towns: &[(f64, f64)]) -> Places {
         let mut count: HashMap<u32, u32> = HashMap::new();
         buckets.near(tx, tz, NAME_REACH_M, |i| {
             let b = &buildings[i as usize];
-            if (b.x - tx).hypot(b.z - tz) <= NAME_REACH_M
+            if b.counts
+                && (b.x - tx).hypot(b.z - tz) <= NAME_REACH_M
                 && members.contains_key(&label[i as usize])
             {
                 *count.entry(label[i as usize]).or_default() += 1;
             }
         });
-        let least_id = |l: u32| members[&l].iter().map(|&i| buildings[i as usize].id).min();
+        let least_id = |l: u32| {
+            members[&l]
+                .iter()
+                .map(|&i| &buildings[i as usize])
+                .filter(|b| b.counts)
+                .map(|b| b.id)
+                .min()
+        };
         let best = count
             .into_iter()
             .max_by(|a, b| a.1.cmp(&b.1).then(least_id(b.0).cmp(&least_id(a.0))));
@@ -376,12 +388,7 @@ fn summarize<'a>(members: impl Iterator<Item = &'a Building>, names: Vec<u32>) -
             f64::NEG_INFINITY,
         ],
         buildings: 0,
-        houses: 0,
-        apartments: 0,
-        shops: 0,
-        civic: 0,
-        industrial: 0,
-        residential_floor: 0.0,
+        floor: 0.0,
         hectares: 0,
         names,
         size: SizeClass::Hamlet,
@@ -389,40 +396,31 @@ fn summarize<'a>(members: impl Iterator<Item = &'a Building>, names: Vec<u32>) -
     };
     let mut cells = std::collections::HashSet::new();
     for b in members {
-        p.id = p.id.min(b.id);
-        p.x += b.x;
-        p.z += b.z;
         p.bbox = [
             p.bbox[0].min(b.x),
             p.bbox[1].min(b.z),
             p.bbox[2].max(b.x),
             p.bbox[3].max(b.z),
         ];
+        if !b.counts {
+            continue;
+        }
+        p.id = p.id.min(b.id);
+        p.x += b.x;
+        p.z += b.z;
         p.buildings += 1;
-        match b.family {
-            Family::House => p.houses += 1,
-            Family::Apartment => p.apartments += 1,
-            Family::Shop => p.shops += 1,
-            Family::Civic => p.civic += 1,
-            Family::Industrial => p.industrial += 1,
-            _ => {}
-        }
-        if b.residential() {
-            p.residential_floor += f64::from(b.floor);
-        }
+        p.floor += f64::from(b.floor);
         cells.insert(Buckets::key(HECTARE_M, b.x, b.z));
     }
     p.x /= f64::from(p.buildings);
     p.z /= f64::from(p.buildings);
     p.hectares = cells.len() as u32;
-    let share = p.apartment_share();
-    p.size = SizeClass::of(p.buildings, share, p.residential_floor);
-    let density = p.residential_floor / f64::from(p.hectares);
-    p.form = Form::of(p.names.len(), p.buildings, share, density);
+    p.size = SizeClass::of(p.buildings, p.floor);
+    p.form = Form::of(p.names.len(), p.buildings, p.floor / f64::from(p.hectares));
     p
 }
 
-/// Every settlement building of `src` within `b`, min x, min z, max x,
+/// Every building of `src` that takes part in a place, within `b`, min x, min z, max x,
 /// max z, once each, in id order.
 pub fn buildings_in(src: &dyn Source, b: [f64; 4]) -> Result<Vec<Building>, Refusal> {
     let mut out = Vec::new();
@@ -466,26 +464,11 @@ impl Places {
         for p in &self.places {
             o.extend_from_slice(&p.id.to_le_bytes());
             for v in [
-                p.x,
-                p.z,
-                p.bbox[0],
-                p.bbox[1],
-                p.bbox[2],
-                p.bbox[3],
-                p.residential_floor,
+                p.x, p.z, p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[3], p.floor,
             ] {
                 o.extend_from_slice(&v.to_le_bytes());
             }
-            for v in [
-                p.buildings,
-                p.houses,
-                p.apartments,
-                p.shops,
-                p.civic,
-                p.industrial,
-                p.hectares,
-                p.names.len() as u32,
-            ] {
+            for v in [p.buildings, p.hectares, p.names.len() as u32] {
                 o.extend_from_slice(&v.to_le_bytes());
             }
             for &n in &p.names {
@@ -517,11 +500,11 @@ impl Places {
             for v in &mut f {
                 *v = f64::from_le_bytes(take(8)?.try_into().unwrap());
             }
-            let mut c = [0u32; 8];
+            let mut c = [0u32; 3];
             for v in &mut c {
                 *v = u32_(take(4)?);
             }
-            let names = (0..c[7])
+            let names = (0..c[2])
                 .map(|_| take(4).map(u32_))
                 .collect::<Result<_, _>>()?;
             let k = take(2)?;
@@ -534,14 +517,9 @@ impl Places {
                 x: f[0],
                 z: f[1],
                 bbox: [f[2], f[3], f[4], f[5]],
-                residential_floor: f[6],
+                floor: f[6],
                 buildings: c[0],
-                houses: c[1],
-                apartments: c[2],
-                shops: c[3],
-                civic: c[4],
-                industrial: c[5],
-                hectares: c[6],
+                hectares: c[1],
                 names,
                 size,
                 form,
@@ -575,7 +553,7 @@ mod tests {
             x,
             z,
             r,
-            family: Family::House,
+            counts: true,
             floor: 100.0,
         }
     }
@@ -710,57 +688,69 @@ mod tests {
     #[test]
     fn size_classes_follow_buildings_floor_and_apartments() {
         use SizeClass::*;
-        assert_eq!(SizeClass::of(3, 0.0, 0.0), Hamlet);
-        assert_eq!(SizeClass::of(49, 1.0, 1e9), Hamlet);
-        assert_eq!(SizeClass::of(50, 0.0, 0.0), Village);
-        assert_eq!(SizeClass::of(200, 0.04, 0.9e6), LargeVillage);
-        assert_eq!(SizeClass::of(200, 0.05, 0.0), Town);
-        assert_eq!(SizeClass::of(200, 0.0, 1e6), Town);
-        assert_eq!(SizeClass::of(200, 0.09, 5e6), Town);
-        assert_eq!(SizeClass::of(200, 0.10, 3e6), City);
-        assert_eq!(SizeClass::of(200, 0.0, 20e6), LargeCity);
-        assert_eq!(Form::of(1, 1000, 0.07, 1499.0), Form::Dispersed);
-        assert_eq!(Form::of(1, 999, 0.07, 1499.0), Form::Compact);
-        assert_eq!(Form::of(0, 1000, 0.08, 1499.0), Form::Compact);
-        assert_eq!(Form::of(1, 1000, 0.0, 1500.0), Form::Compact);
-        assert_eq!(Form::of(2, 3, 0.0, 0.0), Form::Agglomeration);
+        assert_eq!(SizeClass::of(3, 0.0), Hamlet);
+        assert_eq!(SizeClass::of(49, 1e9), Hamlet);
+        assert_eq!(SizeClass::of(50, 0.0), Village);
+        assert_eq!(SizeClass::of(199, 1e9), Village);
+        assert_eq!(SizeClass::of(200, 0.49e6), LargeVillage);
+        assert_eq!(SizeClass::of(200, 0.5e6), Town);
+        assert_eq!(SizeClass::of(200, 2.9e6), Town);
+        assert_eq!(SizeClass::of(200, 3e6), City);
+        assert_eq!(SizeClass::of(200, 19e6), City);
+        assert_eq!(SizeClass::of(200, 20e6), LargeCity);
+        assert_eq!(Form::of(1, 1000, 2499.0), Form::Dispersed);
+        assert_eq!(Form::of(1, 999, 2499.0), Form::Compact);
+        assert_eq!(Form::of(1, 1000, 2500.0), Form::Compact);
+        assert_eq!(Form::of(2, 3, 0.0), Form::Agglomeration);
     }
 
     #[test]
-    fn a_place_counts_its_families_and_residential_floor() {
+    fn only_buildings_that_count_add_to_a_place() {
         let mut b: Vec<_> = (0..4)
-            .map(|k| house(k, 0.0, 30.0 * k as f64, 5.0))
+            .map(|k| house(10 + k, 0.0, 30.0 * k as f64, 5.0))
             .collect();
-        for (k, f) in [
-            Family::Apartment,
-            Family::Shop,
-            Family::Civic,
-            Family::Industrial,
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            b.push(Building {
-                family: f,
-                floor: 1000.0,
-                ..house(10 + k as u64, 130.0, 30.0 * k as f64, 5.0)
-            });
-        }
+        // Its least id, but it only links, and it stands 130 m out.
+        b.push(Building {
+            counts: false,
+            floor: 1e6,
+            ..house(1, 130.0, 0.0, 5.0)
+        });
         let p = &group(&b, &[]).places[0];
-        assert_eq!(
-            (
-                p.buildings,
-                p.houses,
-                p.apartments,
-                p.shops,
-                p.civic,
-                p.industrial
-            ),
-            (8, 4, 1, 1, 1, 1)
-        );
-        assert_eq!(p.residential_floor, 4.0 * 100.0 + 1000.0);
-        assert_eq!(p.hectares, 2);
+        assert_eq!((p.id, p.buildings, p.hectares), (10, 4, 1));
+        assert_eq!(p.floor, 400.0);
+        assert_eq!((p.x, p.z), (0.0, 45.0));
+        // The box takes the whole group in, so reading it finds every member.
         assert_eq!(p.bbox, [0.0, 0.0, 130.0, 90.0]);
+    }
+
+    #[test]
+    fn industrial_buildings_join_two_clusters_and_make_no_place_alone() {
+        let row =
+            |id: u64, z: f64| (0..3).map(move |k| house(id + k, 0.0, z + 10.0 * k as f64, 2.0));
+        let mut b: Vec<_> = row(1, 0.0).chain(row(10, 600.0)).collect();
+        assert_eq!(group(&b, &[]).places.len(), 2);
+        let link = |id, z| Building {
+            counts: false,
+            ..house(id, 0.0, z, 2.0)
+        };
+        b.push(link(20, 200.0));
+        b.push(link(21, 400.0));
+        let p = group(&b, &[]).places;
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].buildings, 6);
+        let alone = [link(1, 0.0), link(2, 10.0), link(3, 20.0)];
+        assert!(group(&alone, &[]).places.is_empty());
+    }
+
+    #[test]
+    fn a_box_too_small_or_too_low_is_no_building() {
+        let at = |w: f32, h: f32| {
+            let bbox = [-w / 2.0, 0.0, -5.0, w / 2.0, h, 5.0];
+            Building::new(1, 0.0, 0.0, Class::Building, Some(Family::Unknown), &bbox)
+        };
+        assert!(at(6.0, 2.0).is_some());
+        assert!(at(5.9, 2.0).is_none());
+        assert!(at(6.0, 1.9).is_none());
     }
 
     #[test]

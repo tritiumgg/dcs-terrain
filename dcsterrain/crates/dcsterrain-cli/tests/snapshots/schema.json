@@ -2044,7 +2044,7 @@
         },
         {
           "const": "dispersed",
-          "description": "A strung-out spread of houses no gap separates.",
+          "description": "A strung-out spread of buildings no gap separates.",
           "type": "string"
         },
         {
@@ -2465,16 +2465,6 @@
     "PlaceInfo": {
       "description": "A place: settlement buildings each within 200 m of another, three or\nmore.",
       "properties": {
-        "apartment_share": {
-          "description": "Apartment blocks over its buildings.",
-          "format": "double",
-          "type": "number"
-        },
-        "apartments": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
         "bbox": {
           "$ref": "#/$defs/Box",
           "description": "Its buildings' positions' box."
@@ -2484,10 +2474,10 @@
           "minimum": 0,
           "type": "integer"
         },
-        "civic": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
+        "floor": {
+          "description": "Square meters of floor.",
+          "format": "double",
+          "type": "number"
         },
         "form": {
           "$ref": "#/$defs/Form"
@@ -2498,19 +2488,9 @@
           "minimum": 0,
           "type": "integer"
         },
-        "houses": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
         "id": {
           "description": "The least scenery object id among its buildings, stable while the\nscene file is.",
           "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "industrial": {
-          "format": "uint32",
           "minimum": 0,
           "type": "integer"
         },
@@ -2550,16 +2530,6 @@
             "null"
           ]
         },
-        "residential_floor": {
-          "description": "Square meters of house and apartment floor.",
-          "format": "double",
-          "type": "number"
-        },
-        "shops": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
         "size": {
           "$ref": "#/$defs/SizeClass"
         },
@@ -2582,13 +2552,7 @@
         "size",
         "form",
         "buildings",
-        "houses",
-        "apartments",
-        "shops",
-        "civic",
-        "industrial",
-        "residential_floor",
-        "apartment_share",
+        "floor",
         "hectares"
       ],
       "type": "object"
@@ -4347,7 +4311,7 @@
       "type": "object"
     },
     "SizeClass": {
-      "description": "A place's size, in the terrain's own units: buildings, residential\nfloor and the share of apartment blocks.",
+      "description": "A place's size, from its buildings and its floor.",
       "enum": [
         "hamlet",
         "village",
@@ -4848,8 +4812,7 @@
       "description": "What places are ranked by, most first, ties by id.",
       "enum": [
         "buildings",
-        "residential_floor",
-        "apartment_share"
+        "floor"
       ],
       "type": "string"
     },

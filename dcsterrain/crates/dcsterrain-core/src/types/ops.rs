@@ -1117,8 +1117,7 @@ fn default_towns_limit() -> u32 {
 pub enum TownsSort {
     #[default]
     Buildings,
-    ResidentialFloor,
-    ApartmentShare,
+    Floor,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1153,15 +1152,8 @@ pub struct PlaceInfo {
     pub size: SizeClass,
     pub form: Form,
     pub buildings: u32,
-    pub houses: u32,
-    pub apartments: u32,
-    pub shops: u32,
-    pub civic: u32,
-    pub industrial: u32,
-    /// Square meters of house and apartment floor.
-    pub residential_floor: f64,
-    /// Apartment blocks over its buildings.
-    pub apartment_share: f64,
+    /// Square meters of floor.
+    pub floor: f64,
     /// The 100 m cells holding one of its buildings.
     pub hectares: u32,
     /// Polygons, each its exterior ring then its holes, as `[x, z]`

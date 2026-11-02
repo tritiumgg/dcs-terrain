@@ -272,5 +272,5 @@ designator follows. A stand's `fits` is null where its size is unknown.
 *Which are the big towns?* This needs the cache entry `index` builds:
 
 ```jsonl
-{"id": "cities", "op": "towns", "request": {"size": ["city"], "sort": "residential_floor", "limit": 10}}
+{"id": "cities", "op": "towns", "request": {"size": ["city"], "sort": "floor", "limit": 10}}
 ```
