@@ -347,7 +347,8 @@ of kind `node_red` and `node_blue`. Scenery returns each object's model as its
 name and its class; without `class` it finds every class but `effect`. An
 airdrome returns as `id` its numeric id in digits, or its `name_id` where the
 files give none, and as `name` its display name, or its `name_id`. Wherever a
-request names an airdrome, a number is an id, and a string is a `name_id` or,
+request names an airdrome, a number is an id, and a string is a `name_id`, a
+display name or,
 failing any, an id in digits, so an `id` from here can be passed back as is.
 A place is measured to its center; it returns its id in digits, its name,
 null when no town names it, and its size class as `class`. Until the places

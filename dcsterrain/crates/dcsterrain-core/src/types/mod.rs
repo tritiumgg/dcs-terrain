@@ -50,7 +50,7 @@ pub enum Region {
 }
 
 /// An airdrome as a request names it: a number is its id; a string is its
-/// `name_id` or, where no `name_id` matches, its id written in digits.
+/// `name_id`, else its display name, else its id written in digits.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum AirdromeRef {

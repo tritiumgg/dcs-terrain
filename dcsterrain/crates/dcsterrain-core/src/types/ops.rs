@@ -1176,8 +1176,8 @@ pub struct PlaceRef {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AirfieldInfoRequest {
-    /// A number is the airdrome's id; a string is its `name_id` or, where
-    /// none matches, its id written in digits.
+    /// A number is the airdrome's id; a string is its `name_id`, else its
+    /// display name, else its id written in digits.
     pub airdrome: AirdromeRef,
     /// An airframe's size: each stand then says whether it fits.
     #[serde(default)]

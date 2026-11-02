@@ -228,7 +228,9 @@ pub fn resolve(src: &dyn Source, r: &Region, path: &str) -> Result<Area, Vec<Iss
 
 /// The airdrome `r` names: a number is its id; a string is its `name_id`,
 /// spelled as the files spell it or, failing that, the one that differs from
-/// it only in case, and failing any, its id written in digits.
+/// it only in case; failing that, its display name, matched the same way,
+/// because `nearest` and `airfield_info` show that name and a user passes it
+/// back; and failing any, its id written in digits.
 pub(super) fn airdrome<'a>(tables: &'a Tables, r: &AirdromeRef) -> Option<&'a AirdromeRow> {
     let all = &tables.airdromes;
     let by_id = |id: i64| all.iter().find(|a| a.id == Some(id));
@@ -237,6 +239,12 @@ pub(super) fn airdrome<'a>(tables: &'a Tables, r: &AirdromeRef) -> Option<&'a Ai
         AirdromeRef::Name(name) => name,
     };
     if let Some(a) = named(all.iter().map(|a| (a.name_id.as_str(), a)), name) {
+        return Some(a);
+    }
+    let shown = all
+        .iter()
+        .filter_map(|a| a.display_name.as_deref().map(|n| (n, a)));
+    if let Some(a) = named(shown, name) {
         return Some(a);
     }
     let digits = !name.is_empty() && name.bytes().all(|c| c.is_ascii_digit());
@@ -253,7 +261,7 @@ pub(super) fn known_airdrome<'a>(
     airdrome(tables, r).ok_or_else(|| {
         let message = match r {
             AirdromeRef::Id(id) => format!("no airdrome has the id {id}"),
-            AirdromeRef::Name(n) => format!("no airdrome has the name_id or id `{n}`"),
+            AirdromeRef::Name(n) => format!("no airdrome has the name, name_id or id `{n}`"),
         };
         vec![Issue::new("unknown_airdrome", &message, path)]
     })
@@ -364,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn an_id_in_digits_and_a_name_id_name_the_same_airdrome() {
+    fn an_id_a_name_id_and_a_display_name_name_the_same_airdrome() {
         let s = synth();
         let t = s.tables().unwrap();
         let name = |n: &str| airdrome(t, &AirdromeRef::Name(n.into())).map(|a| &a.name_id);
@@ -373,6 +381,8 @@ mod tests {
         assert_eq!(name(synth::AIRDROME_NAME_ID), want);
         assert_eq!(name(&id), want);
         assert_eq!(name(&synth::AIRDROME_NAME_ID.to_lowercase()), want);
+        assert_eq!(name(synth::AIRDROME_DISPLAY_NAME), want);
+        assert_eq!(name(&synth::AIRDROME_DISPLAY_NAME.to_uppercase()), want);
         let by_id = airdrome(t, &AirdromeRef::Id(synth::AIRDROME_ID.into()));
         assert_eq!(by_id.map(|a| &a.name_id), want);
         for n in ["99", "", "+1", "Nowhere"] {

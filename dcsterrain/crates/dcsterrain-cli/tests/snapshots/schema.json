@@ -10,13 +10,13 @@
           "type": "string"
         }
       ],
-      "description": "An airdrome as a request names it: a number is its id; a string is its\n`name_id` or, where no `name_id` matches, its id written in digits."
+      "description": "An airdrome as a request names it: a number is its id; a string is its\n`name_id`, else its display name, else its id written in digits."
     },
     "AirfieldInfoRequest": {
       "properties": {
         "airdrome": {
           "$ref": "#/$defs/AirdromeRef",
-          "description": "A number is the airdrome's id; a string is its `name_id` or, where\nnone matches, its id written in digits."
+          "description": "A number is the airdrome's id; a string is its `name_id`, else its\ndisplay name, else its id written in digits."
         },
         "fits": {
           "anyOf": [
