@@ -5,7 +5,8 @@ Tasks have ids; a branch is `task/<id>-<summary>`. Edit this file when the
 order or a task changes, in the pull request that changes it.
 
 "Verified by" says who can see a task's result: **agent** (tests an agent
-runs), **CI**, or **live** (somebody at a Windows machine with DCS on the terrain).
+runs), **CI**, **live** (somebody at a Windows machine with DCS on the terrain),
+or **user** (the user tries it, with no DCS).
 
 ## Already built
 
@@ -32,6 +33,8 @@ Kept from before the reset, tested, and not tasks here:
 | X | Removing the optional hook | any |
 | R | Release and the user guide | any |
 | C | Scenery catalog review, a terrain at a time | an install, or its files copied |
+| M | The MCP server | any; opt-in checks need an install |
+| H | Commands for people | any; opt-in checks need an install |
 
 ## Tasks
 
@@ -98,6 +101,31 @@ a valid RFC 7946 `FeatureCollection` whose features match its JSON response.
 | R1 | Release builds: `dcsterrain` archives for Windows, Linux, and macOS on Apple silicon and Intel, each built on its platform's own CI runner, the C runtime linked statically on Windows and Linux, attached with checksums to a release for each `v*` tag | On each platform's runner, a CI job that only downloads the archive answers `query --terrain synth describe` with no checkout, no cargo call and a bare environment: Linux in a container without glibc, Windows with System32 as its whole path and no dynamic C runtime imported | Q7 | CI |
 | R2 | `docs/guide.md`: point the tool at an install, ask a siting question, read the answer, combine questions, draw the answer as GeoJSON, and the failure modes. Written against real output. The tool is mainly for assistants and software, with the skill as their entry point; the guide serves a person who drives it by hand | Every command and output in the guide reruns on Caucasus in Windows PowerShell 5.1 and 7; a stand-in newcomer subagent, given only the guide, answers a siting question it was not shown. The live newcomer test was not run: the user reviewed the guide and judged it adequate | Q7, S1 | agent, user review |
 
+### M: the MCP server
+
+Over the same operations as `query` (ADR 0011). M and H can run in parallel,
+but they share files: the CLI's subcommand list, the README (each new
+subcommand gets its line, marked planned until it works), the skill and
+`STATE.md`. Each series rebases on the other's merges. The tool schemas and the
+flags are both generated from `schema`, so H4's change reaches them with no
+edit. H5 waits for M3, since both rewrite the guide.
+
+| Id | Deliverable | Done | Depends on | Verified by |
+|---|---|---|---|---|
+| M1 | `dcsterrain mcp` over stdio: one tool per operation, its input schema generated from `schema`, each call running the engine `query` runs; an error is a tool error naming its issues | An MCP client in a test lists one tool per operation, each schema equal to `schema`'s; on `Synth` every tool's answer is byte-identical to `query`'s for every request the CLI's snapshot tests send | Q7 | agent |
+| M2 | The long-lived server: the terrain held open and reopened when its files change, cancellation, progress on long calls (`find_sites`, `exposure`), a GeoJSON over a size limit written to a file whose path is returned | On `Synth`: cancelling `find_sites` stops it within 1 s; `find_sites` and `exposure` send at least one progress notice; a reopened terrain answers after its files change; a GeoJSON over the limit comes back as a path to a valid file. Opt-in, 100 calls in one session stay within 64 MiB of peak commit on Caucasus | M1 | agent, opt-in |
+| M3 | Client setup and the skill: configuration for Claude Desktop and Claude Code, the skill told to use the tools when present, a short section in the README and the guide | An assistant connected only through MCP, with no shell, answers the FARP example on Caucasus, equal to the direct `query` result | M2, S1 | user: the user runs the assistant; no DCS |
+
+### H: commands for people
+
+| Id | Deliverable | Done | Depends on | Verified by |
+|---|---|---|---|---|
+| H1 | One parser for every place a flag takes: DCS `x,z`, MGRS, latitude and longitude, an airfield name or a town name | On `Synth`, using its airdromes and towns, and opt-in on Caucasus, each form round-trips against `geo`; an ambiguous name is refused with its choices | Q7 | agent, opt-in |
+| H2 | One subcommand per operation, its flags generated from the request schema and its `--help` from the schema's descriptions; `--json` prints `query`'s answer, the default a plain list of the answer's fields, and `--geojson-out <file>` writes the GeoJSON of any operation that returns one | For every request the CLI's snapshot tests send, the flag form with `--json` prints JSON byte-identical to `query`'s; the default list names every top-level field of that answer; `--geojson-out` writes the same `FeatureCollection` `query` returns | H1 | agent |
+| H3 | Readable output for `find_sites`, `route`, `route_alternatives`, `nearest`, `point_info`, `airfield_info`, `towns` and `visible`: tables with units, and MGRS beside x and z | Text snapshots on `Synth`, each within 100 columns; every MGRS shown equals `geo`'s for that point; no color when the output is not a terminal | H2 | agent |
+| H4 | GeoJSON on `sample`, `nearest` and `scenery_in`, which today ignore `geojson: true` | Each returns a valid RFC 7946 `FeatureCollection` on `Synth` | Q2 | agent |
+| H5 | The README and the guide: the commands for people as the path for a person, `query` as the path for software, in plain language, one idea per sentence, reviewed by subagents | The user, with only the guide and the commands for people, answers the FARP question, and the answer names a site the enemy post cannot see that equals the `query` result; every point where the user got stuck is fixed | H3, H4, M3 | user: no DCS |
+
 ### C: catalog review
 
 | Id | Deliverable | Done | Depends on | Verified by |
@@ -137,6 +165,7 @@ capture:
 | MS1 Engine on the install | A1, N0–N7, N10, N12, X1 | `query --terrain Caucasus describe` and `sample` answer from the install with no step before; every decoder passes its opt-in checks; `Synth` passes every grid test |
 | MS2 Queries | N8, N9, N11, Q1–Q13, Q15, Q17, Q18 | Every operation tested on `Synth`; opt-in benchmarks within the targets on Caucasus |
 | MS3 Assistant and release | S1, V1, R1, R2, C1 | An assistant with the skill answers the FARP example; live validation within target; release binaries; a guide written against real output and reviewed by the user |
+| MS4 Interfaces | M1–M3, H1–H5 | An assistant answers the FARP example through MCP alone; the user answers it with the commands for people and the guide alone |
 
 N0 goes first among the N tasks because it could stop the design: if DCS holds
 its terrain files with a share mode that denies readers, the tool cannot run

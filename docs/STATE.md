@@ -4,7 +4,7 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `design.md` and `queries.md` hold the design.
 
-**Last updated:** 2026-11-02T18:01Z
+**Last updated:** 2026-11-02T22:33Z
 
 ## Done
 
@@ -23,7 +23,8 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    Windows, Linux and both macOS archives on their own runners, the C runtime
    static on Windows and Linux, and releases them with `SHA256SUMS`. *Verified
    by:* CI: on each platform a job holding only the archive answered
-   `query --terrain synth describe`; no tag pushed yet.
+   `query --terrain synth describe`; v0.1.0 released, its Windows archive
+   answering the README's example.
 3. **Towns by cluster.** A place is any building names do not rule out, sized by
    floor at about 100 m² a person, industrial buildings only linking; no
    per-terrain overrides. Census 0.63; Afghanistan and the Marianas have towns
@@ -51,9 +52,14 @@ One task. The thing to pick up immediately.
 
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
-None: C1 closes MS3.
+1. **M1** — `dcsterrain mcp`, one tool per operation. *Agent.*
+2. **H1** — one parser for every place a flag takes. *Agent, opt-in.*
+3. **M2** — the long-lived MCP server. *Agent, opt-in.*
+4. **H2** — one subcommand per operation. *Agent.*
+5. **H4** — GeoJSON on `sample`, `nearest` and `scenery_in`. *Agent.*
 
-Milestone in view: **MS3 Assistant and release**.
+M and H run in parallel beside C1, which is live (ADR 0011). Milestone in
+view: **MS3 Assistant and release**, which C1 closes; then **MS4 Interfaces**.
 
 ## Carries
 

@@ -41,3 +41,4 @@ are in git at commit `4b85bd0`.
 | [0008](0008-hold-a-query-to-64-mib-by-reading-through-bounded-views.md) | Accepted | 2026-10-30 | Hold a query to 64 MiB by reading through bounded views |
 | [0009](0009-route-over-the-road-files-own-passages.md) | Accepted | 2026-11-01 | Route over the road file's own passages |
 | [0010](0010-tell-places-by-clusters-of-buildings-and-size-them-by-floor.md) | Accepted | 2026-11-02 | Tell places by clusters of buildings, and size them by floor |
+| [0011](0011-serve-the-engine-through-query-mcp-and-commands-for-people.md) | Accepted | 2026-11-02 | Serve the engine through `query`, an MCP server and commands for people |

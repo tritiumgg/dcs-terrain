@@ -27,9 +27,11 @@ Beside the install it keeps one small **cache directory per terrain and build**
 holding only what cannot be computed per query. Deleting the cache loses
 nothing; the next query rebuilds what it needs.
 
-The consumers are campaign tools, scripts, and an AI assistant with a shell.
-There is one interface, `dcsterrain query`, JSON in and JSON out. An assistant
-learns it from a skill shipped in this repository.
+The consumers are campaign tools, scripts, AI assistants and people. There are
+three ways in, over one engine (ADR 0011): `dcsterrain query`, JSON in and JSON
+out, for software; and, both planned, `dcsterrain mcp`, an MCP server, for
+assistants, and commands for people, with flags and readable output. An assistant
+with only a shell learns `query` from a skill shipped in this repository.
 
 The repository ships tools only. Users run them against their own install.
 
@@ -585,10 +587,24 @@ edges, and its road and rail graph has 357 k nodes.
 
 A skill in this repository teaches an assistant with a shell which operation
 answers which question, by example, with `dcsterrain schema` as the reference
-and the metric meanings it needs to turn numbers into difficulty. There is no
-MCP server: the warm state a server would hold lives in the cache. A thin MCP
-wrapper over the same operations can be added if a client without a shell
-needs one.
+and the metric meanings it needs to turn numbers into difficulty.
+
+Planned, over the same operations (ADR 0011):
+
+- `dcsterrain mcp [--install <dir>] [--terrain <Terrain>]` is an MCP server
+  over stdio. Each operation is one tool whose input is its request schema and
+  whose answer is the one `query` gives. The terrain stays open between calls
+  and reopens when its files change, long calls report progress and can be
+  cancelled, and a large GeoJSON goes to a file whose path is returned. The
+  server holds 64 MiB of peak commit across a session, as a query does.
+- `dcsterrain <op> --terrain <Terrain> [flags]` is one subcommand per operation
+  for people. Its flags are generated from the request schema. A place takes
+  DCS `x,z`, an MGRS grid, latitude and longitude, or an airfield or town name,
+  and an ambiguous name is refused with its choices. The main operations print
+  tables with units and MGRS beside x and z, the rest a plain list, with no
+  color when the output is not a terminal. `--json` prints `query`'s answer
+  byte for byte, and `--geojson-out <file>` writes the GeoJSON of any
+  operation that returns one.
 
 ## 8. Targets
 
@@ -706,5 +722,6 @@ Each names what settles it.
     cannot see; `low_level_route` is not built. Wires, pylons and masts are
     not modeled, and the specified request ignores speed. *Settles it:* a
     user asking for routes; `plan.md` says what the first version takes.
-13. **Assistants without a shell** cannot use the tool. *Settles it:* a user
-    who needs one; an MCP wrapper is then its own task.
+13. **Assistants without a shell** cannot use the tool, and people find the
+    JSON interface hard. *Settles it:* the MCP server and the commands for
+    people (ADR 0011), tasks M and H in `plan.md`.
