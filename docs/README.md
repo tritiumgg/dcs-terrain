@@ -26,7 +26,7 @@ it.
 | [data/validation.md](data/validation.md) | The tool against a running DCS: heights, water, sightlines, routes and MGRS, and why routes miss |
 | [data/placements.md](data/placements.md) | `validate_placements` on every installed terrain: a building, water and a runway, a random batch against brute force, and times |
 | [data/point-info.md](data/point-info.md) | `point_info` on every installed terrain: the nearest town against a scan of every town, bearings against the geodesic, and cost |
-| [data/places.md](data/places.md) | Places on every installed terrain: size classes, forms, build and query cost, each point's place against brute force, and Caucasus towns against their census |
+| [data/places.md](data/places.md) | Places on every installed terrain: size classes, forms, why the rules are what they are, the models a screenshot should settle, build and query cost, and Caucasus towns against their census |
 | [data/airfield-info.md](data/airfield-info.md) | `airfield_info` on every installed terrain: runways against the tables, true courses against the geodesic, widths and elevations against a scan, and cost |
 | [data/scenery-review.md](data/scenery-review.md) | Screenshots of the Caucasus models in DCS: how to take them, the heuristics scored against them, what moved |
 | [data/caucasus-scenery-catalogue.tsv](data/caucasus-scenery-catalogue.tsv) | The Caucasus scenery model census |

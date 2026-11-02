@@ -102,7 +102,7 @@ a valid RFC 7946 `FeatureCollection` whose features match its JSON response.
 
 | Id | Deliverable | Done | Depends on | Verified by |
 |---|---|---|---|---|
-| C1 | Review the scenery catalog of every terrain with no override file — Afghanistan, GermanyCW, MarianaIslands, MarianaIslandsWWII, Nevada, PersianGulf and Syria — from screenshots of its models, each into its own classes file, each terrain its own pull request, following the review below. Caucasus is done and set the method | Every terrain has an override file whose keys all apply; no top-100 model is classed building unless it is one | N7 | live: an agent drives the capture with the user at DCS and judges the screenshots |
+| C1 | Settle by screenshot the models a name and a box cannot judge on the seven terrains after Caucasus, listed in `data/places.md`, following the review below. Towns come from clusters of real buildings, so no terrain gets an override file, and what a screenshot finds goes in the rules every terrain shares | Each listed model is judged, and no model among the 100 most placed that counts towards a place is left unjudged | N7 | live: an agent drives the capture with the user at DCS and judges the screenshots |
 
 How to review one terrain, with `data/scenery-review.md` beside you for the
 capture:
@@ -122,13 +122,11 @@ capture:
    - an industrial structure no name catches, which should be `industrial`;
    - a building the no-building rule took because a name pattern happens to
      match, such as `2-floor_house_clay_walls`;
-   - a wrong family, where it changes whether the model settles.
-6. Write `dcsterrain/crates/dcsterrain-core/classes/<terrain id>.toml`, one
-   line per model: `"model" = { class = "...", family = "...", reason = "..." }`.
-   The reason says what was seen. Keys match in any case. Never name a `smoke#`
-   model; a test refuses it. Register the file in `OVERRIDES` in `classes.rs`.
-7. Run the test again. It fails on a key that names no model on the terrain.
-   Check that the class counts moved as expected, and describe what moved.
+   - a wrong family, where it changes whether the model counts towards a place.
+6. Add what the frames show to the family rules in `classes.rs`, by a word that
+   holds across terrains. Never name a `smoke#` model. No per-terrain file.
+7. Run `every_installed_terrain_records_its_places` again, and describe what
+   moved. The census must stay at 0.6 or more.
 8. Send the user one list of the models you cannot judge, each with its
    screenshot. Do not guess those. Screenshots stay out of the repository.
 

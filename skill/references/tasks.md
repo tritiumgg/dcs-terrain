@@ -274,3 +274,9 @@ designator follows. A stand's `fits` is null where its size is unknown.
 ```jsonl
 {"id": "cities", "op": "towns", "request": {"size": ["city"], "sort": "floor", "limit": 10}}
 ```
+
+A place is a cluster of buildings, so `buildings` and `floor`, in square meters,
+are all it says of what stands there; it does not tell houses from shops. A town
+starts at 0.5 M m², a city at 3 M and a large city at 20 M, about 5 000, 30 000 and
+200 000 people. Only Caucasus is checked against a census. A place may have no
+name: `towns.lua` does not list every town.

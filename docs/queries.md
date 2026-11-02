@@ -585,23 +585,21 @@ does not hold an AGL between waypoints without terrain following.
 
 Request: `region`, or none for the whole terrain; `size` and `form`, lists a
 place must be one of, any when empty; `min_buildings`; `sort`, `buildings`
-(the default), `residential_floor` or `apartment_share`, most first, ties
-to the least id; `limit` (default 50, max 1 000, or 100 with outlines); `outlines: bool`.
+(the default) or `floor`, most first, ties to the least id; `limit` (default 50, max 1 000, or 100 with outlines); `outlines: bool`.
 Response: `matched`, how many places pass the region (by their center) and
 the filters before the limit, and the places (`design.md` §6.3), each with
-its id, name and other names, center, box, size class, form, counts of
-buildings, houses, apartments, shops, civic and industrial buildings,
-residential floor, apartment share and occupied hectares, and its outline
-when asked. Until the `places` entry exists, which `index` builds, the
+its id, name and other names, center, box, size class, form, buildings,
+floor and occupied hectares, and its outline when asked. Until the `places` entry exists, which `index` builds, the
 answer is the issue `not_ready`; a query never builds it.
 
 An outline is the place's ground: every 50 m cell, on the cells of DCS x and
-z from 0, whose center lies within 100 m of one of its buildings' circles,
+z from 0, whose center lies within 100 m of one of the circles of the
+buildings that count,
 traced along the cells' edges and simplified to within 25 m. Half the
 linking gap, so two linked buildings' buffers meet, and two places' grounds
 never share a cell. A place's buildings are read again for its outline: the
-settlement buildings in its box that link to its least-id building, which is
-exactly the place, since none outside the box belongs to it.
+buildings in its box that count and link to its least-id building, which is
+exactly the place, since none of its group lies outside the box.
 
 ## 5. Criteria
 

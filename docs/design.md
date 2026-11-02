@@ -247,7 +247,7 @@ opening the install files it was derived from, except once after an update.
 | `tables.json` | Airfields, stands, Lua tables, and the fitted projection each cost a full decode; together they are small | 0.1 MB (MarianaIslands) to 2.4 MB (GermanyCW), read back in 1–10 ms | 47–450 ms, after `scene.nodes`, which it reads to place the towers |
 | `roads.graph` | The `.rn4` has no spatial order: a 3.1 s scan on GermanyCW, and the water under 23 M samples | 6.5 MiB (MarianaIslandsWWII) to 234 MiB (GermanyCW), its passages among them (ADR 0009) | 0.8 s (Caucasus) to 22 s (GermanyCW) |
 | `roads.betweenness` | Betweenness is global | 0.04 MiB (Caucasus) to 1.9 MiB (GermanyCW) | 0.4 s (Caucasus) to 29 s (GermanyCW) on two threads |
-| `places` | Settlements need every building on the terrain (§6.3) | 123 (MarianaIslandsWWII) to 21 788 (GermanyCW) places of about 100 bytes, read back in 0.5–1.7 ms | a whole objects-pool walk and the grouping, one thread at low priority: 0.5 s (MarianaIslandsWWII) to 28 s (GermanyCW), 2.9 s on Caucasus, on 2.9.30.28738 (`data/places.md`) |
+| `places` | Settlements need every building on the terrain (§6.3) | 218 (MarianaIslands) to 27 552 (Afghanistan) places of about 80 bytes, read back in 0.5–2.1 ms | a whole objects-pool walk and the grouping, one thread at low priority: 0.4–53 Gcycles, 0.6 s (MarianaIslandsWWII) to 37 s (GermanyCW) with the files in the OS cache, 4 s on Caucasus, on 2.9.31.29434 (`data/places.md`) |
 | `horizon/` | 3.4–4.9 s per 20 × 20 km region on one core, 0.24 s for one cell in a new area (Caucasus) | 8.4 KiB a tile; about 290 MiB (Caucasus) / ~740 MiB (Afghanistan) if every tile were touched | per tile, the first time a query touches it; never by `index` |
 | `validation.json` | Written by the live validation sortie, not computed | KiB | — |
 
@@ -412,50 +412,55 @@ cache it costs 7–10 ms, and one cell in a new area costs 0.24 s.
 
 ### 6.3 Places
 
-A **place** is a set of settlement buildings — houses, apartments, shops,
-civic and industrial buildings — each within 200 m of another (the UK
-statistics office's built-up-area rule): two buildings join when the gap
-between their circles, each half its box's longer side and at most 60 m, is
-200 m or less, and a place is a connected set of three or more. This is
-single linkage, found by a union-find over a grid hash of 320 m cells, the
-farthest two buildings can be and still join, so it is exactly the linkage
-of every pair, which the tests check. Garages, sheds, kiosks, farm and
-military buildings and effect volumes are not grouped. A building's floor is
-its footprint times its storeys, a storey 3 m of its box's height and at
-least one. Each place has an id, the least scenery object id among its
-buildings, stable while the scene file is; its center, the mean of its
-buildings' positions, and their box; counts of its buildings by family,
-residential floor (houses and apartments), apartment share, occupied
+A **place** is a cluster of buildings (ADR 0010), told by the cluster and not by what its
+buildings are: only 1 145 of 33 016 models appear on two or more terrains, so
+names cannot say which are houses, and a name only rules a model out. Every
+`building` model with a family counts, `unknown` included, unless its family is
+farm, outbuilding or military, which stand apart from a town and would make one
+of themselves; so does no box under 60 m², a shed or a part of a house, or under
+2 m tall. An `industrial` model of that size only links: it joins buildings
+across the gap and adds nothing to the place, so a town does not fall apart at
+its factories and a factory is no town. Two buildings join when the gap between
+their circles, each half its box's longer side and at most 60 m, is 200 m or
+less (the UK statistics office's built-up-area rule), and a place is a connected
+set holding three or more that count. This is single linkage, found by a
+union-find over a grid hash of 320 m cells, the farthest two buildings can be
+and still join, so it is exactly the linkage of every pair, which the tests
+check. A building's floor is its footprint times its storeys, a storey 3 m of
+its box's height and at least one. Each place has an id, the least scenery
+object id among the buildings that count, stable while the scene file is; its
+center, their mean; the box of its whole group, what only links included, so
+that reading the box finds every member; their count and floor; occupied
 hectares (100 m cells), a size class and a form:
 
 | Size class | Rule |
 |---|---|
 | hamlet | 3–49 buildings |
 | village | 50–199 |
-| large village | 200+, apartment share under 5 %, residential floor under 1 M m² |
-| town | 200+, apartment share 5 % or more, or residential floor 1 M m² or more |
-| city | residential floor 3 M m² or more and apartment share 10 % or more |
-| large city | residential floor 20 M m² or more |
+| large village | 200+, floor under 0.5 M m² |
+| town | 200+, floor 0.5 M m² or more |
+| city | floor 3 M m² or more |
+| large city | floor 20 M m² or more |
 
-Form is `agglomeration` when a place holds several `towns.lua` names,
-`dispersed` at 1 000 or more buildings with an apartment share under 8 % and
-under 1 500 m² of residential floor per occupied hectare, else `compact`. A
-`towns.lua` point names the place with the most buildings within 1 km of it,
-ties to the least id; a place with several names takes the one with most of
-its buildings within 1 km, ties in table order. Outlines are made on request
-(`queries.md`, `towns`): the place's buildings buffered by 100 m, rasterized
-at 50 m, traced and simplified to within 25 m.
+Floor stands for people at about 100 m² each, so the lines are 5 000, 30 000 and
+200 000 people. Form is `agglomeration` when a place holds several `towns.lua`
+names, `dispersed` at 1 000 or more buildings under 2 500 m² of floor per
+occupied hectare, about half what such a place holds on most terrains, else
+`compact`. A `towns.lua` point names the place with the most buildings that
+count within 1 km of it, ties to the least id; a place with several names takes
+the one with most of its buildings within 1 km, ties in table order. Outlines
+are made on request (`queries.md`, `towns`): the buildings that count buffered
+by 100 m, rasterized at 50 m, traced and simplified to within 25 m.
 
-Why this way, measured on Caucasus against 47 towns' census populations: the
-200 m rule ranked best of six methods (rank correlation 0.73); the mesh's town
-ground merges whole rural districts and cannot be an outline; and building
-counts do not track people (Tbilisi has 9 351 buildings for 1.1 M people), so
-classes are in the terrain's own units, which is how a place looks in the sim.
-Against a fuller list, every town of the terrain's list with a 2014 Georgian
-or 2021 Russian census figure, 70 of which name a place, residential floor
-ranks at 0.63: 0.77 in Russia and 0.58 in Georgia, where the western
-lowlands' villages chain whole districts into one place under any one gap
-(`data/places.md`).
+Why this way: the 200 m rule ranked best of six methods against 47 Caucasus
+towns' census populations, and the mesh's town ground merges whole rural
+districts. Names failed the other way round: `unknown` is 98.6 % of Afghanistan's
+`building` objects and 99.5 % of MarianaIslands', so those terrains had no town
+at all. Box and class alone fail too: rocks, reefs, solar panels and greenhouses
+all look like buildings, which is why the exclusions stay. Against every town of
+the terrain's list with a census figure, floor ranks at 0.63 over 70 towns
+(`data/places.md`). Building counts do not compare across terrains, Afghan
+houses being split into part models; floor does, within a factor of about three.
 
 ### 6.4 Scenery classes
 
@@ -470,12 +475,12 @@ name pattern list; `misc` when the family rules below give it no family,
 for a name that is no building or a flat box no name tells; else `building`. An override names a class and, when it wants one, a
 family. Box shape does not tell these apart (`data/scenery-review.md`).
 
-A `building` or `industrial` model also has the settlement family of §6.3 (a
-model of another class has one only when its override names one):
-house, apartment, shop, civic or industrial, which make places, and
-outbuilding, farm or military, which do not; a model whose name says it is a
-vehicle, bridge, mast, light, sign or the like has none, and a building no
-rule names is `unknown`. The family rules are names, first match wins, from
+A `building` or `industrial` model also has a family (a model of another class
+has one only when its override names one): house, apartment, shop, civic or
+industrial, outbuilding, farm or military. §6.3 reads only the last three, and
+the catalog shows them all. A model whose name says it is a vehicle, bridge,
+mast, light, sign, rock or the like has none, and a building no rule names is
+`unknown`. The family rules are names, first match wins, from
 the settlements research. A family of house-like models whose names do not
 say which (`german_town_*`, `syria_house*` and the like) is split by its box:
 under 30 m² an outbuilding, a narrow box under 100 m² and 14 m or taller a
@@ -493,9 +498,9 @@ keys that name no model; counting reads the objects pool's ids and one model
 word per object, 54 ms (Caucasus) to 3.4 s (GermanyCW) with the files in the
 OS cache, 0.6 s on Caucasus without. `dcsterrain check` prints it, so a new
 terrain's top models can be reviewed in minutes.
-Only Caucasus has overrides; on the other terrains a bridge or a parked
-vehicle large enough is a `building` until its terrain's file is written,
-though its name already keeps it out of every place.
+Only Caucasus has overrides, and no other terrain gets a file: a rule that
+holds across terrains takes its place, so a name that fixes one terrain goes
+in the family rules.
 
 ### 6.5 Road graph
 
@@ -693,11 +698,10 @@ Each names what settles it.
 11. **Cover bits and place sizes are measured on one terrain.** On Caucasus the
     town subsets cover 46 468 km² but bit 64 only 27 110 km², unexplained;
     a forest edge follows coarse triangles (13 per km² p50). The size classes
-    were fitted on 47 Caucasus towns, and rank 70 at 0.63, the Georgian
-    lowlands lowest; some building families (`korpus_*`,
-    `airfields_building_*`) are uncertain. *Settles it:* the opt-in checks per
-    terrain in N8 and Q15, and each terrain's catalog reviewed into its
-    override file; only Caucasus has one.
+    rest on about 100 m² of floor a person, and rank 70 Caucasus towns at
+    0.63, the Georgian lowlands lowest; only Caucasus has a census test, and
+    some models that count are uncertain (`data/places.md`). *Settles it:*
+    the opt-in checks per terrain, and screenshots of those models.
 12. **Low-level routes are deferred.** `exposure` maps where the sites
     cannot see; `low_level_route` is not built. Wires, pylons and masts are
     not modeled, and the specified request ignores speed. *Settles it:* a
