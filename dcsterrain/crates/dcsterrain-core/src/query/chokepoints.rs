@@ -31,7 +31,7 @@ pub fn chokepoints(
         return Err(vec![Issue::new(
             "not_ready",
             &format!(
-                "betweenness is still being built; `dcsterrain index --terrain {}` builds it",
+                "betweenness is not built yet; `dcsterrain index --terrain {}` builds it",
                 src.identity().terrain
             ),
             "",

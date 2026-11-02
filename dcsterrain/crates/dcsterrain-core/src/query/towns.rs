@@ -39,7 +39,7 @@ pub(super) fn places_of(src: &dyn Source) -> Result<&Places, Vec<Issue>> {
         vec![Issue::new(
             "not_ready",
             &format!(
-                "places are still being built; `dcsterrain index --terrain {}` builds them",
+                "places are not built yet; `dcsterrain index --terrain {}` builds them",
                 src.identity().terrain
             ),
             "",
