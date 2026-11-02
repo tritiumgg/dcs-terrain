@@ -19,10 +19,9 @@ The [skill](skill/SKILL.md) teaches an AI assistant to ask the questions for you
 
 ## Quick start
 
-Download: not usable yet.
-The first release, v0.1.0, is not published.
-Until then, [build it yourself](#build-it-yourself).
-After the release, run this in PowerShell on Windows:
+Download the latest release.
+You can also [build it yourself](#build-it-yourself).
+On Windows, run this in PowerShell:
 
 ```powershell
 Invoke-WebRequest https://github.com/tritiumgg/dcs-terrain/releases/latest/download/dcsterrain-x86_64-pc-windows-msvc.zip -OutFile dcsterrain.zip

@@ -27,11 +27,8 @@ On another build, other numbers can differ too, but each answer keeps the same l
 
 ## Get the tool
 
-<!-- release: once v0.1.0 is published, drop the "not usable yet" note below. -->
-**Download: not usable yet.**
-The first release, v0.1.0, is not published yet.
-When it is, the steps below download it.
-Until then, build the tool yourself as the [README](../README.md#build-it-yourself)
+The steps below download the latest release.
+You can also build the tool yourself, as the [README](../README.md#build-it-yourself)
 explains.
 
 Make a folder for your work, such as `C:\dcs-terrain`:
@@ -1217,9 +1214,7 @@ For example, `dcs/Mods/terrains/Caucasus` holds Caucasus.
 Then add `--install ~/dcs` to every `query`, `index` and `list-terrains`.
 `~` means your home folder.
 
-<!-- release: once v0.1.0 is published, drop the "not usable yet" note below. -->
-**Download: not usable yet.**
-When the first release is out, download the file for your computer:
+Download the file for your computer from the latest release:
 
 - `dcsterrain-aarch64-apple-darwin.tar.gz` for a Mac with Apple silicon.
 - `dcsterrain-x86_64-apple-darwin.tar.gz` for a Mac with an Intel chip.
