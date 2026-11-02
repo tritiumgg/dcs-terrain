@@ -27,7 +27,7 @@ On another build, other numbers can differ too, but each answer keeps the same l
 
 ## Get the tool
 
-<!-- R1-ASSETS: the release v0.1.0 is not published yet. When it is, drop the "not usable yet" note below. -->
+<!-- release: once v0.1.0 is published, drop the "not usable yet" note below. -->
 **Download: not usable yet.**
 The first release, v0.1.0, is not published yet.
 When it is, the steps below download it.
@@ -1209,6 +1209,7 @@ Copy these three things from a Windows DCS install to your computer:
   The tool reads radio and object lists from it.
 - The folder `Mods\terrains`.
   You can copy only the terrains you want from it.
+  Each one is large: Caucasus is 18 GB.
 
 Put them in one folder, such as `dcs` in your home folder.
 Keep the folders inside it as they were.
@@ -1216,7 +1217,7 @@ For example, `dcs/Mods/terrains/Caucasus` holds Caucasus.
 Then add `--install ~/dcs` to every `query`, `index` and `list-terrains`.
 `~` means your home folder.
 
-<!-- R1-ASSETS: the release v0.1.0 is not published yet. When it is, drop the "not usable yet" note below. -->
+<!-- release: once v0.1.0 is published, drop the "not usable yet" note below. -->
 **Download: not usable yet.**
 When the first release is out, download the file for your computer:
 
