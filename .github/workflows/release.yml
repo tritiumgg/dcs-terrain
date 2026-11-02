@@ -1,0 +1,179 @@
+name: release
+
+# A pushed tag `v*` builds `dcsterrain` on each platform's own runner, runs each
+# build on a fresh runner that never sees the source or a toolchain, and only
+# then attaches the archives and their checksums to a GitHub release for the
+# tag. A pull request that changes this file runs the same builds and checks
+# without releasing, so the workflow is proven before a tag depends on it.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A tag's run is never cancelled; a newer push to a pull request supersedes the
+# one in flight.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Named, rather than left to the default, because only a named bash runs with
+# pipefail: without it a binary that fails into `tee` passes the step.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # Every build is native: each runner builds for its own platform, so the C in
+  # the vendored Lua is compiled by that platform's own compiler and nothing is
+  # cross-linked. No dependency cache: a release is built from nothing.
+  #
+  # Windows and Linux link their C runtime in statically, so the binary needs
+  # no Visual C++ redistributable and no particular glibc. Static glibc rather
+  # than musl keeps the allocator the tests and benchmarks run on; the tool
+  # resolves no host names, the one thing static glibc cannot do. macOS has no
+  # static C runtime: the binary links only the system's own libraries, which
+  # every Mac has.
+  #
+  # `--target` is always named, so the static flag reaches the binary and not
+  # the build scripts and proc macros, which run on the host.
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, rustflags: "-C target-feature=+crt-static" }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, rustflags: "-C target-feature=+crt-static" }
+          - { os: macos-latest, target: aarch64-apple-darwin, rustflags: "" }
+          - { os: macos-15-intel, target: x86_64-apple-darwin, rustflags: "" }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # rustup installs the toolchain rust-toolchain.toml pins on the first
+      # cargo call, as in the rust workflow.
+      - name: Build
+        working-directory: dcsterrain
+        run: cargo build --release --locked -p dcsterrain-cli --target ${{ matrix.target }}
+
+      - name: Package for Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Compress-Archive -Path dcsterrain/target/${{ matrix.target }}/release/dcsterrain.exe, LICENSE, README.md -DestinationPath dist/dcsterrain-${{ matrix.target }}.zip
+
+      # tar keeps the executable bit, which a zip made here would not.
+      - name: Package for macOS and Linux
+        if: runner.os != 'Windows'
+        run: |
+          mkdir dist
+          cp dcsterrain/target/${{ matrix.target }}/release/dcsterrain LICENSE README.md dist/
+          tar -czf dist/dcsterrain-${{ matrix.target }}.tar.gz -C dist dcsterrain LICENSE README.md
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dcsterrain-${{ matrix.target }}
+          path: dist/dcsterrain-${{ matrix.target }}.*
+          if-no-files-found: error
+
+  # A fresh runner of the same platform downloads the archive and asks it one
+  # question, with no checkout, no cargo call and a bare environment, so what
+  # answers is the archive alone.
+  verify:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-15-intel, target: x86_64-apple-darwin }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dcsterrain-${{ matrix.target }}
+
+      # Alpine carries musl and no glibc, so a binary that needed the host's C
+      # library would not start there.
+      - name: Answer on Linux, in a container without glibc
+        if: runner.os == 'Linux'
+        run: |
+          mkdir bin
+          tar -xzf dcsterrain-${{ matrix.target }}.tar.gz -C bin
+          docker run --rm -v "$PWD/bin:/bin-under-test:ro" alpine:3.22 \
+            /bin-under-test/dcsterrain query --terrain synth describe | tee answer.json
+          grep -q '"terrain":"synth"' answer.json
+
+      - name: Answer on macOS, with an empty environment
+        if: runner.os == 'macOS'
+        run: |
+          mkdir bin
+          tar -xzf dcsterrain-${{ matrix.target }}.tar.gz -C bin
+          otool -L bin/dcsterrain
+          env -i bin/dcsterrain query --terrain synth describe | tee answer.json
+          grep -q '"terrain":"synth"' answer.json
+
+      # The path holds System32 alone. The import table must name no Visual
+      # C++ or universal C runtime library, which a dynamically linked runtime
+      # would, and which a machine without the redistributable lacks.
+      - name: Answer on Windows, with System32 as the whole path
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Expand-Archive dcsterrain-${{ matrix.target }}.zip -DestinationPath bin
+          $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("bin/dcsterrain.exe"))
+          if ($text -match '(?i)vcruntime\d+\.dll|msvcp\d+\.dll|api-ms-win-crt-') { throw "links a dynamic C runtime: $($Matches[0])" }
+          $env:Path = "$env:SystemRoot\System32"
+          bin/dcsterrain.exe query --terrain synth describe | Tee-Object -FilePath answer.json
+          if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+          Get-Content -Raw answer.json | ConvertFrom-Json | Out-Null
+
+  release:
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+
+      # A tag on a commit whose crate version differs would publish archives
+      # that report another version than their release.
+      - name: The tag names the version the binary reports
+        run: |
+          tar -xzf dist/dcsterrain-x86_64-unknown-linux-gnu.tar.gz -C "$RUNNER_TEMP" dcsterrain
+          reported=$("$RUNNER_TEMP/dcsterrain" --version)
+          test "$reported" = "dcsterrain ${GITHUB_REF_NAME#v}" || { echo "tag $GITHUB_REF_NAME, binary $reported"; exit 1; }
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum dcsterrain-* > SHA256SUMS && cat SHA256SUMS
+
+      # A tag with a hyphen, such as v0.2.0-rc.1, is a pre-release.
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=
+          case "$GITHUB_REF_NAME" in *-*) prerelease=--prerelease ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --title "$GITHUB_REF_NAME" --generate-notes $prerelease
