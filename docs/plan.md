@@ -96,7 +96,7 @@ a valid RFC 7946 `FeatureCollection` whose features match its JSON response.
 | V1 | `tools/validate/`: the live sortie through the bridge — point heights, `visible` against `terrain.isVisible`, route lengths against `findPathOnRoads`, MGRS against `coord.LLtoMGRS` — written to `validation.json` | Caucasus within the accuracy targets. Passed on seed 2, after N13, with the route target changed as `data/validation.md` records | Q7, N0, N13 | live |
 | X1 | Remove the hook (ADR 0005): `extractor/`, its Lua tests and CI workflow, the Lua 5.1 build and tasks, `index --hook` and the import in `tables.json`, and the `code`, `civilian`, `abandoned` and `class` fields; `tables.json` re-stamped after an update like the other entries; `CLAUDE.md` and the README to match | `mise run check` and `mise run docs` pass; `check` and `describe` answer on Caucasus with no hook field; nothing outside `docs/` names the hook | — | agent |
 | R1 | Release builds: `dcsterrain` archives for Windows, Linux, and macOS on Apple silicon and Intel, each built on its platform's own CI runner, the C runtime linked statically on Windows and Linux, attached with checksums to a release for each `v*` tag | On each platform's runner, a CI job that only downloads the archive answers `query --terrain synth describe` with no checkout, no cargo call and a bare environment: Linux in a container without glibc, Windows with System32 as its whole path and no dynamic C runtime imported | Q7 | CI |
-| R2 | `docs/guide.md`: point the tool at an install, ask a siting question, read the answer, and the failure modes. Written against real output | A newcomer answers one siting question following only the guide | Q7, S1 | live |
+| R2 | `docs/guide.md`: point the tool at an install, ask a siting question, read the answer, combine questions, draw the answer as GeoJSON, and the failure modes. Written against real output. The tool is mainly for assistants and software, with the skill as their entry point; the guide serves a person who drives it by hand | Every command and output in the guide reruns on Caucasus in Windows PowerShell 5.1 and 7; a stand-in newcomer subagent, given only the guide, answers a siting question it was not shown. The live newcomer test was not run: the user reviewed the guide and judged it adequate | Q7, S1 | agent, user review |
 
 ### C: catalog review
 
@@ -136,7 +136,7 @@ capture:
 |---|---|---|
 | MS1 Engine on the install | A1, N0–N7, N10, N12, X1 | `query --terrain Caucasus describe` and `sample` answer from the install with no step before; every decoder passes its opt-in checks; `Synth` passes every grid test |
 | MS2 Queries | N8, N9, N11, Q1–Q13, Q15, Q17, Q18 | Every operation tested on `Synth`; opt-in benchmarks within the targets on Caucasus |
-| MS3 Assistant and release | S1, V1, R1, R2, C1 | An assistant with the skill answers the FARP example; live validation within target; release binaries; a guide a newcomer follows |
+| MS3 Assistant and release | S1, V1, R1, R2, C1 | An assistant with the skill answers the FARP example; live validation within target; release binaries; a guide written against real output and reviewed by the user |
 
 N0 goes first among the N tasks because it could stop the design: if DCS holds
 its terrain files with a share mode that denies readers, the tool cannot run
