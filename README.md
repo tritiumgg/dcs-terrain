@@ -8,6 +8,9 @@ It finds the answers in the terrain files of your DCS install.
 DCS does not need to be running.
 The tool only reads your DCS files.
 It never changes them.
+On macOS or Linux, it reads a copy of part of a Windows install.
+The [guide](docs/guide.md#on-macos-or-linux) says which part.
+It needs no GPU.
 
 **This project contains no terrain files.** The tool reads the ones already in your DCS install.
 
@@ -17,9 +20,7 @@ A DCS terrain is a set of files.
 They hold the ground's shape, its roads, its objects and its airfields.
 `dcsterrain` reads those files.
 From them, it works out heights, slopes, lines of sight and routes.
-It saves what it works out in a folder called the cache, so later questions are fast.
-You can delete the cache at any time.
-The tool builds it again.
+It saves what it works out in a cache folder, so later questions are fast.
 
 You type a command that carries a question, written in JSON.
 JSON is a plain-text format for data.
@@ -30,7 +31,6 @@ The [skill](skill/SKILL.md) teaches an AI assistant to ask the questions for you
 
 ## Quick start
 
-<!-- R1-ASSETS: the release v0.1.0 is not published yet. When it is, drop the "not usable yet" note below. -->
 Download, not usable yet: the first release, v0.1.0, is not published.
 Until it is, [build it yourself](#build-it-yourself).
 When it is, Windows users run this in PowerShell:
@@ -43,7 +43,9 @@ Invoke-WebRequest https://github.com/tritiumgg/dcs-terrain/releases/latest/downl
 Expand-Archive dcsterrain.zip -DestinationPath .
 ```
 
-In the folder that holds `dcsterrain.exe`, list your terrains:
+In the folder that holds `dcsterrain.exe`, list your terrains.
+The tool finds DCS by itself.
+`--install <folder>` points it at another DCS folder.
 
 ```powershell
 .\dcsterrain.exe list-terrains
@@ -64,7 +66,6 @@ The question goes in on one line, after `|`:
 ```
 
 The [guide](docs/guide.md) walks through a whole siting question, step by step.
-It covers macOS and Linux too.
 
 ## What the output looks like
 
@@ -113,15 +114,6 @@ The other commands:
 - `check` reports which terrain files the tool can read.
 - `cache list` shows the cache. `cache clear` deletes it.
 - `--help` lists every command and option.
-
-## Requirements
-
-- Windows: DCS World installed on the same PC.
-  The tool finds it by itself.
-  `--install <folder>` points it at a different DCS folder.
-- macOS or Linux: a copy of part of a Windows DCS install.
-  The [guide](docs/guide.md#on-macos-or-linux) says which part.
-- No GPU.
 
 ## Build it yourself
 
