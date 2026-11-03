@@ -78,27 +78,29 @@ fn refusal(issues: Vec<Issue>) -> String {
 }
 
 /// JSON on its way out: kept as text while it is short, and moved to a
-/// file once it passes `INLINE_MAX`, so it is never held whole.
+/// new file named for an operation and an extension once it passes
+/// `INLINE_MAX`, so it is never held whole.
 enum Spill<'a> {
-    Text(Vec<u8>, &'a Path),
+    Text(Vec<u8>, &'a Path, &'a str, &'a str),
     File(BufWriter<File>, PathBuf, usize),
 }
 
 impl Write for Spill<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self {
-            Spill::Text(text, path) if text.len() + buf.len() > INLINE_MAX => {
-                let path: &Path = path;
-                if let Some(dir) = path.parent() {
-                    std::fs::create_dir_all(dir)?;
+            Spill::Text(text, dir, op, extension) if text.len() + buf.len() > INLINE_MAX => {
+                let (file, path) = create(dir, op, extension)?;
+                let mut file = BufWriter::new(file);
+                let moved = file.write_all(text).and_then(|()| file.write_all(buf));
+                if let Err(e) = moved {
+                    drop(file);
+                    let _ = std::fs::remove_file(&path);
+                    return Err(e);
                 }
-                let mut file = BufWriter::new(File::create(path)?);
-                file.write_all(text)?;
-                file.write_all(buf)?;
                 let written = text.len() + buf.len();
-                *self = Spill::File(file, path.to_path_buf(), written);
+                *self = Spill::File(file, path, written);
             }
-            Spill::Text(text, _) => text.extend_from_slice(buf),
+            Spill::Text(text, ..) => text.extend_from_slice(buf),
             Spill::File(file, _, n) => {
                 file.write_all(buf)?;
                 *n += buf.len();
@@ -115,75 +117,151 @@ impl Write for Spill<'_> {
     }
 }
 
+/// A new file in `dir` named for `op`, the process and the time, with
+/// `extension`, never one that is already there: a server given the
+/// process id of an earlier one overwrites none of its files.
+fn create(dir: &Path, op: &str, extension: &str) -> io::Result<(File, PathBuf)> {
+    private(dir)?;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let pid = std::process::id();
+    for k in 0u32.. {
+        let path = dir.join(format!("{op}-{pid}-{now}-{k}.{extension}"));
+        match File::options().write(true).create_new(true).open(&path) {
+            Ok(file) => return Ok((file, path)),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    unreachable!("some name is free")
+}
+
+/// Makes `dir` if it is missing, and refuses it unless it is a directory
+/// only its owner may enter: where users share a temp directory, another
+/// could otherwise read an answer or plant a link in its place.
+fn private(dir: &Path) -> io::Result<()> {
+    let mut b = std::fs::DirBuilder::new();
+    b.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
+    b.create(dir)?;
+    let meta = std::fs::symlink_metadata(dir)?;
+    let open = !meta.is_dir();
+    #[cfg(unix)]
+    let open = open || std::os::unix::fs::PermissionsExt::mode(&meta.permissions()) & 0o077 != 0;
+    if open {
+        let why = format!(
+            "{} is not a directory only this user may enter",
+            dir.display()
+        );
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied, why));
+    }
+    Ok(())
+}
+
 /// Where JSON went: kept as text, or written to a file of so many bytes.
 enum Spilled {
     Text(String),
     File(PathBuf, usize),
 }
 
-/// The files of the answers too large to hand back, one name each.
+/// A path as an answer names it.
+fn named(path: &Path) -> io::Result<&str> {
+    path.to_str().ok_or_else(|| {
+        let why = format!("{} is not UTF-8, so no answer can name it", path.display());
+        io::Error::new(io::ErrorKind::InvalidData, why)
+    })
+}
+
+/// The files of the answers too large to hand back.
 struct Files {
     dir: PathBuf,
-    made: u64,
 }
 
 impl Files {
     /// `value` as text, or in a file named for `op` with `extension` once
-    /// past `INLINE_MAX`.
-    fn spill(&mut self, value: &impl Serialize, op: &str, extension: &str) -> io::Result<Spilled> {
-        self.made += 1;
-        let name = format!("{op}-{}-{}.{extension}", std::process::id(), self.made);
-        let path = self.dir.join(name);
-        let mut out = Spill::Text(Vec::new(), &path);
-        serde_json::to_writer(&mut out, value)?;
-        out.flush()?;
-        Ok(match out {
-            Spill::Text(text, _) => Spilled::Text(String::from_utf8(text).expect("JSON is UTF-8")),
-            Spill::File(_, path, n) => Spilled::File(path, n),
-        })
+    /// past `INLINE_MAX`. A file left part written is removed.
+    fn spill(&self, value: &impl Serialize, op: &str, extension: &str) -> io::Result<Spilled> {
+        let mut out = Spill::Text(Vec::new(), &self.dir, op, extension);
+        let written = serde_json::to_writer(&mut out, value)
+            .map_err(io::Error::from)
+            .and_then(|()| out.flush());
+        let (file, path, n) = match (out, written) {
+            (Spill::Text(text, ..), Ok(())) => {
+                let text = String::from_utf8(text).expect("JSON is UTF-8");
+                return Ok(Spilled::Text(text));
+            }
+            (Spill::Text(..), Err(e)) => return Err(e),
+            (Spill::File(file, path, n), written) => (file, path, written.map(|()| n)),
+        };
+        drop(file);
+        match n.and_then(|n| named(&path).map(|_| n)) {
+            Ok(n) => Ok(Spilled::File(path, n)),
+            Err(e) => {
+                let _ = std::fs::remove_file(&path);
+                Err(e)
+            }
+        }
     }
 
     /// An answer as the tool's text: `query`'s, with a GeoJSON over
     /// `INLINE_MAX` swapped for the path of a file holding it, and an answer
     /// still over it swapped for the path of a file holding the answer.
-    fn written(&mut self, op: &str, mut answer: Answer) -> io::Result<String> {
+    fn written(&self, op: &str, mut answer: Answer) -> io::Result<String> {
         let value = match &mut answer {
             Answer::Value(v) => v,
             Answer::Rasters(r) => &mut r.value,
         };
+        let mut geojson_file = None;
         if let Some(geojson) = value.get("geojson").filter(|g| g.is_object())
             && let Spilled::File(path, bytes) = self.spill(geojson, op, "geojson")?
         {
             let top = value.as_object_mut().expect("an answer is an object");
             top.remove("geojson");
-            top.insert("geojson_file".into(), json!(path));
+            top.insert("geojson_file".into(), json!(named(&path)?));
             top.insert("geojson_bytes".into(), json!(bytes));
+            geojson_file = Some(path);
         }
-        match self.spill(&answer, op, "json")? {
-            Spilled::Text(text) => Ok(text),
-            Spilled::File(path, bytes) => {
+        let text = match self.spill(&answer, op, "json") {
+            Ok(Spilled::Text(text)) => Ok(text),
+            Ok(Spilled::File(path, bytes)) => {
+                let path = named(&path)?;
                 Ok(json!({"answer_file": path, "answer_bytes": bytes}).to_string())
             }
+            Err(e) => Err(e),
+        };
+        // A GeoJSON's file the answer cannot name is named by nothing.
+        if let (Err(_), Some(path)) = (&text, geojson_file) {
+            let _ = std::fs::remove_file(path);
         }
+        text
     }
 
-    /// Removes the files a server wrote more than `KEPT` ago. A file that
-    /// cannot be removed stays for the next.
+    /// Removes the files of large answers written more than `KEPT` ago, by
+    /// this server or another: only names a server gives, an operation's
+    /// followed by a dash, ending `.json` or `.geojson`. A file that cannot
+    /// be removed stays for the next.
     fn tidy(&self) {
         let Ok(entries) = std::fs::read_dir(&self.dir) else {
             return;
         };
         let now = SystemTime::now();
         for e in entries.flatten() {
+            let name = e.file_name();
+            let ours = name.to_str().is_some_and(|n| {
+                OPERATIONS.iter().any(|o| {
+                    n.strip_prefix(o.name).is_some_and(|rest| {
+                        rest.starts_with('-')
+                            && (rest.ends_with(".json") || rest.ends_with(".geojson"))
+                    })
+                })
+            });
             let old = e
                 .metadata()
                 .and_then(|m| m.modified())
                 .is_ok_and(|t| now.duration_since(t).is_ok_and(|age| age > KEPT));
-            let ours = matches!(
-                e.path().extension().and_then(|x| x.to_str()),
-                Some("json" | "geojson")
-            );
-            if old && ours {
+            if ours && old {
                 let _ = std::fs::remove_file(e.path());
             }
         }
@@ -199,7 +277,7 @@ fn answers_dir() -> PathBuf {
 /// Answers each call in turn on this thread, which owns the terrain, until
 /// the server is gone. One call at a time, as a batch answers one line at a
 /// time, so nothing grows with the number of calls.
-fn answer_calls(mut opener: Opener, mut files: Files, calls: mpsc::Receiver<Call>) {
+fn answer_calls(mut opener: Opener, files: Files, calls: mpsc::Receiver<Call>) {
     files.tidy();
     for c in calls {
         let answered = call::within(c.ticket, || opener.answer(&c.op, &c.request));
@@ -253,7 +331,9 @@ impl ServerHandler for Server {
         self.calls.send(call).map_err(|_| gone())?;
         let text = loop {
             tokio::select! {
-                text = &mut answered => break text.map_err(|_| gone())?,
+                // In this order: the answering thread queues every notice
+                // before its reply, so none is lost to a reply that wins.
+                biased;
                 Some((share, doing)) = progress.recv() => {
                     if let Some(token) = &token {
                         let notice = ProgressNotificationParam::new(token.clone(), share)
@@ -268,6 +348,7 @@ impl ServerHandler for Server {
                     ticket.cancel();
                     return Err(ErrorData::internal_error("the call was cancelled", None));
                 }
+                text = &mut answered => break text.map_err(|_| gone())?,
             }
         };
         let result = match text {
@@ -281,10 +362,7 @@ impl ServerHandler for Server {
 /// Serves the tools on stdin and stdout until the client closes them.
 pub fn serve(opener: Opener) -> ExitCode {
     let (calls, waiting) = mpsc::channel();
-    let files = Files {
-        dir: answers_dir(),
-        made: 0,
-    };
+    let files = Files { dir: answers_dir() };
     let answering = std::thread::Builder::new()
         .name("answer".into())
         .spawn(move || answer_calls(opener, files, waiting));
