@@ -397,3 +397,63 @@ fn a_mistake_is_named_with_what_would_do() {
     let e = refused("towns", &[&["limit", "1"], &["limit", "2"]]);
     assert!(e.contains("more than once"), "{e}");
 }
+
+#[test]
+fn a_list_inside_an_object_takes_several_values_in_order_or_after_its_key() {
+    let d = read(
+        "score_site",
+        &[
+            &["at", "1000,2000"],
+            &["footprint", "20", "30", "orientations-deg=0", "90", "45"],
+            &[
+                "criteria",
+                "not-visible-from",
+                "town:A@1",
+                "town:B@2",
+                "0.5",
+            ],
+            &[
+                "criteria",
+                "visible-to",
+                "targets=town:C@3",
+                "town:D@4",
+                "min-fraction=1",
+            ],
+        ],
+    );
+    assert_eq!(
+        d.request["footprint"]["orientations_deg"],
+        json!([0.0, 90.0, 45.0])
+    );
+    assert_eq!(
+        d.request["criteria"][0]["params"],
+        json!({"observers": [{"alt_agl": 1.0}, {"alt_agl": 2.0}], "max_fraction": 0.5})
+    );
+    assert_eq!(
+        d.request["criteria"][1]["params"],
+        json!({"targets": [{"alt_agl": 3.0}, {"alt_agl": 4.0}], "min_fraction": 1.0})
+    );
+}
+
+#[test]
+fn a_list_of_text_splits_at_commas_and_a_map_key_is_given_once() {
+    let d = read(
+        "sample",
+        &[
+            &["points", "1000,2000"],
+            &["layers", "height,slope", "cover"],
+        ],
+    );
+    assert_eq!(d.request["layers"], json!(["height", "slope", "cover"]));
+    let e = refused(
+        "find_sites",
+        &[
+            &["region", "circle", "a", "1"],
+            &["footprint", "1", "1"],
+            &["criteria", "valid"],
+            &["spacing", "1"],
+            &["weights", "slope-max=1", "slope_max=2"],
+        ],
+    );
+    assert!(e.contains("given more than once"), "{e}");
+}

@@ -170,3 +170,25 @@ fn no_command_or_flag_clashes_with_another() {
         assert!(!OPERATIONS.iter().any(|o| kebab(o.name) == name), "{name}");
     }
 }
+
+#[test]
+fn after_two_hyphens_every_word_is_a_value() {
+    let s = spec("nearest");
+    let line = tokens(&s, &args("--kind scenery --class -- -x")).unwrap();
+    assert_eq!(line.given[1], ("class".into(), args("-x")));
+}
+
+#[test]
+fn a_shared_flag_is_given_once_and_geojson_points_to_its_flag() {
+    let s = spec("nearest");
+    let e = tokens(&s, &args("--terrain synth --terrain Caucasus")).unwrap_err();
+    assert_eq!(e.0, "--terrain is given more than once");
+    let e = tokens(&s, &args("--geojson")).unwrap_err();
+    assert!(
+        e.0.ends_with("Did you mean `--geojson-out <file>`?"),
+        "{}",
+        e.0
+    );
+    let e = tokens(&s, &args("--j")).unwrap_err();
+    assert!(!e.0.contains("Did you mean"), "{}", e.0);
+}

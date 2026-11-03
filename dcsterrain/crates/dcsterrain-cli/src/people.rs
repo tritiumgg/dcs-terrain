@@ -166,11 +166,17 @@ pub fn tokens(spec: &Spec, args: &[String]) -> Result<Line, Usage> {
         .iter()
         .map(|f| (kebab(&f.name), &f.shape))
         .collect();
+    // After `--`, every word is a value, even one starting with a hyphen.
+    let mut raw = false;
     for arg in args {
-        let flag = arg.strip_prefix("--");
+        if !raw && arg == "--" {
+            raw = true;
+            continue;
+        }
+        let flag = if raw { None } else { arg.strip_prefix("--") };
         let looks_like_value =
             arg.starts_with('-') && arg[1..].starts_with(|c: char| c.is_ascii_digit() || c == '.');
-        if arg == "-h" {
+        if !raw && arg == "-h" {
             line.shared.push(("help".into(), None));
             open = None;
             continue;
@@ -181,6 +187,9 @@ pub fn tokens(spec: &Spec, args: &[String]) -> Result<Line, Usage> {
                 None => (flag, None),
             };
             if let Some((_, takes)) = SHARED.iter().find(|(n, _)| *n == name) {
+                if name != "help" && line.has(name) {
+                    return Err(Usage(format!("--{name} is given more than once")));
+                }
                 if name == "geojson-out" && !spec.geojson {
                     return Err(Usage(format!(
                         "--geojson-out: {} returns no GeoJSON",
@@ -223,15 +232,19 @@ pub fn tokens(spec: &Spec, args: &[String]) -> Result<Line, Usage> {
                 .map(|(n, _)| n.to_string())
                 .chain(fields.iter().map(|(n, _)| n.clone()))
                 .collect();
-            let near = flags::closest(name, names.iter().map(String::as_str))
-                .map(|n| format!(" Did you mean `--{n}`?"))
-                .unwrap_or_default();
+            let near = if name == "geojson" && spec.geojson {
+                " Did you mean `--geojson-out <file>`?".to_string()
+            } else {
+                flags::closest(name, names.iter().map(String::as_str))
+                    .map(|n| format!(" Did you mean `--{n}`?"))
+                    .unwrap_or_default()
+            };
             return Err(Usage(format!(
                 "--{name} is not a flag of {}.{near}",
                 spec.command()
             )));
         }
-        if arg.starts_with('-') && arg.len() > 1 && !looks_like_value {
+        if !raw && arg.starts_with('-') && arg.len() > 1 && !looks_like_value {
             return Err(Usage(format!("{arg} is not a flag of {}", spec.command())));
         }
         match open {
@@ -552,7 +565,10 @@ pub fn run(op: &str, args: &[String], init: impl FnOnce(bool, Option<u16>)) -> E
         None => None,
         Some(Ok(n)) if n > 0 => Some(n),
         Some(_) => {
-            return usage(&spec, Usage("--threads takes a whole number from 1".into()));
+            return usage(
+                &spec,
+                Usage("--threads takes a whole number from 1 to 65535".into()),
+            );
         }
     };
     let draft = match spec.read(&line.given) {

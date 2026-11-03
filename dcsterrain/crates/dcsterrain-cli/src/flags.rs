@@ -15,7 +15,9 @@
 //!   and words may also be apart by commas.
 //! - An object takes its fields as values, in the order the help lists
 //!   them, or as `key=value` in any order; an optional one only as
-//!   `key=value`. A nested field is `field.key=value`.
+//!   `key=value`. A nested field is `field.key=value`. A list among the
+//!   fields takes every value but those the fields after it need, or the
+//!   values after its key up to the next key.
 //! - A field that is one of several shapes takes the shape's name first.
 //! - A list of objects takes one object each time its flag is given.
 //! - A map takes `key=value` pairs.
@@ -185,7 +187,7 @@ fn distance(a: &str, b: &str) -> usize {
 pub fn closest<'a>(typed: &str, names: impl Iterator<Item = &'a str>) -> Option<&'a str> {
     names
         .map(|n| (distance(typed, n), n))
-        .filter(|(d, n)| *d <= (n.len() / 3).max(2))
+        .filter(|(d, n)| *d <= (n.len() / 3).max(2) && *d < typed.chars().count())
         .min()
         .map(|(_, n)| n)
 }

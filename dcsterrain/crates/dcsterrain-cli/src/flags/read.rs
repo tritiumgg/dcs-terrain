@@ -106,7 +106,7 @@ fn one<'a>(flag: &str, given: &[&'a Vec<String>]) -> Result<&'a str, Usage> {
 /// A value written for a list of numbers or words, split at its commas.
 fn pieces(shape: &Shape, v: &str) -> Vec<String> {
     match shape {
-        Shape::Number { .. } | Shape::Word(_) => v
+        Shape::Number { .. } | Shape::Word(_) | Shape::Text => v
             .split(',')
             .map(str::trim)
             .filter(|p| !p.is_empty())
@@ -294,7 +294,10 @@ impl Reader<'_> {
                     };
                     let at = format!("{pointer}/{}", snake(k));
                     let label = format!("{flag} {k}");
-                    map.insert(snake(k), self.value(inner, &[x.to_string()], &label, &at)?);
+                    let value = self.value(inner, &[x.to_string()], &label, &at)?;
+                    if map.insert(snake(k), value).is_some() {
+                        return Err(Usage(format!("{flag}: `{k}` is given more than once")));
+                    }
                 }
                 Ok(Value::Object(map))
             }
@@ -379,9 +382,13 @@ impl Reader<'_> {
         // Each field's values as written: bare in order, or by key.
         let mut given: BTreeMap<usize, Vec<String>> = BTreeMap::new();
         let mut bare = Vec::new();
+        // The list whose key came last takes the bare values after it.
+        let mut open_list: Option<usize> = None;
         for v in values {
             if let Some((i, tail, x)) = key_of(v) {
                 let entry = given.entry(i).or_default();
+                open_list =
+                    (tail.is_none() && matches!(fields[i].shape, Shape::List(_))).then_some(i);
                 match tail {
                     Some(t) => entry.push(format!("{t}={x}")),
                     None => entry.extend(pieces(&fields[i].shape, &x)),
@@ -394,6 +401,7 @@ impl Reader<'_> {
                 .position(|f| f.shape == Shape::Bool && folded(&f.name) == folded(v))
             {
                 given.entry(i).or_default().push("true".into());
+                open_list = None;
                 continue;
             }
             if v.contains('=') && !v.starts_with(['{', '[']) {
@@ -405,31 +413,35 @@ impl Reader<'_> {
                     suggest(&kebab(&snake(k)), names.iter().map(String::as_str), "")
                 )));
             }
+            if let Some(i) = open_list {
+                let entry = given.entry(i).or_default();
+                entry.extend(pieces(&fields[i].shape, v));
+                continue;
+            }
             bare.push(v.clone());
         }
         // Bare values fill the fields one value can be, in order; a list
-        // last among them takes all that are left.
+        // takes all the values but those the fields after it need.
         let slots: Vec<usize> = fields
             .iter()
             .enumerate()
             .filter(|(_, f)| f.required && takes_bare(&f.shape))
             .map(|(i, _)| i)
             .collect();
+        let open: Vec<usize> = slots
+            .iter()
+            .copied()
+            .filter(|i| !given.contains_key(i))
+            .collect();
         let mut bare = bare.into_iter();
-        for (n, &i) in slots.iter().enumerate() {
-            if given.contains_key(&i) {
-                continue;
-            }
-            let last = n + 1 == slots.len();
+        for (n, &i) in open.iter().enumerate() {
+            let after = open.len() - n - 1;
             let entry = given.entry(i).or_default();
             match &fields[i].shape {
-                Shape::List(inner) if last => {
-                    for v in bare.by_ref() {
-                        entry.extend(pieces(inner, &v));
-                    }
-                }
                 Shape::List(inner) => {
-                    if let Some(v) = bare.next() {
+                    let left = bare.len();
+                    let take = left.saturating_sub(after).max(1);
+                    for v in bare.by_ref().take(take) {
                         entry.extend(pieces(inner, &v));
                     }
                 }
