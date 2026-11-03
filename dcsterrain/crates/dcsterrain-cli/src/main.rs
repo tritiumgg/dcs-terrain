@@ -21,6 +21,9 @@ use tracing::Level;
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::prelude::*;
 
+// The commands for people read their flags through it, once they are wired.
+#[allow(dead_code)]
+mod flags;
 mod mcp;
 // The commands for people read every place flag through it.
 #[cfg_attr(not(test), allow(dead_code))]
