@@ -599,10 +599,11 @@ edges, and its road and rail graph has 357 k nodes.
   The server lives as long as its client:
   - A call the client cancels with `notifications/cancelled` fails as
     `cancelled` at the work's next look, within a second; the next call waits
-    behind it. `find_sites` looks between its reads, every 64 candidates and
-    at each sightline, the horizon march at each cell, and a sweep, as
-    `exposure` runs it, at each row and radial. Whatever work an operation
-    cut short, its answer is never returned.
+    behind it. A read of a layer looks between its tiles. `find_sites` looks
+    between its reads, every 64 candidates and at each sightline, the
+    horizon march at each cell, and a sweep, as `exposure` runs it, at each
+    radial it traces over the mesh, each row and each radial. Whatever work
+    an operation cut short, its answer is never returned.
   - `find_sites` and `exposure` send `notifications/progress` to the caller's
     token: the share of the work done, 0 to 1 against a total of 1, rising,
     at most four a second, with what the work is doing.
