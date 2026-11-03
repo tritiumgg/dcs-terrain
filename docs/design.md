@@ -570,13 +570,28 @@ edges, and its road and rail graph has 357 k nodes.
   from the request and response types the handlers take: every operation's, a
   batch line's, and the issue codes.
 - `dcsterrain index`, `dcsterrain cache`, as §4.
-- `dcsterrain mcp [--install <dir>] --terrain <Terrain>` is an MCP server
-  over stdio (ADR 0011). Each operation is one tool whose input schema is
-  its request's, cut from `schema` with the definitions it reaches, and
-  whose answer is one text block holding the bytes `query` prints for the
-  request. A refusal is a tool error holding `query`'s `{"issues": [...]}`.
-  Calls run one at a time on one thread holding the opener a batch uses, so
-  the terrain stays open between calls and reopens when its files change:
+- `dcsterrain mcp [--install <dir>] [--terrain <Terrain>]` is an MCP server
+  over stdio (ADR 0011), one for every terrain of the install. Each
+  operation is one tool whose input schema is its request's, cut from
+  `schema` with the definitions it reaches, with one property added beside
+  the request's fields: `terrain`, the id the call is about, as `--terrain`
+  takes it. `--terrain` only sets the terrain of a call that names none; a
+  call that names none on a server started without one is refused, its
+  issue's path `terrain`, and an unknown id is refused with the ids the
+  install holds. `synth` takes the server's `--seed`, `--size-km` and
+  `--cell`, so each tool gains one property and not four for a terrain only
+  tests use. A tool's answer is one text block holding the bytes `query`
+  prints for the request about that terrain. A refusal is a tool error
+  holding `query`'s `{"issues": [...]}`. A `list_terrains` tool answers what
+  `list-terrains --json` prints without each terrain's `files`, the class
+  and version of every file, which `check` reports: on an install of eight
+  terrains they are 190 of its 194 KB, and an assistant reads the ids from
+  the rest.
+  Calls run one at a time on one thread holding the opener a batch uses, and
+  that thread holds one terrain open at a time: a call naming another lets
+  the open one go before the next opens, so a session over many terrains
+  holds the memory of one. The terrain stays open between calls that name it
+  and reopens when its files change:
   before each call, the build in `autoupdate.cfg` and the size and modified
   time of each file it was opened from are compared, a few stats. A patch
   changes them; a watcher of the files would be a thread and an OS facility

@@ -90,12 +90,12 @@ Other commands:
 - `cache list` shows the cache.
 - `cache clear` deletes it. The tool builds it again when needed.
 - `schema` prints the fields of every question and answer.
-- `mcp --terrain <id>` answers the same questions as tools for an AI assistant.
+- `mcp` answers the same questions as tools for an AI assistant, about any of your terrains.
 - `--help` lists every command and option.
 
 ## Use it from an AI assistant
 
-`dcsterrain mcp` gives an assistant one tool per kind of question through MCP, with no shell.
+`dcsterrain mcp` gives an assistant one tool per kind of question through MCP, with no shell, for every terrain.
 Release 0.1.0 has no `mcp`; until the next release, build the tool yourself.
 The [guide](docs/guide.md#ask-through-an-ai-assistant) sets up Claude Code and
 Claude Desktop, with the [skill](skill/SKILL.md) that teaches the assistant the tools.

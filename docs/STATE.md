@@ -4,18 +4,20 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `design.md` and `queries.md` hold the design.
 
-**Last updated:** 2026-11-03T06:49Z
+**Last updated:** 2026-11-03T16:20Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **M3: setup and the skill through MCP.** The skill calls the tools when
-   present, one call per batch line, and a `score_site` over the ring for the
-   FARP exposure; the guide sets up Claude Code and Claude Desktop.
+1. **M3: setup and the skill through MCP.** One server answers every
+   terrain: each tool takes `terrain`, `--terrain` only the default, one
+   terrain open at a time, and `list_terrains` lists them without `files`.
+   The skill calls the tools when present, a `score_site` over the ring for
+   the FARP exposure; the guide sets up Claude Code and Claude Desktop.
    *Verified by:* an agent: on Caucasus of 2.9.31.29434 every FARP call
-   through `mcp` equals `query`, each ring share its 36 `visible` calls, and a
-   stand-in given only the skill wrote calls with those answers. The user's
+   through `mcp` equals `query`, each ring share its 36 `visible` calls;
+   100 calls alternating Caucasus and Syria peak at 58.4 MiB. The user's
    run, an assistant with no shell, is pending.
 2. **M2: the long-lived MCP server.** A cancelled call stops its work at
    the next look; `find_sites` and `exposure` report progress to the

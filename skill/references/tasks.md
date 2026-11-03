@@ -5,6 +5,9 @@ numbers are Caucasus around Kutaisi. Every line of a `jsonl` block runs as it
 stands; change the positions for the question at hand. Kutaisi is airdrome 25, at
 `x -284887.375, z 683858.71875`.
 
+Through the MCP tools, each line is one call: the tool `op` names, with the
+`request` object as its arguments and `"terrain": "Caucasus"` added to them.
+
 Two habits hold throughout. Look positions up rather than guessing them, and
 give the terms and the numbers behind a choice, so the designer can overrule it.
 

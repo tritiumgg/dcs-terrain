@@ -1291,16 +1291,15 @@ The skill is now in `C:\dcs-terrain\dcs-terrain-main\skill`.
 
 ### Claude Code
 
-Add the server for every folder you work in.
-Each server answers for one terrain, named by `--terrain`:
+Add the server for every folder you work in:
 
 ```powershell
-claude mcp add --scope user dcsterrain -- C:\dcs-terrain\dcsterrain.exe mcp --terrain Caucasus
+claude mcp add --scope user dcsterrain -- C:\dcs-terrain\dcsterrain.exe mcp
 ```
 
 Everything after `--` is the command the assistant runs.
-To add another terrain, add another server with its own name, such as
-`dcsterrain-germany`.
+One server answers about every terrain you have.
+The assistant names the terrain in each question it asks.
 
 Copy the skill to where Claude Code looks for skills.
 These two commands also update a skill copied before:
@@ -1333,7 +1332,7 @@ its `mcpServers`, or add `mcpServers` beside the settings.
   "mcpServers": {
     "dcsterrain": {
       "command": "C:\\dcs-terrain\\dcsterrain.exe",
-      "args": ["mcp", "--terrain", "Caucasus"]
+      "args": ["mcp"]
     }
   }
 }
@@ -1371,6 +1370,8 @@ Under Skills, choose Upload skill, and pick `dcs-terrain-skill.zip`.
 ### Ask
 
 Ask in plain words, such as "Find a FARP site near Kutaisi."
+Name the terrain if the place does not make it clear, such as "on Syria".
+The assistant can list your terrains and their ids if you ask which you have.
 The assistant asks for your approval before it uses a tool, unless you allow it
 for good.
 It says which terrain and DCS version the answer came from.
@@ -1383,7 +1384,7 @@ It is kept for a day.
 The assistant gives you the path, and you open the file in a map program.
 
 If the server does not connect, or every tool fails, ask one question by hand
-with the same program and terrain:
+with the same program, here about Caucasus:
 
 ```powershell
 C:\dcs-terrain\dcsterrain.exe query --terrain Caucasus describe

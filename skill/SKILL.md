@@ -19,15 +19,18 @@ such as `describe`, `find_sites` and `visible`, from a server called
 `dcsterrain`. Use them even if you also have a shell.
 
 - A tool's arguments are the operation's request, the object a batch line puts
-  under `"request"`. Its answer is the result alone, or a tool error holding
-  `{"issues": [...]}`. `describe` takes `{}`. Where this skill says to look in
+  under `"request"`, plus `terrain`. Its answer is the result alone, or a tool
+  error holding `{"issues": [...]}`. Where this skill says to look in
   `dcsterrain schema`, read the tool's input schema: it describes every request
   field. This skill and its references describe the answers.
-- The server answers for the one terrain it was started on. Call `describe`
-  first: it names the terrain and the build. Another terrain needs another
-  server; ask the user to add one.
+- **Pass `terrain` on every call**, such as `"terrain": "Caucasus"`: the id, as
+  `--terrain` takes it. One server answers every terrain of the install. When
+  you are unsure of an id, call `list_terrains`: it names the install, the
+  build, and each terrain's id and whether it can be read. `describe` with only
+  `terrain` gives one terrain's extent and build.
 - There is no batch. Where this skill shows a batch, make one call per line.
-  The terrain stays open between calls, so each is as fast as a batch line.
+  A terrain stays open while calls name it, so each is as fast as a batch
+  line. A call naming another closes it and opens that one.
 - A long `find_sites` or `exposure` reports its progress, and the client can
   cancel it.
 - No answer is over 64 KiB. A larger `geojson` is replaced by `geojson_file`, a
