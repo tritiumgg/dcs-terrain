@@ -17,6 +17,7 @@ use serde_json::json;
 use super::geojson::{Features, props};
 use super::sightline::horizon;
 use super::{Terrain, outline, refused};
+use crate::call::Call;
 use crate::grid::{Grid, Window};
 use crate::source::{Layer, Refusal, Source};
 use crate::threads::try_map;
@@ -673,8 +674,16 @@ impl Sweep {
         self.row_any(r, near, keys)
     }
 
-    /// `f` over `items`, over every core when the mask is large enough.
-    fn map<T: Send, U: Send>(&self, items: Vec<T>, f: impl Fn(T) -> U + Sync + Send) -> Vec<U> {
+    /// `f` over `items`, over every core when the mask is large enough. Once
+    /// the caller has given up, the rest are skipped and their answers
+    /// left empty: the call fails as cancelled before any is used.
+    fn map<T: Send, U: Send + Default>(
+        &self,
+        items: Vec<T>,
+        f: impl Fn(T) -> U + Sync + Send,
+    ) -> Vec<U> {
+        let call = Call::current();
+        let f = |t| if call.stopped() { U::default() } else { f(t) };
         if self.parallel {
             items.into_par_iter().map(f).collect()
         } else {

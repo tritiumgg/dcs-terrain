@@ -32,7 +32,7 @@ use super::region::airdromes;
 use super::scenery::{OBJECT_REACH_M, Rect, footprint as object_rect};
 use super::sightline::exact;
 use super::visible::altitude;
-use crate::call::Call;
+use crate::call::{Call, cancelled};
 use crate::classes::Class;
 use crate::decode::scn5::Pool;
 use crate::grid::{Grid, Window, box_distance};
@@ -1183,18 +1183,28 @@ pub fn evaluate(
         cols: at.cols + 2 * reach as u32,
     };
     let has = |f: &dyn Fn(&Kind) -> bool| checks.iter().any(|c| f(&c.kind));
-    let r = |e: Refusal| refused(e);
+    // A read cut short by a caller who gave up fails as cancelled.
+    let r = |e: Refusal| {
+        if call.stopped() {
+            cancelled()
+        } else {
+            refused(e)
+        }
+    };
     let valid = derive(src, Derived::Valid, fp).map_err(r)?;
+    call.check()?;
     let slope = if has(&|k| matches!(k, Kind::SlopeMax(_) | Kind::Tpi { .. })) {
         Some(derive(src, Derived::Slope, fp).map_err(r)?)
     } else {
         None
     };
+    call.check()?;
     let height = if has(&|k| matches!(k, Kind::SpanMax(_))) {
         Some(Window::read(src, Layer::Height, fp.row0, fp.col0, fp.rows, fp.cols).map_err(r)?)
     } else {
         None
     };
+    call.check()?;
     let mut codes = Vec::new();
     for layer in [Layer::Water, Layer::Surface, Layer::Cover] {
         if has(&|k| matches!(k, Kind::Codes { layer: l, .. } if *l == layer)) {
@@ -1308,6 +1318,7 @@ pub fn evaluate(
         ctx.objects =
             Objects::read(src, [lb[0] - pad, lb[1] - pad, lb[2] + pad, lb[3] + pad]).map_err(r)?;
     }
+    call.check()?;
 
     // The per-site tests in order of cost over the share each fails on a
     // sample, the sightlines last whatever they fail.
@@ -1317,6 +1328,7 @@ pub fn evaluate(
         let mut failed = vec![0usize; checks.len()];
         let mut tried = vec![0usize; checks.len()];
         for &i in &sample {
+            call.check()?;
             for &deg in &footprint.orientations_deg {
                 let mut cells = None;
                 for (j, k) in checks.iter().enumerate() {
@@ -1438,6 +1450,7 @@ fn prune(
             .iter()
             .map(|(i, _)| [cands[*i].x, cands[*i].z])
             .collect();
+        call.check()?;
         ctx.src
             .points(&xz)
             .map_err(refused)?

@@ -13,6 +13,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::cache::Cache;
+use crate::call::Call;
 use crate::source::install::Install;
 use crate::source::{Refusal, Source};
 use crate::synth::Synth;
@@ -217,7 +218,11 @@ pub fn answer_to_write(terrain: &Terrain, op: &str, request: &Value) -> Result<A
         return answer(terrain, op, request).map(Answer::Value);
     }
     let started = Instant::now();
-    let mut out = exposure(terrain, read(request)?)?;
+    let out = exposure(terrain, read(request)?);
+    // Work cut short by a caller who gave up is never an answer, nor its
+    // failure another issue.
+    Call::current().check()?;
+    let mut out = out?;
     out.value["elapsed_ms"] = (started.elapsed().as_millis() as u64).into();
     Ok(Answer::Rasters(out))
 }
@@ -236,7 +241,9 @@ pub fn answer(terrain: &Terrain, op: &str, request: &Value) -> Result<Value, Vec
             "",
         )]);
     };
-    let mut out = handler(terrain, request)?;
+    let out = handler(terrain, request);
+    Call::current().check()?;
+    let mut out = out?;
     out["elapsed_ms"] = (started.elapsed().as_millis() as u64).into();
     Ok(out)
 }
