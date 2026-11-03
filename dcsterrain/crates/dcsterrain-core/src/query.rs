@@ -54,7 +54,7 @@ pub use describe::describe;
 pub use exposure::exposure;
 pub use floor::{floor_msl_reaching, radar_floor};
 pub use geo::geo;
-pub use mgrs::mgrs;
+pub use mgrs::{MgrsSquare, mgrs, parse_mgrs, truncate_mgrs};
 pub use nearest::nearest;
 pub use placements::validate_placements;
 pub use point_info::point_info;

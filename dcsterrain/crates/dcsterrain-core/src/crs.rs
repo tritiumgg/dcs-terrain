@@ -89,7 +89,7 @@ pub(crate) fn forward(lat_deg: f64, dlon_deg: f64) -> (f64, f64) {
 }
 
 /// Latitude and longitude from the central meridian, in degrees.
-fn inverse(northing: f64, easting: f64) -> (f64, f64) {
+pub(crate) fn inverse(northing: f64, easting: f64) -> (f64, f64) {
     let s = series();
     let (xi, eta) = (northing / s.k0a, easting / s.k0a);
     let (mut xi_p, mut eta_p) = (xi, eta);
