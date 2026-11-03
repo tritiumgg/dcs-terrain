@@ -3,6 +3,7 @@
 //! request schema, and each answer the bytes `query` prints for the same
 //! request, a refusal included.
 
+use std::ffi::OsStr;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -17,6 +18,7 @@ use serde_json::{Map, Value, json};
 use tokio::sync::Notify;
 
 mod common;
+use common::install::{install, put, scratch};
 use common::{bad_lines, every_operation, synth};
 
 const SYNTH: [&str; 4] = ["--threads", "5", "--terrain", "synth"];
@@ -26,8 +28,13 @@ async fn connect() -> RunningService<RoleClient, ()> {
 }
 
 async fn connect_with<H: ClientHandler>(handler: H) -> RunningService<RoleClient, H> {
+    serve(handler, &["--terrain".as_ref(), "synth".as_ref()]).await
+}
+
+/// A client of a server serving `terrain`, a list of the flags that name it.
+async fn serve<H: ClientHandler>(handler: H, terrain: &[&OsStr]) -> RunningService<RoleClient, H> {
     let mut server = tokio::process::Command::new(env!("CARGO_BIN_EXE_dcsterrain"));
-    server.args(["--threads", "5", "mcp", "--terrain", "synth"]);
+    server.args(["--threads", "5", "mcp"]).args(terrain);
     let (transport, _) = TokioChildProcess::builder(server)
         .stderr(Stdio::null())
         .spawn()
@@ -418,5 +425,35 @@ async fn a_large_geojson_and_a_large_answer_come_back_as_files() {
     let queried: Value = serde_json::from_str(&timeless(&text)).unwrap();
     let whole: Value = serde_json::from_str(&timeless(&whole.to_string())).unwrap();
     assert_eq!(whole, queried);
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_terrain_whose_files_change_is_reopened_and_answers() {
+    let t = install(false);
+    let c = scratch();
+    let terrain: [&OsStr; 6] = [
+        "--terrain".as_ref(),
+        "Caucasus".as_ref(),
+        "--install".as_ref(),
+        t.0.as_os_str(),
+        "--cache".as_ref(),
+        c.0.as_os_str(),
+    ];
+    let client = serve((), &terrain).await;
+    let describe = async || parsed(&client.call_tool(call("describe", json!({}))).await.unwrap());
+    assert_eq!(describe().await["dcs_build"], "0.0.0.1");
+
+    let update = br#"{"version": "0.0.0.2", "timestamp": "20000102-000000"}"#;
+    put(&t.0, "autoupdate.cfg", update);
+    assert_eq!(describe().await["dcs_build"], "0.0.0.2");
+
+    // A terrain gone refuses its call, and the next tries again.
+    put(&t.0, "autoupdate.cfg", b"not json");
+    let result = client.call_tool(call("describe", json!({}))).await.unwrap();
+    let (text, refused) = answered(&result);
+    assert!(refused && text.contains("terrain_refused"), "{text}");
+    put(&t.0, "autoupdate.cfg", update);
+    assert_eq!(describe().await["dcs_build"], "0.0.0.2");
     client.cancel().await.unwrap();
 }
