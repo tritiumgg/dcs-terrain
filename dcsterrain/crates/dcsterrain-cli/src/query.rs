@@ -93,7 +93,7 @@ impl Opener {
     /// The terrain as its files are now: the one held, unless they changed
     /// under it, as a patch changes them. The check is a few stats, and a
     /// refusal here is one request's: the next tries again.
-    fn current(&mut self) -> Result<&Terrain, Vec<Issue>> {
+    pub(crate) fn current(&mut self) -> Result<&Terrain, Vec<Issue>> {
         if self.terrain.as_ref().is_some_and(Terrain::changed) {
             tracing::debug!("the files of {} changed", self.id.as_deref().unwrap_or("?"));
             self.terrain = None;
@@ -179,19 +179,22 @@ pub fn one(mut opener: Opener, op: &str, request: Option<String>) -> ExitCode {
         }
     };
     match opener.answer(op, &request) {
-        Ok(v) => {
-            let mut out = std::io::BufWriter::new(std::io::stdout().lock());
-            let written = serde_json::to_writer(&mut out, &v)
-                .map_err(std::io::Error::from)
-                .and_then(|()| out.write_all(b"\n"))
-                .and_then(|()| out.flush());
-            match written {
-                Ok(()) => ExitCode::SUCCESS,
-                Err(e) if e.kind() == ErrorKind::BrokenPipe => ExitCode::SUCCESS,
-                Err(e) => refuse(issue("internal_error", &e.to_string())),
-            }
-        }
+        Ok(v) => print(&v),
         Err(issues) => refuse(issues),
+    }
+}
+
+/// Prints an answer as the one document on stdout, as `query` does.
+pub fn print(answer: &Answer) -> ExitCode {
+    let mut out = std::io::BufWriter::new(std::io::stdout().lock());
+    let written = serde_json::to_writer(&mut out, answer)
+        .map_err(std::io::Error::from)
+        .and_then(|()| out.write_all(b"\n"))
+        .and_then(|()| out.flush());
+    match written {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) if e.kind() == ErrorKind::BrokenPipe => ExitCode::SUCCESS,
+        Err(e) => refuse(issue("internal_error", &e.to_string())),
     }
 }
 
