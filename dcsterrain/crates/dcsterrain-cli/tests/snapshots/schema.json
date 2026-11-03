@@ -4091,6 +4091,11 @@
             }
           ]
         },
+        "geojson": {
+          "default": false,
+          "description": "Also return each object's box, and the region or footprint, as\nGeoJSON.",
+          "type": "boolean"
+        },
         "max_rows": {
           "default": 5000,
           "description": "More objects than this is an error, never a truncated answer.",
@@ -4133,6 +4138,9 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "geojson": {
+          "description": "Each object's box, or its position when it has none, and the region\nor footprint asked about, when `geojson` was asked for."
         },
         "objects": {
           "items": {

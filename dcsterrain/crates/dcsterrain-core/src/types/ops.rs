@@ -893,6 +893,10 @@ pub struct SceneryInRequest {
     /// More objects than this is an error, never a truncated answer.
     #[serde(default = "default_scenery_max_rows")]
     pub max_rows: u32,
+    /// Also return each object's box, and the region or footprint, as
+    /// GeoJSON.
+    #[serde(default)]
+    pub geojson: bool,
 }
 
 fn default_scenery_max_rows() -> u32 {
@@ -914,6 +918,10 @@ pub struct SceneryInResponse {
     pub provenance: Provenance,
     pub objects: Vec<SceneryObject>,
     pub counts_by_class: BTreeMap<String, u64>,
+    /// Each object's box, or its position when it has none, and the region
+    /// or footprint asked about, when `geojson` was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
 }
 
 /// An object's box is `obb_w` across its local x axis, which points

@@ -3,6 +3,9 @@
 
 use std::collections::BTreeMap;
 
+use serde_json::{Value, json};
+
+use super::geojson::{Features, Ring, props, signed_area};
 use super::{Terrain, refused, resolve};
 use crate::classes::Class;
 use crate::decode::scn5::Pool;
@@ -149,69 +152,74 @@ pub fn scenery_in(terrain: &Terrain, q: SceneryInRequest) -> Result<SceneryInRes
         Some(cs) => cs.contains(&c),
         None => c.is_structure(),
     };
-    // A box around the region, and a test of each object found in it.
-    let (bbox, test): ([f64; 4], Test) = match (&q.region, &q.footprint_at) {
-        (Some(r), None) => {
-            let area = resolve(src, r, "region")?;
-            (
-                area.bbox,
-                Box::new(move |o| area.contains(o.pos[0], o.pos[2])),
-            )
-        }
-        (None, Some(f)) => {
-            let fp = &f.footprint;
-            let ok = [f.x, f.z, fp.width, fp.depth, f.orientation_deg]
-                .iter()
-                .all(|v| v.is_finite())
-                && fp.width >= 0.0
-                && fp.depth >= 0.0;
-            if !ok {
+    // A box around the region, a test of each object found in it, and the
+    // shape asked about, to draw.
+    let (bbox, test, asked): ([f64; 4], Test, (&str, Vec<Ring>)) =
+        match (&q.region, &q.footprint_at) {
+            (Some(r), None) => {
+                let area = resolve(src, r, "region")?;
+                let outline = area.outline();
+                (
+                    area.bbox,
+                    Box::new(move |o| area.contains(o.pos[0], o.pos[2])),
+                    ("region", outline),
+                )
+            }
+            (None, Some(f)) => {
+                let fp = &f.footprint;
+                let ok = [f.x, f.z, fp.width, fp.depth, f.orientation_deg]
+                    .iter()
+                    .all(|v| v.is_finite())
+                    && fp.width >= 0.0
+                    && fp.depth >= 0.0;
+                if !ok {
+                    return Err(vec![Issue::new(
+                        "invalid_request",
+                        "a footprint needs a finite position, orientation and size",
+                        "footprint_at",
+                    )]);
+                }
+                let rect = Rect::new(
+                    [f.x, f.z],
+                    f.orientation_deg.to_radians(),
+                    fp.depth,
+                    fp.width,
+                );
+                // Objects are found by position; one whose box reaches in from
+                // outside is found by widening the search by the largest model
+                // footprint likely, then tested exactly.
+                let [x0, z0, x1, z1] = rect.bbox();
+                (
+                    [
+                        x0 - OBJECT_REACH_M,
+                        z0 - OBJECT_REACH_M,
+                        x1 + OBJECT_REACH_M,
+                        z1 + OBJECT_REACH_M,
+                    ],
+                    Box::new(move |o| rect.meets(&footprint(o))),
+                    ("footprint", vec![rect.corners().to_vec()]),
+                )
+            }
+            _ => {
                 return Err(vec![Issue::new(
                     "invalid_request",
-                    "a footprint needs a finite position, orientation and size",
-                    "footprint_at",
+                    "give either region or footprint_at",
+                    "",
                 )]);
             }
-            let rect = Rect::new(
-                [f.x, f.z],
-                f.orientation_deg.to_radians(),
-                fp.depth,
-                fp.width,
-            );
-            // Objects are found by position; one whose box reaches in from
-            // outside is found by widening the search by the largest model
-            // footprint likely, then tested exactly.
-            let [x0, z0, x1, z1] = rect.bbox();
-            (
-                [
-                    x0 - OBJECT_REACH_M,
-                    z0 - OBJECT_REACH_M,
-                    x1 + OBJECT_REACH_M,
-                    z1 + OBJECT_REACH_M,
-                ],
-                Box::new(move |o| rect.meets(&footprint(o))),
-            )
-        }
-        _ => {
-            return Err(vec![Issue::new(
-                "invalid_request",
-                "give either region or footprint_at",
-                "",
-            )]);
-        }
-    };
+        };
     // Keyed by id, so an object found twice counts once against the cap.
-    let mut found: BTreeMap<u64, SceneryObject> = BTreeMap::new();
+    let mut found: BTreeMap<u64, (SceneryObject, Rect)> = BTreeMap::new();
     let mut over = false;
     src.objects_in(Pool::Objects, bbox, &mut |o| {
         if over || !wanted(o.class) || !test(o) {
             return;
         }
-        found.insert(o.id, row(o));
+        found.insert(o.id, (row(o), footprint(o)));
         over = found.len() > q.max_rows as usize;
     })
     .map_err(refused)?;
-    let objects: Vec<SceneryObject> = found.into_values().collect();
+    let (objects, boxes): (Vec<SceneryObject>, Vec<Rect>) = found.into_values().unzip();
     if over {
         return Err(vec![Issue::new(
             "too_many_rows",
@@ -226,16 +234,56 @@ pub fn scenery_in(terrain: &Terrain, q: SceneryInRequest) -> Result<SceneryInRes
     for o in &objects {
         *counts_by_class.entry(o.class.clone()).or_insert(0) += 1;
     }
+    let geojson = if q.geojson {
+        Some(features(terrain, &objects, &boxes, asked)?)
+    } else {
+        None
+    };
     Ok(SceneryInResponse {
         provenance: terrain.provenance(),
         objects,
         counts_by_class,
+        geojson,
     })
+}
+
+/// Each object's turned box as a polygon with its fields, or a point where
+/// its model has no box, and the region or footprint asked about. A shape
+/// with no area, which no reader can fill, is left out.
+fn features(
+    terrain: &Terrain,
+    objects: &[SceneryObject],
+    boxes: &[Rect],
+    (asked, rings): (&str, Vec<Ring>),
+) -> Result<Value, Vec<Issue>> {
+    let mut f = Features::new(terrain)?;
+    for (o, b) in objects.iter().zip(boxes) {
+        let Value::Object(mut fields) = json!(o) else {
+            unreachable!("an object serializes to an object")
+        };
+        for k in ["x", "z"] {
+            fields.remove(k);
+        }
+        let ring = b.corners().to_vec();
+        if signed_area(&ring) != 0.0 {
+            f.polygon(&[ring], fields);
+        } else {
+            f.point([o.x, o.z], fields);
+        }
+    }
+    if rings
+        .first()
+        .is_some_and(|r| r.len() >= 3 && signed_area(r) != 0.0)
+    {
+        f.polygon(&rings, props([(asked, json!(true))]));
+    }
+    Ok(f.finish())
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::answer;
+    use super::super::geojson::tests::assert_valid;
     use super::super::tests::synth;
     use super::*;
     use crate::synth::*;
@@ -335,6 +383,70 @@ mod tests {
         // misses both.
         assert!(at(gap, 120.0, 90.0).is_empty());
         assert_eq!(at(0.0, 2.0, 0.0), [a]);
+    }
+
+    #[test]
+    fn geojson_draws_each_box_and_the_shape_asked_about() {
+        let t = synth();
+        let all = json!({"Box": {"min_x": -1e6, "min_z": -1e6, "max_x": 1e6, "max_z": 1e6}});
+        let v = answer(&t, "scenery_in", &json!({"region": all, "geojson": true})).unwrap();
+        assert_valid(&v["geojson"]);
+        let features = v["geojson"]["features"].as_array().unwrap();
+        let objects = v["objects"].as_array().unwrap();
+        assert_eq!(features.len(), objects.len() + 1);
+        let tm = t.source().tables().unwrap().crs.tmerc();
+        for (f, o) in features.iter().zip(objects) {
+            let p = &f["properties"];
+            assert_eq!(p["id"], o["id"]);
+            assert_eq!(p["model"], o["model"]);
+            assert!(p.get("x").is_none());
+            if o["obb_w"].is_null() {
+                assert_eq!(f["geometry"]["type"], "Point");
+                continue;
+            }
+            assert_eq!(f["geometry"]["type"], "Polygon");
+            // Back in DCS meters, the ring is the turned box: its area the
+            // model's.
+            let ring: Vec<[f64; 2]> = f["geometry"]["coordinates"][0]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|q| {
+                    let (x, z) = tm.to_xz(q[1].as_f64().unwrap(), q[0].as_f64().unwrap());
+                    [x, z]
+                })
+                .collect();
+            let area = signed_area(&ring[..4]).abs() / 2.0;
+            let want = o["obb_w"].as_f64().unwrap() * o["obb_d"].as_f64().unwrap();
+            assert!(
+                (area - want).abs() < 0.01 * want + 0.5,
+                "{area} against {want}"
+            );
+        }
+        let nobox = objects.iter().filter(|o| o["obb_w"].is_null()).count();
+        assert_eq!(nobox, SCENERY_NOBOX_COUNT as usize);
+        let last = &features[objects.len()];
+        assert_eq!(last["geometry"]["type"], "Polygon");
+        assert_eq!(last["properties"], json!({"region": true}));
+
+        // A footprint is drawn as asked; one with no area is left out.
+        let f = form(&t);
+        let (x, z) = f.abs(SCENERY_INDUSTRIAL_NORTH_M, SCENERY_INDUSTRIAL_EAST_M);
+        let at = |width: f64| {
+            let req = json!({"footprint_at": {"x": x, "z": z, "orientation_deg": 30,
+                             "footprint": {"width": width, "depth": 10}}, "geojson": true});
+            let v = answer(&t, "scenery_in", &req).unwrap();
+            assert_valid(&v["geojson"]);
+            v
+        };
+        let v = at(20.0);
+        let features = v["geojson"]["features"].as_array().unwrap();
+        assert_eq!(features.len(), v["objects"].as_array().unwrap().len() + 1);
+        let last = features.last().unwrap();
+        assert_eq!(last["properties"], json!({"footprint": true}));
+        let v = at(0.0);
+        let features = v["geojson"]["features"].as_array().unwrap();
+        assert_eq!(features.len(), v["objects"].as_array().unwrap().len());
     }
 
     #[test]
