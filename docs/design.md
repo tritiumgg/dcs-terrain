@@ -650,21 +650,39 @@ candidate are one `score_site` with the ring as `not_visible_from` observers,
 whose share counts as the 36 `visible` calls do. The guide sets up Claude Code
 and Claude Desktop.
 
-Planned, over the same operations (ADR 0011):
+Over the same operations, for people (ADR 0011):
 
 - `dcsterrain <op> --terrain <Terrain> [flags]` is one subcommand per operation
-  for people. Its flags are generated from the request schema. A place takes
+  for people, named as the operation with `_` written `-`; the operation's own
+  name works too. Its flags are generated from the request schema when the
+  command runs, and its `--help` from the schema's descriptions, which a test
+  requires of every request, every field it reaches and every shape of a
+  one-of. A field is a flag, `--` and its name in kebab case; `x` and `z` side
+  by side are one place, `--at`, and `min_x`, `min_z` the place `min`. A point
+  with a height is `<place>@<m>`, above the ground, or `@<m>msl`. A list
+  takes several values or its flag again; an object takes its values in the
+  order `--help` lists them, or `key=value`, with `field.key=value` for a
+  nested one; a one-of field takes its shape's name first; a list of objects
+  takes one per flag; a map takes `key=value`. Where a value cannot be words,
+  JSON is taken, inline or as `@<file>`. `geojson` is not a flag:
+  `--geojson-out <file>` sets it and writes the `FeatureCollection` there.
+  `--show-request` prints the request the flags make, for `query`. The
+  command line is read by the command's own reader, not clap's, since a place
+  such as `-284887,683859` starts with a hyphen; a flag it does not know exits
+  2 naming the closest, and a request refused exits 1 with each issue named by
+  its flag. An airdrome flag takes a name as a place does, with or without
+  `airport:`, and passes the airport's `name_id`. A place takes
   DCS `x,z`, an MGRS grid (to the center of its square), latitude and
   longitude with hemisphere letters, or `airport:<name>` or `town:<name>`.
   The parser turns it into the `x` and `z` a request takes, through `geo` and
   the terrain's airport and town lists, and never guesses: a name with no
   kind, two numbers that could be degrees or meters, and a name two towns
   share are refused with what to type. The grammar is written once, at the
-  head of the parser. The main operations print
-  tables with units and MGRS beside x and z, the rest a plain list, with no
-  color when the output is not a terminal. `--json` prints `query`'s answer
-  byte for byte, and `--geojson-out <file>` writes the GeoJSON of any
-  operation that returns one.
+  head of the parser. Each command prints a plain list, one line per
+  top-level field of the answer and a line per item of a list or member of
+  an object below it, so no field is dropped; planned, the main operations
+  print tables with units and MGRS beside x and z, with no color when the
+  output is not a terminal. `--json` prints `query`'s answer byte for byte.
 
 ## 8. Targets
 
