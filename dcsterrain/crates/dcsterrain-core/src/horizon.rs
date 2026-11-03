@@ -17,7 +17,7 @@
 
 use rayon::prelude::*;
 
-use crate::call::Call;
+use crate::call::{Call, cut_short};
 use crate::grid::{Grid, box_distance};
 use crate::source::{Layer, Refusal, Source};
 
@@ -136,7 +136,7 @@ fn batch(
     let ts = i64::from(g.tile_size);
     let call = Call::current();
     if call.stopped() {
-        return Err(cancelled());
+        return Err(cut_short());
     }
     let range = RANGE_M / f64::from(g.cell_size);
     // One more cell, for the bilinear square of the farthest sample.
@@ -182,14 +182,9 @@ fn batch(
         })
         .collect();
     if call.stopped() {
-        return Err(cancelled());
+        return Err(cut_short());
     }
     Ok(made)
-}
-
-/// A call given up, as the refusal a horizon gives.
-fn cancelled() -> Refusal {
-    Refusal("the caller cancelled the call".into())
 }
 
 /// Heights over a window clipped to the grid, `NODATA` outside the mesh.

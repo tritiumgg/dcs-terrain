@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::source::Refusal;
 use crate::types::Issue;
 
 /// The least time between two reports: a client shows them to a person,
@@ -123,6 +124,13 @@ impl Call {
 /// A request whose caller gave up.
 pub fn cancelled() -> Vec<Issue> {
     vec![Issue::new("cancelled", "the caller cancelled the call", "")]
+}
+
+/// Work cut short because its caller gave up, as the refusal a read or a
+/// trace fails with: whoever turns it into the request's issues fails the
+/// request as [`cancelled`] instead.
+pub fn cut_short() -> Refusal {
+    Refusal("the caller cancelled the call".into())
 }
 
 #[cfg(test)]

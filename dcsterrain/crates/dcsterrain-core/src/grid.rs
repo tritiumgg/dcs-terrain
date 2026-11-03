@@ -7,6 +7,7 @@
 
 use serde::Deserialize;
 
+use crate::call::{Call, cut_short};
 use crate::source::{Layer, Refusal, Source};
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
@@ -94,6 +95,7 @@ impl Window {
         };
         let (r_lo, r_hi) = clip(row0, rows, g.height);
         let (c_lo, c_hi) = clip(col0, cols, g.width);
+        let call = Call::current();
         let ts = i64::from(g.tile_size);
         let on_grid = r_lo < r_hi && c_lo < c_hi;
         let tiles = |lo: i64, hi: i64| lo / ts..(hi - 1) / ts + 1;
@@ -105,6 +107,10 @@ impl Window {
             }
         }
         src.tiles(layer, &want, &mut |i, t| {
+            // A caller who gave up waits for no more than the tile at hand.
+            if call.stopped() {
+                return Err(cut_short());
+            }
             let (tx, tz) = (i64::from(want[i].0), i64::from(want[i].1));
             if t.len() as i64 != ts * ts {
                 return Err(Refusal(format!(
@@ -549,5 +555,38 @@ mod tests {
         }
         let e = Window::read(&Short(small(2, 2)), Layer::Water, 0, 0, 2, 2).unwrap_err();
         assert!(e.0.contains("holds 3 cells, not 4"), "{e}");
+    }
+
+    #[test]
+    fn a_read_stops_at_the_tile_its_caller_gives_up_on() {
+        use crate::call::{Ticket, within};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        // Gives up as the second tile is read.
+        struct Giving(Synth, Arc<Ticket>, AtomicUsize);
+        impl Source for Giving {
+            fn identity(&self) -> &Identity {
+                self.0.identity()
+            }
+            fn grid(&self) -> Grid {
+                self.0.grid()
+            }
+            fn tile(&self, layer: Layer, tx: u32, tz: u32) -> Result<Vec<i32>, Refusal> {
+                if self.2.fetch_add(1, Ordering::Relaxed) == 1 {
+                    self.1.cancel();
+                }
+                self.0.tile(layer, tx, tz)
+            }
+            fn point(&self, x: f64, z: f64) -> Result<Option<Ground>, Refusal> {
+                self.0.point(x, z)
+            }
+        }
+        let ticket = Ticket::new(Box::new(|_, _| {}));
+        let s = Giving(synth(), ticket.clone(), AtomicUsize::new(0));
+        let n = 4 * TILE_SIZE;
+        let e = within(ticket, || Window::read(&s, Layer::Height, 0, 0, n, n)).unwrap_err();
+        assert_eq!(e.0, crate::call::cut_short().0);
+        assert_eq!(s.2.load(Ordering::Relaxed), 2, "of 16 tiles");
     }
 }

@@ -33,7 +33,7 @@ use super::viewshed::{
     CELLS_MAX, base64, check_reach, check_resolution, check_size, prepare, site_eye, too_large,
 };
 use super::{Area, Terrain, refused, resolve};
-use crate::call::Call;
+use crate::call::{Call, cancelled};
 use crate::grid::Window;
 use crate::source::Layer;
 use crate::types::{
@@ -387,7 +387,13 @@ fn reduce(terrain: &Terrain, q: &ExposureRequest, area: &Area) -> Result<Reduced
         (r_hi - r_lo + 1) as u32,
         (c_hi - c_lo + 1) as u32,
     )
-    .map_err(refused)?;
+    .map_err(|e| {
+        if Call::current().stopped() {
+            cancelled()
+        } else {
+            refused(e)
+        }
+    })?;
     let agl: Vec<AtomicU32> = (0..rows * cols)
         .into_par_iter()
         .map(|i| {

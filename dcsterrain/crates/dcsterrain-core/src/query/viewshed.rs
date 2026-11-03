@@ -17,7 +17,7 @@ use serde_json::json;
 use super::geojson::{Features, props};
 use super::sightline::horizon;
 use super::{Terrain, outline, refused};
-use crate::call::Call;
+use crate::call::{Call, cancelled, cut_short};
 use crate::grid::{Grid, Window};
 use crate::source::{Layer, Refusal, Source};
 use crate::threads::try_map;
@@ -291,7 +291,17 @@ pub(super) fn prepare_reaching(
         index(o.z + reach, g.origin_z),
     );
     let (rows, cols) = ((r_hi - r_lo + 1) as u32, (c_hi - c_lo + 1) as u32);
-    let w = Window::read(src, Layer::Height, r_lo, c_lo, rows, cols).map_err(refused)?;
+    // The read and the trace below stop part way for a caller who gave up,
+    // and the sweep then fails as cancelled.
+    let call = Call::current();
+    let r = |e: Refusal| {
+        if call.stopped() {
+            cancelled()
+        } else {
+            refused(e)
+        }
+    };
+    let w = Window::read(src, Layer::Height, r_lo, c_lo, rows, cols).map_err(r)?;
     let radials = radials(radius, res);
     let bearing = TAU / radials as f64;
     let step = cell / 2.0;
@@ -312,9 +322,12 @@ pub(super) fn prepare_reaching(
         // A radial at a time: over a dense mesh the pieces of every radial
         // together run to tens of MiB, and only its horizon is kept.
         try_map(&segments, true, |&[a, b]| {
+            if call.stopped() {
+                return Err(cut_short());
+            }
             Ok::<_, Refusal>(horizon(&src.along(a, b)?, eye, length, step))
         })
-        .map_err(refused)?
+        .map_err(r)?
     };
     Ok(Sweep {
         w,
@@ -1135,6 +1148,28 @@ pub(super) mod tests {
         let fine = share(ask(&t, 4000.0, json!({})));
         let coarse = share(ask(&t, 4000.0, json!({"resolution": 100})));
         assert!((fine - coarse).abs() < 0.02, "{fine} against {coarse}");
+    }
+
+    #[test]
+    fn a_sweep_is_not_prepared_for_a_caller_who_gave_up() {
+        use crate::call::{Ticket, within};
+        use crate::types::Observer;
+
+        let t = synth();
+        let (x, z) = observer();
+        let o = Observer {
+            x,
+            z,
+            alt_agl: 10.0,
+        };
+        let ticket = Ticket::new(Box::new(|_, _| {}));
+        ticket.cancel();
+        let at = ["observer", "radius"];
+        let r = within(ticket, || super::prepare(&t, o, at, 2000.0, None, vec![]));
+        let Err(issues) = r else {
+            panic!("a sweep was prepared");
+        };
+        assert_eq!(issues[0].code, "cancelled");
     }
 
     #[test]
