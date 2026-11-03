@@ -15,13 +15,17 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
 dcsterrain-core = { path = "../dcsterrain-core" }
+rmcp = { version = "=3.8.0", default-features = false, features = ["server", "transport-io"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+tokio = { version = "1.54.1", features = ["rt"] }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 
 [dev-dependencies]
 dcsterrain-core = { path = "../dcsterrain-core", features = ["testing"] }
+rmcp = { version = "=3.8.0", default-features = false, features = ["client", "transport-child-process"] }
+tokio = { version = "1.54.1", features = ["rt", "macros"] }
 
 [target."cfg(windows)".dependencies]
 winreg = "0.56.0"

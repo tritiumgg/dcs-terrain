@@ -18,7 +18,10 @@ use dcsterrain_core::synth;
 use dcsterrain_core::types::Issue;
 use serde_json::{Value, json};
 use tracing::Level;
+use tracing_subscriber::filter::Targets;
+use tracing_subscriber::prelude::*;
 
+mod mcp;
 mod query;
 
 #[derive(Parser)]
@@ -137,6 +140,54 @@ enum Command {
         #[arg(long)]
         op: Option<String>,
     },
+    /// Serve the operations as tools of an MCP server on stdin and stdout,
+    /// each answering as `query` does.
+    Mcp {
+        #[command(flatten)]
+        terrain: TerrainArgs,
+    },
+}
+
+/// The terrain a long-running command answers about, as `query` takes it.
+#[derive(clap::Args)]
+struct TerrainArgs {
+    /// The DCS install root. On Windows it defaults to the one the registry
+    /// names.
+    #[arg(long)]
+    install: Option<PathBuf>,
+    /// The terrain's id, as `list-terrains` shows it, or `synth` for the
+    /// synthetic terrain, which needs no install.
+    #[arg(long)]
+    terrain: String,
+    /// The synthetic terrain's seed.
+    #[arg(long, default_value_t = synth::DEFAULT_SEED)]
+    seed: u32,
+    /// The synthetic terrain's side, in kilometers.
+    #[arg(long, default_value_t = synth::DEFAULT_SIZE_KM)]
+    size_km: u32,
+    /// The synthetic terrain's cell, in meters.
+    #[arg(long, default_value_t = synth::CELL_SIZE_M)]
+    cell: u32,
+    /// Accept a projection fitted to the terrain's beacons that misses one
+    /// by more than 2 m.
+    #[arg(long)]
+    allow_crs_residual: bool,
+    #[command(flatten)]
+    cache: CacheDir,
+}
+
+impl TerrainArgs {
+    fn opener(self) -> query::Opener {
+        query::Opener {
+            install: self.install,
+            id: self.terrain,
+            synth: (self.seed, self.size_km, self.cell),
+            allow_crs_residual: self.allow_crs_residual,
+            cache: self.cache,
+            terrain: None,
+            opens: 0,
+        }
+    }
 }
 
 #[derive(clap::Args)]
@@ -190,16 +241,30 @@ enum CacheAction {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    let level = if cli.verbose {
+        Level::DEBUG
+    } else {
+        Level::INFO
+    };
+    // The MCP library reports every message it passes at info; that is
+    // diagnostics, not progress.
+    let library = if cli.verbose {
+        Level::DEBUG
+    } else {
+        Level::WARN
+    };
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_ansi(std::io::stderr().is_terminal())
-        .with_max_level(if cli.verbose {
-            Level::DEBUG
-        } else {
-            Level::INFO
-        })
+        .with_max_level(level)
         .with_target(false)
         .without_time()
+        .finish()
+        .with(
+            Targets::new()
+                .with_default(level)
+                .with_target("rmcp", library),
+        )
         .init();
     dcsterrain_core::threads::init(cli.threads.map(usize::from));
 
@@ -272,6 +337,7 @@ fn main() -> ExitCode {
                 ExitCode::from(2)
             }
         },
+        Command::Mcp { terrain } => mcp::serve(terrain.opener()),
     }
 }
 

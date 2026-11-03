@@ -94,7 +94,7 @@ impl Opener {
     /// One answer. A panic is one request's failure and not the batch's; the
     /// terrain it passed through is dropped, its locks perhaps poisoned, and
     /// the next request opens it again.
-    fn answer(&mut self, op: &str, request: &Value) -> Result<Answer, Vec<Issue>> {
+    pub(crate) fn answer(&mut self, op: &str, request: &Value) -> Result<Answer, Vec<Issue>> {
         self.contained(|terrain| query::answer_to_write(terrain, op, request))
     }
 
