@@ -621,9 +621,15 @@ edges, and its road and rail graph has 357 k nodes.
   that cannot be read, a fit over 2 m. 0.4 s on
   Caucasus with an empty cache on 2.9.30.28738.
 
-A skill in this repository teaches an assistant with a shell which operation
-answers which question, by example, with `dcsterrain schema` as the reference
-and the metric meanings it needs to turn numbers into difficulty.
+A skill in this repository teaches an assistant which operation answers which
+question, by example, with `dcsterrain schema` as the reference and the metric
+meanings it needs to turn numbers into difficulty. It tells the assistant to
+call the MCP tools when it has them and the command line otherwise, and gives a
+way through each worked task with no shell: where the shell builds a batch, the
+assistant makes one call per line, and the FARP task's 36 ring sightlines per
+candidate are one `score_site` with the ring as `not_visible_from` observers,
+whose share counts as the 36 `visible` calls do. The guide sets up Claude Code
+and Claude Desktop.
 
 Planned, over the same operations (ADR 0011):
 

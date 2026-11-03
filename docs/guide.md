@@ -1250,6 +1250,126 @@ A DCS update can change a terrain file while a question is reading it.
 Then the question may stop with the message "bus error".
 Ask the question again.
 
+## Ask through an AI assistant
+
+An AI assistant can ask the questions for you.
+It talks to `dcsterrain` through MCP, the Model Context Protocol.
+MCP is the standard way an assistant calls tools on your computer.
+`dcsterrain mcp` starts a server with one tool per kind of question.
+The assistant starts the server itself, when it opens.
+It needs no shell, the window where you type commands.
+
+Release 0.1.0 has no `mcp` command.
+Until a later release, [build the tool yourself](../README.md#build-it-yourself).
+The steps below take the program to be `C:\dcs-terrain\dcsterrain.exe`.
+Put your own path wherever it appears.
+
+### Get the skill
+
+The skill teaches the assistant which tool answers which question.
+Without it, the assistant knows the tools but not how to use them well.
+It is the `skill` folder of the source code.
+Download the source code:
+
+```powershell
+Invoke-WebRequest https://github.com/tritiumgg/dcs-terrain/archive/refs/heads/main.zip -OutFile source.zip
+```
+
+```powershell
+Expand-Archive source.zip -DestinationPath .
+```
+
+The skill is now in `C:\dcs-terrain\dcs-terrain-main\skill`.
+
+### Claude Code
+
+Add the server for every folder you work in.
+Each server answers for one terrain, named by `--terrain`:
+
+```powershell
+claude mcp add --scope user dcsterrain -- C:\dcs-terrain\dcsterrain.exe mcp --terrain Caucasus
+```
+
+Everything after `--` is the command the assistant runs.
+To add another terrain, add another server with its own name, such as
+`dcsterrain-germany`.
+
+Copy the skill to where Claude Code looks for skills:
+
+```powershell
+New-Item -ItemType Directory -Force $HOME\.claude\skills
+```
+
+```powershell
+Copy-Item -Recurse dcs-terrain-main\skill $HOME\.claude\skills\dcs-terrain
+```
+
+Start `claude`, and type `/mcp`.
+`dcsterrain` shows as connected.
+On macOS or Linux, the same commands work with your own paths, and the skill
+goes in `~/.claude/skills/dcs-terrain`.
+
+### Claude Desktop
+
+Open the configuration file.
+In Claude Desktop, open Settings, then Developer, and choose Edit Config.
+The file is `%APPDATA%\Claude\claude_desktop_config.json`.
+Put this in it, keeping any other servers it already lists:
+
+```json
+{
+  "mcpServers": {
+    "dcsterrain": {
+      "command": "C:\\dcs-terrain\\dcsterrain.exe",
+      "args": ["mcp", "--terrain", "Caucasus"]
+    }
+  }
+}
+```
+
+In this file, every `\` in a path is written twice.
+Quit Claude Desktop completely, from its icon beside the clock, and open it again.
+In a new chat, open the `+` menu, then Connectors: `dcsterrain` is listed.
+
+On macOS, the file is `~/Library/Application Support/Claude/claude_desktop_config.json`.
+On Linux, it is `~/.config/Claude/claude_desktop_config.json`.
+There, a path is written once, such as `/Users/you/dcs-terrain/dcsterrain`.
+
+Claude Desktop takes a skill as a zip file.
+Make one, with the folder inside named `dcs-terrain`:
+
+```powershell
+Copy-Item -Recurse dcs-terrain-main\skill dcs-terrain
+```
+
+```powershell
+Compress-Archive dcs-terrain dcs-terrain-skill.zip
+```
+
+In Settings, open Capabilities.
+Skills need "Code execution and file creation" turned on.
+Under Skills, choose Upload skill, and pick `dcs-terrain-skill.zip`.
+
+### Ask
+
+Ask in plain words, such as "Find a FARP site near Kutaisi."
+The assistant asks for your approval before it uses a tool, unless you allow it
+for good.
+It says which terrain and DCS version the answer came from.
+
+A very large answer, such as a map drawing of a big area, does not fit in a chat.
+The tool writes it to a file instead and gives the assistant its path.
+The file is in the `dcsterrain` folder of your temporary folder, which on
+Windows is `%TEMP%`.
+It is kept for a day.
+The assistant gives you the path, and you open the file in a map program.
+
+If the server does not connect, run the command from the configuration in
+PowerShell, adding `--help`.
+An error there is the reason.
+Claude Desktop writes what the server printed to
+`%APPDATA%\Claude\logs\mcp-server-dcsterrain.log`.
+
 ## Where to go next
 
 - [queries.md](queries.md) describes every operation, test and layer.
