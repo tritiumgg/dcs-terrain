@@ -6,6 +6,8 @@
 
 use serde_json::{Value, json};
 
+pub mod install;
+
 /// Where the requests of one batch look: a center on the ground, an
 /// airdrome, and two ends of a road.
 pub struct Around {
