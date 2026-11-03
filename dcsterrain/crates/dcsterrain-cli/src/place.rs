@@ -32,6 +32,7 @@
 
 use dcsterrain_core::query::{self, MgrsSquare, Terrain, parse_mgrs};
 use dcsterrain_core::types::{DescribeRequest, GeoRequest, Issue, LatLon, Point};
+use serde_json::{Value, json};
 
 /// The example of each form an error lists.
 const FORMS: &str = "A place is one of:
@@ -388,6 +389,8 @@ struct Named {
     shown: String,
     keys: Vec<String>,
     at: Option<(f64, f64)>,
+    /// An airport's `name_id`, the name a request takes it by.
+    name_id: Option<String>,
 }
 
 impl Named {
@@ -409,6 +412,7 @@ fn names(terrain: &Terrain) -> Result<Vec<Named>, Vec<Issue>> {
             shown: a.display_name.clone().unwrap_or_else(|| a.name_id.clone()),
             keys,
             at: a.x.zip(a.z),
+            name_id: Some(a.name_id.clone()),
         });
     }
     for t in &tables.towns {
@@ -419,6 +423,7 @@ fn names(terrain: &Terrain) -> Result<Vec<Named>, Vec<Issue>> {
             shown: t.display_name.clone().unwrap_or_else(|| t.name.clone()),
             keys,
             at: Some((t.x, t.z)),
+            name_id: None,
         });
     }
     Ok(all)
@@ -591,6 +596,67 @@ fn resolve_among(
         ));
     }
     Ok(Point { x, z })
+}
+
+/// Reads `text`, given to the flag `path`, to the airport it names on
+/// `terrain`, as a request names one: its id when `text` is digits, else
+/// its `name_id`. The name matches as a place's does, with or without
+/// `airport:`, since the flag already says the kind.
+pub fn airport(terrain: &Terrain, path: &str, text: &str) -> Result<Value, Vec<Issue>> {
+    airport_among(|| names(terrain), &terrain_name(terrain), path, text)
+}
+
+/// `airport`, with the airports `names` gives.
+fn airport_among(
+    names: impl Fn() -> Result<Vec<Named>, Vec<Issue>>,
+    terrain: &str,
+    path: &str,
+    text: &str,
+) -> Result<Value, Vec<Issue>> {
+    let issue = |code: &str, message: String| vec![Issue::new(code, &message, path)];
+    let t = text.trim();
+    let name = match t.split_once(':') {
+        Some((k, rest)) if k.trim().eq_ignore_ascii_case("airport") => rest.trim(),
+        Some((k, _)) if k.chars().all(|c| c.is_ascii_alphabetic()) => {
+            let m = format!("\"{t}\" is not an airport: this flag takes airport:<name> or a name.");
+            return Err(issue("invalid_place", m));
+        }
+        _ => t,
+    };
+    if !name.is_empty() && name.chars().all(|c| c.is_ascii_digit()) {
+        return Ok(name.parse::<i64>().map(Value::from).unwrap_or(json!(name)));
+    }
+    let key = fold(name);
+    if key.is_empty() {
+        return Err(issue("invalid_place", format!("\"{t}\" names no airport.")));
+    }
+    let all = names()?;
+    let airports = || all.iter().filter(|n| n.kind == Kind::Airport);
+    let mut found: Vec<&str> = airports()
+        .filter(|n| n.keys.contains(&key))
+        .filter_map(|n| n.name_id.as_deref())
+        .collect();
+    found.dedup();
+    match found.as_slice() {
+        [one] => Ok(Value::String((*one).to_string())),
+        [] => {
+            let mut m = format!("no airport on {terrain} is named \"{name}\".");
+            let near = closest(airports(), &key);
+            if !near.is_empty() {
+                m += &format!("\nThe closest names: {}.", near.join(", "));
+            }
+            Err(issue("unknown_place", m))
+        }
+        many => {
+            let typed: Vec<String> = many.iter().map(|n| format!("airport:{n}")).collect();
+            let m = format!(
+                "\"{name}\" names {} airports on {terrain}. Type one of: {}.",
+                many.len(),
+                typed.join(", ")
+            );
+            Err(issue("ambiguous_place", m))
+        }
+    }
 }
 
 /// DCS `x` and `z` of a latitude and longitude, as `geo` gives them.

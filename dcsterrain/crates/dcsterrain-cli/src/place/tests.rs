@@ -125,6 +125,7 @@ fn a_name_two_towns_share_is_refused_with_each_one() {
             shown: synth::town_name(1),
             keys: vec![fold(&synth::town_name(1))],
             at: Some((two.x, two.z)),
+            name_id: None,
         });
         Ok(all)
     };
@@ -446,9 +447,62 @@ fn rows_repeated_at_one_position_are_one_place() {
             shown: synth::town_name(1),
             keys: vec![fold(&synth::town_name(1))],
             at: Some((one.x, one.z)),
+            name_id: None,
         });
         Ok(all)
     };
     let p = resolve_among(&t, repeated, "--at", "town:Synth Town 1").unwrap();
     assert_eq!((p.x, p.z), (one.x, one.z));
+}
+
+#[test]
+fn an_airport_flag_takes_its_name_with_or_without_the_kind() {
+    let t = synth();
+    let name_id = Value::String(synth::AIRDROME_NAME_ID.into());
+    for typed in [
+        "airport:Synth Field",
+        "synth field",
+        "SYNTH",
+        "airport: synth-field",
+    ] {
+        assert_eq!(
+            airport(&t, "--airdrome", typed).unwrap(),
+            name_id,
+            "{typed}"
+        );
+    }
+    assert_eq!(airport(&t, "--airdrome", "1").unwrap(), json!(1));
+    let e = airport(&t, "--airdrome", "town:Synth Town 1").unwrap_err();
+    assert_eq!(e[0].code, "invalid_place");
+    let e = airport(&t, "--airdrome", "Synth Feld").unwrap_err();
+    assert_eq!(e[0].code, "unknown_place");
+    assert!(
+        e[0].message.contains("airport:Synth Field"),
+        "{}",
+        e[0].message
+    );
+    assert_eq!(e[0].path, "--airdrome");
+}
+
+#[test]
+fn an_airport_name_two_share_is_refused_with_each_name_id() {
+    let t = synth();
+    let shared = || {
+        let mut all = names(&t)?;
+        all.push(Named {
+            kind: Kind::Airport,
+            shown: synth::AIRDROME_DISPLAY_NAME.into(),
+            keys: vec![fold(synth::AIRDROME_DISPLAY_NAME)],
+            at: Some((0.0, 0.0)),
+            name_id: Some("SYNTH_TWO".into()),
+        });
+        Ok(all)
+    };
+    let e = airport_among(shared, "synth", "--airdrome", "Synth Field").unwrap_err();
+    assert_eq!(e[0].code, "ambiguous_place");
+    assert!(
+        e[0].message.contains("airport:SYNTH, airport:SYNTH_TWO"),
+        "{}",
+        e[0].message
+    );
 }
