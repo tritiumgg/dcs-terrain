@@ -74,6 +74,7 @@ pub fn viewshed(terrain: &Terrain, q: ViewshedRequest) -> Result<ViewshedRespons
         target.into_iter().collect(),
     )?;
     let (bits, seen, total) = s.run(q.target_alt_agl);
+    Call::current().check()?;
     let (side, res, (origin_x, origin_z), o) = (s.side, s.res, s.origin, q.observer);
 
     let polygons = (q.as_polygons || q.geojson).then(|| {
@@ -801,6 +802,11 @@ impl Sweep {
             let near_count = self.row(r, near, &mut keys);
             (keys, near_count)
         });
+        // A caller who gave up has no use for the counts, and the rows it
+        // skipped are empty: neither pass over the keys below is worth it.
+        if Call::current().stopped() {
+            return (0, 0);
+        }
         // The keys bucketed by radial, in place of a sort of them all.
         let mut start = vec![0usize; self.radials as usize + 1];
         for (keys, _) in &rows {

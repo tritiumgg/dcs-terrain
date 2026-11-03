@@ -21,6 +21,7 @@ use super::{
     CELL_SIZE, EachTile, Ground, Identity, Layer, Object, Piece, Refusal, Source, TILE_SIZE,
 };
 use crate::cache::{Cache, Entry, Opened, Parts, TerrainCache};
+use crate::call::{Call, cut_short};
 use crate::classes::Class;
 use crate::decode::install::{self, Map};
 use crate::decode::scn5::Pool;
@@ -754,7 +755,12 @@ impl Source for Install {
     /// each tile once, and keeps the blocks the next band shares with it.
     fn tiles(&self, layer: Layer, tiles: &[(u32, u32)], f: &mut EachTile) -> Result<(), Refusal> {
         let mut kept: HashMap<usize, Arc<Prepared>> = HashMap::new();
+        let call = Call::current();
         for (at, band) in self.bands(tiles) {
+            // A caller who gave up waits for no band after the one at hand.
+            if call.stopped() {
+                return Err(cut_short());
+            }
             let mut got: Vec<Option<Arc<Tile>>> = {
                 let mut held = self.tiles.lock().unwrap();
                 band.iter().map(|t| held.get(t)).collect()
