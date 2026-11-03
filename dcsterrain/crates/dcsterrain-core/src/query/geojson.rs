@@ -48,12 +48,13 @@ impl Features {
         p
     }
 
+    /// Each member is moved in: `json!` would copy a `Value` it is given.
     fn push(&mut self, geometry: Value, properties: Map<String, Value>) {
-        self.features.push(json!({
-            "type": "Feature",
-            "geometry": geometry,
-            "properties": properties,
-        }));
+        let mut f = Map::new();
+        f.insert("type".into(), "Feature".into());
+        f.insert("geometry".into(), geometry);
+        f.insert("properties".into(), Value::Object(properties));
+        self.features.push(Value::Object(f));
     }
 
     pub fn point(&mut self, p: [f64; 2], properties: Map<String, Value>) {
@@ -96,7 +97,10 @@ impl Features {
     }
 
     pub fn finish(self) -> Value {
-        json!({"type": "FeatureCollection", "features": self.features})
+        let mut c = Map::new();
+        c.insert("type".into(), "FeatureCollection".into());
+        c.insert("features".into(), Value::Array(self.features));
+        Value::Object(c)
     }
 }
 
