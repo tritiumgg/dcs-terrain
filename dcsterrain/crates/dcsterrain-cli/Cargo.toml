@@ -25,7 +25,7 @@ tracing-subscriber = "0.3.23"
 [dev-dependencies]
 dcsterrain-core = { path = "../dcsterrain-core", features = ["testing"] }
 rmcp = { version = "=3.8.0", default-features = false, features = ["client", "transport-child-process"] }
-tokio = { version = "1.54.1", features = ["macros", "rt", "sync", "time"] }
+tokio = { version = "1.54.1", features = ["macros", "process", "rt", "sync", "time"] }
 
 [target."cfg(windows)".dependencies]
 winreg = "0.56.0"

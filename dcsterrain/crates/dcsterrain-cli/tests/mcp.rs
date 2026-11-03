@@ -3,6 +3,7 @@
 //! request schema, and each answer the bytes `query` prints for the same
 //! request, a refusal included.
 
+use std::cell::{Cell, RefCell};
 use std::ffi::OsStr;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -456,4 +457,134 @@ async fn a_terrain_whose_files_change_is_reopened_and_answers() {
     put(&t.0, "autoupdate.cfg", update);
     assert_eq!(describe().await["dcs_build"], "0.0.0.2");
     client.cancel().await.unwrap();
+}
+
+/// Opt-in: a session of 100 calls on Caucasus, the heaviest among them,
+/// held to 64 MiB of peak commit for the server's whole life. Set
+/// `DCSTERRAIN_INSTALL` to the DCS install root, and `DCSTERRAIN_CACHE` to a
+/// cache built by `index` if not the default; without the install this
+/// passes without reading anything, which is what CI does.
+#[tokio::test]
+async fn a_session_of_100_calls_on_caucasus_holds_its_memory() {
+    let Some(root) = std::env::var_os("DCSTERRAIN_INSTALL") else {
+        eprintln!("DCSTERRAIN_INSTALL is not set; skipped");
+        return;
+    };
+    let mut server = Command::new(env!("CARGO_BIN_EXE_dcsterrain"));
+    server.args([
+        "--threads",
+        "5",
+        "mcp",
+        "--terrain",
+        "Caucasus",
+        "--install",
+    ]);
+    server.arg(&root);
+    if let Some(cache) = std::env::var_os("DCSTERRAIN_CACHE") {
+        server.arg("--cache").arg(cache);
+    }
+    let mut child = server
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("the server starts");
+    let stdin = tokio::process::ChildStdin::from_std(child.stdin.take().unwrap()).unwrap();
+    let stdout = tokio::process::ChildStdout::from_std(child.stdout.take().unwrap()).unwrap();
+    let client = ().serve((stdout, stdin)).await.expect("the server initializes");
+
+    let calls = Cell::new(0);
+    let issues = RefCell::new(Vec::new());
+    let ask = async |op: &str, request: Value| {
+        calls.set(calls.get() + 1);
+        let result = client.call_tool(call(op, request)).await.unwrap();
+        let (text, refused) = answered(&result);
+        let text = restored(text);
+        if refused {
+            issues.borrow_mut().push(format!("{op}: {text}"));
+            return Value::Null;
+        }
+        serde_json::from_str::<Value>(&text).expect("an answer is JSON")
+    };
+
+    // Where to ask: an airdrome near the middle, and a road from beside it
+    // to the farthest of its near roads a route reaches.
+    let described = ask("describe", json!({})).await;
+    let build = described["dcs_build"].as_str().unwrap_or("?").to_string();
+    let e = &described["extent"];
+    let mid = |a: &str, b: &str| (e[a].as_f64().unwrap() + e[b].as_f64().unwrap()) / 2.0;
+    let (x, z) = (mid("min_x", "max_x"), mid("min_z", "max_z"));
+    let found = ask("nearest", json!({"kind": "airdrome", "x": x, "z": z})).await;
+    let airdrome = found["results"][0].clone();
+    let (x, z) = (
+        airdrome["x"].as_f64().unwrap(),
+        airdrome["z"].as_f64().unwrap(),
+    );
+    let roads = ask("nearest", json!({"kind": "road", "x": x, "z": z, "n": 20})).await;
+    let roads = roads["results"].as_array().unwrap().clone();
+    let end = |r: &Value| json!({"x": r["x"], "z": r["z"]});
+    let from = end(&roads[0]);
+    let mut to = from.clone();
+    for r in roads.iter().skip(1).rev() {
+        let route = json!({"network": "roads", "from": from, "to": end(r)});
+        if ask("route", route).await["length"]
+            .as_f64()
+            .is_some_and(|l| l > 0.0)
+        {
+            to = end(r);
+            break;
+        }
+    }
+    issues.borrow_mut().clear();
+    let at = common::Around {
+        x,
+        z,
+        airdrome: airdrome["id"].clone(),
+        from,
+        to,
+    };
+
+    // Every operation, and the heaviest calls: a sweep whose rasters go to a
+    // file, and a search whose outlines do.
+    let observer = json!({"x": x, "z": z, "alt_agl": 10});
+    let mut session = every_operation(&at);
+    session.push((
+        "exposure",
+        json!({"sites": [{"observer": observer, "radius": 20000}], "target_alt_agl": 30,
+               "geojson": true}),
+    ));
+    session.push((
+        "find_sites",
+        json!({"region": {"Circle": {"x": x, "z": z, "radius": 8000}},
+               "footprint": {"width": 60, "depth": 40},
+               "criteria": [{"name": "slope_max", "params": {"deg": 15}},
+                            {"name": "not_visible_from",
+                             "params": {"observers": [observer], "max_fraction": 0.5}}],
+               "spacing": 0, "limit": 200, "geojson": true}),
+    ));
+    let (started, before) = (Instant::now(), calls.get());
+    for (op, request) in session.iter().cycle() {
+        if calls.get() == 100 {
+            break;
+        }
+        ask(op, request.clone()).await;
+    }
+    let took = started.elapsed().as_secs_f64();
+    client.cancel().await.unwrap();
+    let (_, cost) = dcsterrain_core::threads::wait_costed(child).unwrap();
+    let peak = cost.peak_bytes as f64 / f64::from(1 << 20);
+    let issues = issues.into_inner();
+    eprintln!(
+        "Caucasus on {build}: {} calls in one session, the last {} in {took:.1} s; peak commit \
+         {peak:.1} MiB",
+        calls.get(),
+        calls.get() - before,
+    );
+    for i in &issues {
+        eprintln!("    {i}");
+    }
+    assert!(issues.is_empty(), "{issues:?}");
+    if cfg!(windows) {
+        assert!(peak <= 64.0, "peak commit {peak:.1} MiB");
+    }
 }
