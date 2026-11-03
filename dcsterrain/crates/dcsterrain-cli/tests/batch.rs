@@ -16,6 +16,9 @@ use std::time::Instant;
 
 use serde_json::{Map, Value, json};
 
+mod common;
+use common::{Around, bad_lines, every_operation, synth};
+
 /// Every request on its own line, written from stdin to stdout.
 fn query(args: &[&str], input: &[u8]) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_dcsterrain"))
@@ -53,133 +56,6 @@ fn input(requests: &[(&str, Value)]) -> Vec<u8> {
         text.push_str(&format!("{line}\n"));
     }
     text.into_bytes()
-}
-
-/// Where the requests of one batch look: a center on the ground, an
-/// airdrome, and two ends of a road.
-struct Around {
-    x: f64,
-    z: f64,
-    airdrome: Value,
-    from: Value,
-    to: Value,
-}
-
-/// One request per operation, small enough for a test.
-fn every_operation(at: &Around) -> Vec<(&'static str, Value)> {
-    let (x, z) = (at.x, at.z);
-    let observer = json!({"x": x, "z": z, "alt_agl": 10});
-    let point = json!({"x": x, "z": z});
-    let circle = json!({"Circle": {"x": x, "z": z, "radius": 1500}});
-    let box_ = json!({"Box": {
-        "min_x": x - 1000.0, "min_z": z - 1000.0, "max_x": x + 1000.0, "max_z": z + 1000.0,
-    }});
-    let wide = json!({"Circle": {"x": x, "z": z, "radius": 20000}});
-    let east = json!({"x": x, "z": z + 3000.0, "alt_agl": 100});
-    let north = json!({"x": x + 3000.0, "z": z, "alt_agl": 100});
-    let footprint = json!({"width": 60, "depth": 40});
-    let criteria = json!([
-        {"name": "slope_max", "params": {"deg": 30}},
-        {"name": "dist_road_band", "params": {"min": 0, "max": 50000}},
-    ]);
-    let placement =
-        |id: &str, shape: Value| json!({"id": id, "x": x, "z": z, "heading": 0, "shape": shape});
-    vec![
-        ("describe", json!({})),
-        (
-            "sample",
-            json!({"points": [point], "layers": ["height", "slope", "dist_road"]}),
-        ),
-        ("geo", json!({"to_latlon": [point]})),
-        (
-            "score_site",
-            json!({"x": x, "z": z, "footprint": footprint, "criteria": criteria}),
-        ),
-        (
-            "find_sites",
-            json!({"region": circle, "footprint": footprint, "criteria": criteria,
-                   "spacing": 200, "limit": 3, "geojson": true}),
-        ),
-        (
-            "visible",
-            json!({"a": {"x": x, "z": z, "alt_agl": 10}, "b": east, "geojson": true}),
-        ),
-        (
-            "viewshed",
-            json!({"observer": observer, "radius": 2000, "target_alt_agl": 2, "geojson": true}),
-        ),
-        (
-            "radar_floor",
-            json!({"site": observer, "radius": 2000, "geojson": true}),
-        ),
-        (
-            "coverage",
-            json!({"site": observer, "envelope": {"radius": 2000, "alt_bands_agl": [30, 100]},
-                   "asset": circle, "geojson": true}),
-        ),
-        (
-            "exposure",
-            json!({"sites": [{"observer": observer, "radius": 2000}], "target_alt_agl": 30,
-                   "geojson": true}),
-        ),
-        (
-            "approach_spectrum",
-            json!({"site": observer, "radius": 2000, "alt_bands_agl": [30], "geojson": true}),
-        ),
-        (
-            "unmask_profile",
-            json!({"site": observer, "route": [east, north], "geojson": true}),
-        ),
-        (
-            "route",
-            json!({"network": "roads", "from": at.from, "to": at.to, "geojson": true}),
-        ),
-        (
-            "route_alternatives",
-            json!({"network": "roads", "from": at.from, "to": at.to, "k": 2, "geojson": true}),
-        ),
-        (
-            "nearest",
-            json!({"kind": "road", "x": x, "z": z, "n": 2, "geojson": true}),
-        ),
-        (
-            "scenery_in",
-            json!({"region": box_, "max_rows": 1000000, "geojson": true}),
-        ),
-        (
-            "chokepoints",
-            json!({"region": wide, "network": "roads", "limit": 5, "geojson": true}),
-        ),
-        (
-            "trafficability",
-            json!({"x": x, "z": z, "max_slope_deg": 30, "network": "roads", "geojson": true}),
-        ),
-        ("point_info", json!({"points": [point], "geojson": true})),
-        (
-            "airfield_info",
-            json!({"airdrome": at.airdrome, "geojson": true}),
-        ),
-        (
-            "validate_placements",
-            json!({"placements": [
-                placement("point", json!("Point")),
-                placement("rect", json!({"Rect": {"width": 60, "depth": 40}})),
-                placement("circle", json!({"Circle": {"radius": 30}})),
-            ], "geojson": true}),
-        ),
-        ("towns", json!({"limit": 3, "geojson": true})),
-    ]
-}
-
-/// The synthetic terrain's own center, airdrome and road.
-fn synth() -> Around {
-    Around {
-        x: 12000.0,
-        z: 15000.0,
-        airdrome: json!(1),
-        from: json!({"x": 10000, "z": -12000}),
-        to: json!({"x": 20000, "z": 10000}),
-    }
 }
 
 /// The surface of an answer without what a platform's floating point or a
@@ -307,27 +183,7 @@ fn a_hundred_requests_open_the_terrain_once() {
 
 #[test]
 fn a_bad_line_gets_its_own_answer_and_the_batch_goes_on() {
-    let mut text = Vec::new();
-    text.extend_from_slice(b"\xEF\xBB\xBF{\"op\": \"describe\"}\r\n");
-    text.extend_from_slice(b"\n   \n");
-    text.extend_from_slice(b"not json\n");
-    text.extend_from_slice(b"{\"id\": 1, \"op\": \"nope\"}\n");
-    text.extend_from_slice(b"{\"id\": 2}\n");
-    text.extend_from_slice(b"{\"id\": 3, \"op\": \"visible\", \"x\": 1}\n");
-    text.extend_from_slice(b"{\"id\": 4, \"op\": 5}\n");
-    text.extend_from_slice(b"[1, 2]\n");
-    text.extend_from_slice(b"\"\xFF\"\n");
-    let bad = r#"{"id": 5, "op": "sample", "request": {"points": [{"x": "north", "z": 0}], "layers": []}}"#;
-    text.extend_from_slice(bad.as_bytes());
-    text.push(b'\n');
-    text.extend_from_slice(b"{\"id\": 6, \"op\": \"visible\", \"request\": {\"a\": {\"x\": 0, \"z\": 0}, \"b\": {\"x\": 1, \"z\": 1, \"alt\": 5}}}\n");
-    text.extend_from_slice(
-        b"{\"id\": 7, \"op\": \"sample\", \"request\": {\"points\": [], \"layers\": [\"nope\"]}}\n",
-    );
-    // The last line needs no newline.
-    text.extend_from_slice(b"{\"id\": [\"last\"], \"op\": \"describe\"}");
-
-    let out = query(&SYNTH, &text);
+    let out = query(&SYNTH, &bad_lines());
     assert!(out.status.success(), "the batch itself succeeded");
     let answers = lines(&out);
     assert_eq!(answers.len(), 12);
