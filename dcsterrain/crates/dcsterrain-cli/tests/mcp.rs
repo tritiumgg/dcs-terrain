@@ -614,3 +614,89 @@ async fn a_session_of_100_calls_on_caucasus_holds_its_memory() {
         assert!(peak <= 64.0, "peak commit {peak:.1} MiB");
     }
 }
+
+/// The skill's FARP request, as its worked tasks print it.
+fn farp_request() -> Value {
+    let tasks =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../skill/references/tasks.md");
+    let tasks = std::fs::read_to_string(tasks).expect("the skill's tasks read");
+    let line = tasks
+        .lines()
+        .find(|l| l.starts_with(r#"{"id": "farp""#))
+        .expect("the tasks hold the FARP request");
+    serde_json::from_str::<Value>(line).unwrap()["request"].clone()
+}
+
+/// Opt-in: the FARP task as an assistant with only the tools works it on
+/// Caucasus, each answer the one `query` gives: the search, then for each
+/// candidate the scenery within 500 m and 150 m and one `score_site` whose
+/// 36 ring observers count as the 36 `visible` calls do. Set
+/// `DCSTERRAIN_INSTALL` as for the session above.
+#[tokio::test]
+async fn the_farp_task_through_the_tools_answers_as_query_does_on_caucasus() {
+    let Some(root) = std::env::var_os("DCSTERRAIN_INSTALL") else {
+        eprintln!("DCSTERRAIN_INSTALL is not set; skipped");
+        return;
+    };
+    let mut terrain: Vec<&OsStr> = vec!["--terrain".as_ref(), "Caucasus".as_ref()];
+    terrain.extend(["--install".as_ref(), root.as_os_str()]);
+    let cache = std::env::var_os("DCSTERRAIN_CACHE");
+    if let Some(cache) = &cache {
+        terrain.extend(["--cache".as_ref(), cache.as_os_str()]);
+    }
+    let client = serve((), &terrain).await;
+    let ask = async |op: &str, request: &Value| {
+        let result = client.call_tool(call(op, request.clone())).await.unwrap();
+        let (text, refused) = answered(&result);
+        assert!(!refused, "{op}: {text}");
+        let printed = Command::new(env!("CARGO_BIN_EXE_dcsterrain"))
+            .args(["--threads", "5", "query"])
+            .args(&terrain)
+            .args([op, &request.to_string()])
+            .stderr(Stdio::null())
+            .output()
+            .expect("the binary runs");
+        let printed = String::from_utf8(printed.stdout).expect("stdout is UTF-8");
+        assert_eq!(timeless(&text), timeless(printed.trim_end()), "{op}");
+        serde_json::from_str::<Value>(&text).expect("an answer is JSON")
+    };
+
+    let found = ask("find_sites", &farp_request()).await;
+    let candidates = found["candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 8, "{found}");
+    for c in candidates {
+        let (x, z) = (c["x"].as_f64().unwrap(), c["z"].as_f64().unwrap());
+        for radius in [500, 150] {
+            let around = json!({"region": {"Circle": {"x": x, "z": z, "radius": radius}}});
+            ask("scenery_in", &around).await;
+        }
+        let mut ring = Vec::new();
+        for r in [3000.0, 6000.0, 10000.0] {
+            for b in (0..360).step_by(30) {
+                let b = f64::from(b).to_radians();
+                let at = |v: f64| (v * 1000.0).round() / 1000.0;
+                ring.push(
+                    json!({"x": at(x + r * b.cos()), "z": at(z + r * b.sin()), "alt_agl": 2}),
+                );
+            }
+        }
+        let scored = ask(
+            "score_site",
+            &json!({"x": x, "z": z,
+                    "footprint": {"width": 120, "depth": 80, "orientations_deg": [0]},
+                    "criteria": [{"name": "not_visible_from",
+                                  "params": {"observers": ring, "max_fraction": 1}}]}),
+        )
+        .await;
+        let mut seen = 0;
+        for o in &ring {
+            let line = json!({"a": o, "b": {"x": x, "z": z, "alt_agl": 2}});
+            if ask("visible", &line).await["visible"] == json!(true) {
+                seen += 1;
+            }
+        }
+        let share = scored["terms"][1]["value"].as_f64().unwrap();
+        assert_eq!((share * 36.0).round() as i32, seen, "at {x}, {z}");
+    }
+    client.cancel().await.unwrap();
+}
