@@ -90,6 +90,7 @@ Other commands:
 - `cache list` shows the cache.
 - `cache clear` deletes it. The tool builds it again when needed.
 - `schema` prints the fields of every question and answer.
+- `mcp --terrain <id>` answers the same questions as tools for an assistant that uses MCP. Not final: setup for each assistant is planned.
 - `--help` lists every command and option.
 
 ## Build it yourself

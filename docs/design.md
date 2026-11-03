@@ -570,6 +570,13 @@ edges, and its road and rail graph has 357 k nodes.
   from the request and response types the handlers take: every operation's, a
   batch line's, and the issue codes.
 - `dcsterrain index`, `dcsterrain cache`, as §4.
+- `dcsterrain mcp [--install <dir>] --terrain <Terrain>` is an MCP server
+  over stdio (ADR 0011). Each operation is one tool whose input schema is
+  its request's, cut from `schema` with the definitions it reaches, and
+  whose answer is one text block holding the bytes `query` prints for the
+  request. A refusal is a tool error holding `query`'s `{"issues": [...]}`.
+  Calls run one at a time on one thread holding the opener a batch uses, so
+  the terrain stays open between calls and reopens when its files change.
 - `dcsterrain check [--install <dir>] --terrain <Terrain> [--top <n>] [--json]`
   reports each terrain file's class and version and why no decoder reads it
   when none does, each cache entry's state as found and the horizon tiles
@@ -591,12 +598,10 @@ and the metric meanings it needs to turn numbers into difficulty.
 
 Planned, over the same operations (ADR 0011):
 
-- `dcsterrain mcp [--install <dir>] [--terrain <Terrain>]` is an MCP server
-  over stdio. Each operation is one tool whose input is its request schema and
-  whose answer is the one `query` gives. The terrain stays open between calls
-  and reopens when its files change, long calls report progress and can be
-  cancelled, and a large GeoJSON goes to a file whose path is returned. The
-  server holds 64 MiB of peak commit across a session, as a query does.
+- On `dcsterrain mcp`, long calls report progress and can be cancelled,
+  and a large GeoJSON goes to a file whose path is returned, so an answer is
+  not held whole as one tool text. The server holds 64 MiB of peak commit
+  across a session, as a query does.
 - `dcsterrain <op> --terrain <Terrain> [flags]` is one subcommand per operation
   for people. Its flags are generated from the request schema. A place takes
   DCS `x,z`, an MGRS grid, latitude and longitude, or an airfield or town name,
