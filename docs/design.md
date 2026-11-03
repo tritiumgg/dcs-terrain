@@ -652,8 +652,13 @@ Planned, over the same operations (ADR 0011):
 
 - `dcsterrain <op> --terrain <Terrain> [flags]` is one subcommand per operation
   for people. Its flags are generated from the request schema. A place takes
-  DCS `x,z`, an MGRS grid, latitude and longitude, or an airfield or town name,
-  and an ambiguous name is refused with its choices. The main operations print
+  DCS `x,z`, an MGRS grid (to the center of its square), latitude and
+  longitude with hemisphere letters, or `airport:<name>` or `town:<name>`.
+  The parser turns it into the `x` and `z` a request takes, through `geo` and
+  the terrain's airport and town lists, and never guesses: a name with no
+  kind, two numbers that could be degrees or meters, and a name two towns
+  share are refused with what to type. The grammar is written once, at the
+  head of the parser. The main operations print
   tables with units and MGRS beside x and z, the rest a plain list, with no
   color when the output is not a terminal. `--json` prints `query`'s answer
   byte for byte, and `--geojson-out <file>` writes the GeoJSON of any
