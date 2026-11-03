@@ -100,15 +100,30 @@ pub struct MgrsSquare {
 /// may stand anywhere or nowhere, and letters are of either case. The
 /// error says what is wrong, as the end of a sentence about the reference.
 pub fn parse_mgrs(text: &str) -> Result<MgrsSquare, String> {
-    let s: Vec<u8> = text
-        .bytes()
-        .filter(|b| !b.is_ascii_whitespace())
-        .map(|b| b.to_ascii_uppercase())
+    let chars: Vec<char> = text
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .map(|c| c.to_ascii_uppercase())
         .collect();
-    let zone_len = s.iter().take_while(|b| b.is_ascii_digit()).count();
+    let zone_len = chars.iter().take_while(|c| c.is_ascii_digit()).count();
     if !(1..=2).contains(&zone_len) {
         return Err("an MGRS grid starts with its zone, 1 to 60".into());
     }
+    let letters = (chars[zone_len..].iter())
+        .take_while(|c| c.is_ascii_alphabetic())
+        .count();
+    if letters != 3 {
+        return Err(
+            "an MGRS grid needs three letters after its zone: the band, then the square".into(),
+        );
+    }
+    if let Some(bad) = (chars[zone_len + 3..].iter()).find(|c| !c.is_ascii_digit()) {
+        return Err(format!(
+            "only digits may follow the square's letters, not `{bad}`"
+        ));
+    }
+    // Every character is an ASCII digit or letter from here.
+    let s: Vec<u8> = chars.iter().map(|&c| c as u8).collect();
     let zone: i32 = std::str::from_utf8(&s[..zone_len])
         .expect("digits are ASCII")
         .parse()
@@ -117,20 +132,8 @@ pub fn parse_mgrs(text: &str) -> Result<MgrsSquare, String> {
         return Err(format!("the zone must be 1 to 60, not {zone}"));
     }
     let rest = &s[zone_len..];
-    let letters = rest.iter().take_while(|b| b.is_ascii_alphabetic()).count();
-    if letters != 3 {
-        return Err(
-            "an MGRS grid needs three letters after its zone: the band, then the square".into(),
-        );
-    }
     let (b, c, r) = (rest[0], rest[1], rest[2]);
     let digits = &rest[3..];
-    if let Some(&bad) = digits.iter().find(|b| !b.is_ascii_digit()) {
-        return Err(format!(
-            "only digits may follow the square's letters, not `{}`",
-            bad as char
-        ));
-    }
     if digits.is_empty() || digits.len() % 2 == 1 || digits.len() > 10 {
         return Err(format!(
             "an MGRS grid needs an even number of digits, 2 to 10, and this one has {}",
@@ -193,38 +196,25 @@ pub fn parse_mgrs(text: &str) -> Result<MgrsSquare, String> {
         })?;
 
     // A square cut by its zone's or band's edge holds a part written with
-    // other letters; the point is the center of the part these name.
+    // other letters; the point is the middle of the part these name.
     let inside = |e: f64, n: f64| {
         let (lat, lon) = at(e, n);
         covered(lat, lon) && self::zone(lat, lon) == zone && band(lat) == b
     };
-    const STEPS: usize = 64;
-    let middle_of_inside = |from: f64, f: &dyn Fn(f64) -> bool| -> Option<f64> {
-        let mut found: Option<(f64, f64)> = None;
-        for j in 0..STEPS {
-            let v = from + side * (j as f64 + 0.5) / STEPS as f64;
-            if f(v) {
-                found = Some(found.map_or((v, v), |(a, _)| (a, v)));
-            }
-        }
-        found.map(|(first, last)| (first + last) / 2.0)
-    };
     let (mut e, mut n) = (center.0, cycle + side / 2.0);
     if !inside(e, n) {
-        if let Some(v) = middle_of_inside(cycle, &|v| inside(e, v)) {
-            n = v;
-        }
-        if !inside(e, n)
-            && let Some(v) = middle_of_inside(east0, &|v| inside(v, n))
-        {
-            e = v;
-        }
-        if !inside(e, n) {
-            return Err(format!(
+        let part = Part {
+            zone,
+            band: (lo, hi),
+            corner: (east0, cycle),
+            side,
+        };
+        (e, n) = part.middle(&inside).ok_or_else(|| {
+            format!(
                 "square {}{} of zone {zone} lies outside band {}",
                 c as char, r as char, b as char
-            ));
-        }
+            )
+        })?;
     }
     let (lat, lon) = at(e, n);
     Ok(MgrsSquare {
@@ -233,6 +223,111 @@ pub fn parse_mgrs(text: &str) -> Result<MgrsSquare, String> {
         digits: k as u32,
         side,
     })
+}
+
+/// The longitudes `zone` spans at `lat`, with Norway's and Svalbard's
+/// exceptions, as `zone` assigns them.
+fn zone_span(zone: i32, lat: f64) -> (f64, f64) {
+    let exception = if (56.0..64.0).contains(&lat) {
+        match zone {
+            31 => Some((0.0, 3.0)),
+            32 => Some((3.0, 12.0)),
+            _ => None,
+        }
+    } else if (72.0..=84.0).contains(&lat) {
+        match zone {
+            31 => Some((0.0, 9.0)),
+            33 => Some((9.0, 21.0)),
+            35 => Some((21.0, 33.0)),
+            37 => Some((33.0, 42.0)),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    exception.unwrap_or_else(|| (meridian(zone) - 3.0, meridian(zone) + 3.0))
+}
+
+/// The part of a square, `side` meters across from its `corner`, that lies
+/// in `zone` and between the latitudes `band`.
+struct Part {
+    zone: i32,
+    band: (f64, f64),
+    corner: (f64, f64),
+    side: f64,
+}
+
+impl Part {
+    /// The mean of the part's corners, which lies in it: the band's and the
+    /// zone's edges are near straight across a square, so the part is
+    /// convex. Its corners are the square's corners in it, the points where
+    /// the square's sides cross into it, and the band's and zone's corners in
+    /// the square. `None` when the square holds none of it.
+    fn middle(&self, inside: &dyn Fn(f64, f64) -> bool) -> Option<(f64, f64)> {
+        // Within the square, a hair inside its sides: a reference names the
+        // square's west and south edges but not its east and north.
+        let inset = self.side * 1e-6;
+        let (e0, n0) = (self.corner.0 + inset, self.corner.1 + inset);
+        let (e1, n1) = (
+            self.corner.0 + self.side - inset,
+            self.corner.1 + self.side - inset,
+        );
+        let corners = [(e0, n0), (e1, n0), (e1, n1), (e0, n1)];
+        let mut found: Vec<(f64, f64)> = Vec::new();
+        // Across one square an edge of the band or the zone crosses a side at
+        // most once, so a few samples a side find every crossing.
+        const SAMPLES: usize = 8;
+        for k in 0..4 {
+            let (a, b) = (corners[k], corners[(k + 1) % 4]);
+            let along = |t: f64| (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
+            let mut was = inside(a.0, a.1);
+            if was {
+                found.push(a);
+            }
+            for j in 1..=SAMPLES {
+                let t = j as f64 / SAMPLES as f64;
+                let p = along(t);
+                let now = inside(p.0, p.1);
+                if now != was {
+                    // Halve the step between the two samples down to a
+                    // micrometer, keeping the end that lies in the part.
+                    let (mut out_t, mut in_t) = if now {
+                        (t - 1.0 / SAMPLES as f64, t)
+                    } else {
+                        (t, t - 1.0 / SAMPLES as f64)
+                    };
+                    for _ in 0..40 {
+                        let mid = (out_t + in_t) / 2.0;
+                        let q = along(mid);
+                        if inside(q.0, q.1) {
+                            in_t = mid;
+                        } else {
+                            out_t = mid;
+                        }
+                    }
+                    found.push(along(in_t));
+                }
+                was = now;
+            }
+        }
+        // About a centimeter, so a corner of the band and the zone is inside
+        // both.
+        const NUDGE_DEG: f64 = 1e-7;
+        for lat in [self.band.0 + NUDGE_DEG, self.band.1 - NUDGE_DEG] {
+            let (west, east) = zone_span(self.zone, lat);
+            for lon in [west + NUDGE_DEG, east - NUDGE_DEG] {
+                let (e, n) = utm(lat, lon, self.zone);
+                let within = (e0..=e1).contains(&e) && (n0..=n1).contains(&n);
+                if within && inside(e, n) {
+                    found.push((e, n));
+                }
+            }
+        }
+        let first = *found.first()?;
+        let k = found.len() as f64;
+        let mean = (found.iter()).fold((0.0, 0.0), |s, p| (s.0 + p.0 / k, s.1 + p.1 / k));
+        Some(if inside(mean.0, mean.1) { mean } else { first })
+    }
 }
 
 /// `reference`, as `mgrs` writes it, cut to `digits` of easting and of
@@ -283,6 +378,57 @@ mod tests {
             }
             lat += 3.13;
         }
+    }
+
+    /// Near every band's and zone's edge, where a square holds a sliver of
+    /// the part its letters name, the reference still reads back to it.
+    #[test]
+    fn a_sliver_of_a_square_reads_back_to_itself() {
+        let mut lats = vec![-80.0, 84.0];
+        for k in 0..20 {
+            let edge = -80.0 + 8.0 * f64::from(k);
+            lats.extend([edge - 0.001, edge, edge + 0.001]);
+        }
+        let mut lons = vec![3.0, 9.0, 12.0, 21.0, 33.0, 42.0];
+        for k in 0..60 {
+            lons.push(-180.0 + 6.0 * f64::from(k));
+        }
+        let lons: Vec<f64> = (lons.iter())
+            .flat_map(|&l| [l - 0.01, l - 0.0001, l, l + 0.0001, l + 0.01])
+            .collect();
+        let mut checked = 0;
+        for &lat in lats.iter().filter(|l| (-80.0..=84.0).contains(*l)) {
+            for &lon in &lons {
+                let Some(full) = mgrs(lat, lon) else { continue };
+                for d in 1..=5 {
+                    let typed = truncate_mgrs(&full, d);
+                    let sq =
+                        parse_mgrs(&typed).unwrap_or_else(|e| panic!("{lat} {lon} {typed}: {e}"));
+                    let back = truncate_mgrs(&mgrs(sq.lat, sq.lon).unwrap(), d);
+                    assert_eq!(back, typed, "{lat} {lon}");
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 30_000, "{checked}");
+        // The cases a review found refused.
+        for (lat, lon) in [
+            (-71.999, 0.0),
+            (-71.999, 180.0),
+            (-72.0, 6.0),
+            (83.09, 21.01),
+        ] {
+            let typed = truncate_mgrs(&mgrs(lat, lon).unwrap(), 1);
+            let sq = parse_mgrs(&typed).unwrap();
+            assert_eq!(truncate_mgrs(&mgrs(sq.lat, sq.lon).unwrap(), 1), typed);
+        }
+    }
+
+    #[test]
+    fn a_character_outside_ascii_is_named_as_typed() {
+        assert!(parse_mgrs("38T KM ９１").unwrap_err().ends_with("not `９`"));
+        let spaced = parse_mgrs("38T\u{a0}KM 9198").unwrap();
+        assert_eq!(spaced, parse_mgrs("38T KM 9198").unwrap());
     }
 
     #[test]
