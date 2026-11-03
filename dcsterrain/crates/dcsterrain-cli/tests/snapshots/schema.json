@@ -5378,6 +5378,10 @@
     "issue_codes": {
       "oneOf": [
         {
+          "const": "ambiguous_place",
+          "description": "a place name belongs to more than one place"
+        },
+        {
           "const": "cancelled",
           "description": "the caller cancelled the call"
         },
@@ -5392,6 +5396,10 @@
         {
           "const": "invalid_flag",
           "description": "a command-line flag does not apply here"
+        },
+        {
+          "const": "invalid_place",
+          "description": "a place is written in no form a place takes"
         },
         {
           "const": "invalid_point",
@@ -5472,6 +5480,10 @@
         {
           "const": "unknown_operation",
           "description": "no operation has that name"
+        },
+        {
+          "const": "unknown_place",
+          "description": "no airport or town of that kind has the name"
         }
       ]
     },

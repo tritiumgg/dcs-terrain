@@ -22,6 +22,9 @@ use tracing_subscriber::filter::Targets;
 use tracing_subscriber::prelude::*;
 
 mod mcp;
+// The commands for people read every place flag through it.
+#[cfg_attr(not(test), allow(dead_code))]
+mod place;
 mod query;
 
 #[derive(Parser)]

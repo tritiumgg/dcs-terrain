@@ -55,6 +55,10 @@ pub const OPERATIONS: &[Operation] = &[
 /// Every `Issue::code` a surface returns and what it means. A code is never
 /// reworded once shipped; a test holds this list to the source.
 pub const ISSUE_CODES: &[(&str, &str)] = &[
+    (
+        "ambiguous_place",
+        "a place name belongs to more than one place",
+    ),
     ("cancelled", "the caller cancelled the call"),
     ("internal_error", "a bug: the operation failed unexpectedly"),
     (
@@ -62,6 +66,10 @@ pub const ISSUE_CODES: &[(&str, &str)] = &[
         "a criterion's name or params are wrong",
     ),
     ("invalid_flag", "a command-line flag does not apply here"),
+    (
+        "invalid_place",
+        "a place is written in no form a place takes",
+    ),
     ("invalid_point", "a point is outside what can be converted"),
     ("invalid_region", "a region is empty or malformed"),
     ("invalid_request", "the request is not what the schema says"),
@@ -85,6 +93,10 @@ pub const ISSUE_CODES: &[(&str, &str)] = &[
     ("unknown_class", "a class name is not in the closed set"),
     ("unknown_layer", "a layer name is not a layer"),
     ("unknown_operation", "no operation has that name"),
+    (
+        "unknown_place",
+        "no airport or town of that kind has the name",
+    ),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
