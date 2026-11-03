@@ -3926,6 +3926,11 @@
     "SampleRequest": {
       "description": "Either `region` with `step`, or `points`.",
       "properties": {
+        "geojson": {
+          "default": false,
+          "description": "Also return a point per row as GeoJSON.",
+          "type": "boolean"
+        },
         "layers": {
           "items": {
             "type": "string"
@@ -3989,6 +3994,9 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "geojson": {
+          "description": "A point per row with its layer values, when `geojson` was asked\nfor."
         },
         "rows": {
           "items": {

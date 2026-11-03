@@ -107,6 +107,9 @@ pub struct SampleRequest {
     /// More rows than this is an error, never a truncated answer.
     #[serde(default = "default_max_rows")]
     pub max_rows: u32,
+    /// Also return a point per row as GeoJSON.
+    #[serde(default)]
+    pub geojson: bool,
 }
 
 fn default_max_rows() -> u32 {
@@ -120,6 +123,10 @@ pub struct SampleResponse {
     pub rows: Vec<SampleRow>,
     /// Some distance found nothing within its cap and reads as the cap.
     pub distance_capped: bool,
+    /// A point per row with its layer values, when `geojson` was asked
+    /// for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
 }
 
 /// Over a region, `height` is bilinear between cell centers and every other

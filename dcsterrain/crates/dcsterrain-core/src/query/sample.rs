@@ -2,6 +2,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use serde_json::json;
+
+use super::geojson::Features;
 use super::{Terrain, invalid, refused, resolve};
 use crate::classes::Class;
 use crate::decode::scn5::Pool;
@@ -308,7 +311,7 @@ pub fn sample(terrain: &Terrain, q: SampleRequest) -> Result<SampleResponse, Vec
         };
         columns.insert(k, col);
     }
-    let rows = pts
+    let rows: Vec<SampleRow> = pts
         .iter()
         .enumerate()
         .map(|(i, &[x, z])| SampleRow {
@@ -322,16 +325,28 @@ pub fn sample(terrain: &Terrain, q: SampleRequest) -> Result<SampleResponse, Vec
                 .collect(),
         })
         .collect();
+    let geojson = if q.geojson {
+        let mut f = Features::new(terrain)?;
+        for r in &rows {
+            let values = r.values.iter().map(|(k, v)| (k.clone(), json!(v)));
+            f.point([r.x, r.z], values.collect());
+        }
+        Some(f.finish())
+    } else {
+        None
+    };
     Ok(SampleResponse {
         provenance: terrain.provenance(),
         rows,
         distance_capped: capped,
+        geojson,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::answer;
+    use super::super::geojson::tests::assert_valid;
     use super::super::tests::synth;
     use super::*;
     use crate::synth::*;
@@ -488,6 +503,42 @@ mod tests {
         let other = answer(&t, "sample", &req(&[b])).unwrap();
         assert_eq!(rows(&both)[0]["values"], rows(&one)[0]["values"]);
         assert_eq!(rows(&both)[1]["values"], rows(&other)[0]["values"]);
+    }
+
+    #[test]
+    fn geojson_holds_a_point_per_row_with_its_values() {
+        let t = synth();
+        let region = json!({"Box": {"min_x": 0, "min_z": 0, "max_x": 990, "max_z": 990}});
+        let req = json!({"region": region, "step": 110, "layers": ["height", "slope"],
+                         "max_rows": 100, "geojson": true});
+        let v = answer(&t, "sample", &req).unwrap();
+        assert_valid(&v["geojson"]);
+        let features = v["geojson"]["features"].as_array().unwrap();
+        assert_eq!(features.len(), rows(&v).len());
+        let tm = t.source().tables().unwrap().crs.tmerc();
+        for (f, r) in features.iter().zip(rows(&v)) {
+            assert_eq!(f["geometry"]["type"], "Point");
+            assert_eq!(f["properties"], r["values"]);
+            let p = &f["geometry"]["coordinates"];
+            let (x, z) = tm.to_xz(p[1].as_f64().unwrap(), p[0].as_f64().unwrap());
+            assert!((x - r["x"].as_f64().unwrap()).abs() < 0.05);
+            assert!((z - r["z"].as_f64().unwrap()).abs() < 0.05);
+        }
+        // Without it, the field is absent; over the cap, it is still an error.
+        let mut plain = req.clone();
+        plain["geojson"] = json!(false);
+        assert!(
+            answer(&t, "sample", &plain)
+                .unwrap()
+                .get("geojson")
+                .is_none()
+        );
+        let mut over = req;
+        over["max_rows"] = json!(99);
+        assert_eq!(
+            answer(&t, "sample", &over).unwrap_err()[0].code,
+            "too_many_rows"
+        );
     }
 
     #[test]

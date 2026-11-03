@@ -41,7 +41,8 @@ pub fn every_operation(at: &Around) -> Vec<(&'static str, Value)> {
         ("describe", json!({})),
         (
             "sample",
-            json!({"points": [point], "layers": ["height", "slope", "dist_road"]}),
+            json!({"points": [point], "layers": ["height", "slope", "dist_road"],
+                   "geojson": true}),
         ),
         ("geo", json!({"to_latlon": [point]})),
         (
