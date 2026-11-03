@@ -468,6 +468,7 @@ impl Spec {
     }
 }
 
+mod help;
 mod read;
 
 #[cfg(test)]
