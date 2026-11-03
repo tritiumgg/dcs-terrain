@@ -1263,12 +1263,20 @@ Release 0.1.0 has no `mcp` command.
 Until a later release, [build the tool yourself](../README.md#build-it-yourself).
 The steps below take the program to be `C:\dcs-terrain\dcsterrain.exe`.
 Put your own path wherever it appears.
+In a command, put a path with a space in it in quotes, such as
+`"C:\My Tools\dcsterrain.exe"`.
 
 ### Get the skill
 
 The skill teaches the assistant which tool answers which question.
 Without it, the assistant knows the tools but not how to use them well.
 It is the `skill` folder of the source code.
+Go to your work folder:
+
+```powershell
+cd C:\dcs-terrain
+```
+
 Download the source code:
 
 ```powershell
@@ -1276,7 +1284,7 @@ Invoke-WebRequest https://github.com/tritiumgg/dcs-terrain/archive/refs/heads/ma
 ```
 
 ```powershell
-Expand-Archive source.zip -DestinationPath .
+Expand-Archive -Force source.zip -DestinationPath .
 ```
 
 The skill is now in `C:\dcs-terrain\dcs-terrain-main\skill`.
@@ -1294,14 +1302,15 @@ Everything after `--` is the command the assistant runs.
 To add another terrain, add another server with its own name, such as
 `dcsterrain-germany`.
 
-Copy the skill to where Claude Code looks for skills:
+Copy the skill to where Claude Code looks for skills.
+These two commands also update a skill copied before:
 
 ```powershell
-New-Item -ItemType Directory -Force $HOME\.claude\skills
+New-Item -ItemType Directory -Force $HOME\.claude\skills\dcs-terrain
 ```
 
 ```powershell
-Copy-Item -Recurse dcs-terrain-main\skill $HOME\.claude\skills\dcs-terrain
+Copy-Item -Recurse -Force dcs-terrain-main\skill\* $HOME\.claude\skills\dcs-terrain
 ```
 
 Start `claude`, and type `/mcp`.
@@ -1313,8 +1322,11 @@ goes in `~/.claude/skills/dcs-terrain`.
 
 Open the configuration file.
 In Claude Desktop, open Settings, then Developer, and choose Edit Config.
-The file is `%APPDATA%\Claude\claude_desktop_config.json`.
-Put this in it, keeping any other servers it already lists:
+It usually opens `%APPDATA%\Claude\claude_desktop_config.json`.
+Edit the file that button opens, wherever it is.
+An empty file takes the text below as it stands.
+A file that already holds settings keeps them: add the `dcsterrain` entry inside
+its `mcpServers`, or add `mcpServers` beside the settings.
 
 ```json
 {
@@ -1339,12 +1351,18 @@ Claude Desktop takes a skill as a zip file.
 Make one, with the folder inside named `dcs-terrain`:
 
 ```powershell
-Copy-Item -Recurse dcs-terrain-main\skill dcs-terrain
+New-Item -ItemType Directory -Force skill-zip\dcs-terrain
 ```
 
 ```powershell
-Compress-Archive dcs-terrain dcs-terrain-skill.zip
+Copy-Item -Recurse -Force dcs-terrain-main\skill\* skill-zip\dcs-terrain
 ```
+
+```powershell
+tar -a -c -f dcs-terrain-skill.zip -C skill-zip dcs-terrain
+```
+
+`tar` comes with Windows 10 and 11.
 
 In Settings, open Capabilities.
 Skills need "Code execution and file creation" turned on.
@@ -1364,9 +1382,15 @@ Windows is `%TEMP%`.
 It is kept for a day.
 The assistant gives you the path, and you open the file in a map program.
 
-If the server does not connect, run the command from the configuration in
-PowerShell, adding `--help`.
+If the server does not connect, or every tool fails, ask one question by hand
+with the same program and terrain:
+
+```powershell
+C:\dcs-terrain\dcsterrain.exe query --terrain Caucasus describe
+```
+
 An error there is the reason.
+[When something goes wrong](#when-something-goes-wrong) explains each one.
 Claude Desktop writes what the server printed to
 `%APPDATA%\Claude\logs\mcp-server-dcsterrain.log`.
 

@@ -95,15 +95,8 @@ Other commands:
 
 ## Use it from an AI assistant
 
-MCP is the standard way an AI assistant calls tools on your computer.
-`dcsterrain mcp` gives the assistant one tool per kind of question, with no shell needed.
-In Claude Code, add it like this:
-
-```powershell
-claude mcp add --scope user dcsterrain -- C:\dcs-terrain\dcsterrain.exe mcp --terrain Caucasus
-```
-
-Release 0.1.0 has no `mcp` command; build the tool yourself until the next release.
+`dcsterrain mcp` gives an assistant one tool per kind of question through MCP, with no shell.
+Release 0.1.0 has no `mcp`; until the next release, build the tool yourself.
 The [guide](docs/guide.md#ask-through-an-ai-assistant) sets up Claude Code and
 Claude Desktop, with the [skill](skill/SKILL.md) that teaches the assistant the tools.
 
