@@ -584,8 +584,10 @@ edges, and its road and rail graph has 357 k nodes.
   The server lives as long as its client:
   - A call the client cancels with `notifications/cancelled` fails as
     `cancelled` at the work's next look, within a second; the next call waits
-    behind it. `find_sites` looks every 64 candidates and at each sightline,
-    the horizon march at each cell, `exposure` at each site.
+    behind it. `find_sites` looks between its reads, every 64 candidates and
+    at each sightline, the horizon march at each cell, and a sweep, as
+    `exposure` runs it, at each row and radial. Whatever work an operation
+    cut short, its answer is never returned.
   - `find_sites` and `exposure` send `notifications/progress` to the caller's
     token: the share of the work done, 0 to 1 against a total of 1, rising,
     at most four a second, with what the work is doing.
@@ -594,13 +596,16 @@ edges, and its road and rail graph has 357 k nodes.
     `geojson_file`, its path, and `geojson_bytes`; an answer still larger is
     written whole, as it is encoded, and the text is only `answer_file` and
     `answer_bytes`. Files go to `dcsterrain` in the system temp directory,
-    never the install or the cache, and a server starting removes those
-    over a day old.
+    never the install or the cache: one only its owner may enter, each file
+    new and named `<op>-<pid>-<time>-<n>.json` or `.geojson`. A server
+    starting removes those over a day old. A file that cannot be written
+    fails the call as `internal_error`, and leaves no part behind.
   - It holds 64 MiB of peak commit across a session as a batch does: nothing
     is kept per call, and the terrain lets go of its blocks after a second
     idle. 100 calls on Caucasus of 2.9.31.29434, a 20 km `exposure` and a
-    200-site `find_sites` among them, peak at 63.5 MiB, and the same lines
-    through one `query` batch at 63.6 MiB.
+    200-site `find_sites` among them, peak at 63.0 to 63.5 MiB over three
+    runs, and the same lines through one `query` batch at 63.6 MiB: the
+    margin is the engine's.
 - `dcsterrain check [--install <dir>] --terrain <Terrain> [--top <n>] [--json]`
   reports each terrain file's class and version and why no decoder reads it
   when none does, each cache entry's state as found and the horizon tiles

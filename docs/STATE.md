@@ -4,7 +4,7 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `design.md` and `queries.md` hold the design.
 
-**Last updated:** 2026-11-03T05:50Z
+**Last updated:** 2026-11-03T05:58Z
 
 ## Done
 
@@ -14,9 +14,10 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    the next look; `find_sites` and `exposure` report progress to the
    caller's token; a GeoJSON, then an answer, over 64 KiB goes to a file
    in the temp directory; a terrain whose files change reopens.
-   *Verified by:* an agent, through `mise run check` on `Synth`, a cancel
-   answered within 185 ms anywhere in a 22 s search; opt-in, 100 calls on
-   Caucasus of 2.9.31.29434 peak at 63.5 MiB, as `query` does at 63.6.
+   *Verified by:* an agent, through `mise run check` on `Synth`: cancels in
+   a 22 s search's reads and its sightlines and in a sweep each stop within
+   1 s; opt-in, 100 calls on Caucasus of 2.9.31.29434 peak at 63.0 to 63.5
+   MiB, as the same lines through `query` do at 63.6.
 2. **M1: `dcsterrain mcp`.** An MCP server on stdio through `rmcp` 3.8.0,
    one tool per operation, its input the request schema cut from `schema`,
    each call answered by the opener a batch uses; a refusal is a tool error
