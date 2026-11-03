@@ -2367,6 +2367,11 @@
             "null"
           ]
         },
+        "geojson": {
+          "default": false,
+          "description": "Also return each result as GeoJSON.",
+          "type": "boolean"
+        },
         "kind": {
           "$ref": "#/$defs/NearestKind"
         },
@@ -2406,6 +2411,9 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "geojson": {
+          "description": "A point per result, and each road or rail result's edge, when\n`geojson` was asked for."
         },
         "results": {
           "description": "Nearest first.",

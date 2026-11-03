@@ -1,6 +1,9 @@
 //! `nearest`: the closest roads, rails, airdromes, towns, nodes, beacons or
 //! scenery objects to a point.
 
+use serde_json::{Value, json};
+
+use super::geojson::{Features, props};
 use super::{Terrain, refused};
 use crate::classes::Class;
 use crate::decode::lua::tables::TownRow;
@@ -296,15 +299,58 @@ pub fn nearest(terrain: &Terrain, q: NearestRequest) -> Result<NearestResponse, 
             scenery(src, &want, from, n)?
         }
     };
+    let geojson = if q.geojson {
+        Some(features(terrain, q.kind, &results)?)
+    } else {
+        None
+    };
     Ok(NearestResponse {
         provenance: terrain.provenance(),
         results,
+        geojson,
     })
+}
+
+/// A point per result with its fields, and for road and rail the edge it
+/// lies on, whole, with its index in the graph as `edge_id` and its class.
+fn features(terrain: &Terrain, kind: NearestKind, results: &[Nearby]) -> Result<Value, Vec<Issue>> {
+    let mut f = Features::new(terrain)?;
+    let graph = match kind {
+        NearestKind::Road | NearestKind::Rail => {
+            Some(terrain.source().road_graph().map_err(refused)?)
+        }
+        _ => None,
+    };
+    for r in results {
+        let Value::Object(mut fields) = json!(r) else {
+            unreachable!("a result serializes to an object")
+        };
+        for k in ["x", "z"] {
+            fields.remove(k);
+        }
+        f.point([r.x, r.z], fields);
+        if let Some(g) = &graph {
+            let i: usize = r.id.parse().expect("an edge's id is its index");
+            let line = g.piece(&g.edges[i], 0.0, 1.0);
+            if line.len() >= 2 {
+                f.line(
+                    &line,
+                    props([
+                        ("kind", json!(r.kind)),
+                        ("edge_id", json!(i)),
+                        ("class", json!(r.class)),
+                    ]),
+                );
+            }
+        }
+    }
+    Ok(f.finish())
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::answer;
+    use super::super::geojson::tests::assert_valid;
     use super::super::tests::synth;
     use super::*;
     use crate::synth::*;
@@ -344,6 +390,49 @@ mod tests {
             "{rail:?}"
         );
         assert_eq!(rail[0]["kind"], "rail");
+    }
+
+    #[test]
+    fn geojson_holds_each_result_and_each_matched_edge() {
+        let t = synth();
+        let (x, z) = form(&t).abs(ROAD_EW_NORTH_M + 300.0, 6000.0);
+        let v = answer(
+            &t,
+            "nearest",
+            &json!({"kind": "road", "x": x, "z": z, "n": 2, "geojson": true}),
+        )
+        .unwrap();
+        assert_valid(&v["geojson"]);
+        let features = v["geojson"]["features"].as_array().unwrap();
+        let results = v["results"].as_array().unwrap();
+        assert_eq!(features.len(), 2 * results.len());
+        let g = t.source().road_graph().unwrap();
+        for (pair, r) in features.chunks(2).zip(results) {
+            let (point, edge) = (&pair[0], &pair[1]);
+            assert_eq!(point["geometry"]["type"], "Point");
+            let p = &point["properties"];
+            for k in ["kind", "id", "name", "class", "distance"] {
+                assert_eq!(p[k], r[k], "{k}");
+            }
+            assert!(p.get("x").is_none());
+            assert_eq!(edge["geometry"]["type"], "LineString");
+            let i: usize = r["id"].as_str().unwrap().parse().unwrap();
+            assert_eq!(edge["properties"]["edge_id"], i);
+            assert_eq!(edge["properties"]["class"], r["class"]);
+            let n = edge["geometry"]["coordinates"].as_array().unwrap().len();
+            assert_eq!(n, g.piece(&g.edges[i], 0.0, 1.0).len());
+        }
+        // Other kinds have no edge: a point per result.
+        let v = answer(
+            &t,
+            "nearest",
+            &json!({"kind": "airdrome", "x": x, "z": z, "geojson": true}),
+        )
+        .unwrap();
+        assert_valid(&v["geojson"]);
+        let features = v["geojson"]["features"].as_array().unwrap();
+        assert_eq!(features.len(), v["results"].as_array().unwrap().len());
+        assert!(features.iter().all(|f| f["geometry"]["type"] == "Point"));
     }
 
     /// Every edge of the network at its closest point, by brute force: the

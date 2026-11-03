@@ -824,6 +824,9 @@ pub struct NearestRequest {
     /// are found only when named here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub class: Option<String>,
+    /// Also return each result as GeoJSON.
+    #[serde(default)]
+    pub geojson: bool,
 }
 
 fn default_nearest_n() -> u32 {
@@ -851,6 +854,10 @@ pub struct NearestResponse {
     pub provenance: Provenance,
     /// Nearest first.
     pub results: Vec<Nearby>,
+    /// A point per result, and each road or rail result's edge, when
+    /// `geojson` was asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geojson: Option<serde_json::Value>,
 }
 
 /// For road and rail, the closest point on each of the nearest edges, `id`
