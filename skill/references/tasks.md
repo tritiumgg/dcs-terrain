@@ -52,6 +52,39 @@ awk 'BEGIN { pi = atan2(0, -1) }
 per id; the share is over the lines that answered, so say so if any are
 `off_terrain`.
 
+**Without a shell**, as through the MCP tools, make one `score_site` call per
+candidate with the 36 observers in one `not_visible_from`. The `value` of the
+term named `not_visible_from` is the share of observers that see the site, the
+same count the `visible` lines give: 0.5 is 18 of 36. `max_fraction` 1 only keeps
+the test from failing. The sightlines end at the footprint's center, so one
+orientation is enough.
+
+```jsonl
+{"id": "c1", "op": "score_site", "request": {"x": -287487.375, "z": 675858.71875, "footprint": {"width": 120, "depth": 80, "orientations_deg": [0]}, "criteria": [{"name": "not_visible_from", "params": {"observers": [{"x": -284487.375, "z": 675858.71875, "alt_agl": 2}, {"x": -284889.299, "z": 677358.71875, "alt_agl": 2}], "max_fraction": 1}}]}}
+```
+
+That line shows the first two observers; give all 36. Each is the candidate's
+`x` and `z` plus one row of this table, which is `r cos b` and `r sin b`:
+
+| Bearing | 3 km: add to x, z | 6 km: add to x, z | 10 km: add to x, z |
+|---|---|---|---|
+| 0 | 3000, 0 | 6000, 0 | 10000, 0 |
+| 30 | 2598.076, 1500 | 5196.152, 3000 | 8660.254, 5000 |
+| 60 | 1500, 2598.076 | 3000, 5196.152 | 5000, 8660.254 |
+| 90 | 0, 3000 | 0, 6000 | 0, 10000 |
+| 120 | -1500, 2598.076 | -3000, 5196.152 | -5000, 8660.254 |
+| 150 | -2598.076, 1500 | -5196.152, 3000 | -8660.254, 5000 |
+| 180 | -3000, 0 | -6000, 0 | -10000, 0 |
+| 210 | -2598.076, -1500 | -5196.152, -3000 | -8660.254, -5000 |
+| 240 | -1500, -2598.076 | -3000, -5196.152 | -5000, -8660.254 |
+| 270 | 0, -3000 | 0, -6000 | 0, -10000 |
+| 300 | 1500, -2598.076 | 3000, -5196.152 | 5000, -8660.254 |
+| 330 | 2598.076, -1500 | 5196.152, -3000 | 8660.254, -5000 |
+
+An observer off the terrain refuses the call as `off_terrain`, its `path` naming
+it, such as `criteria.0.params.observers.7`. Drop that one, call again, and say
+the share is over fewer observers.
+
 **Report** a table: position, `orientation_deg`, span, road distance, scenery
 within 500 m, exposure. Recommend from it, and reject a candidate by name with the
 reason. Candidates with nothing within 500 m and low exposure are the prudent

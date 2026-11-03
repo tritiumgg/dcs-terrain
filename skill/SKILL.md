@@ -1,6 +1,6 @@
 ---
 name: dcs-terrain
-description: Answer DCS World terrain siting and routing questions with the `dcsterrain` command line, read from the terrain's own files without DCS running. Use for where to put a FARP, SAM site, bunker, ambush or landing zone; what a site can see or what is masked from it; how a convoy gets there and where it can be cut; what stands at a position or an airfield; and how hard a placement makes a mission.
+description: Answer DCS World terrain siting and routing questions with `dcsterrain`, through its MCP tools or its command line, read from the terrain's own files without DCS running. Use for where to put a FARP, SAM site, bunker, ambush or landing zone; what a site can see or what is masked from it; how a convoy gets there and where it can be cut; what stands at a position or an airfield; and how hard a placement makes a mission.
 ---
 
 # dcs-terrain
@@ -12,9 +12,33 @@ cache directory. DCS need not be running.
 Never put numbers you did not get from the tool into an answer. Work from the
 real output, and say which terrain and build it came from.
 
-## Calling it
+## Calling it through MCP
 
-Run `dcsterrain list-terrains` first. It names the install, the build and the
+Use the MCP tools when you have them: tools named after the operations below,
+such as `describe`, `find_sites` and `visible`, from a server called
+`dcsterrain`. Use them even if you also have a shell.
+
+- A tool's arguments are the operation's request, the object a batch line puts
+  under `"request"`. Its answer is the result alone, or a tool error holding
+  `{"issues": [...]}`. `describe` takes `{}`. Where this skill says to look in
+  `dcsterrain schema`, read the tool's input schema: it describes every request
+  field. This skill and its references describe the answers.
+- The server answers for the one terrain it was started on. Call `describe`
+  first: it names the terrain and the build. Another terrain needs another
+  server; ask the user to add one.
+- There is no batch. Where this skill shows a batch, make one call per line.
+  The terrain stays open between calls, so each is as fast as a batch line.
+- A long `find_sites` or `exposure` reports its progress, and the client can
+  cancel it.
+- No answer is over 64 KiB. A larger `geojson` is replaced by `geojson_file`, a
+  path, and `geojson_bytes`. A still larger answer is only `answer_file` and
+  `answer_bytes`. The file is kept for a day. Give the user the path; a `.geojson`
+  opens in a map program. If you have a tool that reads files, read only the
+  fields you need. Asking again returns another path, not the text.
+
+## Calling it with a shell
+
+Without the MCP tools, run the command line. Run `dcsterrain list-terrains` first. It names the install, the build and the
 `--terrain` id of each terrain. An id is not always its folder: Germany's folder
 is `GermanyColdWar`, its id `GermanyCW`. If the command is not on the `PATH`, look
 for `dcsterrain/target/release/dcsterrain` in a checkout, and ask the user
