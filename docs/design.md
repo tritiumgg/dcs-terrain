@@ -599,7 +599,8 @@ edges, and its road and rail graph has 357 k nodes.
   The server lives as long as its client:
   - A call the client cancels with `notifications/cancelled` fails as
     `cancelled` at the work's next look, within a second; the next call waits
-    behind it. A read of a layer looks between its tiles. `find_sites` looks
+    behind it. A read of a layer looks between its tiles, on an install
+    between the bands of tiles it builds together. `find_sites` looks
     between its reads, every 64 candidates and at each sightline, the
     horizon march at each cell, and a sweep, as `exposure` runs it, at each
     radial it traces over the mesh, each row and each radial. Whatever work
