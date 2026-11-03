@@ -85,7 +85,8 @@ fn restored(text: String) -> String {
         Some(text)
     };
     if let Some(whole) = take("answer_file") {
-        return whole;
+        // An answer in a file may name its GeoJSON's file in turn.
+        return restored(whole);
     }
     match take("geojson_file") {
         Some(geojson) => {
@@ -300,31 +301,53 @@ fn long_search() -> Value {
     })
 }
 
-#[tokio::test]
-async fn a_cancelled_search_stops_within_a_second() {
+/// How long after its cancel a call of `op` stops, cancelled once it has
+/// reported `share` of its work done.
+async fn stopped_after(op: &str, request: Value, share: f64) -> Duration {
     let notices = Notices::default();
     let client = connect_with(notices.clone()).await;
-    let request = ClientRequest::CallToolRequest(Request::new(call("find_sites", long_search())));
+    let request = ClientRequest::CallToolRequest(Request::new(call(op, request)));
     let handle = client
         .peer()
         .send_cancellable_request(request, PeerRequestOptions::no_options())
         .await
         .expect("the call is sent");
-    // Once the search reports, it is working: the rest is seconds more.
-    notices.1.notified().await;
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    loop {
+        notices.1.notified().await;
+        let last = notices.0.lock().unwrap().last().map(|n| n.progress);
+        if last.is_some_and(|p| p >= share) {
+            break;
+        }
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
     handle.cancel(None).await.expect("the cancel is sent");
     let cancelled = Instant::now();
     // Calls are answered one at a time, so the next is answered only once
-    // the search has stopped.
+    // the cancelled one has stopped.
     let result = client.call_tool(call("describe", json!({}))).await.unwrap();
     let took = cancelled.elapsed();
     assert!(!answered(&result).1);
-    assert!(
-        took < Duration::from_secs(1),
-        "the search stopped {took:?} after its cancel"
-    );
     client.cancel().await.unwrap();
+    took
+}
+
+#[tokio::test]
+async fn a_cancelled_call_stops_within_a_second() {
+    // The search takes over 20 s here: cancelled as it reads the layers,
+    // and as it traces sightlines.
+    for share in [0.0, 0.5] {
+        let took = stopped_after("find_sites", long_search(), share).await;
+        assert!(
+            took < Duration::from_secs(1),
+            "find_sites at {share}: {took:?}"
+        );
+    }
+    // Each of these sites takes a second or more to sweep: cancelled in the
+    // second.
+    let site = |x: f64| json!({"observer": {"x": x, "z": -10000, "alt_agl": 10}, "radius": 40000});
+    let sweeps = json!({"sites": [site(5000.0), site(0.0), site(-5000.0)], "target_alt_agl": 30});
+    let took = stopped_after("exposure", sweeps, 0.3).await;
+    assert!(took < Duration::from_secs(1), "exposure: {took:?}");
 }
 
 #[tokio::test]
@@ -350,7 +373,10 @@ async fn find_sites_and_exposure_report_progress_to_the_callers_token() {
     for (op, request) in calls {
         notices.0.lock().unwrap().clear();
         let result = client.call_tool(call(op, request)).await.unwrap();
-        assert!(!answered(&result).1, "{op}: {result:?}");
+        let (text, refused) = answered(&result);
+        assert!(!refused, "{op}: {text}");
+        // Removes any file the answer went to.
+        restored(text);
         let seen = notices.0.lock().unwrap().clone();
         assert!(!seen.is_empty(), "{op} reported nothing");
         let token = &seen[0].progress_token;
