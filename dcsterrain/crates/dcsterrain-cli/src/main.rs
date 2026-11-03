@@ -8,25 +8,22 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use dcsterrain_core::cache::{self, Cache, Stored};
 use dcsterrain_core::check;
 use dcsterrain_core::classes;
 use dcsterrain_core::decode::install;
 use dcsterrain_core::source::install::Tables;
 use dcsterrain_core::synth;
-use dcsterrain_core::types::Issue;
+use dcsterrain_core::types::{Issue, OPERATIONS};
 use serde_json::{Value, json};
 use tracing::Level;
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::prelude::*;
 
-// The commands for people read their flags through it, once they are wired.
-#[allow(dead_code)]
 mod flags;
 mod mcp;
-// The commands for people read every place flag through it.
-#[cfg_attr(not(test), allow(dead_code))]
+mod people;
 mod place;
 mod query;
 
@@ -248,20 +245,12 @@ enum CacheAction {
     },
 }
 
-fn main() -> ExitCode {
-    let cli = Cli::parse();
-    let level = if cli.verbose {
-        Level::DEBUG
-    } else {
-        Level::INFO
-    };
+/// Sets up the log on stderr and the threads the work spreads over.
+fn init(verbose: bool, threads: Option<u16>) {
+    let level = if verbose { Level::DEBUG } else { Level::INFO };
     // The MCP library reports every message it passes at info; that is
     // diagnostics, not progress.
-    let library = if cli.verbose {
-        Level::DEBUG
-    } else {
-        Level::WARN
-    };
+    let library = if verbose { Level::DEBUG } else { Level::WARN };
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_ansi(std::io::stderr().is_terminal())
@@ -275,7 +264,89 @@ fn main() -> ExitCode {
                 .with_target("rmcp", library),
         )
         .init();
-    dcsterrain_core::threads::init(cli.threads.map(usize::from));
+    dcsterrain_core::threads::init(threads.map(usize::from));
+}
+
+/// The command line's commands: the ones above, and one per operation,
+/// whose flags `people` reads, so clap passes them on as they are.
+fn command() -> clap::Command {
+    let mut cmd = Cli::command();
+    for o in OPERATIONS {
+        let summary = flags::Spec::of(o.name)
+            .map(|s| s.summary)
+            .unwrap_or_default();
+        let mut sub = clap::Command::new(flags::kebab(o.name))
+            .about(summary)
+            .disable_help_flag(true)
+            .arg(
+                clap::Arg::new("args")
+                    .num_args(0..)
+                    .trailing_var_arg(true)
+                    .allow_hyphen_values(true),
+            );
+        if o.name.contains('_') {
+            sub = sub.alias(o.name);
+        }
+        cmd = cmd.subcommand(sub);
+    }
+    cmd
+}
+
+/// The first word of the command line that is not a flag, and where it
+/// stands.
+fn command_word(args: &[String]) -> Option<(usize, &str)> {
+    let mut i = 1;
+    while let Some(w) = args.get(i) {
+        match w.as_str() {
+            "--threads" => i += 2,
+            w if w.starts_with('-') => i += 1,
+            w => return Some((i, w)),
+        }
+    }
+    None
+}
+
+/// The operation a command word names, by its name or as it is typed.
+fn operation(word: &str) -> Option<&'static str> {
+    OPERATIONS
+        .iter()
+        .find(|o| o.name == word || flags::kebab(o.name) == word)
+        .map(|o| o.name)
+}
+
+fn main() -> ExitCode {
+    // An operation's flags are `people`'s to read, before and after its
+    // name; the operations' list is built only for clap's help and its
+    // suggestions, since each entry costs its schema.
+    let args: Option<Vec<String>> = std::env::args_os().map(|a| a.into_string().ok()).collect();
+    let args = args.unwrap_or_default();
+    match command_word(&args) {
+        Some((i, "help")) => {
+            if let Some(spec) = args
+                .get(i + 1)
+                .and_then(|w| operation(w))
+                .and_then(flags::Spec::of)
+            {
+                return people::help(&spec);
+            }
+        }
+        Some((i, w)) => {
+            if let Some(op) = operation(w) {
+                let mut rest = args[1..].to_vec();
+                rest.remove(i - 1);
+                return people::run(op, &rest, init);
+            }
+        }
+        None => {}
+    }
+    let known =
+        command_word(&args).is_some_and(|(_, w)| Cli::command().find_subcommand(w).is_some());
+    let cli = if known {
+        Cli::parse()
+    } else {
+        Cli::from_arg_matches(&command().get_matches()).unwrap_or_else(|e| e.exit())
+    };
+    init(cli.verbose, cli.threads);
 
     match cli.command {
         Command::Query {
