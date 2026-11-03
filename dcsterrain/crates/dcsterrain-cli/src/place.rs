@@ -9,12 +9,14 @@
 //! - **MGRS**: the zone, its band, the square's two letters, then an even
 //!   count of 2 to 10 digits, spaces anywhere or nowhere:
 //!   `38T KM 91980 72567`, `38tkm919725`. The point is the center of the
-//!   square the digits name.
+//!   square the digits name, or of its part in the zone and band written
+//!   when their edge cuts it.
 //! - **Latitude and longitude**, each half with its hemisphere letter, N or
 //!   S and E or W, all before or all after the numbers, the halves apart by
 //!   spaces or a comma: `42.177616N 42.481292E`, `N42.177616 E42.481292`.
 //!   Each half is degrees, degrees and minutes, or degrees, minutes and
-//!   seconds, marked `°`, `'` and `"` or apart by spaces:
+//!   seconds, marked `°`, `'` and `"` (or the `’` and `”` a word processor
+//!   writes) or apart by spaces:
 //!   `42°10'39.4"N 42°28'52.7"E`, `N42 10 39.4 E42 28 52.7`. Latitude
 //!   normally comes first; the letters let the other order be read too. A
 //!   sign is refused: the letter gives it.
@@ -25,8 +27,8 @@
 //!   underscores, apostrophes and dots.
 //!
 //! Nothing is guessed. A name with no kind, two small numbers with no `m`,
-//! and a name two places share are refused with what to type instead. `@`
-//! has no meaning in a place.
+//! and a name two places share are refused with what to type instead. A
+//! place never holds `@`.
 
 use dcsterrain_core::query::{self, MgrsSquare, Terrain, parse_mgrs};
 use dcsterrain_core::types::{DescribeRequest, GeoRequest, Issue, LatLon, Point};
@@ -96,7 +98,11 @@ pub fn read(text: &str) -> Result<Written, Unread> {
     if t.is_empty() {
         return malformed("is empty");
     }
+    if t.contains('@') {
+        return malformed("has `@`, which no place takes");
+    }
     if let Some((k, name)) = t.split_once(':')
+        && let k = k.trim_end()
         && !k.is_empty()
         && k.chars().all(|c| c.is_ascii_alphabetic())
     {
@@ -130,7 +136,7 @@ pub fn read(text: &str) -> Result<Written, Unread> {
     let digit = t.chars().any(|c| c.is_ascii_digit());
     let hemisphere = t.chars().any(|c| "NSEWnsew".contains(c));
     let latlon_char =
-        |c: char| c.is_ascii_digit() || c.is_whitespace() || "NSEWnsew.,+-°º'\"′″".contains(c);
+        |c: char| c.is_ascii_digit() || c.is_whitespace() || "NSEWnsew.,+-°º'\"′″’”".contains(c);
     if digit && hemisphere && t.chars().all(latlon_char) {
         return latlon(t).map_err(|why| Unread::Malformed(format!("it {why}")));
     }
@@ -139,8 +145,8 @@ pub fn read(text: &str) -> Result<Written, Unread> {
         return xz(t);
     }
     // A name may hold digits, but never a comma, which only coordinates
-    // take, nor `@`, which a height follows.
-    if t.chars().any(char::is_alphabetic) && !t.contains([',', '@']) {
+    // take.
+    if t.chars().any(char::is_alphabetic) && !t.contains(',') {
         return Ok(Written::Bare(t.to_string()));
     }
     malformed("is not in any form a place takes")
@@ -164,7 +170,7 @@ fn xz(t: &str) -> Result<Written, Unread> {
     let meters: Vec<bool> = parts.iter().map(|p| p.ends_with(['m', 'M'])).collect();
     let bare: Vec<&str> = parts
         .iter()
-        .map(|p| p.trim_end_matches(['m', 'M']).trim_end())
+        .map(|p| p.strip_suffix(['m', 'M']).unwrap_or(p).trim_end())
         .collect();
     let (Some(x), Some(z)) = (number(bare[0]), number(bare[1])) else {
         return malformed(
@@ -201,9 +207,17 @@ fn latlon(t: &str) -> Result<Written, String> {
     let (first, second) = match (blank(&before), blank(&after)) {
         (true, false) => (between, after),
         (false, true) => (before, between),
-        _ => {
+        (true, true) => {
             return Err(
-                "puts its hemisphere letters on different sides of their numbers; put both before or both after"
+                "puts one hemisphere letter before its number and the other after; put both \
+                 before or both after"
+                    .into(),
+            );
+        }
+        (false, false) => {
+            return Err(
+                "has numbers both before and after its hemisphere letters; put both letters \
+                 before their numbers or both after"
                     .into(),
             );
         }
@@ -254,8 +268,9 @@ fn degrees(text: &str, letter: char) -> Result<f64, String> {
     for c in half.chars() {
         let mark = match c {
             '°' | 'º' => Some(0),
-            '\'' | '′' => Some(1),
-            '"' | '″' => Some(2),
+            // A word processor turns ' and " into ’ and ”.
+            '\'' | '′' | '’' => Some(1),
+            '"' | '″' | '”' => Some(2),
             _ => None,
         };
         if mark.is_some() || c.is_whitespace() {
@@ -313,7 +328,8 @@ fn degrees(text: &str, letter: char) -> Result<f64, String> {
 pub fn fold(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     for c in name.chars().flat_map(char::to_lowercase) {
-        if c.is_whitespace() || "-_.'’‘`".contains(c) {
+        // Combining marks are the accents of text written decomposed.
+        if c.is_whitespace() || "-_.'’‘`".contains(c) || ('\u{300}'..='\u{36f}').contains(&c) {
             continue;
         }
         match c {
@@ -490,33 +506,42 @@ fn resolve_among(
             let of_kind = || all.iter().filter(|n| n.kind == kind);
             let found: Vec<&Named> = of_kind().filter(|n| n.keys.contains(&key)).collect();
             let what = kind.prefix();
-            match found.as_slice() {
-                [] => {
-                    let mut m = format!(
-                        "no {what} on {} is named \"{name}\".",
-                        terrain_name(terrain)
-                    );
-                    let near = closest(of_kind(), &key);
-                    if !near.is_empty() {
-                        m += &format!("\nThe closest names: {}.", near.join(", "));
-                    }
-                    return Err(issue("unknown_place", m));
+            if key.is_empty() {
+                let m = format!("{quoted} is not a place: it names no {what}.\n{FORMS}");
+                return Err(issue("invalid_place", m));
+            }
+            if found.is_empty() {
+                let mut m = format!(
+                    "no {what} on {} is named \"{name}\".",
+                    terrain_name(terrain)
+                );
+                let near = closest(of_kind(), &key);
+                if !near.is_empty() {
+                    m += &format!("\nThe closest names: {}.", near.join(", "));
                 }
-                [one] => one.at.ok_or_else(|| {
-                    issue(
-                        "invalid_place",
-                        format!("{} has no runway, so no position.", one.typed()),
-                    )
-                })?,
+                return Err(issue("unknown_place", m));
+            }
+            // Rows the list repeats at one position are one place.
+            let mut placed: Vec<(f64, f64)> = Vec::new();
+            for p in found.iter().filter_map(|n| n.at) {
+                if !placed.iter().any(|q| (p.0 - q.0).hypot(p.1 - q.1) < 1.0) {
+                    placed.push(p);
+                }
+            }
+            match placed.as_slice() {
+                [] => {
+                    let m = format!("{} has no runway, so no position.", found[0].typed());
+                    return Err(issue("invalid_place", m));
+                }
+                [one] => *one,
                 many => {
-                    let placed: Vec<(f64, f64)> = many.iter().filter_map(|n| n.at).collect();
-                    let grids = mgrs_of(terrain, &placed)?;
+                    let grids = mgrs_of(terrain, many)?;
                     let mut m = format!(
                         "\"{name}\" names {} {what}s on {}. Type the position of the one you mean:",
                         many.len(),
                         terrain_name(terrain)
                     );
-                    for (&(x, z), g) in placed.iter().zip(&grids) {
+                    for (&(x, z), g) in many.iter().zip(&grids) {
                         m += &format!("\n  {g}   {}", shown_xz(x, z));
                     }
                     return Err(issue("ambiguous_place", m));

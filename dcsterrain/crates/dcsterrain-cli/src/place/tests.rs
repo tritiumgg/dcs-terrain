@@ -249,7 +249,9 @@ fn a_malformed_value_says_what_is_wrong_and_lists_the_forms() {
         assert!(m.contains(part), "{s}: {m}");
     };
     has("-42.1N 42.4E", "sign on its N half");
-    has("N42.1 42.4E", "different sides");
+    has("N42.1 42.4E", "one hemisphere letter before");
+    has("42.0N 42.0E 5", "numbers both before and after");
+    has("N 42 E", "one hemisphere letter before");
     has("42.1N 42.4N", "one must be N or S");
     has("42.1N", "1 hemisphere letters");
     has("42 61N 42E", "minutes 61");
@@ -263,7 +265,10 @@ fn a_malformed_value_says_what_is_wrong_and_lists_the_forms() {
     has("1e5,2e5", "hemisphere letters");
     has("1,2,3", "more than one comma");
     has("1000m,2000", "`m` on one number only");
-    has("10@20", "not in any form");
+    has("10@20", "has `@`, which no place takes");
+    has("airport:Synth Field@100", "has `@`");
+    has("5mm,6m", "is not two numbers");
+    has("town:-", "it names no town");
     has("   ", "it is empty");
 }
 
@@ -297,6 +302,8 @@ fn names_fold_case_accents_and_punctuation() {
     assert_eq!(fold("Fürstenfeldbruck"), fold("Furstenfeldbruck"));
     assert_eq!(fold("Şanlıurfa"), "sanliurfa");
     assert_ne!(fold("Gomi"), fold("Gori"));
+    assert_eq!(fold("Cafe\u{301}"), fold("Café"));
+    assert_eq!(fold("İzmir"), "izmir");
 }
 
 #[test]
@@ -308,6 +315,12 @@ fn the_forms_are_told_apart() {
     assert!(matches!(r("-284887, 683859"), Written::Xz { .. }));
     assert!(matches!(r("Zugdidi"), Written::Bare(_)));
     assert!(matches!(r("town:42"), Written::Name { .. }));
+    assert!(matches!(r("airport :Kutaisi"), Written::Name { .. }));
+    // The quotes a word processor writes are minutes and seconds.
+    assert_eq!(
+        r("42°10’39.4”N 42°28’52.7”E"),
+        r("42°10'39.4\"N 42°28'52.7\"E")
+    );
     assert_eq!(
         r("S33 51 W151 12"),
         Written::LatLon {
@@ -419,4 +432,23 @@ fn on_caucasus_each_form_round_trips_and_a_shared_name_is_refused() {
         "{airports} airports and {towns} towns round-trip on DCS {}",
         build.version
     );
+}
+
+#[test]
+fn rows_repeated_at_one_position_are_one_place() {
+    let t = synth();
+    let tables = t.source().tables().unwrap();
+    let one = &tables.towns[0];
+    let repeated = || {
+        let mut all = names(&t)?;
+        all.push(Named {
+            kind: Kind::Town,
+            shown: synth::town_name(1),
+            keys: vec![fold(&synth::town_name(1))],
+            at: Some((one.x, one.z)),
+        });
+        Ok(all)
+    };
+    let p = resolve_among(&t, repeated, "--at", "town:Synth Town 1").unwrap();
+    assert_eq!((p.x, p.z), (one.x, one.z));
 }
