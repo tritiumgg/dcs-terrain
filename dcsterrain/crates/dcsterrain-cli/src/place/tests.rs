@@ -316,3 +316,107 @@ fn the_forms_are_told_apart() {
         }
     );
 }
+
+/// Opt-in: Caucasus from the install `DCSTERRAIN_INSTALL` names, its cache
+/// in the user's cache directory. Without the variable it passes having read
+/// nothing, which is what CI does.
+#[test]
+fn on_caucasus_each_form_round_trips_and_a_shared_name_is_refused() {
+    use dcsterrain_core::cache::{self, Cache};
+    use dcsterrain_core::decode::install;
+    let Some(root) = std::env::var_os("DCSTERRAIN_INSTALL") else {
+        eprintln!("DCSTERRAIN_INSTALL is not set; skipped");
+        return;
+    };
+    let root = std::path::PathBuf::from(root);
+    let build = install::read_build(&root).unwrap();
+    eprintln!("DCS {} ({})", build.version, build.timestamp);
+    let cache = Cache::new(cache::default_root().unwrap());
+    let t = Terrain::open(&root, "Caucasus", &cache, false).unwrap();
+    let tables = t.source().tables().unwrap();
+
+    let kutaisi = tables
+        .airdromes
+        .iter()
+        .find(|a| a.name_id == "KUTAISI")
+        .unwrap();
+    let (kx, kz) = (kutaisi.x.unwrap(), kutaisi.z.unwrap());
+    assert_eq!(geo_of(&t, kx, kz).2, "38T KM 91980 72567");
+    let (x, z) = at(&t, "38T KM 91980 72567");
+    assert!((x - kx).abs() < 1.0 && (z - kz).abs() < 1.0);
+
+    // Every airport by each of its names, and every form of its point.
+    let mut airports = 0;
+    for a in &tables.airdromes {
+        let Some(want) = a.x.zip(a.z) else { continue };
+        for name in std::iter::once(&a.name_id).chain(&a.display_name) {
+            assert_eq!(at(&t, &format!("airport:{name}")), want, "{name}");
+            let loose = name.to_lowercase().replace('-', " ");
+            assert_eq!(at(&t, &format!("airport:{loose}")), want, "{loose}");
+        }
+        every_form_round_trips(&t, want.0, want.1);
+        airports += 1;
+    }
+    assert!(airports >= 20, "{airports}");
+    for (typed, name_id) in [
+        ("airport:Senaki Kolkhi", "Senaki"),
+        ("airport:tbilisi lochini", "Lochini"),
+        ("airport:mineralnye vody", "MinVody"),
+        ("airport:krasnodar p", "Krasnodar_P"),
+    ] {
+        let a = tables
+            .airdromes
+            .iter()
+            .find(|a| a.name_id == name_id)
+            .unwrap();
+        assert_eq!(at(&t, typed), (a.x.unwrap(), a.z.unwrap()), "{typed}");
+    }
+
+    // Every 25th town whose name no other town holds.
+    let key = |n: &str| fold(n);
+    let mut towns = 0;
+    for town in tables.towns.iter().step_by(25) {
+        let k = key(&town.name);
+        let shared = tables.towns.iter().filter(|o| key(&o.name) == k).count();
+        if shared > 1 {
+            continue;
+        }
+        assert_eq!(at(&t, &format!("town:{}", town.name)), (town.x, town.z));
+        every_form_round_trips(&t, town.x, town.z);
+        towns += 1;
+    }
+    assert!(towns >= 50, "{towns}");
+    let nalchik = tables.towns.iter().find(|o| o.name == "NAL'CHIK").unwrap();
+    assert_eq!(at(&t, "town:nalchik"), (nalchik.x, nalchik.z));
+
+    assert_eq!(
+        refusal(&t, "Kutaisi"),
+        (
+            "invalid_place".into(),
+            "--at: \"Kutaisi\" needs a kind. Type airport:Kutaisi or town:KUTAISI.".into()
+        )
+    );
+    // Two towns of the list whose names differ only in case: the list repeats
+    // other names under one key, which keeps only its last town.
+    let shared: Vec<_> = (tables.towns.iter())
+        .filter(|o| fold(&o.name) == "mayskiy")
+        .collect();
+    assert_eq!(shared.len(), 2);
+    let (code, m) = refusal(&t, "town:Mayskiy");
+    assert_eq!(code, "ambiguous_place");
+    let mut lines = m.lines();
+    assert_eq!(
+        lines.next().unwrap(),
+        "--at: \"Mayskiy\" names 2 towns on Caucasus. Type the position of the one you mean:"
+    );
+    for (line, town) in lines.zip(&shared) {
+        let grid = geo_of(&t, town.x, town.z).2;
+        assert_eq!(line, format!("  {grid}   {}", shown_xz(town.x, town.z)));
+        let (x, z) = at(&t, &grid);
+        assert!((x - town.x).abs() < 1.0 && (z - town.z).abs() < 1.0);
+    }
+    eprintln!(
+        "{airports} airports and {towns} towns round-trip on DCS {}",
+        build.version
+    );
+}
