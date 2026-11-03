@@ -17,7 +17,7 @@ pub enum Criterion {
         /// The steepest slope allowed, in degrees.
         deg: f64,
     },
-    /// Highest minus lowest height over the footprint's corners and centre,
+    /// Highest minus lowest height over the footprint's corners and center,
     /// at most `m`.
     SpanMax {
         /// The largest height difference allowed, in meters.

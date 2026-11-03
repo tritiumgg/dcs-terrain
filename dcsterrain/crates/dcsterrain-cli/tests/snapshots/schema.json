@@ -920,7 +920,7 @@
           "type": "object"
         },
         {
-          "description": "Highest minus lowest height over the footprint's corners and centre,\nat most `m`.",
+          "description": "Highest minus lowest height over the footprint's corners and center,\nat most `m`.",
           "properties": {
             "name": {
               "const": "span_max",

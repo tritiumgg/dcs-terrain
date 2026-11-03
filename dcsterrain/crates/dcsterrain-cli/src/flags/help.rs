@@ -82,7 +82,7 @@ fn field_help(f: &Field) -> String {
         let shown = match d {
             Value::Array(a) if a.is_empty() => None,
             Value::Object(m) if m.is_empty() => None,
-            Value::Bool(false) => None,
+            Value::Bool(false) | Value::Null => None,
             Value::Array(a) => Some(a.iter().map(shown_number).collect::<Vec<_>>().join(" ")),
             Value::String(s) => Some(s.clone()),
             v => Some(shown_number(v)),
@@ -145,6 +145,35 @@ fn object_section(out: &mut String, f: &Field) {
     for g in fields {
         let left = format!("{} {}", kebab(&g.name), typed(&g.shape));
         flag_line(out, left.trim_end(), &field_help(g));
+        nested(out, g);
+    }
+}
+
+/// The values a field inside an object takes, when it is an object or one
+/// of several shapes: `field=<shape>`, then `field.key=` for each value.
+fn nested(out: &mut String, g: &Field) {
+    let k = kebab(&g.name);
+    let line = |out: &mut String, name: &str, fields: &[Field], help: &str| {
+        let keys: Vec<String> = fields
+            .iter()
+            .map(|h| format!("{k}.{}=", kebab(&h.name)))
+            .collect();
+        let left = format!("  {k}={name} {}", keys.join(" "));
+        flag_line(out, left.trim_end(), help);
+    };
+    match &g.shape {
+        Shape::OneOf(o) => {
+            for v in &o.variants {
+                line(
+                    out,
+                    &word(&v.tag),
+                    v.fields.as_deref().unwrap_or(&[]),
+                    &v.help,
+                );
+            }
+        }
+        Shape::Object(fields) => line(out, "", fields, &g.help),
+        _ => {}
     }
 }
 
@@ -249,7 +278,9 @@ impl Spec {
              latitude and longitude (42.177616N 42.481292E), airport:<name> or town:<name>.\n\
              A height follows it after `@`: meters above the ground, or above sea level\n\
              with `msl` (airport:Kutaisi@10, town:Zugdidi@1200msl).\n\
-             An object's values go in the order shown, or as key=value in any order."
+             Quote a place that holds a space: \"42.18N 42.48E\".\n\
+             An object's values go in the order shown, or as key=value in any order. A list\n\
+             takes several values, or its key again. A nested field is field.key=value."
         );
         if let Some(e) = example {
             let _ = writeln!(out, "\nExample:\n  {e}");
