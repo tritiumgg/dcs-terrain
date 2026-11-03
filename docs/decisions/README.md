@@ -38,7 +38,8 @@ are in git at commit `4b85bd0`.
 | [0005](0005-drop-the-hook-and-place-airdrome-ids-by-position.md) | Accepted | 2026-10-29 | Drop the hook, and give an airdrome its id by its beacons' positions |
 | [0006](0006-cross-the-mesh-near-the-site-in-the-radial-sweep.md) | Accepted | 2026-10-29 | Cross the mesh's triangles near the site in the radial sweep |
 | [0007](0007-count-parallel-budgets-on-8-cores-and-relax-two-targets.md) | Accepted, memory target superseded by 0008 | 2026-10-30 | Count a parallel operation's budget on 8 cores, and relax two targets |
-| [0008](0008-hold-a-query-to-64-mib-by-reading-through-bounded-views.md) | Accepted | 2026-10-30 | Hold a query to 64 MiB by reading through bounded views |
+| [0008](0008-hold-a-query-to-64-mib-by-reading-through-bounded-views.md) | Accepted, memory target amended by 0012 | 2026-10-30 | Hold a query to 64 MiB by reading through bounded views |
 | [0009](0009-route-over-the-road-files-own-passages.md) | Accepted | 2026-11-01 | Route over the road file's own passages |
 | [0010](0010-tell-places-by-clusters-of-buildings-and-size-them-by-floor.md) | Accepted | 2026-11-02 | Tell places by clusters of buildings, and size them by floor |
 | [0011](0011-serve-the-engine-through-query-mcp-and-commands-for-people.md) | Accepted | 2026-11-02 | Serve the engine through `query`, an MCP server and commands for people |
+| [0012](0012-hold-the-engine-to-64-mib-not-the-answer-it-encodes.md) | Accepted | 2026-11-03 | Hold the engine to 64 MiB, not the answer it encodes |

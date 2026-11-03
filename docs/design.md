@@ -615,12 +615,14 @@ edges, and its road and rail graph has 357 k nodes.
     new and named `<op>-<pid>-<time>-<n>.json` or `.geojson`. A server
     starting removes those over a day old. A file that cannot be written
     fails the call as `internal_error`, and leaves no part behind.
-  - It holds 64 MiB of peak commit across a session as a batch does: nothing
-    is kept per call, and the terrain lets go of its blocks after a second
+  - The engine holds 64 MiB of peak commit across a session as a batch
+    does, and the answers it encodes are not counted (ADR 0012): nothing is
+    kept per call, and the terrain lets go of its blocks after a second
     idle. 100 calls on Caucasus of 2.9.31.29434, a 20 km `exposure` and a
     200-site `find_sites` among them, peak at 63.0 to 63.5 MiB over three
     runs, and the same lines through one `query` batch at 63.6 MiB: the
-    margin is the engine's.
+    margin is the engine's. A call with a large answer peaks higher while it
+    runs and keeps nothing after (ADR 0012).
 - `dcsterrain check [--install <dir>] --terrain <Terrain> [--top <n>] [--json]`
   reports each terrain file's class and version and why no decoder reads it
   when none does, each cache entry's state as found and the horizon tiles
@@ -684,7 +686,7 @@ single-thread baseline of each operation is in `data/q18-performance.md`.
 | `validate_placements`, 1 000 placements | 1 000 of every shape, a third near structures and a third by runways, scattered over each of 8 terrains: 0.76–2.5 s warm, GermanyCW the slowest, and 1.0–4.4 s cold, Syria over the target on first touch, at 5 threads, on 2.9.30.28738 (`data/placements.md`) | 3 s |
 | `point_info`, `airfield_info` | µs to a few ms; `point_info` 0.4–3.9 ms a point warm over 3 000 uniform points on each of 8 terrains, most of it the nearest road from points far out at sea, so 10 000 points at sea take about 20 s, on 2.9.30.28738 (`data/point-info.md`); `airfield_info` 0.8–16.5 ms p50 cold, 0.6–5.1 ms warm, over every airdrome of 8 terrains at 5 threads, most of it the runway width; worst 23 ms cold off the Mariana terrains and 44 and 109 ms on them, on 2.9.30.28738 (`data/airfield-info.md`) | `point_info` 150 ms cold in a fresh process, 20 ms held; `airfield_info` 20 ms cold |
 | cache build, all but betweenness and places | < 2 s; roads 0.5 / 9.8 s (Caucasus / GermanyCW, 2.9.30.28738), 3.1 s of it the GermanyCW scan and 4.6 s its water | 10 s |
-| peak commit of a query process, mapped file pages not counted; a request that builds a cache entry is exempt and measured beside it (ADR 0008) | 47–61 MiB worst case by terrain, on 2.9.31.29434 (`data/q18-performance.md`) | 64 MiB |
+| peak commit of a query process over the query benchmark's cases, mapped file pages not counted: the engine's work, not the answer it encodes; a request that builds a cache entry, or whose answer is large, is exempt and measured beside it (ADR 0008, ADR 0012) | 47–61 MiB worst case by terrain, on 2.9.31.29434 (`data/q18-performance.md`); exempt, at the row caps on `Synth`, `sample` of 57 layers 133 MiB and 293 MiB with GeoJSON, `point_info` 76 and 187 MiB | 64 MiB |
 
 Accuracy:
 

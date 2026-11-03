@@ -266,9 +266,12 @@ The first request on a terrain, or on a stretch of it, reads files and costs
 more. A horizon criterion (`masked_from`, `enclosure_min`) or an `enclosure` or
 `horizon_*` layer computes its region's horizon once and caches it. `--threads
 <n>` caps the cores; the work already runs below normal priority, so a DCS
-server beside it keeps the CPU. A query process stays within 64 MiB of commit,
-and the worst case measured is 61.1 MiB. A process building a cache entry is
-exempt: `dcsterrain index` from empty peaks at about 1.5 GiB on GermanyCW.
+server beside it keeps the CPU. The engine's work stays within 64 MiB of
+commit, and the worst case measured is 61.1 MiB. A large answer adds its own:
+`sample` of all 57 layers at 10 000 rows with GeoJSON peaks near 300 MiB, so
+ask for fewer rows or layers where memory is short. A process building a cache
+entry is exempt: `dcsterrain index` from empty peaks at about 1.5 GiB on
+GermanyCW.
 
 ## Layers for `sample`
 

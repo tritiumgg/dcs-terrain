@@ -67,6 +67,7 @@ Max 5 entries, in dependency order. Task ids from `plan.md`.
 2. **H2** — one subcommand per operation. *Agent.*
 3. **H3** — readable output for the main operations. *Agent.*
 4. **H5** — the README and the guide for people. *User: no DCS.*
+5. **Q19** — encode each answer as it is written, to cut its memory. *Agent.*
 
 M and H run in parallel beside C1, which is live (ADR 0011). Milestone in
 view: **MS3 Assistant and release**, which C1 closes; then **MS4 Interfaces**.
