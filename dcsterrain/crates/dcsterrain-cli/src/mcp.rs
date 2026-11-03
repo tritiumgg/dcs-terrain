@@ -1,9 +1,10 @@
 //! `dcsterrain mcp`: the operations as tools of a Model Context Protocol
 //! server on stdin and stdout. A tool's input is its operation's request and
-//! its answer the one `query` prints for it, byte for byte, unless it is too
-//! large to hand back as text; a refusal is a tool error whose text is the
-//! issue list `query` prints. Nothing here knows a terrain: each call is
-//! handed to the opener `query` answers with.
+//! the terrain the call is about, and its answer the one `query` prints for
+//! that request about that terrain, byte for byte, unless it is too large to
+//! hand back as text; a refusal is a tool error whose text is the issue list
+//! `query` prints. Nothing here knows a terrain: each call is handed to the
+//! opener `query` answers with, which holds one terrain open at a time.
 //!
 //! The server lives as long as its client. A call the client cancels stops
 //! its work, as the protocol's `notifications/cancelled` asks, and a long
@@ -45,6 +46,8 @@ const KEPT: Duration = Duration::from_secs(24 * 60 * 60);
 /// One call for the thread that holds the terrain.
 struct Call {
     op: String,
+    /// The terrain the call names, or a refusal of what it gave as one.
+    terrain: Result<Option<String>, String>,
     request: Value,
     ticket: Arc<Ticket>,
     reply: oneshot::Sender<Result<String, String>>,
@@ -57,19 +60,68 @@ struct Server {
     calls: mpsc::Sender<Call>,
 }
 
-/// One tool per operation, its input the operation's request schema.
+/// The tool that lists the install's terrains, as `list-terrains --json`.
+pub const LIST_TERRAINS: &str = "list_terrains";
+
+/// The input every operation's tool takes beside its request: the terrain
+/// the call is about.
+pub const TERRAIN: &str = "terrain";
+
+/// One tool per operation, its input the operation's request schema with
+/// `terrain` beside its fields, and the tool that lists the terrains.
 fn tools() -> Vec<Tool> {
-    OPERATIONS
+    let mut tools: Vec<Tool> = OPERATIONS
         .iter()
         .map(|o| {
-            let schema = request_schema(o.name).expect("a listed operation has a schema");
+            let mut schema = request_schema(o.name).expect("a listed operation has a schema");
             let description = schema
                 .get("description")
                 .and_then(Value::as_str)
                 .map(|d| d.to_string().into());
+            let terrain = json!({
+                "type": "string",
+                "description": "The terrain to answer about: its id, as `list_terrains` \
+                    gives it, such as `Caucasus`, or `synth` for the synthetic terrain. \
+                    Omitted, the terrain the server was started with.",
+            });
+            let fields = schema.entry("properties").or_insert_with(|| json!({}));
+            let fields = fields
+                .as_object_mut()
+                .expect("a request's fields are an object");
+            assert!(
+                fields.insert(TERRAIN.into(), terrain).is_none(),
+                "{} has its own `terrain`",
+                o.name
+            );
             Tool::new_with_raw(o.name, description, schema)
         })
-        .collect()
+        .collect();
+    let input = json!({"type": "object", "properties": {}, "additionalProperties": false});
+    let description = "Every terrain of the DCS install: its id, which the other tools take \
+        as `terrain`, whether it can be read, and what the cache holds for it; and the DCS \
+        build. As `dcsterrain list-terrains --json` prints it, without each terrain's \
+        `files`: the class and version of every terrain file, which `dcsterrain check` \
+        reports.";
+    let input = input.as_object().cloned().expect("an object");
+    tools.push(Tool::new_with_raw(
+        LIST_TERRAINS,
+        Some(description.into()),
+        input,
+    ));
+    tools
+}
+
+/// A listing of the terrains as text, each terrain's `files` left out: they
+/// are most of it, about 190 KB on an install of eight terrains, where the
+/// rest is a few KB an assistant reads the ids from.
+fn without_files(mut listing: Value) -> String {
+    let terrains = listing["terrains"].as_array_mut().into_iter().flatten();
+    for t in terrains {
+        if let Some(t) = t.as_object_mut() {
+            t.remove("files");
+        }
+    }
+    listing.to_string()
 }
 
 /// Issues as the document `query` prints for them.
@@ -279,7 +331,23 @@ fn answers_dir() -> PathBuf {
 /// time, so nothing grows with the number of calls.
 fn answer_calls(mut opener: Opener, files: Files, calls: mpsc::Receiver<Call>) {
     files.tidy();
+    // The terrain a call that names none is about.
+    let started_on = opener.id.clone();
     for c in calls {
+        let terrain = match c.terrain {
+            Ok(t) => t.or_else(|| started_on.clone()),
+            Err(text) => {
+                let _ = c.reply.send(Err(text));
+                continue;
+            }
+        };
+        if c.op == LIST_TERRAINS {
+            let (install, cache) = (opener.install.clone(), &opener.cache);
+            let listed = call::within(c.ticket, || crate::terrains_json(install, cache));
+            let _ = c.reply.send(listed.map(without_files).map_err(refusal));
+            continue;
+        }
+        opener.name(terrain);
         let answered = call::within(c.ticket, || opener.answer(&c.op, &c.request));
         let text = answered.map_err(refusal).and_then(|a| {
             files.written(&c.op, a).map_err(|e| {
@@ -321,9 +389,20 @@ impl ServerHandler for Server {
             let _ = report.send((share, doing.to_string()));
         }));
         let (reply, mut answered) = oneshot::channel();
+        let mut arguments = request.arguments.unwrap_or_default();
+        let terrain = match arguments.remove(TERRAIN) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::String(id)) => Ok(Some(id)),
+            Some(_) => Err(refusal(vec![Issue::new(
+                "invalid_request",
+                "`terrain` is a terrain's id, a string",
+                TERRAIN,
+            )])),
+        };
         let call = Call {
             op: request.name.into_owned(),
-            request: Value::Object(request.arguments.unwrap_or_default()),
+            terrain,
+            request: Value::Object(arguments),
             ticket: ticket.clone(),
             reply,
         };

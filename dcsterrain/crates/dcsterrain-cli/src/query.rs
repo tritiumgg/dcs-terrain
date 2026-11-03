@@ -35,7 +35,8 @@ enum Reply {
 /// needed and held from then on.
 pub struct Opener {
     pub install: Option<PathBuf>,
-    pub id: String,
+    /// The terrain's id; none until one is named.
+    pub id: Option<String>,
     /// The synthetic terrain's seed, side and cell.
     pub synth: (u32, u32, u32),
     pub allow_crs_residual: bool,
@@ -51,8 +52,12 @@ fn issue(code: &str, message: &str) -> Vec<Issue> {
 
 impl Opener {
     fn open(&self) -> Result<Terrain, Vec<Issue>> {
+        let Some(id) = self.id.as_deref() else {
+            let why = "no terrain is named: give `terrain`, an id `list_terrains` shows";
+            return Err(vec![Issue::new("invalid_request", why, "terrain")]);
+        };
         let (seed, size_km, cell) = self.synth;
-        if self.id == synth::TERRAIN_ID {
+        if id == synth::TERRAIN_ID {
             return match Synth::new(seed, size_km, cell) {
                 Ok(s) => Ok(Terrain::Synth(Box::new(s))),
                 Err(e) => Err(issue("terrain_refused", &e.0)),
@@ -71,8 +76,18 @@ impl Opener {
         }
         let root = install_root(self.install.clone()).map_err(|e| issue("no_install", &e))?;
         let cache = self.cache.open().map_err(|e| issue("no_cache", &e))?;
-        Terrain::open(&root, &self.id, &cache, self.allow_crs_residual)
+        Terrain::open(&root, id, &cache, self.allow_crs_residual)
             .map_err(|e| issue("terrain_refused", &e.0))
+    }
+
+    /// Names the terrain the next answer is about. Another than the one held
+    /// lets that one go before the next opens, so only one is ever open and
+    /// a session over many terrains holds the memory of one.
+    pub(crate) fn name(&mut self, id: Option<String>) {
+        if self.id != id {
+            self.terrain = None;
+            self.id = id;
+        }
     }
 
     /// The terrain as its files are now: the one held, unless they changed
@@ -80,13 +95,13 @@ impl Opener {
     /// refusal here is one request's: the next tries again.
     fn current(&mut self) -> Result<&Terrain, Vec<Issue>> {
         if self.terrain.as_ref().is_some_and(Terrain::changed) {
-            tracing::debug!("the files of {} changed", self.id);
+            tracing::debug!("the files of {} changed", self.id.as_deref().unwrap_or("?"));
             self.terrain = None;
         }
         if self.terrain.is_none() {
             self.terrain = Some(self.open()?);
             self.opens += 1;
-            tracing::debug!("opened terrain {}", self.id);
+            tracing::debug!("opened terrain {}", self.id.as_deref().unwrap_or("?"));
         }
         Ok(self.terrain.as_ref().expect("opened above"))
     }
@@ -250,7 +265,7 @@ mod tests {
     fn opener() -> Opener {
         Opener {
             install: None,
-            id: synth::TERRAIN_ID.into(),
+            id: Some(synth::TERRAIN_ID.into()),
             synth: (
                 synth::DEFAULT_SEED,
                 synth::DEFAULT_SIZE_KM,

@@ -141,31 +141,34 @@ enum Command {
         op: Option<String>,
     },
     /// Serve the operations as tools of an MCP server on stdin and stdout,
-    /// each answering as `query` does.
+    /// each answering as `query` does about the terrain its call names.
     Mcp {
         #[command(flatten)]
         terrain: TerrainArgs,
     },
 }
 
-/// The terrain a long-running command answers about, as `query` takes it.
+/// The terrains a long-running command answers about, as `query` takes
+/// them: each call may name its own, and `--terrain` is the one a call
+/// that names none answers about.
 #[derive(clap::Args)]
 struct TerrainArgs {
     /// The DCS install root. On Windows it defaults to the one the registry
     /// names.
     #[arg(long)]
     install: Option<PathBuf>,
-    /// The terrain's id, as `list-terrains` shows it, or `synth` for the
-    /// synthetic terrain, which needs no install.
+    /// The terrain a call that names none answers about: its id, as
+    /// `list-terrains` shows it, or `synth` for the synthetic terrain, which
+    /// needs no install. Without it, each call names its terrain.
     #[arg(long)]
-    terrain: String,
-    /// The synthetic terrain's seed.
+    terrain: Option<String>,
+    /// The synthetic terrain's seed, for every call about `synth`.
     #[arg(long, default_value_t = synth::DEFAULT_SEED)]
     seed: u32,
-    /// The synthetic terrain's side, in kilometers.
+    /// The synthetic terrain's side, in kilometers, for every call about `synth`.
     #[arg(long, default_value_t = synth::DEFAULT_SIZE_KM)]
     size_km: u32,
-    /// The synthetic terrain's cell, in meters.
+    /// The synthetic terrain's cell, in meters, for every call about `synth`.
     #[arg(long, default_value_t = synth::CELL_SIZE_M)]
     cell: u32,
     /// Accept a projection fitted to the terrain's beacons that misses one
@@ -282,7 +285,7 @@ fn main() -> ExitCode {
         } => {
             let opener = query::Opener {
                 install,
-                id: terrain,
+                id: Some(terrain),
                 synth: (seed, size_km, cell),
                 allow_crs_residual,
                 cache,
@@ -394,20 +397,41 @@ fn run_batch(mut opener: query::Opener) -> ExitCode {
 }
 
 fn list_terrains(install: Option<PathBuf>, as_json: bool, cache: CacheDir) -> ExitCode {
-    let listed = install_root(install).and_then(|root| {
-        let listed = install::terrains(&root).map_err(|e| e.0)?;
-        Ok((root, listed))
-    });
-    let (root, listed) = match listed {
-        Ok(l) => l,
-        // A table reader gets the reason on stderr; a JSON reader also gets
-        // it as the one document on stdout.
-        Err(e) if as_json => return refuse(vec![Issue::new("no_install", &e, "")]),
+    if as_json {
+        return match terrains_json(install, &cache) {
+            Ok(listing) => {
+                println!("{listing}");
+                ExitCode::SUCCESS
+            }
+            // A JSON reader gets the reason as the one document on stdout too.
+            Err(issues) => refuse(issues),
+        };
+    }
+    match surveyed(install, &cache, |l| print!("{}", listing_text(l))) {
+        Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             tracing::error!("{e}");
-            return ExitCode::FAILURE;
+            ExitCode::FAILURE
         }
-    };
+    }
+}
+
+/// What `list-terrains --json` prints, or the issue it refuses with.
+pub(crate) fn terrains_json(
+    install: Option<PathBuf>,
+    cache: &CacheDir,
+) -> Result<Value, Vec<Issue>> {
+    surveyed(install, cache, listing_json).map_err(|e| vec![Issue::new("no_install", &e, "")])
+}
+
+/// Surveys every terrain of the install and hands the listing to `show`.
+fn surveyed<T>(
+    install: Option<PathBuf>,
+    cache: &CacheDir,
+    show: impl FnOnce(&Listing) -> T,
+) -> Result<T, String> {
+    let root = install_root(install)?;
+    let listed = install::terrains(&root).map_err(|e| e.0)?;
     // Without a cache directory the listing still answers, its cache column
     // unknown.
     let cache = cache.open().inspect_err(|e| tracing::warn!("{e}")).ok();
@@ -427,12 +451,7 @@ fn list_terrains(install: Option<PathBuf>, as_json: bool, cache: CacheDir) -> Ex
         surveys: &surveys,
         stored: &stored,
     };
-    if as_json {
-        println!("{}", listing_json(&listing));
-    } else {
-        print!("{}", listing_text(&listing));
-    }
-    ExitCode::SUCCESS
+    Ok(show(&listing))
 }
 
 /// What `list-terrains` reports: each terrain surveyed, and beside it what

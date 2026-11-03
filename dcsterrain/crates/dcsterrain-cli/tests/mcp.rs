@@ -5,6 +5,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::ffi::OsStr;
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -145,6 +146,17 @@ fn assert_same_request(tool: &Tool, printed: &Value) {
         .unwrap()
         .remove("$defs")
         .unwrap_or_else(|| Value::Object(Map::new()));
+    // Beside the request's own fields, every tool takes the terrain it is about.
+    let fields = input.as_object_mut().unwrap().get_mut("properties");
+    let fields = fields
+        .and_then(Value::as_object_mut)
+        .expect("the input has fields");
+    let terrain = fields.remove("terrain").expect("the input takes `terrain`");
+    assert_eq!(terrain["type"], "string", "{name}");
+    assert!(terrain["description"].is_string(), "{name}");
+    if fields.is_empty() && request_def.get("properties").is_none() {
+        input.as_object_mut().unwrap().remove("properties");
+    }
     let dialect = input.as_object_mut().unwrap().remove("$schema");
     assert_eq!(dialect.as_ref(), Some(&printed["$schema"]), "{name}");
     assert_eq!(&input, request_def, "{name}");
@@ -170,7 +182,7 @@ fn assert_same_request(tool: &Tool, printed: &Value) {
 }
 
 #[tokio::test]
-async fn there_is_one_tool_per_operation_and_its_input_is_the_request_schema() {
+async fn there_is_one_tool_per_operation_and_its_input_is_the_request_schema_and_terrain() {
     let client = connect().await;
     let tools = client.list_all_tools().await.expect("the tools are listed");
     client.cancel().await.unwrap();
@@ -187,11 +199,13 @@ async fn there_is_one_tool_per_operation_and_its_input_is_the_request_schema() {
         .map(|n| n.as_str().unwrap())
         .collect();
     let mut names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+    let listing = names.iter().position(|n| *n == "list_terrains");
+    names.remove(listing.expect("the terrains are listed by a tool"));
     ops.sort_unstable();
     names.sort_unstable();
     assert_eq!(names, ops);
 
-    for tool in &tools {
+    for tool in tools.iter().filter(|t| t.name != "list_terrains") {
         let out = Command::new(env!("CARGO_BIN_EXE_dcsterrain"))
             .args(["schema", "--op", tool.name.as_ref()])
             .output()
@@ -306,6 +320,20 @@ fn long_search() -> Value {
 async fn stopped_after(op: &str, request: Value, share: f64) -> Duration {
     let notices = Notices::default();
     let client = connect_with(notices.clone()).await;
+    let took = stopped_on(&client, &notices, op, request, share).await;
+    client.cancel().await.unwrap();
+    took
+}
+
+/// How long after its cancel a call of `op` on `client` stops.
+async fn stopped_on(
+    client: &RunningService<RoleClient, Notices>,
+    notices: &Notices,
+    op: &str,
+    request: Value,
+    share: f64,
+) -> Duration {
+    notices.0.lock().unwrap().clear();
     let request = ClientRequest::CallToolRequest(Request::new(call(op, request)));
     let handle = client
         .peer()
@@ -327,7 +355,6 @@ async fn stopped_after(op: &str, request: Value, share: f64) -> Duration {
     let result = client.call_tool(call("describe", json!({}))).await.unwrap();
     let took = cancelled.elapsed();
     assert!(!answered(&result).1);
-    client.cancel().await.unwrap();
     took
 }
 
@@ -485,26 +512,187 @@ async fn a_terrain_whose_files_change_is_reopened_and_answers() {
     client.cancel().await.unwrap();
 }
 
-/// Opt-in: a session of 100 calls on Caucasus, the heaviest among them,
-/// held to 64 MiB of peak commit for the server's whole life. Set
-/// `DCSTERRAIN_INSTALL` to the DCS install root, and `DCSTERRAIN_CACHE` to a
-/// cache built by `index` if not the default; without the install this
-/// passes without reading anything, which is what CI does.
+/// What `query` prints for one request about `terrain` of the install at
+/// `root`, without its newline, and whether it refused.
+fn query_on(root: &Path, cache: &Path, terrain: &str, op: &str, request: &Value) -> (String, bool) {
+    let out = Command::new(env!("CARGO_BIN_EXE_dcsterrain"))
+        .args(["--threads", "5", "query", "--terrain", terrain, "--install"])
+        .arg(root)
+        .arg("--cache")
+        .arg(cache)
+        .args([op, &request.to_string()])
+        .stderr(Stdio::null())
+        .output()
+        .expect("the binary runs");
+    let printed = String::from_utf8(out.stdout).expect("stdout is UTF-8");
+    let printed = printed.strip_suffix('\n').expect("one line").to_string();
+    (printed, !out.status.success())
+}
+
+/// `request` with the terrain it is about.
+fn on(terrain: &str, request: &Value) -> Value {
+    let mut request = request.clone();
+    request["terrain"] = json!(terrain);
+    request
+}
+
 #[tokio::test]
-async fn a_session_of_100_calls_on_caucasus_holds_its_memory() {
+async fn a_call_that_names_no_terrain_or_an_unknown_one_is_refused() {
+    let t = install(false);
+    let c = scratch();
+    let flags: [&OsStr; 4] = [
+        "--install".as_ref(),
+        t.0.as_os_str(),
+        "--cache".as_ref(),
+        c.0.as_os_str(),
+    ];
+    let client = serve((), &flags).await;
+    let refusal = async |request: Value| {
+        let result = client.call_tool(call("describe", request)).await.unwrap();
+        let (text, refused) = answered(&result);
+        assert!(refused, "{text}");
+        serde_json::from_str::<Value>(&text).unwrap()["issues"][0].clone()
+    };
+    // A null `terrain` names none, as an omitted one does.
+    for request in [json!({}), json!({"terrain": null})] {
+        let missing = refusal(request).await;
+        assert_eq!(missing["code"], "invalid_request");
+        assert_eq!(missing["path"], "terrain");
+    }
+    let unknown = refusal(json!({"terrain": "Nope"})).await;
+    assert_eq!(unknown["code"], "terrain_refused");
+    let message = unknown["message"].as_str().unwrap();
+    assert!(
+        message.contains("Caucasus") && message.contains("GermanyCW"),
+        "{message}"
+    );
+    let wrong = refusal(json!({"terrain": 7})).await;
+    assert_eq!(wrong["path"], "terrain");
+    // The server still answers a call that names a terrain.
+    let result = client.call_tool(call("describe", json!({"terrain": "Caucasus"})));
+    assert!(!answered(&result.await.unwrap()).1);
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn list_terrains_answers_as_the_command_line_without_the_files() {
+    let t = install(false);
+    let c = scratch();
+    let flags: [&OsStr; 4] = [
+        "--install".as_ref(),
+        t.0.as_os_str(),
+        "--cache".as_ref(),
+        c.0.as_os_str(),
+    ];
+    let client = serve((), &flags).await;
+    let result = client
+        .call_tool(call("list_terrains", json!({})))
+        .await
+        .unwrap();
+    let (text, refused) = answered(&result);
+    assert!(!refused, "{text}");
+    client.cancel().await.unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_dcsterrain"))
+        .args(["list-terrains", "--json", "--install"])
+        .arg(&t.0)
+        .arg("--cache")
+        .arg(&c.0)
+        .output()
+        .unwrap();
+    let mut printed: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let terrains = printed["terrains"].as_array_mut().unwrap();
+    assert_eq!(terrains.len(), 2);
+    for terrain in terrains {
+        assert!(terrain.as_object_mut().unwrap().remove("files").is_some());
+    }
+    assert_eq!(text, printed.to_string());
+}
+
+/// One server, its default `synth`, answers calls that alternate between it
+/// and two terrains of an install, each as `query` answers it about that
+/// terrain; and after each switch a terrain whose files change reopens, a
+/// long call reports progress and stops when cancelled, and a large answer
+/// goes to a file.
+#[tokio::test]
+async fn one_server_answers_each_terrain_its_calls_name() {
+    let t = install(false);
+    let c = scratch();
+    let flags: [&OsStr; 6] = [
+        "--terrain".as_ref(),
+        "synth".as_ref(),
+        "--install".as_ref(),
+        t.0.as_os_str(),
+        "--cache".as_ref(),
+        c.0.as_os_str(),
+    ];
+    let notices = Notices::default();
+    let client = serve(notices.clone(), &flags).await;
+    let ask = async |request: Value, op: &str| {
+        let result = client.call_tool(call(op, request)).await.unwrap();
+        let (text, refused) = answered(&result);
+        (restored(text), refused)
+    };
+
+    let describe = json!({});
+    let on_install = async |id: &str| {
+        let (text, refused) = ask(on(id, &describe), "describe").await;
+        let (printed, _) = query_on(&t.0, &c.0, id, "describe", &describe);
+        assert!(!refused, "{id}: {text}");
+        assert_eq!(timeless(&text), timeless(&printed), "{id}");
+        serde_json::from_str::<Value>(&text).unwrap()
+    };
+    for (i, (op, request)) in every_operation(&synth()).into_iter().enumerate() {
+        on_install(["Caucasus", "GermanyCW"][i % 2]).await;
+        // `synth` named, then left to the server's default.
+        let (printed, query_refused) = query(op, &request);
+        for request in [on("synth", &request), request.clone()] {
+            let (text, refused) = ask(request, op).await;
+            assert_eq!(refused, query_refused, "{op}");
+            assert_eq!(timeless(&text), timeless(&printed), "{op}");
+        }
+    }
+
+    // A terrain opened after a switch, whose files change between two calls
+    // that name it, reopens.
+    ask(json!({}), "describe").await;
+    assert_eq!(on_install("Caucasus").await["dcs_build"], "0.0.0.1");
+    let update = br#"{"version": "0.0.0.2", "timestamp": "20000102-000000"}"#;
+    put(&t.0, "autoupdate.cfg", update);
+    assert_eq!(on_install("Caucasus").await["dcs_build"], "0.0.0.2");
+
+    // A long call after a switch reports progress and stops when cancelled.
+    on_install("GermanyCW").await;
+    let took = stopped_on(&client, &notices, "find_sites", long_search(), 0.0).await;
+    assert!(took < Duration::from_secs(1), "{took:?}");
+    assert!(!notices.0.lock().unwrap().is_empty());
+
+    // A large answer after a switch goes to a file.
+    on_install("Caucasus").await;
+    let at = synth();
+    let observer = json!({"x": at.x, "z": at.z, "alt_agl": 10});
+    let request = json!({"sites": [{"observer": observer, "radius": 6000}], "target_alt_agl": 30});
+    let result = client.call_tool(call("exposure", request)).await.unwrap();
+    let answer = parsed(&result);
+    assert_eq!(file(&answer, "answer_file")["terrain"], "synth");
+    client.cancel().await.unwrap();
+}
+
+/// Opt-in: a session of 100 calls that alternate between Caucasus and a
+/// second terrain, Syria where it is installed, each call switching the
+/// terrain, the heaviest calls among them, held to 64 MiB of peak commit
+/// for the server's whole life. Set `DCSTERRAIN_INSTALL` to the DCS install
+/// root, and `DCSTERRAIN_CACHE` to a cache built by `index` if not the
+/// default; without the install this passes without reading anything, which
+/// is what CI does.
+#[tokio::test]
+async fn a_session_of_100_calls_over_two_terrains_holds_its_memory() {
     let Some(root) = std::env::var_os("DCSTERRAIN_INSTALL") else {
         eprintln!("DCSTERRAIN_INSTALL is not set; skipped");
         return;
     };
     let mut server = Command::new(env!("CARGO_BIN_EXE_dcsterrain"));
-    server.args([
-        "--threads",
-        "5",
-        "mcp",
-        "--terrain",
-        "Caucasus",
-        "--install",
-    ]);
+    server.args(["--threads", "5", "mcp", "--install"]);
     server.arg(&root);
     if let Some(cache) = std::env::var_os("DCSTERRAIN_CACHE") {
         server.arg("--cache").arg(cache);
@@ -521,79 +709,116 @@ async fn a_session_of_100_calls_on_caucasus_holds_its_memory() {
 
     let calls = Cell::new(0);
     let issues = RefCell::new(Vec::new());
-    let ask = async |op: &str, request: Value| {
+    let ask = async |terrain: &str, op: &str, request: Value| {
         calls.set(calls.get() + 1);
-        let result = client.call_tool(call(op, request)).await.unwrap();
+        let result = client
+            .call_tool(call(op, on(terrain, &request)))
+            .await
+            .unwrap();
         let (text, refused) = answered(&result);
         let text = restored(text);
         if refused {
-            issues.borrow_mut().push(format!("{op}: {text}"));
+            issues.borrow_mut().push(format!("{terrain} {op}: {text}"));
             return Value::Null;
         }
         serde_json::from_str::<Value>(&text).expect("an answer is JSON")
     };
 
-    // Where to ask: an airdrome near the middle, and a road from beside it
-    // to the farthest of its near roads a route reaches.
-    let described = ask("describe", json!({})).await;
-    let build = described["dcs_build"].as_str().unwrap_or("?").to_string();
-    let e = &described["extent"];
-    let mid = |a: &str, b: &str| (e[a].as_f64().unwrap() + e[b].as_f64().unwrap()) / 2.0;
-    let (x, z) = (mid("min_x", "max_x"), mid("min_z", "max_z"));
-    let found = ask("nearest", json!({"kind": "airdrome", "x": x, "z": z})).await;
-    let airdrome = found["results"][0].clone();
-    let (x, z) = (
-        airdrome["x"].as_f64().unwrap(),
-        airdrome["z"].as_f64().unwrap(),
-    );
-    let roads = ask("nearest", json!({"kind": "road", "x": x, "z": z, "n": 20})).await;
-    let roads = roads["results"].as_array().unwrap().clone();
-    let end = |r: &Value| json!({"x": r["x"], "z": r["z"]});
-    let from = end(&roads[0]);
-    let mut to = from.clone();
-    for r in roads.iter().skip(1).rev() {
-        let route = json!({"network": "roads", "from": from, "to": end(r)});
-        if ask("route", route).await["length"]
-            .as_f64()
-            .is_some_and(|l| l > 0.0)
-        {
-            to = end(r);
-            break;
+    let listed = ask("", "list_terrains", json!({})).await;
+    let readable: Vec<&str> = listed["terrains"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|t| t["readable"] == true)
+        .filter_map(|t| t["id"].as_str())
+        .collect();
+    let second = ["Syria"]
+        .into_iter()
+        .chain(readable.iter().copied())
+        .find(|id| *id != "Caucasus" && readable.contains(id))
+        .expect("a second terrain is installed");
+    // `towns` and `chokepoints` read what `index` builds, which takes minutes
+    // on a large terrain: without it they are left out there, and said so.
+    let indexed = !ask(second, "towns", json!({"limit": 1})).await.is_null();
+    let terrains = ["Caucasus", second];
+
+    let mut sessions = Vec::new();
+    let mut build = String::new();
+    for terrain in terrains {
+        // Where to ask: an airdrome near the middle, and a road from beside
+        // it to the farthest of its near roads a route reaches.
+        let described = ask(terrain, "describe", json!({})).await;
+        build = described["dcs_build"].as_str().unwrap_or("?").to_string();
+        let e = &described["extent"];
+        let mid = |a: &str, b: &str| (e[a].as_f64().unwrap() + e[b].as_f64().unwrap()) / 2.0;
+        let (x, z) = (mid("min_x", "max_x"), mid("min_z", "max_z"));
+        let found = ask(
+            terrain,
+            "nearest",
+            json!({"kind": "airdrome", "x": x, "z": z}),
+        )
+        .await;
+        let airdrome = found["results"][0].clone();
+        let (x, z) = (
+            airdrome["x"].as_f64().unwrap(),
+            airdrome["z"].as_f64().unwrap(),
+        );
+        let near = json!({"kind": "road", "x": x, "z": z, "n": 20});
+        let roads = ask(terrain, "nearest", near).await;
+        let roads = roads["results"].as_array().unwrap().clone();
+        let end = |r: &Value| json!({"x": r["x"], "z": r["z"]});
+        let from = end(&roads[0]);
+        let mut to = from.clone();
+        for r in roads.iter().skip(1).rev() {
+            let route = json!({"network": "roads", "from": from, "to": end(r)});
+            if ask(terrain, "route", route).await["length"]
+                .as_f64()
+                .is_some_and(|l| l > 0.0)
+            {
+                to = end(r);
+                break;
+            }
         }
+        let at = common::Around {
+            x,
+            z,
+            airdrome: airdrome["id"].clone(),
+            from,
+            to,
+        };
+        // Every operation, and the heaviest calls: a sweep whose rasters go
+        // to a file, and a search whose outlines do.
+        let observer = json!({"x": x, "z": z, "alt_agl": 10});
+        let mut session = every_operation(&at);
+        if terrain == second && !indexed {
+            session.retain(|(op, _)| !["towns", "chokepoints"].contains(op));
+        }
+        session.push((
+            "exposure",
+            json!({"sites": [{"observer": observer, "radius": 20000}], "target_alt_agl": 30,
+                   "geojson": true}),
+        ));
+        session.push((
+            "find_sites",
+            json!({"region": {"Circle": {"x": x, "z": z, "radius": 8000}},
+                   "footprint": {"width": 60, "depth": 40},
+                   "criteria": [{"name": "slope_max", "params": {"deg": 15}},
+                                {"name": "not_visible_from",
+                                 "params": {"observers": [observer], "max_fraction": 0.5}}],
+                   "spacing": 0, "limit": 200, "geojson": true}),
+        ));
+        sessions.push(session);
     }
     issues.borrow_mut().clear();
-    let at = common::Around {
-        x,
-        z,
-        airdrome: airdrome["id"].clone(),
-        from,
-        to,
-    };
 
-    // Every operation, and the heaviest calls: a sweep whose rasters go to a
-    // file, and a search whose outlines do.
-    let observer = json!({"x": x, "z": z, "alt_agl": 10});
-    let mut session = every_operation(&at);
-    session.push((
-        "exposure",
-        json!({"sites": [{"observer": observer, "radius": 20000}], "target_alt_agl": 30,
-               "geojson": true}),
-    ));
-    session.push((
-        "find_sites",
-        json!({"region": {"Circle": {"x": x, "z": z, "radius": 8000}},
-               "footprint": {"width": 60, "depth": 40},
-               "criteria": [{"name": "slope_max", "params": {"deg": 15}},
-                            {"name": "not_visible_from",
-                             "params": {"observers": [observer], "max_fraction": 0.5}}],
-               "spacing": 0, "limit": 200, "geojson": true}),
-    ));
+    // Each call names the other terrain than the one before it.
     let (started, before) = (Instant::now(), calls.get());
-    for (op, request) in session.iter().cycle() {
-        if calls.get() == 100 {
-            break;
-        }
-        ask(op, request.clone()).await;
+    let mut i = 0;
+    while calls.get() < 100 {
+        let k = i % 2;
+        let (op, request) = &sessions[k][(i / 2) % sessions[k].len()];
+        ask(terrains[k], op, request.clone()).await;
+        i += 1;
     }
     let took = started.elapsed().as_secs_f64();
     client.cancel().await.unwrap();
@@ -601,8 +826,14 @@ async fn a_session_of_100_calls_on_caucasus_holds_its_memory() {
     let peak = cost.peak_bytes as f64 / f64::from(1 << 20);
     let issues = issues.into_inner();
     eprintln!(
-        "Caucasus on {build}: {} calls in one session, the last {} in {took:.1} s; peak commit \
-         {peak:.1} MiB",
+        "{} and {second}{} on {build}: {} calls in one session, the last {} in {took:.1} s \
+         alternating; peak commit {peak:.1} MiB",
+        terrains[0],
+        if indexed {
+            ""
+        } else {
+            ", without towns or chokepoints: not indexed"
+        },
         calls.get(),
         calls.get() - before,
     );
@@ -638,20 +869,23 @@ async fn the_farp_task_through_the_tools_answers_as_query_does_on_caucasus() {
         eprintln!("DCSTERRAIN_INSTALL is not set; skipped");
         return;
     };
-    let mut terrain: Vec<&OsStr> = vec!["--terrain".as_ref(), "Caucasus".as_ref()];
-    terrain.extend(["--install".as_ref(), root.as_os_str()]);
+    // The server is started on no terrain: each call names Caucasus.
+    let mut install: Vec<&OsStr> = vec!["--install".as_ref(), root.as_os_str()];
     let cache = std::env::var_os("DCSTERRAIN_CACHE");
     if let Some(cache) = &cache {
-        terrain.extend(["--cache".as_ref(), cache.as_os_str()]);
+        install.extend(["--cache".as_ref(), cache.as_os_str()]);
     }
-    let client = serve((), &terrain).await;
+    let client = serve((), &install).await;
     let ask = async |op: &str, request: &Value| {
-        let result = client.call_tool(call(op, request.clone())).await.unwrap();
+        let result = client
+            .call_tool(call(op, on("Caucasus", request)))
+            .await
+            .unwrap();
         let (text, refused) = answered(&result);
         assert!(!refused, "{op}: {text}");
         let printed = Command::new(env!("CARGO_BIN_EXE_dcsterrain"))
-            .args(["--threads", "5", "query"])
-            .args(&terrain)
+            .args(["--threads", "5", "query", "--terrain", "Caucasus"])
+            .args(&install)
             .args([op, &request.to_string()])
             .stderr(Stdio::null())
             .output()
