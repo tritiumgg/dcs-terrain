@@ -321,6 +321,65 @@ mod tests {
         }
     }
 
+    /// Where `v` holds a field or a shape with no description, each named by
+    /// where it lies. The field a one-of shape is tagged by is the shape's,
+    /// which says what it is, and `geojson` asks for one output among many.
+    fn undescribed(v: &Value, at: &str, out: &mut Vec<String>) {
+        let Value::Object(m) = v else { return };
+        let described = |s: &Value| s.get("description").and_then(Value::as_str).is_some();
+        if let Some(Value::Array(shapes)) = m.get("oneOf") {
+            for (i, s) in shapes.iter().enumerate() {
+                let words = s.get("enum").is_some() || s.get("const").is_some();
+                if !described(s) && !(words && shapes.len() == 1) {
+                    out.push(format!("{at} shape {i}"));
+                }
+                // A shape's own fields are its tag and the fields it wraps.
+                for inner in s.get("properties").and_then(Value::as_object).iter() {
+                    for (k, f) in inner.iter() {
+                        undescribed(f, &format!("{at}.{k}"), out);
+                    }
+                }
+            }
+        }
+        if let Some(Value::Object(fields)) = m.get("properties")
+            && m.get("oneOf").is_none()
+        {
+            for (k, f) in fields {
+                if !described(f) && k != "geojson" {
+                    out.push(format!("{at}.{k}"));
+                }
+                undescribed(f, &format!("{at}.{k}"), out);
+            }
+        }
+        for k in ["items", "anyOf", "allOf", "additionalProperties"] {
+            match m.get(k) {
+                Some(Value::Array(a)) => a.iter().for_each(|x| undescribed(x, at, out)),
+                Some(x) => undescribed(x, at, out),
+                None => {}
+            }
+        }
+    }
+
+    /// The help a person reads and the tools an assistant calls are written
+    /// from these descriptions, so none may be missing.
+    #[test]
+    fn every_request_and_every_field_it_reaches_is_described() {
+        let mut missing = Vec::new();
+        for o in OPERATIONS {
+            let alone = Value::Object(request_schema(o.name).unwrap());
+            if alone.get("description").is_none() {
+                missing.push(o.name.to_string());
+            }
+            undescribed(&alone, o.name, &mut missing);
+            for (n, def) in alone["$defs"].as_object().into_iter().flatten() {
+                undescribed(def, n, &mut missing);
+            }
+        }
+        missing.sort_unstable();
+        missing.dedup();
+        assert!(missing.is_empty(), "no description: {missing:#?}");
+    }
+
     #[test]
     fn the_list_names_each_operation_once() {
         let mut names: Vec<_> = OPERATIONS.iter().map(|o| o.name).collect();

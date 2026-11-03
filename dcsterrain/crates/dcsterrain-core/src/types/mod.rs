@@ -24,9 +24,13 @@ use serde_json::Value;
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename = "Box")]
 pub struct BoundingBox {
+    /// The south-west corner: its `x`, the least, in meters.
     pub min_x: f64,
+    /// The south-west corner: its `z`, the least, in meters.
     pub min_z: f64,
+    /// The north-east corner: its `x`, the greatest, in meters.
     pub max_x: f64,
+    /// The north-east corner: its `z`, the greatest, in meters.
     pub max_z: f64,
 }
 
@@ -34,17 +38,26 @@ pub struct BoundingBox {
 /// box plus a membership test before any grid is read.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub enum Region {
+    /// An axis-aligned box between two corners.
     Box(BoundingBox),
+    /// A circle about a center.
     Circle {
+        /// The center: meters north of the terrain's origin.
         x: f64,
+        /// The center: meters east of the terrain's origin.
         z: f64,
+        /// The radius, in meters.
         radius: f64,
     },
+    /// A polygon through three or more corners.
     Polygon(Polygon),
     /// The ring between two distances from an airdrome's reference point.
     AirdromeBand {
+        /// The airdrome the ring is about.
         airdrome: AirdromeRef,
+        /// The ring's inner radius, in meters.
         min_dist: f64,
+        /// The ring's outer radius, in meters.
         max_dist: f64,
     },
 }
@@ -61,12 +74,15 @@ pub enum AirdromeRef {
 /// A simple polygon as `[x, z]` vertices, closed by its first point.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Polygon {
+    /// The corners, each `[x, z]` in meters.
     pub points: Vec<[f64; 2]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Point {
+    /// Meters north of the terrain's origin.
     pub x: f64,
+    /// Meters east of the terrain's origin.
     pub z: f64,
 }
 
@@ -77,10 +93,14 @@ pub struct Point {
 /// reads `{"x": .., "z": .., "alt_agl": 2}`, the way a caller writes it.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Point3 {
+    /// Meters north of the terrain's origin.
     pub x: f64,
+    /// Meters east of the terrain's origin.
     pub z: f64,
+    /// The height above sea level, in meters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alt: Option<f64>,
+    /// The height above the ground, in meters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alt_agl: Option<f64>,
 }
@@ -108,16 +128,23 @@ impl Point3 {
 /// Someone looking: a position and an eye height above the ground.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Observer {
+    /// Meters north of the terrain's origin.
     pub x: f64,
+    /// Meters east of the terrain's origin.
     pub z: f64,
+    /// The eye height above the ground, in meters.
     pub alt_agl: f64,
 }
 
 /// A rectangle to be placed, tried at each of its orientations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Footprint {
+    /// Meters across the orientation.
     pub width: f64,
+    /// Meters along the orientation.
     pub depth: f64,
+    /// The bearings to try the depth along, in degrees from north towards
+    /// east.
     #[serde(default = "default_orientations")]
     pub orientations_deg: Vec<f64>,
 }
@@ -126,9 +153,12 @@ fn default_orientations() -> Vec<f64> {
     vec![0.0, 90.0]
 }
 
+/// A latitude and longitude on WGS84.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LatLon {
+    /// Degrees north; south is negative.
     pub lat: f64,
+    /// Degrees east; west is negative.
     pub lon: f64,
 }
 

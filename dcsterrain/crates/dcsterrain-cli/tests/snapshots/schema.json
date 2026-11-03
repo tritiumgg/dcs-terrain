@@ -13,6 +13,7 @@
       "description": "An airdrome as a request names it: a number is its id; a string is its\n`name_id`, else its display name, else its id written in digits."
     },
     "AirfieldInfoRequest": {
+      "description": "An airdrome's runways, stands, radio and navaids.",
       "properties": {
         "airdrome": {
           "$ref": "#/$defs/AirdromeRef",
@@ -179,6 +180,7 @@
       "description": "An airframe's size in meters, which the caller supplies.",
       "properties": {
         "height": {
+          "description": "Meters, ground to top.",
           "format": "double",
           "type": "number"
         },
@@ -188,6 +190,7 @@
           "type": "boolean"
         },
         "length": {
+          "description": "Meters, nose to tail.",
           "format": "double",
           "type": "number"
         },
@@ -299,8 +302,10 @@
       "type": "object"
     },
     "ApproachSpectrumRequest": {
+      "description": "Blind arcs around a site, by bearing and height.",
       "properties": {
         "alt_bands_agl": {
+          "description": "The heights above the ground judged, in meters.",
           "items": {
             "format": "double",
             "type": "number"
@@ -309,6 +314,7 @@
         },
         "azimuth_step_deg": {
           "default": 5.0,
+          "description": "Degrees between radials.",
           "format": "double",
           "type": "number"
         },
@@ -319,6 +325,7 @@
         },
         "min_masked_range": {
           "default": 8000.0,
+          "description": "A radial first seen closer than this, in meters, is blind.",
           "format": "double",
           "type": "number"
         },
@@ -328,7 +335,7 @@
           "type": "number"
         },
         "resolution": {
-          "description": "Raster cell size; the file's cell size when omitted, and may be\ncoarser.",
+          "description": "Raster cell size in meters; the file's cell size when omitted, and may\nbe coarser.",
           "format": "double",
           "type": [
             "number",
@@ -347,7 +354,8 @@
           "description": "Summaries are also returned restricted to this sector."
         },
         "site": {
-          "$ref": "#/$defs/Observer"
+          "$ref": "#/$defs/Observer",
+          "description": "The radar, with its height above the ground."
         }
       },
       "required": [
@@ -471,18 +479,22 @@
       "description": "An axis-aligned box in DCS metres, the canonical region.",
       "properties": {
         "max_x": {
+          "description": "The north-east corner: its `x`, the greatest, in meters.",
           "format": "double",
           "type": "number"
         },
         "max_z": {
+          "description": "The north-east corner: its `z`, the greatest, in meters.",
           "format": "double",
           "type": "number"
         },
         "min_x": {
+          "description": "The south-west corner: its `x`, the least, in meters.",
           "format": "double",
           "type": "number"
         },
         "min_z": {
+          "description": "The south-west corner: its `z`, the least, in meters.",
           "format": "double",
           "type": "number"
         }
@@ -598,6 +610,7 @@
       "type": "object"
     },
     "ChokepointsRequest": {
+      "description": "The network's edges in an area that most routes cross.",
       "properties": {
         "geojson": {
           "default": false,
@@ -612,7 +625,8 @@
           "type": "integer"
         },
         "network": {
-          "$ref": "#/$defs/Network"
+          "$ref": "#/$defs/Network",
+          "description": "Roads or railroads."
         },
         "region": {
           "$ref": "#/$defs/Region",
@@ -787,6 +801,7 @@
       "type": "object"
     },
     "CoverageRequest": {
+      "description": "Where a site's envelope has dead zones, at each height.",
       "properties": {
         "asset": {
           "anyOf": [
@@ -800,7 +815,8 @@
           "description": "An area whose coverage is reported on its own."
         },
         "envelope": {
-          "$ref": "#/$defs/Envelope"
+          "$ref": "#/$defs/Envelope",
+          "description": "How far the site reaches and the heights judged."
         },
         "geojson": {
           "default": false,
@@ -809,11 +825,12 @@
         },
         "min_masked_range": {
           "default": 8000.0,
+          "description": "A radial first seen closer than this, in meters, is blind.",
           "format": "double",
           "type": "number"
         },
         "resolution": {
-          "description": "Mask cell size; the file's cell size when omitted, and may be coarser.",
+          "description": "Mask cell size in meters; the file's cell size when omitted, and may\nbe coarser.",
           "format": "double",
           "type": [
             "number",
@@ -821,7 +838,8 @@
           ]
         },
         "site": {
-          "$ref": "#/$defs/Observer"
+          "$ref": "#/$defs/Observer",
+          "description": "The radar, with its height above the ground."
         }
       },
       "required": [
@@ -884,6 +902,7 @@
             "params": {
               "properties": {
                 "deg": {
+                  "description": "The steepest slope allowed, in degrees.",
                   "format": "double",
                   "type": "number"
                 }
@@ -910,6 +929,7 @@
             "params": {
               "properties": {
                 "m": {
+                  "description": "The largest height difference allowed, in meters.",
                   "format": "double",
                   "type": "number"
                 }
@@ -936,6 +956,7 @@
             "params": {
               "properties": {
                 "classes": {
+                  "description": "The water classes allowed: land, lake, sea or river.",
                   "items": {
                     "$ref": "#/$defs/WaterClass"
                   },
@@ -964,6 +985,7 @@
             "params": {
               "properties": {
                 "values": {
+                  "description": "The `surface` codes allowed.",
                   "items": {
                     "format": "uint8",
                     "maximum": 255,
@@ -995,6 +1017,7 @@
             "params": {
               "properties": {
                 "classes": {
+                  "description": "The cover classes allowed.",
                   "items": {
                     "$ref": "#/$defs/CoverClass"
                   },
@@ -1023,13 +1046,16 @@
             "params": {
               "properties": {
                 "class": {
-                  "$ref": "#/$defs/CoverClass"
+                  "$ref": "#/$defs/CoverClass",
+                  "description": "The cover class counted."
                 },
                 "min": {
+                  "description": "The least share, from 0 to 1.",
                   "format": "double",
                   "type": "number"
                 },
                 "radius": {
+                  "description": "Meters around the site.",
                   "format": "double",
                   "type": "number"
                 }
@@ -1058,13 +1084,16 @@
             "params": {
               "properties": {
                 "class": {
-                  "$ref": "#/$defs/CoverClass"
+                  "$ref": "#/$defs/CoverClass",
+                  "description": "The cover class measured to."
                 },
                 "max": {
+                  "description": "The greatest distance, in meters.",
                   "format": "double",
                   "type": "number"
                 },
                 "min": {
+                  "description": "The least distance, in meters.",
                   "format": "double",
                   "type": "number"
                 }
@@ -1084,6 +1113,7 @@
           "type": "object"
         },
         {
+          "description": "Distance to the nearest road, from `min` to `max`.",
           "properties": {
             "name": {
               "const": "dist_road_band",
@@ -1092,10 +1122,12 @@
             "params": {
               "properties": {
                 "max": {
+                  "description": "The greatest distance, in meters.",
                   "format": "double",
                   "type": "number"
                 },
                 "min": {
+                  "description": "The least distance, in meters.",
                   "format": "double",
                   "type": "number"
                 }
@@ -1114,6 +1146,7 @@
           "type": "object"
         },
         {
+          "description": "Distance to the nearest railroad, from `min` to `max`.",
           "properties": {
             "name": {
               "const": "dist_rail_band",
@@ -1122,10 +1155,12 @@
             "params": {
               "properties": {
                 "max": {
+                  "description": "The greatest distance, in meters.",
                   "format": "double",
                   "type": "number"
                 },
                 "min": {
+                  "description": "The least distance, in meters.",
                   "format": "double",
                   "type": "number"
                 }
@@ -1144,6 +1179,7 @@
           "type": "object"
         },
         {
+          "description": "Distance to the nearest water, at least `m`.",
           "properties": {
             "name": {
               "const": "dist_water_min",
@@ -1152,6 +1188,7 @@
             "params": {
               "properties": {
                 "m": {
+                  "description": "The least distance, in meters.",
                   "format": "double",
                   "type": "number"
                 }
@@ -1185,13 +1222,16 @@
                     {
                       "type": "null"
                     }
-                  ]
+                  ],
+                  "description": "The airdrome measured to; the nearest when omitted."
                 },
                 "max": {
+                  "description": "The greatest distance, in meters.",
                   "format": "double",
                   "type": "number"
                 },
                 "min": {
+                  "description": "The least distance, in meters.",
                   "format": "double",
                   "type": "number"
                 }
@@ -1219,14 +1259,17 @@
             "params": {
               "properties": {
                 "class": {
+                  "description": "The scenery class counted.",
                   "type": "string"
                 },
                 "max": {
+                  "description": "The most objects allowed.",
                   "format": "uint32",
                   "minimum": 0,
                   "type": "integer"
                 },
                 "radius": {
+                  "description": "Meters around the site.",
                   "format": "double",
                   "type": "number"
                 }
@@ -1255,6 +1298,7 @@
             "params": {
               "properties": {
                 "max": {
+                  "description": "The most objects allowed.",
                   "format": "uint32",
                   "minimum": 0,
                   "type": "integer"
@@ -1282,12 +1326,14 @@
             "params": {
               "properties": {
                 "max": {
+                  "description": "The most objects allowed.",
                   "format": "uint32",
                   "minimum": 0,
                   "type": "integer"
                 },
                 "radius": {
                   "default": 150.0,
+                  "description": "Meters around the site.",
                   "format": "double",
                   "type": "number"
                 }
@@ -1305,6 +1351,7 @@
           "type": "object"
         },
         {
+          "description": "How enclosed the site is: the mean of its horizon's elevation, at least\n`deg`.",
           "properties": {
             "name": {
               "const": "enclosure_min",
@@ -1313,6 +1360,7 @@
             "params": {
               "properties": {
                 "deg": {
+                  "description": "The least mean elevation, in degrees.",
                   "format": "double",
                   "type": "number"
                 }
@@ -1339,14 +1387,17 @@
             "params": {
               "properties": {
                 "bearing_deg": {
+                  "description": "The sector's center, in degrees from north towards east.",
                   "format": "double",
                   "type": "number"
                 },
                 "half_width_deg": {
+                  "description": "Degrees either side of the bearing.",
                   "format": "double",
                   "type": "number"
                 },
                 "min_elev_deg": {
+                  "description": "The least horizon elevation, in degrees.",
                   "format": "double",
                   "type": "number"
                 }
@@ -1375,10 +1426,12 @@
             "params": {
               "properties": {
                 "max_fraction": {
+                  "description": "The largest share of observers that may see the site, from 0 to 1.",
                   "format": "double",
                   "type": "number"
                 },
                 "observers": {
+                  "description": "Who looks, each with an eye height above the ground.",
                   "items": {
                     "$ref": "#/$defs/Observer"
                   },
@@ -1386,6 +1439,7 @@
                 },
                 "own_alt_agl": {
                   "default": 2.0,
+                  "description": "The height above the site's ground that is seen, in meters.",
                   "format": "double",
                   "type": "number"
                 }
@@ -1413,15 +1467,18 @@
             "params": {
               "properties": {
                 "min_fraction": {
+                  "description": "The least share of targets seen, from 0 to 1.",
                   "format": "double",
                   "type": "number"
                 },
                 "own_alt_agl": {
                   "default": 2.0,
+                  "description": "The eye height above the site's ground, in meters.",
                   "format": "double",
                   "type": "number"
                 },
                 "targets": {
+                  "description": "The points the site must see, each with a height.",
                   "items": {
                     "$ref": "#/$defs/Point3"
                   },
@@ -1451,6 +1508,7 @@
             "params": {
               "properties": {
                 "classes": {
+                  "description": "The landform classes allowed.",
                   "items": {
                     "$ref": "#/$defs/TpiClass"
                   },
@@ -1458,6 +1516,7 @@
                 },
                 "threshold_m": {
                   "default": 10.0,
+                  "description": "The relief that counts, in meters.",
                   "format": "double",
                   "type": "number"
                 }
@@ -1475,6 +1534,7 @@
           "type": "object"
         },
         {
+          "description": "Every footprint cell has ground. Always applied.",
           "properties": {
             "name": {
               "const": "valid",
@@ -1489,6 +1549,7 @@
       ]
     },
     "DescribeRequest": {
+      "description": "What the terrain holds: its extent, files, cache and counts.",
       "type": "object"
     },
     "DescribeResponse": {
@@ -1572,6 +1633,7 @@
     "Envelope": {
       "properties": {
         "alt_bands_agl": {
+          "description": "The heights above the ground judged, in meters.",
           "items": {
             "format": "double",
             "type": "number"
@@ -1579,6 +1641,7 @@
           "type": "array"
         },
         "radius": {
+          "description": "How far the site reaches, in meters.",
           "format": "double",
           "type": "number"
         }
@@ -1658,6 +1721,7 @@
       "type": "object"
     },
     "ExposureRequest": {
+      "description": "How many sites see each cell, and the areas none sees.",
       "properties": {
         "bands_agl": {
           "default": [
@@ -1690,7 +1754,7 @@
           "description": "The area answered over; the box about every site's radius when\nomitted."
         },
         "resolution": {
-          "description": "Raster cell size; the file's cell size when omitted, and may be\ncoarser.",
+          "description": "Raster cell size in meters; the file's cell size when omitted, and may\nbe coarser.",
           "format": "double",
           "type": [
             "number",
@@ -1775,9 +1839,11 @@
     "ExposureSite": {
       "properties": {
         "observer": {
-          "$ref": "#/$defs/Observer"
+          "$ref": "#/$defs/Observer",
+          "description": "Who looks, with an eye height above the ground."
         },
         "radius": {
+          "description": "How far it looks, in meters.",
           "format": "double",
           "type": "number"
         }
@@ -1789,15 +1855,18 @@
       "type": "object"
     },
     "FindSitesRequest": {
+      "description": "Find the best sites for a footprint in a region.",
       "properties": {
         "criteria": {
+          "description": "The tests a site must pass; their scores rank the sites.",
           "items": {
             "$ref": "#/$defs/Criterion"
           },
           "type": "array"
         },
         "footprint": {
-          "$ref": "#/$defs/Footprint"
+          "$ref": "#/$defs/Footprint",
+          "description": "A site's size, tried at each orientation."
         },
         "geojson": {
           "default": false,
@@ -1812,15 +1881,16 @@
           "type": "integer"
         },
         "region": {
-          "$ref": "#/$defs/Region"
+          "$ref": "#/$defs/Region",
+          "description": "Where to look."
         },
         "spacing": {
-          "description": "No two candidates returned are closer than this.",
+          "description": "No two candidates returned are closer than this, in meters.",
           "format": "double",
           "type": "number"
         },
         "step": {
-          "description": "Candidate lattice spacing; twice the cell size when omitted.",
+          "description": "Meters between candidates tried; twice the cell size when omitted.",
           "format": "double",
           "type": [
             "number",
@@ -1982,6 +2052,7 @@
       "description": "A rectangle to be placed, tried at each of its orientations.",
       "properties": {
         "depth": {
+          "description": "Meters along the orientation.",
           "format": "double",
           "type": "number"
         },
@@ -1990,6 +2061,7 @@
             0.0,
             90.0
           ],
+          "description": "The bearings to try the depth along, in degrees from north towards\neast.",
           "items": {
             "format": "double",
             "type": "number"
@@ -1997,6 +2069,7 @@
           "type": "array"
         },
         "width": {
+          "description": "Meters across the orientation.",
           "format": "double",
           "type": "number"
         }
@@ -2010,17 +2083,21 @@
     "FootprintAt": {
       "properties": {
         "footprint": {
-          "$ref": "#/$defs/Footprint"
+          "$ref": "#/$defs/Footprint",
+          "description": "The footprint's size; its orientations are not used."
         },
         "orientation_deg": {
+          "description": "The bearing its depth runs along, in degrees from north towards east.",
           "format": "double",
           "type": "number"
         },
         "x": {
+          "description": "The footprint's center: meters north of the terrain's origin.",
           "format": "double",
           "type": "number"
         },
         "z": {
+          "description": "The footprint's center: meters east of the terrain's origin.",
           "format": "double",
           "type": "number"
         }
@@ -2037,9 +2114,8 @@
       "description": "How a place is laid out.",
       "oneOf": [
         {
-          "enum": [
-            "compact"
-          ],
+          "const": "compact",
+          "description": "One built-up area, its buildings close together.",
           "type": "string"
         },
         {
@@ -2079,9 +2155,11 @@
       "type": "object"
     },
     "GeoRequest": {
+      "description": "Convert between DCS x and z and latitude and longitude.",
       "properties": {
         "to_latlon": {
           "default": [],
+          "description": "Points to convert to latitude, longitude and MGRS.",
           "items": {
             "$ref": "#/$defs/Point"
           },
@@ -2089,6 +2167,7 @@
         },
         "to_xz": {
           "default": [],
+          "description": "Latitudes and longitudes to convert to DCS x and z.",
           "items": {
             "$ref": "#/$defs/LatLon"
           },
@@ -2165,12 +2244,15 @@
       "type": "object"
     },
     "LatLon": {
+      "description": "A latitude and longitude on WGS84.",
       "properties": {
         "lat": {
+          "description": "Degrees north; south is negative.",
           "format": "double",
           "type": "number"
         },
         "lon": {
+          "description": "Degrees east; west is negative.",
           "format": "double",
           "type": "number"
         }
@@ -2359,6 +2441,7 @@
       "type": "string"
     },
     "NearestRequest": {
+      "description": "The nearest roads, airdromes, towns, beacons or objects to a point.",
       "properties": {
         "class": {
           "description": "For `kind` `scenery`, only objects of this class; `effect` objects\nare found only when named here.",
@@ -2373,7 +2456,8 @@
           "type": "boolean"
         },
         "kind": {
-          "$ref": "#/$defs/NearestKind"
+          "$ref": "#/$defs/NearestKind",
+          "description": "What to find."
         },
         "n": {
           "default": 1,
@@ -2383,10 +2467,12 @@
           "type": "integer"
         },
         "x": {
+          "description": "Where to look from: meters north of the terrain's origin.",
           "format": "double",
           "type": "number"
         },
         "z": {
+          "description": "Where to look from: meters east of the terrain's origin.",
           "format": "double",
           "type": "number"
         }
@@ -2451,14 +2537,17 @@
       "description": "Someone looking: a position and an eye height above the ground.",
       "properties": {
         "alt_agl": {
+          "description": "The eye height above the ground, in meters.",
           "format": "double",
           "type": "number"
         },
         "x": {
+          "description": "Meters north of the terrain's origin.",
           "format": "double",
           "type": "number"
         },
         "z": {
+          "description": "Meters east of the terrain's origin.",
           "format": "double",
           "type": "number"
         }
@@ -2603,6 +2692,7 @@
           "type": "number"
         },
         "id": {
+          "description": "The name its answer is labeled with.",
           "type": "string"
         },
         "max_slope_deg": {
@@ -2623,17 +2713,21 @@
         },
         "on": {
           "$ref": "#/$defs/Underfoot",
-          "default": "land"
+          "default": "land",
+          "description": "What must be under it: `land` or `water`."
         },
         "shape": {
           "$ref": "#/$defs/PlacementShape",
-          "default": "Point"
+          "default": "Point",
+          "description": "What it covers: a point, a rectangle, a circle or a polygon."
         },
         "x": {
+          "description": "Its center: meters north of the terrain's origin.",
           "format": "double",
           "type": "number"
         },
         "z": {
+          "description": "Its center: meters east of the terrain's origin.",
           "format": "double",
           "type": "number"
         }
@@ -2951,10 +3045,12 @@
             "Rect": {
               "properties": {
                 "depth": {
+                  "description": "Meters along the heading.",
                   "format": "double",
                   "type": "number"
                 },
                 "width": {
+                  "description": "Meters across the heading.",
                   "format": "double",
                   "type": "number"
                 }
@@ -2978,6 +3074,7 @@
             "Circle": {
               "properties": {
                 "radius": {
+                  "description": "The radius, in meters.",
                   "format": "double",
                   "type": "number"
                 }
@@ -3000,6 +3097,7 @@
             "Polygon": {
               "properties": {
                 "points": {
+                  "description": "The corners, each `[x, z]` in meters.",
                   "items": {
                     "items": {
                       "format": "double",
@@ -3028,10 +3126,12 @@
     "Point": {
       "properties": {
         "x": {
+          "description": "Meters north of the terrain's origin.",
           "format": "double",
           "type": "number"
         },
         "z": {
+          "description": "Meters east of the terrain's origin.",
           "format": "double",
           "type": "number"
         }
@@ -3046,6 +3146,7 @@
       "description": "A point with a height, given either absolute or above the ground.\n\nExactly one of `alt` and `alt_agl` is set; `Point3::check` reports both or\nneither as an issue. The pair is two fields rather than an enum so the JSON\nreads `{\"x\": .., \"z\": .., \"alt_agl\": 2}`, the way a caller writes it.",
       "properties": {
         "alt": {
+          "description": "The height above sea level, in meters.",
           "format": "double",
           "type": [
             "number",
@@ -3053,6 +3154,7 @@
           ]
         },
         "alt_agl": {
+          "description": "The height above the ground, in meters.",
           "format": "double",
           "type": [
             "number",
@@ -3060,10 +3162,12 @@
           ]
         },
         "x": {
+          "description": "Meters north of the terrain's origin.",
           "format": "double",
           "type": "number"
         },
         "z": {
+          "description": "Meters east of the terrain's origin.",
           "format": "double",
           "type": "number"
         }
@@ -3245,6 +3349,7 @@
       "type": "object"
     },
     "PointInfoRequest": {
+      "description": "The ground at each point and what lies near it.",
       "properties": {
         "geojson": {
           "default": false,
@@ -3314,6 +3419,7 @@
       "description": "A simple polygon as `[x, z]` vertices, closed by its first point.",
       "properties": {
         "points": {
+          "description": "The corners, each `[x, z]` in meters.",
           "items": {
             "items": {
               "format": "double",
@@ -3332,6 +3438,7 @@
       "type": "object"
     },
     "RadarFloorRequest": {
+      "description": "The lowest height above the ground a site sees, around it.",
       "properties": {
         "bands_agl": {
           "default": [
@@ -3363,11 +3470,12 @@
           ]
         },
         "radius": {
+          "description": "How far to look, in meters.",
           "format": "double",
           "type": "number"
         },
         "resolution": {
-          "description": "Raster cell size; the file's cell size when omitted, and may be\ncoarser.",
+          "description": "Raster cell size in meters; the file's cell size when omitted, and may\nbe coarser.",
           "format": "double",
           "type": [
             "number",
@@ -3375,7 +3483,8 @@
           ]
         },
         "site": {
-          "$ref": "#/$defs/Observer"
+          "$ref": "#/$defs/Observer",
+          "description": "The radar, with its height above the ground."
         }
       },
       "required": [
@@ -3527,6 +3636,7 @@
       "oneOf": [
         {
           "additionalProperties": false,
+          "description": "An axis-aligned box between two corners.",
           "properties": {
             "Box": {
               "$ref": "#/$defs/Box"
@@ -3539,18 +3649,22 @@
         },
         {
           "additionalProperties": false,
+          "description": "A circle about a center.",
           "properties": {
             "Circle": {
               "properties": {
                 "radius": {
+                  "description": "The radius, in meters.",
                   "format": "double",
                   "type": "number"
                 },
                 "x": {
+                  "description": "The center: meters north of the terrain's origin.",
                   "format": "double",
                   "type": "number"
                 },
                 "z": {
+                  "description": "The center: meters east of the terrain's origin.",
                   "format": "double",
                   "type": "number"
                 }
@@ -3570,6 +3684,7 @@
         },
         {
           "additionalProperties": false,
+          "description": "A polygon through three or more corners.",
           "properties": {
             "Polygon": {
               "$ref": "#/$defs/Polygon"
@@ -3587,13 +3702,16 @@
             "AirdromeBand": {
               "properties": {
                 "airdrome": {
-                  "$ref": "#/$defs/AirdromeRef"
+                  "$ref": "#/$defs/AirdromeRef",
+                  "description": "The airdrome the ring is about."
                 },
                 "max_dist": {
+                  "description": "The ring's outer radius, in meters.",
                   "format": "double",
                   "type": "number"
                 },
                 "min_dist": {
+                  "description": "The ring's inner radius, in meters.",
                   "format": "double",
                   "type": "number"
                 }
@@ -3614,6 +3732,7 @@
       ]
     },
     "RouteAlternativesRequest": {
+      "description": "Several distinct routes between two points.",
       "properties": {
         "avoid": {
           "default": [],
@@ -3633,11 +3752,13 @@
         },
         "exposure_weight": {
           "default": 1.0,
+          "description": "How much more a seen edge costs: its length times 1 plus this times the\nshare seen.",
           "format": "double",
           "type": "number"
         },
         "from": {
-          "$ref": "#/$defs/Point"
+          "$ref": "#/$defs/Point",
+          "description": "Where the route starts, snapped to the nearest edge."
         },
         "geojson": {
           "default": false,
@@ -3670,7 +3791,8 @@
           "type": "number"
         },
         "network": {
-          "$ref": "#/$defs/Network"
+          "$ref": "#/$defs/Network",
+          "description": "Roads or railroads."
         },
         "penalty": {
           "default": 1.6,
@@ -3679,7 +3801,8 @@
           "type": "number"
         },
         "to": {
-          "$ref": "#/$defs/Point"
+          "$ref": "#/$defs/Point",
+          "description": "Where the route ends, snapped to the nearest edge."
         }
       },
       "required": [
@@ -3731,6 +3854,7 @@
       "type": "object"
     },
     "RouteRequest": {
+      "description": "The least-cost road or rail route between two points.",
       "properties": {
         "avoid": {
           "default": [],
@@ -3750,11 +3874,13 @@
         },
         "exposure_weight": {
           "default": 1.0,
+          "description": "How much more a seen edge costs: its length times 1 plus this times the\nshare seen.",
           "format": "double",
           "type": "number"
         },
         "from": {
-          "$ref": "#/$defs/Point"
+          "$ref": "#/$defs/Point",
+          "description": "Where the route starts, snapped to the nearest edge."
         },
         "geojson": {
           "default": false,
@@ -3768,10 +3894,12 @@
           "type": "number"
         },
         "network": {
-          "$ref": "#/$defs/Network"
+          "$ref": "#/$defs/Network",
+          "description": "Roads or railroads."
         },
         "to": {
-          "$ref": "#/$defs/Point"
+          "$ref": "#/$defs/Point",
+          "description": "Where the route ends, snapped to the nearest edge."
         }
       },
       "required": [
@@ -3932,7 +4060,7 @@
       "type": "object"
     },
     "SampleRequest": {
-      "description": "Either `region` with `step`, or `points`.",
+      "description": "Read terrain layers at points or over a grid.\n\nEither `region` with `step`, or `points`.",
       "properties": {
         "geojson": {
           "default": false,
@@ -3940,6 +4068,7 @@
           "type": "boolean"
         },
         "layers": {
+          "description": "The layers to read, such as `height`, `slope`, `cover` and `dist_road`.",
           "items": {
             "type": "string"
           },
@@ -3953,6 +4082,7 @@
           "type": "integer"
         },
         "points": {
+          "description": "The points to read at.",
           "items": {
             "$ref": "#/$defs/Point"
           },
@@ -3969,10 +4099,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "The area to read over, with `step`."
         },
         "step": {
-          "description": "Lattice spacing inside `region`, at least the cell size.",
+          "description": "Meters between points read inside `region`, at least the cell size.",
           "format": "double",
           "type": [
             "number",
@@ -4069,7 +4200,7 @@
       "type": "string"
     },
     "SceneryInRequest": {
-      "description": "Either `region`, or `footprint_at` for exact overlap with a placed\nfootprint.",
+      "description": "The scenery objects in an area.\n\nEither `region`, or `footprint_at` for exact overlap with a placed\nfootprint.",
       "properties": {
         "classes": {
           "description": "Only objects of these classes; every class but `effect` when\nomitted.",
@@ -4089,7 +4220,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "A footprint placed at a point: the objects it overlaps exactly."
         },
         "geojson": {
           "default": false,
@@ -4111,7 +4243,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "The area whose objects are listed."
         }
       },
       "type": "object"
@@ -4228,15 +4361,18 @@
       "type": "object"
     },
     "ScoreSiteRequest": {
+      "description": "Score one site against siting criteria.",
       "properties": {
         "criteria": {
+          "description": "The tests the site is judged by.",
           "items": {
             "$ref": "#/$defs/Criterion"
           },
           "type": "array"
         },
         "footprint": {
-          "$ref": "#/$defs/Footprint"
+          "$ref": "#/$defs/Footprint",
+          "description": "The site's size, tried at each orientation."
         },
         "geojson": {
           "default": false,
@@ -4244,10 +4380,12 @@
           "type": "boolean"
         },
         "x": {
+          "description": "The site: meters north of the terrain's origin.",
           "format": "double",
           "type": "number"
         },
         "z": {
+          "description": "The site: meters east of the terrain's origin.",
           "format": "double",
           "type": "number"
         }
@@ -4320,10 +4458,12 @@
       "description": "An arc of bearings, clockwise from `from_deg` to `to_deg`.",
       "properties": {
         "from_deg": {
+          "description": "Where the arc starts, in degrees from north towards east.",
           "format": "double",
           "type": "number"
         },
         "to_deg": {
+          "description": "Where the arc ends, clockwise from its start, in degrees.",
           "format": "double",
           "type": "number"
         }
@@ -4726,6 +4866,7 @@
       "type": "object"
     },
     "TownsRequest": {
+      "description": "The towns and villages of an area or of the whole terrain.",
       "properties": {
         "form": {
           "default": [],
@@ -4749,6 +4890,7 @@
         },
         "min_buildings": {
           "default": 0,
+          "description": "Only places with at least this many buildings.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -4780,7 +4922,8 @@
         },
         "sort": {
           "$ref": "#/$defs/TownsSort",
-          "default": "buildings"
+          "default": "buildings",
+          "description": "What places are ranked by: `buildings` or `floor`."
         }
       },
       "type": "object"
@@ -4853,6 +4996,7 @@
       "type": "string"
     },
     "TrafficabilityRequest": {
+      "description": "Whether a vehicle can reach a network across country from a point.",
       "properties": {
         "geojson": {
           "default": false,
@@ -4865,13 +5009,16 @@
           "type": "number"
         },
         "network": {
-          "$ref": "#/$defs/Network"
+          "$ref": "#/$defs/Network",
+          "description": "Roads or railroads."
         },
         "x": {
+          "description": "Where the vehicle starts: meters north of the terrain's origin.",
           "format": "double",
           "type": "number"
         },
         "z": {
+          "description": "Where the vehicle starts: meters east of the terrain's origin.",
           "format": "double",
           "type": "number"
         }
@@ -4963,6 +5110,7 @@
       "type": "string"
     },
     "UnmaskProfileRequest": {
+      "description": "Where along a route a site first sees it.",
       "properties": {
         "geojson": {
           "default": false,
@@ -4970,16 +5118,19 @@
           "type": "boolean"
         },
         "route": {
+          "description": "The route's points in order, two or more, each with a height.",
           "items": {
             "$ref": "#/$defs/Point3"
           },
           "type": "array"
         },
         "site": {
-          "$ref": "#/$defs/Observer"
+          "$ref": "#/$defs/Observer",
+          "description": "The site looking, with its eye height above the ground."
         },
         "step": {
           "default": 100.0,
+          "description": "Meters between samples along the route.",
           "format": "double",
           "type": "number"
         }
@@ -5059,6 +5210,7 @@
       "type": "object"
     },
     "ValidatePlacementsRequest": {
+      "description": "Whether things to be placed fit the ground under them.",
       "properties": {
         "geojson": {
           "default": false,
@@ -5149,9 +5301,11 @@
       "type": "object"
     },
     "ViewshedRequest": {
+      "description": "The area an observer sees.",
       "properties": {
         "as_polygons": {
           "default": false,
+          "description": "Also return the visible area as polygons.",
           "type": "boolean"
         },
         "geojson": {
@@ -5160,14 +5314,16 @@
           "type": "boolean"
         },
         "observer": {
-          "$ref": "#/$defs/Observer"
+          "$ref": "#/$defs/Observer",
+          "description": "Who looks, with an eye height above the ground."
         },
         "radius": {
+          "description": "How far to look, in meters.",
           "format": "double",
           "type": "number"
         },
         "resolution": {
-          "description": "Mask cell size; the file's cell size when omitted, and may be coarser.",
+          "description": "Mask cell size in meters; the file's cell size when omitted, and may\nbe coarser.",
           "format": "double",
           "type": [
             "number",
@@ -5175,6 +5331,7 @@
           ]
         },
         "target_alt_agl": {
+          "description": "The height above the ground a cell is seen at, in meters.",
           "format": "double",
           "type": "number"
         }
@@ -5268,12 +5425,15 @@
       "type": "object"
     },
     "VisibleRequest": {
+      "description": "Whether one point sees another over the terrain.",
       "properties": {
         "a": {
-          "$ref": "#/$defs/Point3"
+          "$ref": "#/$defs/Point3",
+          "description": "The point looking, with its height."
         },
         "b": {
-          "$ref": "#/$defs/Point3"
+          "$ref": "#/$defs/Point3",
+          "description": "The point looked at, with its height."
         },
         "geojson": {
           "default": false,

@@ -14,107 +14,150 @@ use crate::source::Cover;
 pub enum Criterion {
     /// Steepest slope over the footprint, at most `deg`.
     SlopeMax {
+        /// The steepest slope allowed, in degrees.
         deg: f64,
     },
     /// Highest minus lowest height over the footprint's corners and centre,
     /// at most `m`.
     SpanMax {
+        /// The largest height difference allowed, in meters.
         m: f64,
     },
     /// Every footprint cell's water class is one of `classes`.
     SurfaceIn {
+        /// The water classes allowed: land, lake, sea or river.
         classes: Vec<WaterClass>,
     },
     /// Every footprint cell's `surface` code is one of `values`.
     SurfaceEnumIn {
+        /// The `surface` codes allowed.
         values: Vec<u8>,
     },
     /// Every footprint cell's ground cover is one of `classes`.
     CoverIn {
+        /// The cover classes allowed.
         classes: Vec<CoverClass>,
     },
     /// The share of the covered cells within `radius` that are of `class`,
     /// at least `min`.
     CoverFractionMin {
+        /// The cover class counted.
         class: CoverClass,
+        /// Meters around the site.
         radius: f64,
+        /// The least share, from 0 to 1.
         min: f64,
     },
     /// Distance to the nearest cell of `class`, from `min` to `max`.
     DistCoverBand {
+        /// The cover class measured to.
         class: CoverClass,
+        /// The least distance, in meters.
         min: f64,
+        /// The greatest distance, in meters.
         max: f64,
     },
+    /// Distance to the nearest road, from `min` to `max`.
     DistRoadBand {
+        /// The least distance, in meters.
         min: f64,
+        /// The greatest distance, in meters.
         max: f64,
     },
+    /// Distance to the nearest railroad, from `min` to `max`.
     DistRailBand {
+        /// The least distance, in meters.
         min: f64,
+        /// The greatest distance, in meters.
         max: f64,
     },
+    /// Distance to the nearest water, at least `m`.
     DistWaterMin {
+        /// The least distance, in meters.
         m: f64,
     },
     /// Distance to the nearest airdrome, or to `airdrome` when given: its id
     /// as a number, or its `name_id`.
     DistAirdromeBand {
+        /// The least distance, in meters.
         min: f64,
+        /// The greatest distance, in meters.
         max: f64,
+        /// The airdrome measured to; the nearest when omitted.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         airdrome: Option<AirdromeRef>,
     },
     /// Scenery objects of `class` within `radius`, at most `max`.
     SceneryMax {
+        /// The scenery class counted.
         class: String,
+        /// Meters around the site.
         radius: f64,
+        /// The most objects allowed.
         max: u32,
     },
     /// Scenery objects overlapping the footprint, at most `max`.
     SceneryInFootprintMax {
+        /// The most objects allowed.
         max: u32,
     },
     /// Objects of any class within `radius`: what a heliport static would
     /// remove at spawn.
     ClearingMax {
+        /// Meters around the site.
         #[serde(default = "default_clearing_radius")]
         radius: f64,
+        /// The most objects allowed.
         max: u32,
     },
+    /// How enclosed the site is: the mean of its horizon's elevation, at least
+    /// `deg`.
     EnclosureMin {
+        /// The least mean elevation, in degrees.
         deg: f64,
     },
     /// A ridge that way: every horizon bin in the sector rises at least
     /// `min_elev_deg`.
     MaskedFrom {
+        /// The sector's center, in degrees from north towards east.
         bearing_deg: f64,
+        /// Degrees either side of the bearing.
         half_width_deg: f64,
+        /// The least horizon elevation, in degrees.
         min_elev_deg: f64,
     },
     /// The fraction of `observers` that can see the site at `own_alt_agl`,
     /// at most `max_fraction`.
     NotVisibleFrom {
+        /// Who looks, each with an eye height above the ground.
         observers: Vec<Observer>,
+        /// The largest share of observers that may see the site, from 0 to 1.
         max_fraction: f64,
+        /// The height above the site's ground that is seen, in meters.
         #[serde(default = "default_own_alt_agl")]
         own_alt_agl: f64,
     },
     /// The fraction of `targets` the site sees from `own_alt_agl`, at least
     /// `min_fraction`.
     VisibleTo {
+        /// The points the site must see, each with a height.
         targets: Vec<Point3>,
+        /// The least share of targets seen, from 0 to 1.
         min_fraction: f64,
+        /// The eye height above the site's ground, in meters.
         #[serde(default = "default_own_alt_agl")]
         own_alt_agl: f64,
     },
     /// The site's landform class is one of `classes`, judged at
     /// `threshold_m` of local and regional relief.
     TpiClassIn {
+        /// The landform classes allowed.
         classes: Vec<TpiClass>,
+        /// The relief that counts, in meters.
         #[serde(default = "default_tpi_threshold")]
         threshold_m: f64,
     },
+    /// Every footprint cell has ground. Always applied.
     Valid,
 }
 

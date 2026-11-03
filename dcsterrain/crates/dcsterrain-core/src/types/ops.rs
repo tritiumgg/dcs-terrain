@@ -21,6 +21,7 @@ use super::{
 
 // describe
 
+/// What the terrain holds: its extent, files, cache and counts.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DescribeRequest {}
 
@@ -93,16 +94,21 @@ pub struct Validation {
 
 // sample
 
+/// Read terrain layers at points or over a grid.
+///
 /// Either `region` with `step`, or `points`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SampleRequest {
+    /// The area to read over, with `step`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<Region>,
-    /// Lattice spacing inside `region`, at least the cell size.
+    /// Meters between points read inside `region`, at least the cell size.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step: Option<f64>,
+    /// The points to read at.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub points: Option<Vec<Point>>,
+    /// The layers to read, such as `height`, `slope`, `cover` and `dist_road`.
     pub layers: Vec<String>,
     /// More rows than this is an error, never a truncated answer.
     #[serde(default = "default_max_rows")]
@@ -142,10 +148,13 @@ pub struct SampleRow {
 
 // geo
 
+/// Convert between DCS x and z and latitude and longitude.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GeoRequest {
+    /// Points to convert to latitude, longitude and MGRS.
     #[serde(default)]
     pub to_latlon: Vec<Point>,
+    /// Latitudes and longitudes to convert to DCS x and z.
     #[serde(default)]
     pub to_xz: Vec<LatLon>,
 }
@@ -170,11 +179,16 @@ pub struct GeoPoint {
 
 // score_site
 
+/// Score one site against siting criteria.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ScoreSiteRequest {
+    /// The site: meters north of the terrain's origin.
     pub x: f64,
+    /// The site: meters east of the terrain's origin.
     pub z: f64,
+    /// The site's size, tried at each orientation.
     pub footprint: Footprint,
+    /// The tests the site is judged by.
     #[serde(deserialize_with = "super::criteria::deserialize_criteria")]
     pub criteria: Vec<Criterion>,
     /// Also return the site and its footprint as GeoJSON.
@@ -211,16 +225,20 @@ pub struct Term {
 
 // find_sites
 
+/// Find the best sites for a footprint in a region.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FindSitesRequest {
+    /// Where to look.
     pub region: Region,
+    /// A site's size, tried at each orientation.
     pub footprint: Footprint,
+    /// The tests a site must pass; their scores rank the sites.
     #[serde(deserialize_with = "super::criteria::deserialize_criteria")]
     pub criteria: Vec<Criterion>,
-    /// Candidate lattice spacing; twice the cell size when omitted.
+    /// Meters between candidates tried; twice the cell size when omitted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step: Option<f64>,
-    /// No two candidates returned are closer than this.
+    /// No two candidates returned are closer than this, in meters.
     pub spacing: f64,
     /// At most 200.
     #[serde(default = "default_find_sites_limit")]
@@ -267,9 +285,12 @@ pub struct FindSitesStats {
 
 // visible
 
+/// Whether one point sees another over the terrain.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct VisibleRequest {
+    /// The point looking, with its height.
     pub a: Point3,
+    /// The point looked at, with its height.
     pub b: Point3,
     /// Also return the answer as GeoJSON.
     #[serde(default)]
@@ -294,14 +315,20 @@ pub struct VisibleResponse {
 
 // viewshed
 
+/// The area an observer sees.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ViewshedRequest {
+    /// Who looks, with an eye height above the ground.
     pub observer: Observer,
+    /// How far to look, in meters.
     pub radius: f64,
+    /// The height above the ground a cell is seen at, in meters.
     pub target_alt_agl: f64,
-    /// Mask cell size; the file's cell size when omitted, and may be coarser.
+    /// Mask cell size in meters; the file's cell size when omitted, and may
+    /// be coarser.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolution: Option<f64>,
+    /// Also return the visible area as polygons.
     #[serde(default)]
     pub as_polygons: bool,
     /// Also return the visible area as GeoJSON.
@@ -340,12 +367,15 @@ pub struct ViewshedResponse {
 
 // radar_floor
 
+/// The lowest height above the ground a site sees, around it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RadarFloorRequest {
+    /// The radar, with its height above the ground.
     pub site: Observer,
+    /// How far to look, in meters.
     pub radius: f64,
-    /// Raster cell size; the file's cell size when omitted, and may be
-    /// coarser.
+    /// Raster cell size in meters; the file's cell size when omitted, and may
+    /// be coarser.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolution: Option<f64>,
     /// Answer at these points instead of over a raster.
@@ -419,16 +449,21 @@ pub struct PointFloor {
 
 // coverage
 
+/// Where a site's envelope has dead zones, at each height.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CoverageRequest {
+    /// The radar, with its height above the ground.
     pub site: Observer,
+    /// How far the site reaches and the heights judged.
     pub envelope: Envelope,
     /// An area whose coverage is reported on its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asset: Option<Region>,
+    /// A radial first seen closer than this, in meters, is blind.
     #[serde(default = "default_min_masked_range")]
     pub min_masked_range: f64,
-    /// Mask cell size; the file's cell size when omitted, and may be coarser.
+    /// Mask cell size in meters; the file's cell size when omitted, and may
+    /// be coarser.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolution: Option<f64>,
     /// Also return the dead zones as GeoJSON.
@@ -442,7 +477,9 @@ fn default_min_masked_range() -> f64 {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Envelope {
+    /// How far the site reaches, in meters.
     pub radius: f64,
+    /// The heights above the ground judged, in meters.
     pub alt_bands_agl: Vec<f64>,
 }
 
@@ -473,21 +510,26 @@ pub struct CoverageBand {
 
 // approach_spectrum
 
+/// Blind arcs around a site, by bearing and height.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ApproachSpectrumRequest {
+    /// The radar, with its height above the ground.
     pub site: Observer,
     /// The engagement or search radius each radial is marched in from.
     pub radius: f64,
+    /// The heights above the ground judged, in meters.
     pub alt_bands_agl: Vec<f64>,
+    /// Degrees between radials.
     #[serde(default = "default_azimuth_step")]
     pub azimuth_step_deg: f64,
+    /// A radial first seen closer than this, in meters, is blind.
     #[serde(default = "default_min_masked_range")]
     pub min_masked_range: f64,
     /// Summaries are also returned restricted to this sector.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sector: Option<Sector>,
-    /// Raster cell size; the file's cell size when omitted, and may be
-    /// coarser.
+    /// Raster cell size in meters; the file's cell size when omitted, and may
+    /// be coarser.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolution: Option<f64>,
     /// Also return each blind arc as a wedge in GeoJSON.
@@ -502,7 +544,9 @@ fn default_azimuth_step() -> f64 {
 /// An arc of bearings, clockwise from `from_deg` to `to_deg`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Sector {
+    /// Where the arc starts, in degrees from north towards east.
     pub from_deg: f64,
+    /// Where the arc ends, clockwise from its start, in degrees.
     pub to_deg: f64,
 }
 
@@ -552,10 +596,14 @@ pub struct SpectrumSummary {
 
 // unmask_profile
 
+/// Where along a route a site first sees it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct UnmaskProfileRequest {
+    /// The site looking, with its eye height above the ground.
     pub site: Observer,
+    /// The route's points in order, two or more, each with a height.
     pub route: Vec<Point3>,
+    /// Meters between samples along the route.
     #[serde(default = "default_unmask_step")]
     pub step: f64,
     /// Also return the route, its masked stretches and the first-seen
@@ -592,6 +640,7 @@ pub struct RouteSpan {
 
 // exposure
 
+/// How many sites see each cell, and the areas none sees.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ExposureRequest {
     /// The sites looking, each out to its own radius.
@@ -605,8 +654,8 @@ pub struct ExposureRequest {
     /// The heights above ground the unseen areas are drawn at.
     #[serde(default = "default_floor_bands")]
     pub bands_agl: Vec<f64>,
-    /// Raster cell size; the file's cell size when omitted, and may be
-    /// coarser.
+    /// Raster cell size in meters; the file's cell size when omitted, and may
+    /// be coarser.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolution: Option<f64>,
     /// Also return the unseen areas as GeoJSON.
@@ -616,7 +665,9 @@ pub struct ExposureRequest {
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ExposureSite {
+    /// Who looks, with an eye height above the ground.
     pub observer: Observer,
+    /// How far it looks, in meters.
     pub radius: f64,
 }
 
@@ -667,10 +718,14 @@ pub struct ExposureBand {
 
 // route
 
+/// The least-cost road or rail route between two points.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RouteRequest {
+    /// Roads or railroads.
     pub network: Network,
+    /// Where the route starts, snapped to the nearest edge.
     pub from: Point,
+    /// Where the route ends, snapped to the nearest edge.
     pub to: Point,
     /// No edge crossing any of these is used.
     #[serde(default)]
@@ -678,6 +733,8 @@ pub struct RouteRequest {
     /// Edges these observers see cost more, by `exposure_weight`.
     #[serde(default)]
     pub exposure_observers: Vec<Observer>,
+    /// How much more a seen edge costs: its length times 1 plus this times the
+    /// share seen.
     #[serde(default = "default_exposure_weight")]
     pub exposure_weight: f64,
     /// No route longer than this times the straight line between the
@@ -746,6 +803,7 @@ pub struct Leg {
 
 // route_alternatives
 
+/// Several distinct routes between two points.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RouteAlternativesRequest {
     #[serde(flatten)]
@@ -812,10 +870,14 @@ pub struct Alternative {
 
 // nearest
 
+/// The nearest roads, airdromes, towns, beacons or objects to a point.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct NearestRequest {
+    /// What to find.
     pub kind: NearestKind,
+    /// Where to look from: meters north of the terrain's origin.
     pub x: f64,
+    /// Where to look from: meters east of the terrain's origin.
     pub z: f64,
     /// At most 50.
     #[serde(default = "default_nearest_n")]
@@ -878,12 +940,16 @@ pub struct Nearby {
 
 // scenery_in
 
+/// The scenery objects in an area.
+///
 /// Either `region`, or `footprint_at` for exact overlap with a placed
 /// footprint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SceneryInRequest {
+    /// The area whose objects are listed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<Region>,
+    /// A footprint placed at a point: the objects it overlaps exactly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub footprint_at: Option<FootprintAt>,
     /// Only objects of these classes; every class but `effect` when
@@ -905,9 +971,13 @@ fn default_scenery_max_rows() -> u32 {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FootprintAt {
+    /// The footprint's center: meters north of the terrain's origin.
     pub x: f64,
+    /// The footprint's center: meters east of the terrain's origin.
     pub z: f64,
+    /// The footprint's size; its orientations are not used.
     pub footprint: Footprint,
+    /// The bearing its depth runs along, in degrees from north towards east.
     pub orientation_deg: f64,
 }
 
@@ -944,10 +1014,12 @@ pub struct SceneryObject {
 
 // chokepoints
 
+/// The network's edges in an area that most routes cross.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ChokepointsRequest {
     /// Edges any point of whose path lies in it.
     pub region: Region,
+    /// Roads or railroads.
     pub network: Network,
     /// At most 500.
     #[serde(default = "default_chokepoints_limit")]
@@ -987,12 +1059,16 @@ pub struct Chokepoint {
 
 // trafficability
 
+/// Whether a vehicle can reach a network across country from a point.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TrafficabilityRequest {
+    /// Where the vehicle starts: meters north of the terrain's origin.
     pub x: f64,
+    /// Where the vehicle starts: meters east of the terrain's origin.
     pub z: f64,
     /// Steeper ground than this blocks; at most 60.
     pub max_slope_deg: f64,
+    /// Roads or railroads.
     pub network: Network,
     /// Also return the answer as GeoJSON.
     #[serde(default)]
@@ -1023,6 +1099,7 @@ pub struct TrafficabilityResponse {
 
 // point_info
 
+/// The ground at each point and what lies near it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PointInfoRequest {
     /// At most 10 000.
@@ -1101,6 +1178,7 @@ pub struct TownFix {
 
 // towns
 
+/// The towns and villages of an area or of the whole terrain.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TownsRequest {
     /// Places whose center lies in it; every place of the terrain when
@@ -1113,8 +1191,10 @@ pub struct TownsRequest {
     /// Only places of these forms; any form when empty.
     #[serde(default)]
     pub form: Vec<Form>,
+    /// Only places with at least this many buildings.
     #[serde(default)]
     pub min_buildings: u32,
+    /// What places are ranked by: `buildings` or `floor`.
     #[serde(default)]
     pub sort: TownsSort,
     /// At most 1 000, or 100 with outlines.
@@ -1196,6 +1276,7 @@ pub struct PlaceRef {
 
 // airfield_info
 
+/// An airdrome's runways, stands, radio and navaids.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AirfieldInfoRequest {
     /// A number is the airdrome's id; a string is its `name_id`, else its
@@ -1214,7 +1295,9 @@ pub struct AirfieldInfoRequest {
 pub struct Airframe {
     /// Span, rotor disc included.
     pub width: f64,
+    /// Meters, nose to tail.
     pub length: f64,
+    /// Meters, ground to top.
     pub height: f64,
     /// A helicopter needs a stand helicopters may use; an airplane one
     /// airplanes may.
@@ -1356,6 +1439,7 @@ pub struct StandSize {
 
 // validate_placements
 
+/// Whether things to be placed fit the ground under them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ValidatePlacementsRequest {
     /// At most 10 000.
@@ -1370,14 +1454,19 @@ pub struct ValidatePlacementsRequest {
 /// of units: the caller gives the size and the needs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Placement {
+    /// The name its answer is labeled with.
     pub id: String,
+    /// Its center: meters north of the terrain's origin.
     pub x: f64,
+    /// Its center: meters east of the terrain's origin.
     pub z: f64,
     /// Degrees from north towards east; turns only a `Rect`.
     #[serde(default)]
     pub heading: f64,
+    /// What it covers: a point, a rectangle, a circle or a polygon.
     #[serde(default)]
     pub shape: PlacementShape,
+    /// What must be under it: `land` or `water`.
     #[serde(default)]
     pub on: Underfoot,
     /// Degrees, 0 to 90: the steepest slope allowed under the shape.
@@ -1397,12 +1486,23 @@ pub enum PlacementShape {
     Point,
     /// Centered on the position, `depth` along `heading` and `width`
     /// across it.
-    Rect { width: f64, depth: f64 },
+    Rect {
+        /// Meters across the heading.
+        width: f64,
+        /// Meters along the heading.
+        depth: f64,
+    },
     /// Centered on the position.
-    Circle { radius: f64 },
+    Circle {
+        /// The radius, in meters.
+        radius: f64,
+    },
     /// Absolute DCS `[x, z]` vertices, 3 to 1 000, closed by the first,
     /// inside by the even-odd rule.
-    Polygon { points: Vec<[f64; 2]> },
+    Polygon {
+        /// The corners, each `[x, z]` in meters.
+        points: Vec<[f64; 2]>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

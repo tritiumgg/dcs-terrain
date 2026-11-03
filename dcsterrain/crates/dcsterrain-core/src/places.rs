@@ -251,6 +251,7 @@ impl SizeClass {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Form {
+    /// One built-up area, its buildings close together.
     Compact,
     /// A strung-out spread of buildings no gap separates.
     Dispersed,
