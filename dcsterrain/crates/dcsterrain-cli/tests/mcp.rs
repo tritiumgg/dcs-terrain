@@ -369,8 +369,9 @@ async fn a_cancelled_call_stops_within_a_second() {
             "find_sites at {share}: {took:?}"
         );
     }
-    // Each of these sites takes a second or more to sweep: cancelled in the
-    // second.
+    // Each of these sites takes a second or more to read and sweep in a
+    // debug build: cancelled as the second reads its heights, which on a
+    // slow runner alone outlasted a second when the read did not look.
     let site = |x: f64| json!({"observer": {"x": x, "z": -10000, "alt_agl": 10}, "radius": 40000});
     let sweeps = json!({"sites": [site(5000.0), site(0.0), site(-5000.0)], "target_alt_agl": 30});
     let took = stopped_after("exposure", sweeps, 0.3).await;
