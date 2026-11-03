@@ -169,22 +169,79 @@ pub fn schema(only: Option<&str>) -> Result<Value, UnknownOperation> {
     }))
 }
 
+/// Every `$ref` in `v`, collected.
+fn refs<'a>(v: &'a Value, out: &mut Vec<&'a str>) {
+    match v {
+        Value::Object(m) => {
+            if let Some(Value::String(r)) = m.get("$ref") {
+                out.push(r);
+            }
+            m.values().for_each(|x| refs(x, out));
+        }
+        Value::Array(a) => a.iter().for_each(|x| refs(x, out)),
+        _ => {}
+    }
+}
+
+/// The name a `#/$defs/<name>` reference points at.
+fn def_name(r: &str) -> &str {
+    r.strip_prefix("#/$defs/").unwrap_or(r)
+}
+
+/// One operation's request schema standing alone, as a tool's input takes
+/// it: the request type's definition at the root, with `$defs` holding
+/// every definition it reaches, cut from the document `schema` prints for
+/// that operation.
+pub fn request_schema(name: &str) -> Result<Map<String, Value>, UnknownOperation> {
+    let doc = schema(Some(name))?;
+    let defs = &doc["$defs"];
+    let request = &doc["properties"]["operations"]["properties"][name]["properties"]["request"];
+    let request = match request.get("$ref").and_then(Value::as_str) {
+        Some(r) => &defs[def_name(r)],
+        None => request,
+    };
+    let mut root = request.as_object().cloned().unwrap_or_default();
+
+    let mut reached = Map::new();
+    let mut pending = Vec::new();
+    refs(request, &mut pending);
+    while let Some(r) = pending.pop() {
+        let n = def_name(r);
+        if reached.contains_key(n) {
+            continue;
+        }
+        let def = &defs[n];
+        reached.insert(n.to_string(), def.clone());
+        refs(def, &mut pending);
+    }
+    root.insert("$schema".into(), doc["$schema"].clone());
+    if !reached.is_empty() {
+        root.insert("$defs".into(), Value::Object(reached));
+    }
+    Ok(root)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Every `$ref` in `v`, collected.
-    fn refs<'a>(v: &'a Value, out: &mut Vec<&'a str>) {
-        match v {
-            Value::Object(m) => {
-                if let Some(Value::String(r)) = m.get("$ref") {
-                    out.push(r);
-                }
-                m.values().for_each(|x| refs(x, out));
+    #[test]
+    fn each_request_stands_alone_as_an_object() {
+        for o in OPERATIONS {
+            let alone = Value::Object(request_schema(o.name).unwrap());
+            assert_eq!(alone["type"], "object", "{}", o.name);
+            let mut found = Vec::new();
+            refs(&alone, &mut found);
+            for r in found {
+                assert!(alone["$defs"].get(def_name(r)).is_some(), "{}: {r}", o.name);
             }
-            Value::Array(a) => a.iter().for_each(|x| refs(x, out)),
-            _ => {}
         }
+        let route = request_schema("route").unwrap();
+        assert!(
+            route["$defs"].get("Issue").is_none(),
+            "only what it reaches"
+        );
+        assert!(request_schema("nope").is_err());
     }
 
     #[test]

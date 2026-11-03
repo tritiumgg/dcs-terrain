@@ -14,7 +14,7 @@ mod schema;
 
 pub use criteria::*;
 pub use ops::*;
-pub use schema::{ISSUE_CODES, OPERATIONS, Operation, UnknownOperation, schema};
+pub use schema::{ISSUE_CODES, OPERATIONS, Operation, UnknownOperation, request_schema, schema};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
