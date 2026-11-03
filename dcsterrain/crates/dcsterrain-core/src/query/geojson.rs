@@ -41,11 +41,33 @@ impl Features {
     /// clockwise when not, as RFC 7946 asks of an exterior ring and a hole.
     fn ring(&self, ring: &[[f64; 2]], outer: bool) -> Vec<[f64; 2]> {
         let mut p: Vec<_> = ring.iter().map(|&v| self.position(v)).collect();
+        // A ring its caller closed itself is closed once.
+        if p.len() > 1 && p[0] == p[p.len() - 1] {
+            p.pop();
+        }
         if (signed_area(&p) > 0.0) != outer {
             p.reverse();
         }
         p.push(p[0]);
         p
+    }
+
+    /// Whether a polygon, its exterior then its holes in DCS `[x, z]`, has
+    /// an area a reader can fill once written: rounding positions to a
+    /// centimeter or so can fold a sliver flat, and a hole can fill its
+    /// exterior.
+    pub fn fillable(&self, rings: &[Ring]) -> bool {
+        let area = |r: &Ring| signed_area(r).abs() / 2.0;
+        let flat = |r: &Ring| {
+            let p: Vec<_> = r.iter().map(|&v| self.position(v)).collect();
+            signed_area(&p) == 0.0
+        };
+        let Some(outer) = rings.first() else {
+            return false;
+        };
+        let holes: f64 = rings[1..].iter().map(area).sum();
+        // Under a square centimeter, a ring is rounding noise.
+        rings.iter().all(|r| r.len() >= 3 && !flat(r)) && area(outer) - holes > 1e-4
     }
 
     /// Each member is moved in: `json!` would copy a `Value` it is given.

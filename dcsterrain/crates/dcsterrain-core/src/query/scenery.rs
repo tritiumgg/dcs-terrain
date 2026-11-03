@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 
-use super::geojson::{Features, Ring, props, signed_area};
+use super::geojson::{Features, Ring, props};
 use super::{Terrain, refused, resolve};
 use crate::classes::Class;
 use crate::decode::scn5::Pool;
@@ -248,8 +248,8 @@ pub fn scenery_in(terrain: &Terrain, q: SceneryInRequest) -> Result<SceneryInRes
 }
 
 /// Each object's turned box as a polygon with its fields, or a point where
-/// its model has no box, and the region or footprint asked about. A shape
-/// with no area, which no reader can fill, is left out.
+/// its model has no box or a box too thin to fill, and the region or
+/// footprint asked about unless it has no area.
 fn features(
     terrain: &Terrain,
     objects: &[SceneryObject],
@@ -264,17 +264,14 @@ fn features(
         for k in ["x", "z"] {
             fields.remove(k);
         }
-        let ring = b.corners().to_vec();
-        if signed_area(&ring) != 0.0 {
-            f.polygon(&[ring], fields);
+        let ring = vec![b.corners().to_vec()];
+        if f.fillable(&ring) {
+            f.polygon(&ring, fields);
         } else {
             f.point([o.x, o.z], fields);
         }
     }
-    if rings
-        .first()
-        .is_some_and(|r| r.len() >= 3 && signed_area(r) != 0.0)
-    {
+    if f.fillable(&rings) {
         f.polygon(&rings, props([(asked, json!(true))]));
     }
     Ok(f.finish())
@@ -283,6 +280,7 @@ fn features(
 #[cfg(test)]
 mod tests {
     use super::super::answer;
+    use super::super::geojson::signed_area;
     use super::super::geojson::tests::assert_valid;
     use super::super::tests::synth;
     use super::*;
@@ -447,6 +445,47 @@ mod tests {
         let v = at(0.0);
         let features = v["geojson"]["features"].as_array().unwrap();
         assert_eq!(features.len(), v["objects"].as_array().unwrap().len());
+    }
+
+    #[test]
+    fn a_region_with_no_area_once_written_is_not_drawn() {
+        let t = synth();
+        let drawn = |region: Value| {
+            let v = answer(
+                &t,
+                "scenery_in",
+                &json!({"region": region, "geojson": true}),
+            )
+            .unwrap();
+            assert_valid(&v["geojson"]);
+            v["geojson"]["features"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|f| f["properties"]["region"] == true)
+        };
+        // Collinear, its area float noise; a box thinner than the rounding;
+        // a band whose hole fills it.
+        let line = json!({"Polygon": {"points": [[0.1, 0.7], [1000.4, 334.0], [2000.7, 667.3]]}});
+        assert!(!drawn(line));
+        let thin =
+            json!({"Box": {"min_x": 1000, "min_z": 1000, "max_x": 1000.0001, "max_z": 3000}});
+        assert!(!drawn(thin));
+        let band = json!({"AirdromeBand": {"airdrome": 1, "min_dist": 900, "max_dist": 900}});
+        assert!(!drawn(band));
+        // A polygon its caller closed is closed once.
+        let closed = json!({"Polygon": {"points": [[0, 0], [1000, 0], [1000, 1000], [0, 0]]}});
+        let v = answer(
+            &t,
+            "scenery_in",
+            &json!({"region": closed, "geojson": true}),
+        )
+        .unwrap();
+        let ring =
+            v["geojson"]["features"].as_array().unwrap().last().unwrap()["geometry"]["coordinates"]
+                [0]
+            .clone();
+        assert_eq!(ring.as_array().unwrap().len(), 4);
     }
 
     #[test]
