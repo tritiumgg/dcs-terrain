@@ -576,7 +576,31 @@ edges, and its road and rail graph has 357 k nodes.
   whose answer is one text block holding the bytes `query` prints for the
   request. A refusal is a tool error holding `query`'s `{"issues": [...]}`.
   Calls run one at a time on one thread holding the opener a batch uses, so
-  the terrain stays open between calls and reopens when its files change.
+  the terrain stays open between calls and reopens when its files change:
+  before each call, the build in `autoupdate.cfg` and the size and modified
+  time of each file it was opened from are compared, a few stats. A patch
+  changes them; a watcher of the files would be a thread and an OS facility
+  per platform for the same answer.
+  The server lives as long as its client:
+  - A call the client cancels with `notifications/cancelled` fails as
+    `cancelled` at the work's next look, within a second; the next call waits
+    behind it. `find_sites` looks every 64 candidates and at each sightline,
+    the horizon march at each cell, `exposure` at each site.
+  - `find_sites` and `exposure` send `notifications/progress` to the caller's
+    token: the share of the work done, 0 to 1 against a total of 1, rising,
+    at most four a second, with what the work is doing.
+  - No tool text is over 64 KiB, about the 25 000 tokens clients cut a tool's
+    text at. A larger `geojson` is written to a file and replaced by
+    `geojson_file`, its path, and `geojson_bytes`; an answer still larger is
+    written whole, as it is encoded, and the text is only `answer_file` and
+    `answer_bytes`. Files go to `dcsterrain` in the system temp directory,
+    never the install or the cache, and a server starting removes those
+    over a day old.
+  - It holds 64 MiB of peak commit across a session as a batch does: nothing
+    is kept per call, and the terrain lets go of its blocks after a second
+    idle. 100 calls on Caucasus of 2.9.31.29434, a 20 km `exposure` and a
+    200-site `find_sites` among them, peak at 63.5 MiB, and the same lines
+    through one `query` batch at 63.6 MiB.
 - `dcsterrain check [--install <dir>] --terrain <Terrain> [--top <n>] [--json]`
   reports each terrain file's class and version and why no decoder reads it
   when none does, each cache entry's state as found and the horizon tiles
@@ -598,10 +622,6 @@ and the metric meanings it needs to turn numbers into difficulty.
 
 Planned, over the same operations (ADR 0011):
 
-- On `dcsterrain mcp`, long calls report progress and can be cancelled,
-  and a large GeoJSON goes to a file whose path is returned, so an answer is
-  not held whole as one tool text. The server holds 64 MiB of peak commit
-  across a session, as a query does.
 - `dcsterrain <op> --terrain <Terrain> [flags]` is one subcommand per operation
   for people. Its flags are generated from the request schema. A place takes
   DCS `x,z`, an MGRS grid, latitude and longitude, or an airfield or town name,

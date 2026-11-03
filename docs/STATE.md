@@ -4,20 +4,27 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `design.md` and `queries.md` hold the design.
 
-**Last updated:** 2026-11-03T04:46Z
+**Last updated:** 2026-11-03T05:50Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
-1. **M1: `dcsterrain mcp`.** An MCP server on stdio through `rmcp` 3.8.0,
+1. **M2: the long-lived MCP server.** A cancelled call stops its work at
+   the next look; `find_sites` and `exposure` report progress to the
+   caller's token; a GeoJSON, then an answer, over 64 KiB goes to a file
+   in the temp directory; a terrain whose files change reopens.
+   *Verified by:* an agent, through `mise run check` on `Synth`, a cancel
+   answered within 185 ms anywhere in a 22 s search; opt-in, 100 calls on
+   Caucasus of 2.9.31.29434 peak at 63.5 MiB, as `query` does at 63.6.
+2. **M1: `dcsterrain mcp`.** An MCP server on stdio through `rmcp` 3.8.0,
    one tool per operation, its input the request schema cut from `schema`,
    each call answered by the opener a batch uses; a refusal is a tool error
    holding the issue list. A large answer is held whole as one text until M2.
    *Verified by:* an agent, through `mise run check`: an rmcp client over the
    binary's stdio matches every tool schema to `schema --op` and every answer
    to `query`'s, byte for byte but for the time taken, refusals included.
-2. **R2: the guide.** `docs/guide.md` walks a siting question on Caucasus from
+3. **R2: the guide.** `docs/guide.md` walks a siting question on Caucasus from
    install to Mission Editor position, combines questions into a hidden FARP and
    its convoy route, draws GeoJSON, and covers each failure; questions go in on
    stdin, which Windows PowerShell 5.1 passes intact. README rewritten. Fixes:
@@ -26,22 +33,17 @@ Newest first. Max 5 entries — drop the oldest when adding a sixth.
    newcomer subagent answered an unseen question from the guide alone; the live
    newcomer test was not run: the user reviewed the guide and judged it adequate,
    the tool being mainly for assistants and software.
-3. **R1: release builds.** `.github/workflows/release.yml`: a `v*` tag builds
+4. **R1: release builds.** `.github/workflows/release.yml`: a `v*` tag builds
    Windows, Linux and both macOS archives on their own runners, the C runtime
    static on Windows and Linux, and releases them with `SHA256SUMS`. *Verified
    by:* CI: on each platform a job holding only the archive answered
    `query --terrain synth describe`; v0.1.0 released, its Windows archive
    answering the README's example.
-4. **Towns by cluster.** A place is any building names do not rule out, sized by
+5. **Towns by cluster.** A place is any building names do not rule out, sized by
    floor at about 100 m² a person, industrial buildings only linking; no
    per-terrain overrides. Census 0.63; Afghanistan and the Marianas have towns
    and cities (`data/places.md`). *Verified by:* an agent, through
    `mise run check`, and opt-in on the 8 terrains of 2.9.31.29434.
-5. **N13: passages in the road graph.** Routes search the road file's own table
-   and connectors, every edge is decoded, and the sortie keeps refused routes
-   (ADR 0009). *Verified by:* an agent, opt-in on Caucasus of 2.9.31.29434 against
-   V1's replies: 22 of 22 refused, 198 of 198 answered, largest +0.24 %; worst peak
-   60.0 MiB on 8 terrains.
 
 ## Next
 
@@ -55,10 +57,10 @@ One task. The thing to pick up immediately.
 Max 5 entries, in dependency order. Task ids from `plan.md`.
 
 1. **H1** — one parser for every place a flag takes. *Agent, opt-in.*
-2. **M2** — the long-lived MCP server. *Agent, opt-in.*
-3. **H2** — one subcommand per operation. *Agent.*
-4. **H4** — GeoJSON on `sample`, `nearest` and `scenery_in`. *Agent.*
-5. **H3** — readable output for the main operations. *Agent.*
+2. **H2** — one subcommand per operation. *Agent.*
+3. **H4** — GeoJSON on `sample`, `nearest` and `scenery_in`. *Agent.*
+4. **H3** — readable output for the main operations. *Agent.*
+5. **M3** — client setup and the skill. *User: no DCS.*
 
 M and H run in parallel beside C1, which is live (ADR 0011). Milestone in
 view: **MS3 Assistant and release**, which C1 closes; then **MS4 Interfaces**.
