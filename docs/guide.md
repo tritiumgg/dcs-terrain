@@ -632,13 +632,16 @@ These operations return GeoJSON when the request has `"geojson": true`:
 | `exposure` | the area that no site in a group can see |
 | `route`, `route_alternatives` | the route along the roads or railways |
 | `chokepoints` | the roads that matter most |
+| `sample` | each point sampled, with its layer values |
+| `nearest` | each thing found, and the road or railway it lies on |
+| `scenery_in` | each object's outline, and the area you asked about |
 | `trafficability` | the line from a point to the nearest road |
 | `point_info` | each point you asked about |
 | `airfield_info` | the runways and parking spots |
 | `validate_placements` | each placement, and anything in its way |
 | `towns` | each town's center, and its outline if you ask for it |
 
-`sample`, `nearest`, `scenery_in`, `describe` and `geo` do not return GeoJSON yet.
+`describe` and `geo` draw nothing.
 They accept `"geojson": true`, but their answer has no `geojson` field.
 
 ## Many questions at once

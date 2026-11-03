@@ -88,8 +88,8 @@ endpoints also returns them as `Point` features.
 | `route` | the route as a `LineString`, and each leg as one with its `length`, `ascent`, `descent`, `max_grade_pct`, `exposure` and `class` |
 | `route_alternatives` | each route as a `LineString` with its stretch and overlap; the edges every alternative shares, as `LineString`s marked `shared` |
 | `low_level_route` (deferred) | the path as a `LineString`, with the waypoints' MSL and AGL altitudes as `alt_msl` and `alt_agl` arrays in its properties, and each leg with its height above ground and the sites that see it. Coordinates stay two-dimensional, because RFC 7946 reads a third one as height above the ellipsoid, not MSL |
-| `nearest` | a `Point` per result with its kind, name and distance; for roads and rail, the matched edge as a `LineString` |
-| `scenery_in` | each object's box as a `Polygon` with its model, class and height; the region or footprint queried |
+| `nearest` | a `Point` per result with its fields but `x` and `z`; for road and rail, the matched edge, whole, as a `LineString` with its `kind`, `edge_id` and `class` |
+| `scenery_in` | each object's turned box as a `Polygon` with its fields but `x` and `z`, or a `Point` where its model has no box; the region or footprint asked about as a `Polygon` marked `region` or `footprint`, unless it has no area |
 | `chokepoints` | each edge as a `LineString` with its rank, betweenness, class and `crosses_water` |
 | `trafficability` | the line to the nearest road as a `LineString`, and the blocking point when there is one |
 | `point_info` | a `Point` per request point with its fields |

@@ -109,7 +109,7 @@ and `path` names the field at fault, such as `criteria.2.params.deg`.
   every sightline here. The world is flat to these operations.
 - `geojson: true` adds a `geojson` field in longitude and latitude, for a user who
   wants to see the answer in a map program. Every operation takes it but
-  `describe`, `sample`, `geo`, `nearest` and `scenery_in`.
+  `describe` and `geo`.
 
 ## Which operation
 
