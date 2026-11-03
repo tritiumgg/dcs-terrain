@@ -38,7 +38,8 @@ such as `describe`, `find_sites` and `visible`, from a server called
 
 ## Calling it with a shell
 
-Without the MCP tools, run the command line. Run `dcsterrain list-terrains` first. It names the install, the build and the
+Without the MCP tools, run the command line. Run `dcsterrain list-terrains`
+first. It names the install, the build and the
 `--terrain` id of each terrain. An id is not always its folder: Germany's folder
 is `GermanyColdWar`, its id `GermanyCW`. If the command is not on the `PATH`, look
 for `dcsterrain/target/release/dcsterrain` in a checkout, and ask the user
@@ -192,7 +193,9 @@ Mind these:
 
 - **Observers and targets are fixed points.** `not_visible_from` cannot express
   "a ring around each candidate". For that, take the candidates and run a second
-  pass of `visible` in a batch, as the FARP task does.
+  pass of `visible` in a batch, as the FARP task does. Without a shell, make that
+  pass one `score_site` per candidate with its ring as the observers, as the FARP
+  task also shows.
 - **On a plain the ranking ties.** `span_max` reads the 50 m raster's heights,
   rounded to the meter, and a road distance runs between cell centers, so many
   candidates score alike and ties go to the lesser x, then the lesser z. Tied

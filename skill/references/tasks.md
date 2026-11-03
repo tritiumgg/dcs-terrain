@@ -26,7 +26,8 @@ land, 200 m to 3 km from a road, at least 3 km from the airfield, nothing within
 separates the candidates is what stands around them and who can see them.
 
 - Scenery within 500 m: `scenery_in` with a `Circle` of radius 500 around the
-  candidate. Report `counts_by_class`.
+  candidate. Report `counts_by_class`. A second one of radius 150 gives the
+  expected clearing, as "Back in DCS" says.
 - Ground exposure: the share of 36 observers that see it. The observers stand on
   a ring around the candidate, 12 bearings every 30° at 3, 6 and 10 km, 2 m above
   the ground, and the site is judged 2 m above the ground. A criterion's observers
