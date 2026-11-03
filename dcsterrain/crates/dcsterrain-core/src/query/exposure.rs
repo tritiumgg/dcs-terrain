@@ -33,6 +33,7 @@ use super::viewshed::{
     CELLS_MAX, base64, check_reach, check_resolution, check_size, prepare, site_eye, too_large,
 };
 use super::{Area, Terrain, refused, resolve};
+use crate::call::Call;
 use crate::grid::Window;
 use crate::source::Layer;
 use crate::types::{
@@ -204,6 +205,7 @@ pub fn exposure(terrain: &Terrain, q: ExposureRequest) -> Result<Rasters, Vec<Is
     let r = reduce(terrain, &q, &area.expect("no issues, so a region"));
     src.tight(false);
     let r = r?;
+    Call::current().check()?;
     let mut heights = q.bands_agl.clone();
     heights.sort_unstable_by(f64::total_cmp);
     heights.dedup();
@@ -404,7 +406,10 @@ fn reduce(terrain: &Terrain, q: &ExposureRequest, area: &Area) -> Result<Reduced
     // Counted as the floors are returned, so the count is what the returned
     // floors say.
     let target = q.target_alt_agl as f32;
+    let call = Call::current();
     for (i, s) in q.sites.iter().enumerate() {
+        call.check()?;
+        call.progress(i as f64 / q.sites.len() as f64, "sweeping the sites");
         // A sweep keeps the cell holding its site however small its radius,
         // and that cell's center lies within half a cell's diagonal.
         let reach = s.radius.max(res * std::f64::consts::FRAC_1_SQRT_2);

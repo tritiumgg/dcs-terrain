@@ -17,6 +17,7 @@
 
 use rayon::prelude::*;
 
+use crate::call::Call;
 use crate::grid::{Grid, box_distance};
 use crate::source::{Layer, Refusal, Source};
 
@@ -133,6 +134,10 @@ fn batch(
     tiles: &[(u32, u32)],
 ) -> Result<Vec<Vec<u8>>, Refusal> {
     let ts = i64::from(g.tile_size);
+    let call = Call::current();
+    if call.stopped() {
+        return Err(cancelled());
+    }
     let range = RANGE_M / f64::from(g.cell_size);
     // One more cell, for the bilinear square of the farthest sample.
     let pad = range.ceil() as i64 + 1;
@@ -157,7 +162,9 @@ fn batch(
     let center = (span as f64 - 1.0) / 2.0;
     // Every horizon cell marches on its own, so they go to any core in any
     // order and each tile's bytes are the same.
-    Ok(tiles
+    // A call given up marches no more cells, and its tiles, cut short, are
+    // refused, so none is kept.
+    let made: Vec<Vec<u8>> = tiles
         .par_iter()
         .map(|&(tx, tz)| {
             let mut t = vec![UNDEFINED; tile_len(g)];
@@ -167,11 +174,22 @@ fn batch(
                 let col = i64::from(tz) * ts + i64::from(hc) * span;
                 let or = (row - r0) as f64 + center;
                 let oc = (col - c0) as f64 + center;
-                march(&v, &p, or, oc, range, &dirs, bins);
+                if !call.stopped() {
+                    march(&v, &p, or, oc, range, &dirs, bins);
+                }
             });
             t
         })
-        .collect())
+        .collect();
+    if call.stopped() {
+        return Err(cancelled());
+    }
+    Ok(made)
+}
+
+/// A call given up, as the refusal a horizon gives.
+fn cancelled() -> Refusal {
+    Refusal("the caller cancelled the call".into())
 }
 
 /// Heights over a window clipped to the grid, `NODATA` outside the mesh.

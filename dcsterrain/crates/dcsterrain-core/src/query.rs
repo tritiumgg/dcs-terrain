@@ -275,6 +275,57 @@ pub(crate) mod tests {
         assert_eq!(issues[0].path, "points.1.x");
     }
 
+    /// A search and a sweep with work enough to report, over sightlines.
+    fn long_calls() -> [(&'static str, Value); 2] {
+        let observer = json!({"x": 12000, "z": 15000, "alt_agl": 10});
+        [
+            (
+                "find_sites",
+                json!({
+                    "region": {"Circle": {"x": 12000, "z": 15000, "radius": 4000}},
+                    "footprint": {"width": 60, "depth": 40},
+                    "criteria": [{"name": "not_visible_from",
+                                  "params": {"observers": [observer], "max_fraction": 0.5}}],
+                    "spacing": 200, "limit": 3,
+                }),
+            ),
+            (
+                "exposure",
+                json!({"sites": [{"observer": observer, "radius": 2000},
+                                 {"observer": {"x": 14000, "z": 15000, "alt_agl": 10},
+                                  "radius": 2000}],
+                       "target_alt_agl": 30}),
+            ),
+        ]
+    }
+
+    #[test]
+    fn a_cancelled_call_fails_as_cancelled() {
+        use crate::call::{Ticket, within};
+        for (op, request) in long_calls() {
+            let ticket = Ticket::new(Box::new(|_, _| {}));
+            ticket.cancel();
+            let issues = within(ticket, || answer(&synth(), op, &request)).unwrap_err();
+            assert_eq!(issues[0].code, "cancelled", "{op}: {issues:?}");
+        }
+    }
+
+    #[test]
+    fn a_long_call_reports_its_progress() {
+        use crate::call::{Ticket, within};
+        use std::sync::{Arc, Mutex};
+        for (op, request) in long_calls() {
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let s = seen.clone();
+            let ticket = Ticket::new(Box::new(move |share, _| s.lock().unwrap().push(share)));
+            let answered = within(ticket, || answer(&synth(), op, &request));
+            assert!(answered.is_ok(), "{op}: {answered:?}");
+            let seen = seen.lock().unwrap();
+            assert!(!seen.is_empty(), "{op}");
+            assert!(seen.is_sorted() && seen.iter().all(|s| (0.0..=1.0).contains(s)));
+        }
+    }
+
     #[test]
     fn refuses_an_unknown_operation_and_a_bad_request() {
         let issue = |op: &str, req: Value| answer(&synth(), op, &req).unwrap_err()[0].code.clone();

@@ -25,12 +25,14 @@
 //! pruned evaluation is checked against.
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::refused;
 use super::region::airdromes;
 use super::scenery::{OBJECT_REACH_M, Rect, footprint as object_rect};
 use super::sightline::exact;
 use super::visible::altitude;
+use crate::call::Call;
 use crate::classes::Class;
 use crate::decode::scn5::Pool;
 use crate::grid::{Grid, Window, box_distance};
@@ -43,6 +45,9 @@ use crate::types::{Criterion, Footprint, Issue, Point3, Term, TpiClass};
 /// Sites evaluated in full before the order of the per-site tests is fixed
 /// from the share of them each test failed.
 const SAMPLE: usize = 256;
+/// Candidates tested between two looks at whether the caller gave up: a
+/// few milliseconds of work at most.
+const CHECK_EVERY: usize = 64;
 /// The mean margin over a masked sector's floor that scores 1.
 pub const MASK_MARGIN_FULL_DEG: f64 = 10.0;
 /// The longest side a footprint may have.
@@ -1135,6 +1140,8 @@ pub fn evaluate(
         )]);
     }
     let (checks, wants) = compile(src, criteria)?;
+    let call = Call::current();
+    call.progress(0.0, "reading the layers under the candidates");
     let g = src.grid();
     let cs = f64::from(g.cell_size);
     let mut stats = Stats {
@@ -1196,8 +1203,10 @@ pub fn evaluate(
     }
     let mut centers = Vec::with_capacity(wants.len());
     for w in &wants {
+        call.check()?;
         centers.push(derive(src, *w, at).map_err(r)?);
     }
+    call.check()?;
     let tpi = has(&|k| matches!(k, Kind::Tpi { .. })).then(|| {
         let i = |d| wants.iter().position(|w| *w == d).expect("wanted");
         (i(TPI_300), i(TPI_2000))
@@ -1258,7 +1267,9 @@ pub fn evaluate(
             })
             .map(|&(tx, tz)| (tx as u32, tz as u32))
             .collect();
-        for (t, h) in on_grid.iter().zip(src.horizon(&on_grid).map_err(r)?) {
+        let horizons = src.horizon(&on_grid);
+        call.check()?;
+        for (t, h) in on_grid.iter().zip(horizons.map_err(r)?) {
             ctx.horizon.insert((i64::from(t.0), i64::from(t.1)), h);
         }
         if mode == Mode::Prune {
@@ -1343,7 +1354,7 @@ pub fn evaluate(
             }
             back
         };
-        let sites = prune(&ctx, &cands, &live, &ordered, &mut stats)?;
+        let sites = prune(&ctx, &cands, &live, &ordered, &mut stats, &call)?;
         // Terms back in the order asked.
         let sites = sites
             .into_iter()
@@ -1370,12 +1381,23 @@ fn prune(
     live: &[usize],
     checks: &[Check],
     stats: &mut Stats,
+    call: &Call,
 ) -> Result<Vec<Site>, Vec<Issue>> {
     let degs = &ctx.footprint.orientations_deg;
+    let sights: Vec<usize> = (0..checks.len())
+        .filter(|&j| checks[j].is_sight())
+        .collect();
+    // The share of the work the tests before the sightlines are taken to
+    // be: the sightlines cost the most wherever they are asked for.
+    let before = if sights.is_empty() { 1.0 } else { 0.3 };
     // Candidates that pass all but the sightlines, with the terms of each
     // passing orientation.
     let mut through: Vec<(usize, Vec<Partial>)> = Vec::new();
-    'cand: for &i in live {
+    'cand: for (n, &i) in live.iter().enumerate() {
+        if n % CHECK_EVERY == 0 {
+            call.check()?;
+            call.progress(before * n as f64 / live.len() as f64, "testing sites");
+        }
         let c = &cands[i];
         let mut shared: Vec<Option<Term>> = vec![None; checks.len()];
         for (j, k) in checks.iter().enumerate() {
@@ -1408,9 +1430,7 @@ fn prune(
             through.push((i, passing));
         }
     }
-    let sights: Vec<usize> = (0..checks.len())
-        .filter(|&j| checks[j].is_sight())
-        .collect();
+    call.check()?;
     let ground = if sights.is_empty() || through.is_empty() {
         vec![None; through.len()]
     } else {
@@ -1431,7 +1451,15 @@ fn prune(
     let lines: usize = sights.iter().map(|&j| checks[j].ends()).sum();
     let at: Vec<(usize, Option<f64>)> = (through.iter().map(|t| t.0)).zip(ground).collect();
     let parallel = at.len().saturating_mul(lines) >= PARALLEL_LINES;
+    let done = AtomicUsize::new(0);
     let seen = try_map(&at, parallel, |&(i, ground)| -> Result<_, Refusal> {
+        // A call given up skips the rest, and fails below.
+        if call.stopped() {
+            return Ok(None);
+        }
+        let n = done.fetch_add(1, Ordering::Relaxed);
+        let share = before + (1.0 - before) * n as f64 / at.len() as f64;
+        call.progress(share, "tracing sightlines");
         let mut seen = Vec::with_capacity(sights.len());
         for &j in &sights {
             let t = ctx.sight(&checks[j], ground, &cands[i], true)?;
@@ -1443,6 +1471,7 @@ fn prune(
         Ok(Some(seen))
     })
     .map_err(refused)?;
+    call.check()?;
     let mut sites = Vec::new();
     for ((i, passing), seen) in through.into_iter().zip(seen) {
         let Some(seen) = seen else {

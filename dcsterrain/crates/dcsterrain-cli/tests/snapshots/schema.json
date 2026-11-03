@@ -5354,6 +5354,10 @@
     "issue_codes": {
       "oneOf": [
         {
+          "const": "cancelled",
+          "description": "the caller cancelled the call"
+        },
+        {
           "const": "internal_error",
           "description": "a bug: the operation failed unexpectedly"
         },

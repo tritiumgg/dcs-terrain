@@ -55,6 +55,7 @@ pub const OPERATIONS: &[Operation] = &[
 /// Every `Issue::code` a surface returns and what it means. A code is never
 /// reworded once shipped; a test holds this list to the source.
 pub const ISSUE_CODES: &[(&str, &str)] = &[
+    ("cancelled", "the caller cancelled the call"),
     ("internal_error", "a bug: the operation failed unexpectedly"),
     (
         "invalid_criterion",
