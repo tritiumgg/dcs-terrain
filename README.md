@@ -53,8 +53,7 @@ Then ask a question, such as the airfield nearest to the town of Zugdidi:
 1         33834  Senaki-Kolkhi  —      23  -281782  647279  38T KM 56437 80737
 ```
 
-A place can be a DCS position such as `-284887,683859`, a grid reference such as `"38T KM 91980 72567"`, a latitude and longitude, `airport:Kutaisi` or `town:Zugdidi`.
-To turn a grid reference into DCS x and z, run `.\dcsterrain.exe geo --terrain Caucasus --to-xz "38T KM 91980 72567"`; it prints the position in every form.
+A place can be a DCS position such as `-284887,683859`, a grid reference such as `"38T KM 91980 72567"`, a latitude and longitude, `airport:Kutaisi` or `town:Zugdidi`; `.\dcsterrain.exe geo --terrain Caucasus --to-xz "38T KM 91980 72567"` turns a grid reference into DCS x and z.
 `--help` after a command lists what it takes.
 The [guide](docs/guide.md) walks through a whole siting question, step by step, and shows how software uses `query`.
 [docs/queries.md](docs/queries.md) describes all 22 kinds of question.
