@@ -290,6 +290,50 @@ Every field, unrounded: add --json.
 - Both print the same table.
   Give several positions after either one, each in quotes if it has a space.
 
+A latitude and longitude goes to `--to-xz` the same way:
+
+```powershell
+.\dcsterrain.exe geo --terrain Caucasus --to-xz "42.368559N 42.082249E"
+```
+
+```text
+1 point, in the order given.
+
+#        x       z  MGRS                Latitude (°)  Longitude (°)
+1  -267283  648580  38T KM 59748 94822    42.368559N     42.082249E
+
+Each row is one point in every form: copy any of them into an option that takes a place. Latitude
+and longitude are WGS84.
+
+Every field, unrounded: add --json.
+```
+
+It takes degrees, minutes and seconds too.
+Write them apart by spaces, with the letter first:
+
+```powershell
+.\dcsterrain.exe geo --terrain Caucasus --to-xz "N42 22 06.8 E42 04 56.1"
+```
+
+```text
+1 point, in the order given.
+
+#        x       z  MGRS                Latitude (°)  Longitude (°)
+1  -267283  648580  38T KM 59748 94822    42.368556N     42.082250E
+
+Each row is one point in every form: copy any of them into an option that takes a place. Latitude
+and longitude are WGS84.
+
+Every field, unrounded: add --json.
+```
+
+- Degrees and minutes work the same way: `"N42 22.1135 E42 04.9349"`.
+- The letter can also go after each number: `"42 22 06.8N 42 04 56.1E"`.
+- The marks `°`, `'` and `"` work too.
+  In PowerShell, a `"` inside quotes needs a backtick before it:
+  ``"42°22'06.8`"N 42°04'56.1`"E"``.
+  Spaces are easier to type.
+
 This command gives the position of Kutaisi in every form:
 
 ```powershell
