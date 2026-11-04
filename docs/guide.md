@@ -34,7 +34,7 @@ Each answer keeps the same layout.
 
 ## Get the tool
 
-The steps below download release 0.2.0.
+The steps below download release 0.2.1.
 You can also build the tool yourself, as the [README](../README.md#build-it-yourself)
 explains.
 
@@ -54,7 +54,7 @@ cd C:\dcs-terrain
 Download the Windows release, which works on Windows 10 and 11:
 
 ```powershell
-Invoke-WebRequest https://github.com/tritiumgg/dcs-terrain/releases/download/v0.2.0/dcsterrain-x86_64-pc-windows-msvc.zip -OutFile dcsterrain.zip
+Invoke-WebRequest https://github.com/tritiumgg/dcs-terrain/releases/download/v0.2.1/dcsterrain-x86_64-pc-windows-msvc.zip -OutFile dcsterrain.zip
 ```
 
 Unpack it into this folder:
@@ -67,14 +67,14 @@ The folder now holds `dcsterrain.exe`.
 `-Force` replaces an older copy, if you had one.
 If you built the tool instead, copy your `dcsterrain.exe` into this folder.
 
-Check that you have release 0.2.0:
+Check that you have release 0.2.1:
 
 ```powershell
 .\dcsterrain.exe --version
 ```
 
 ```text
-dcsterrain 0.2.0
+dcsterrain 0.2.1
 ```
 
 Release 0.1.0 does not have the commands this guide uses.
@@ -1212,7 +1212,7 @@ For example, `dcs/Mods/terrains/Caucasus` holds Caucasus.
 Then add `--install ~/dcs` to every command.
 `~` means your home folder.
 
-Download the file for your computer from release 0.2.0:
+Download the file for your computer from release 0.2.1:
 
 - `dcsterrain-aarch64-apple-darwin.tar.gz` for a Mac with Apple silicon.
 - `dcsterrain-x86_64-apple-darwin.tar.gz` for a Mac with an Intel chip.
@@ -1221,7 +1221,7 @@ Download the file for your computer from release 0.2.0:
 For example, on a Mac with Apple silicon, open Terminal and run:
 
 ```bash
-curl -LO https://github.com/tritiumgg/dcs-terrain/releases/download/v0.2.0/dcsterrain-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/tritiumgg/dcs-terrain/releases/download/v0.2.1/dcsterrain-aarch64-apple-darwin.tar.gz
 ```
 
 ```bash
