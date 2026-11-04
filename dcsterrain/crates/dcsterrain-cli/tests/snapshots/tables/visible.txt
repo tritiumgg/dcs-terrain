@@ -2,7 +2,7 @@ Yes: A and B see each other. The line clears the ground by 10.0 m at its lowest.
 The ends are 3.03 km apart.
 
 Point      x      z  MGRS                Height
-A      12000  15000  36T XR 14517 10114  10.0 m above the ground
+A      12000  15000  36T XR 14517 10115  10.0 m above the ground
 B      12054  18025  36T XR 17541 10169  100.0 m above the ground
 
 Every field, unrounded: add --json.

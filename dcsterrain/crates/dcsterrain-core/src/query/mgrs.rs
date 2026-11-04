@@ -65,7 +65,13 @@ pub fn mgrs(lat: f64, lon: f64) -> Option<String> {
         return None;
     }
     let z = zone(lat, lon);
+    // To the micrometer before truncating to the meter: a point on a meter
+    // line, as the synthetic terrain's are, otherwise falls either side of it
+    // with each platform's sine and cosine, and the reference differs by a
+    // meter between Linux and Windows.
+    let micrometer = |v: f64| (v * 1e6).round() / 1e6;
     let (easting, northing) = utm(lat, lon, z);
+    let (easting, northing) = (micrometer(easting), micrometer(northing));
     let col = (easting / SQUARE).floor() as usize;
     let column = *COLUMNS[((z - 1) % 3) as usize].get(col.checked_sub(1)?)?;
     let shift = if z % 2 == 0 { 5 } else { 0 };
@@ -356,6 +362,14 @@ mod tests {
         assert_eq!(&mgrs(78.0, 15.0).unwrap()[..3], "33X");
         assert_eq!(mgrs(85.0, 0.0), None);
         assert_eq!(mgrs(f64::NAN, 0.0), None);
+    }
+
+    #[test]
+    fn a_point_on_a_meter_line_reads_the_same_on_every_platform() {
+        // Northing 5 025 140.000000000 m on Windows, which Linux truncated
+        // to 25139 before the rounding.
+        let (lat, lon) = (45.373325272815144, 34.21379179579571);
+        assert_eq!(mgrs(lat, lon).unwrap(), "36T WR 95042 25140");
     }
 
     /// Every reference `mgrs` writes, cut to any precision, reads back to a

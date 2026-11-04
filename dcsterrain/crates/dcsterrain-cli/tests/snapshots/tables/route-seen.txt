@@ -3,7 +3,7 @@ It climbs 314 m and descends 164 m; its steepest 100 m is 9.5 %.
 
 Ends, each where it joins the network
 End       x       z  MGRS                Moved (m)
-From  10000  -12475  36T WR 87042 08114        475
+From  10000  -12475  36T WR 87042 08115        475
 To    25025  -25000  36T WR 74517 23140       5000
 
 Legs

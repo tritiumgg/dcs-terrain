@@ -4,7 +4,7 @@ at most 90 % of its length with each route kept; the search, at most 16 tries, f
 
 Ends, each where it joins the network
 End       x       z  MGRS                Moved (m)
-From  10000  -12475  36T WR 87042 08114        475
+From  10000  -12475  36T WR 87042 08115        475
 To    25025   15001  36T XR 14517 23140          0
 
 Routes
@@ -19,16 +19,16 @@ Edges every route runs along: 2, 3, 4.
 Route 1 legs
 #  Class  Edge  Length (km)  Up (m)  Down (m)  Grade (%)      x       z  MGRS
 1  rdb       4        15.03     314       164        9.5  25025  -12475  36T WR 87042 23140
-2  road      1         8.00       0         0        0.0  25025   -4475  36T WR 95042 23139
+2  road      1         8.00       0         0        0.0  25025   -4475  36T WR 95042 23140
 3  road      2        14.50       0         0        0.0  25025   10025  36T XR 09542 23140
 4  road      3         4.98       0         0        0.0  25025   15001  36T XR 14517 23140
 
 Route 2 legs
 #  Class  Edge  Length (km)  Up (m)  Down (m)  Grade (%)      x       z  MGRS
 1  rdb       4        15.03     314       164        9.5  25025  -12475  36T WR 87042 23140
-2  rdb       5         2.00      20         0        1.0  27025  -12475  36T WR 87041 25140
+2  rdb       5         2.00      20         0        1.0  27025  -12475  36T WR 87042 25140
 3  road      9         8.00       0         0        0.0  27025   -4475  36T WR 95042 25140
-4  road     10         2.00       0        20        1.0  25025   -4475  36T WR 95042 23139
+4  road     10         2.00       0        20        1.0  25025   -4475  36T WR 95042 23140
 5  road      2        14.50       0         0        0.0  25025   10025  36T XR 09542 23140
 6  road      3         4.98       0         0        0.0  25025   15001  36T XR 14517 23140
 
