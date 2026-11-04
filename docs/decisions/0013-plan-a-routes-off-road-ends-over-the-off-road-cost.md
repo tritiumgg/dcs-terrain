@@ -48,7 +48,9 @@ cut costs no more. `offroad` on railroads is refused. Without `offroad`, `route`
 answers as before.
 
 `trafficability` runs the same search from its point to the network within
-`max_distance`, 5 km by default, and `reachable` means a way was found; the
+`max_distance`, 20 km by default as today, and `reachable` means a way was found.
+It stops at the first cell of the network it reaches in order of cost, so a near
+road costs a small search whatever the reach; the
 straight line stays in the answer, judged as before. `max_offroad` takes at most
 what `max_distance` does, `max_slope_deg` is bounded as `trafficability` bounds it,
 and `offroad_weight` is at least 1.
@@ -78,9 +80,9 @@ climb counted, and a route from an end beside an isolated piece of road answers.
 whole way when `offroad` is set; `snapped_from` and `snapped_to` are null only on a
 way that never meets the road. `trafficability`'s answer changes shape: a caller
 reading `reachable` as the straight line's verdict must read `straight` instead.
-By default it now searches 5 km where it judged a line up to 20 km: a road
-between the two is `too_far` unless the caller raises `max_distance`, since the
-search's cells, not a line's, grow with the reach.
+Its reach stays 20 km, unless 20 km of search passes 64 MiB on GermanyCW: then the
+most that holds is both its default and its limit, and a road past it, answered
+today, becomes `too_far`.
 
 The off-road ways are unvalidated: their cost model is this tool's own, and the
 game's ground units path by rules of their own between waypoints. The search's

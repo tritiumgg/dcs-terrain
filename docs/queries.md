@@ -413,13 +413,14 @@ the game's ground units.
 
 **A searched way, planned (ADR 0013), not built yet.** The least-cost way from
 the point to the network over the 50 m cells within `max_distance` (default
-5 km, at most 20 km or the most that holds the engine to 64 MiB), 16 neighbors,
-at the cost per meter above, straightened where a straight cut costs no more.
+and most 20 km, or the most that holds the engine to 64 MiB), 16 neighbors,
+at the cost per meter above, ending at the first cell of the network it
+reaches in order of cost, straightened where a straight cut costs no more.
 `reachable` then means such a way exists; `way` gives its path, length, cost,
 ascent, descent, the point where it meets the road and that edge; the straight
 line above moves to `straight`, with its cost, blocking point and reason. A
 road farther than `max_distance` is then `too_far`, its message naming the
-field: by default that is a road past 5 km, where today it is one past 20 km.
+field.
 
 ## 4. Operations added
 
