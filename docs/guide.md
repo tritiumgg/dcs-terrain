@@ -327,11 +327,16 @@ and longitude are WGS84.
 Every field, unrounded: add --json.
 ```
 
+- The latitude reads 42.368556 here, not 42.368559 as above.
+  That is because 06.8 seconds is rounded.
+  It is still the same 1 m square.
 - Degrees and minutes work the same way: `"N42 22.1135 E42 04.9349"`.
 - The letter can also go after each number: `"42 22 06.8N 42 04 56.1E"`.
 - The marks `°`, `'` and `"` work too.
   In PowerShell, a `"` inside quotes needs a backtick before it:
   ``"42°22'06.8`"N 42°04'56.1`"E"``.
+  A position copied from a word processor may hold curly quotes, `’` and `”`.
+  PowerShell reads those as quotes too, and the command fails.
   Spaces are easier to type.
 
 This command gives the position of Kutaisi in every form:
