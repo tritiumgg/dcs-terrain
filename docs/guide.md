@@ -161,7 +161,7 @@ It never changes them.
 
 **When to use it:** once for each terrain, before your first question.
 Run it again after each DCS update.
-It is required only before `chokepoints` and `towns`.
+It is required for towns and road chokepoints.
 
 ```powershell
 .\dcsterrain.exe index --terrain Caucasus
@@ -169,8 +169,9 @@ It is required only before `chokepoints` and `towns`.
 
 This command builds the terrain's cache ahead of time.
 Most questions build what they need by themselves.
-Two kinds of question do not: road chokepoints and towns.
-They need this step first.
+Questions about towns and road chokepoints do not.
+Without this step, `chokepoints` and `towns` refuse to answer.
+`point-info` answers, but leaves out the town or village a point stands in.
 
 The first run on Caucasus takes about 5 seconds and prints this:
 
@@ -191,7 +192,7 @@ If you run the command again, each line says `current`.
 `current` means that part was already up to date.
 
 Caucasus builds in seconds.
-Germany takes several minutes.
+Germany takes a minute or two.
 While Germany builds, the tool needs about 1.5 GB of free memory.
 
 ## How you ask a question
@@ -923,6 +924,8 @@ For the first one, type `--at "38T MP 24680 31287"` or `--at -107364,793444`.
 .\dcsterrain.exe point-info --terrain Caucasus --points 38T KM 78924 65394
 ```
 
+The answer starts like this:
+
 ```text
 error: --points: "38T" is not a place: a name needs its kind, and no airport or town on Caucasus has it.
 ```
@@ -1040,6 +1043,8 @@ This command asked for a site on the sea, near Kutaisi, where there is no sea:
 ```text
 No site passes every test: of 7845 lattice points in the region, 0 passed, and 15 tiles skipped
 whole. Loosen a criterion, or widen the region.
+
+Every field, unrounded: add --json.
 ```
 
 This is not an error.

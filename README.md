@@ -8,8 +8,7 @@ Where can a FARP go? What can a SAM site see? Which road should a convoy take?
 `dcsterrain` reads a terrain's files in your DCS install: the ground, the roads, the objects and the airfields.
 From them, it works out heights, slopes, lines of sight and routes.
 It never changes the files, and DCS does not need to be running.
-It keeps its results in a cache folder, so later questions are fast.
-This project ships no terrain files.
+It keeps its results in a cache folder, and this project ships no terrain files.
 
 There are three ways to ask, and all three give the same answers:
 
@@ -43,8 +42,7 @@ The tool finds DCS by itself; if it cannot, add `--install` and the DCS folder.
 .\dcsterrain.exe list-terrains
 ```
 
-Then ask a question.
-This one finds the airfield nearest to the town of Zugdidi:
+Then ask a question, such as the airfield nearest to the town of Zugdidi:
 
 ```powershell
 .\dcsterrain.exe nearest --terrain Caucasus --kind airdrome --at town:Zugdidi
