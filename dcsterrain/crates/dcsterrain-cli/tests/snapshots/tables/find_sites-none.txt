@@ -1,0 +1,4 @@
+No site passes every test: of 709 lattice points in the region, 0 passed, and 4 tiles skipped whole.
+Loosen a criterion, or widen the region.
+
+Every field, unrounded: add --json.

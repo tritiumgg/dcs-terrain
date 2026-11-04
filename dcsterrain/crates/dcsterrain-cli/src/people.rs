@@ -1,6 +1,7 @@
 //! The commands for people: one subcommand per operation, its flags read
-//! into the request `query` takes, and its answer printed as a plain list,
-//! or with `--json` as `query` prints it.
+//! into the request `query` takes, and its answer printed as a table for
+//! the main operations and a plain list for the rest, or with `--json` as
+//! `query` prints it.
 //!
 //! Its own reader takes the command line, not clap's: a place such as
 //! `-284887,683859` starts with a hyphen, and clap reads a value starting
@@ -623,9 +624,44 @@ pub fn run(op: &str, args: &[String], init: impl FnOnce(bool, Option<u16>)) -> E
             }
         },
     };
-    print!("{}", plain(&value, geojson_out.as_deref()));
+    print!(
+        "{}",
+        shown_answer(op, &mut opener, &request, &value, geojson_out.as_deref())
+    );
     ExitCode::SUCCESS
 }
+
+/// The answer as a person reads it: a table for the main operations, the
+/// plain list for the rest.
+fn shown_answer(
+    op: &str,
+    opener: &mut query::Opener,
+    request: &Value,
+    answer: &Value,
+    geojson_out: Option<&std::path::Path>,
+) -> String {
+    if let Ok(terrain) = opener.current() {
+        let grid = |x: f64, z: f64| {
+            place::mgrs_of(terrain, &[(x, z)])
+                .ok()
+                .and_then(|g| g.into_iter().next())
+                .unwrap_or_else(|| "(no MGRS)".into())
+        };
+        let asked = readable::Asked {
+            request,
+            grid: &grid,
+            color: table::color_wanted(),
+            geojson_out,
+        };
+        if let Some(page) = readable::readable(op, &asked, answer) {
+            return page;
+        }
+    }
+    plain(answer, geojson_out)
+}
+
+mod readable;
+mod table;
 
 #[cfg(test)]
 mod tests;

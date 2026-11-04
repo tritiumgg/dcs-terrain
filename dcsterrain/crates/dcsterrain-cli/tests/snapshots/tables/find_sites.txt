@@ -1,0 +1,11 @@
+3 sites, best first, of 709 lattice points in the region; 642 passed every test.
+--limit asks for more sites, up to 200.
+
+#  Score      x      z  MGRS                Hdg (°)  slope_max (°)  dist_road_band (m)  cover_in (%)
+1  3.821  13199  14100  36T XR 13617 11314        0            0.6                7983           100
+2  3.821  13299  14300  36T XR 13817 11414        0            0.6                8003           100
+3  3.820  13399  14500  36T XR 14017 11514        0            0.6                8029           100
+
+Each criterion's score, 0 to 1, is in --json; the site's score is their weighted sum.
+
+Every field, unrounded: add --json.

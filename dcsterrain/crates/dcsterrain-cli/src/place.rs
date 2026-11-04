@@ -670,7 +670,7 @@ fn to_xz(terrain: &Terrain, lat: f64, lon: f64) -> Result<(f64, f64), Vec<Issue>
 }
 
 /// The MGRS of each point, as `geo` gives it.
-fn mgrs_of(terrain: &Terrain, at: &[(f64, f64)]) -> Result<Vec<String>, Vec<Issue>> {
+pub(crate) fn mgrs_of(terrain: &Terrain, at: &[(f64, f64)]) -> Result<Vec<String>, Vec<Issue>> {
     let q = GeoRequest {
         to_latlon: at.iter().map(|&(x, z)| Point { x, z }).collect(),
         to_xz: Vec::new(),

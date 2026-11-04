@@ -172,7 +172,11 @@ fn every_request_asked_with_flags_answers_as_query_does() {
             std::fs::remove_file(&file).unwrap();
         }
 
-        // The plain list names every top-level field.
+        // The plain list names every top-level field; the operations that
+        // print a table are checked by `tables_*`.
+        if TABLED.contains(&op) {
+            continue;
+        }
         let plain = run(&asked);
         assert!(plain.status.success(), "{op}");
         let text = stdout(&plain);
@@ -283,4 +287,184 @@ fn help_reads_from_the_schema_with_an_example() {
         top.contains("find-sites") && top.contains("route-alternatives"),
         "{top}"
     );
+}
+
+/// The operations that print a table rather than the plain list.
+const TABLED: &[&str] = &["find_sites"];
+
+/// The questions each table is shown with on `Synth`: a name for its
+/// snapshot, and the command line after the command, where a quoted
+/// value holds its spaces. Places are written in each form a person
+/// types.
+const TABLE_CASES: &[(&str, &str)] = &[
+    (
+        "find_sites",
+        "find-sites --region circle 36TXR1451710114 1500 --footprint 60 40 \
+         --criteria slope-max 30 --criteria dist-road-band 0 50000 \
+         --criteria cover-in plain --spacing 200 --limit 3",
+    ),
+    (
+        "find_sites-none",
+        "find-sites --region circle 12000,15000 1500 --footprint 60 40 \
+         --criteria dist-road-band 0 100 --spacing 200",
+    ),
+];
+
+/// A command line split as a shell would, keeping quoted words whole.
+fn shell_words(line: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quoted = false;
+    for c in line.chars() {
+        match c {
+            '"' => quoted = !quoted,
+            c if c.is_whitespace() && !quoted => {
+                if !word.is_empty() {
+                    words.push(std::mem::take(&mut word));
+                }
+            }
+            c => word.push(c),
+        }
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words
+}
+
+/// Accepts a changed snapshot under `DCSTERRAIN_UPDATE_SNAPSHOTS=1`.
+fn golden(name: &str, printed: &str) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/snapshots/tables")
+        .join(format!("{name}.txt"));
+    if std::env::var_os("DCSTERRAIN_UPDATE_SNAPSHOTS").is_some_and(|v| v == "1") {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, printed).unwrap();
+        return;
+    }
+    let committed = std::fs::read_to_string(&path).unwrap_or_default();
+    assert!(
+        printed == committed,
+        "{name}: the table differs from {}; rerun with DCSTERRAIN_UPDATE_SNAPSHOTS=1 to \
+         accept it, and review the diff. It printed:\n{printed}",
+        path.display()
+    );
+}
+
+/// Every point with an `x` and a `z` anywhere in `v`.
+fn points(v: &Value, out: &mut Vec<(f64, f64)>) {
+    match v {
+        Value::Object(m) => {
+            if let (Some(x), Some(z)) = (
+                m.get("x").and_then(Value::as_f64),
+                m.get("z").and_then(Value::as_f64),
+            ) {
+                out.push((x, z));
+            }
+            m.values().for_each(|v| points(v, out));
+        }
+        Value::Array(a) => a.iter().for_each(|v| points(v, out)),
+        _ => {}
+    }
+}
+
+/// Each MGRS a page shows, with the x and z written just before it on its
+/// line: `12000  15000  36T XR 14517 10114`, or `12000, 15000 (36T …)`.
+fn grids_shown(page: &str) -> Vec<(f64, f64, String)> {
+    let mut found = Vec::new();
+    for line in page.lines() {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        for i in 0..words.len().saturating_sub(3) {
+            let zone = words[i].trim_start_matches('(');
+            let digits = |w: &str| !w.is_empty() && w.chars().all(|c| c.is_ascii_digit());
+            let is_zone = zone.len() >= 2
+                && zone.ends_with(|c: char| c.is_ascii_uppercase())
+                && digits(&zone[..zone.len() - 1]);
+            let square =
+                words[i + 1].len() == 2 && words[i + 1].chars().all(|c| c.is_ascii_uppercase());
+            let (e, n) = (words[i + 2], words[i + 3].trim_end_matches([')', ',', '.']));
+            if !(is_zone && square && digits(e) && digits(n) && e.len() == n.len()) {
+                continue;
+            }
+            let numbers: Vec<f64> = words[..i]
+                .iter()
+                .filter_map(|w| w.trim_end_matches(',').parse().ok())
+                .collect();
+            assert!(numbers.len() >= 2, "no x and z before the MGRS in: {line}");
+            let (x, z) = (numbers[numbers.len() - 2], numbers[numbers.len() - 1]);
+            found.push((x, z, format!("{zone} {} {e} {n}", words[i + 1])));
+        }
+    }
+    found
+}
+
+#[test]
+fn tables_fit_100_columns_carry_geo_s_mgrs_and_no_color_when_piped() {
+    let cases = TABLE_CASES;
+    for op in TABLED {
+        assert!(
+            cases
+                .iter()
+                .any(|(name, _)| name.split('-').next() == Some(*op)),
+            "no table case for {op}"
+        );
+    }
+    for &(name, line) in cases {
+        let mut asked = shell_words(line);
+        asked.splice(1..1, ["--terrain".to_string(), "synth".into()]);
+        let out = run(&asked);
+        assert!(
+            out.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let page = stdout(&out);
+        golden(name, &page);
+
+        // Not a terminal, so no color.
+        assert!(!page.contains('\x1b'), "{name}: color when piped");
+        for l in page.lines() {
+            assert!(l.chars().count() <= 100, "{name}: over 100 columns: {l}");
+        }
+
+        // Each MGRS is `geo`'s for a point of the answer or the request
+        // within the half meter x and z are rounded to.
+        let mut at = Vec::new();
+        for extra in ["--json", "--show-request"] {
+            let mut a = asked.clone();
+            a.push(extra.into());
+            let v: Value = serde_json::from_str(&stdout(&run(&a))).unwrap();
+            points(&v, &mut at);
+        }
+        let shown = grids_shown(&page);
+        let to_latlon: Vec<Value> = at.iter().map(|&(x, z)| json!({"x": x, "z": z})).collect();
+        let geo = run(&[
+            "query".into(),
+            "--terrain".into(),
+            "synth".into(),
+            "geo".into(),
+            json!({"to_latlon": to_latlon}).to_string(),
+        ]);
+        let geo: Value = serde_json::from_str(&stdout(&geo)).unwrap();
+        for (x, z, grid) in &shown {
+            let matches: Vec<&str> = at
+                .iter()
+                .zip(geo["to_latlon"].as_array().unwrap())
+                .filter(|((px, pz), _)| (px - x).abs() <= 0.5 && (pz - z).abs() <= 0.5)
+                .filter_map(|(_, g)| g["mgrs"].as_str())
+                .collect();
+            assert!(
+                !matches.is_empty(),
+                "{name}: {x}, {z} is no point of the answer"
+            );
+            assert!(
+                matches.contains(&grid.as_str()),
+                "{name}: {grid} at {x}, {z}, where geo gives {matches:?}"
+            );
+        }
+        let tabled = name.split('-').next().unwrap();
+        if !name.contains('-') && tabled != "visible" {
+            assert!(!shown.is_empty(), "{name}: no MGRS shown");
+        }
+    }
 }
