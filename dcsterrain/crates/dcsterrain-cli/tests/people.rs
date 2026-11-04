@@ -296,6 +296,7 @@ const TABLED: &[&str] = &[
     "route",
     "route_alternatives",
     "point_info",
+    "airfield_info",
 ];
 
 /// The questions each table is shown with on `Synth`: a name for its
@@ -344,6 +345,11 @@ const TABLE_CASES: &[(&str, &str)] = &[
         "point_info",
         "point-info --points 12000,15000 \"town:Synth Town 1\" \"airport:Synth Field\" \
          45.30N,34.10E 36TXR1451710114",
+    ),
+    ("airfield_info", "airfield-info --airdrome \"Synth Field\""),
+    (
+        "airfield_info-fits",
+        "airfield-info --airdrome SYNTH --fits width=16 length=17 height=5 helicopter",
     ),
 ];
 

@@ -26,6 +26,7 @@ pub fn readable(op: &str, asked: &Asked, answer: &Value) -> Option<String> {
         "route" => route(&mut page, asked, answer),
         "route_alternatives" => route_alternatives(&mut page, asked, answer),
         "point_info" => point_info(&mut page, asked, answer),
+        "airfield_info" => airfield_info(&mut page, asked, answer),
         _ => return None,
     }
     if let Some(path) = asked.geojson_out {
@@ -498,5 +499,200 @@ fn point_info(page: &mut Page, asked: &Asked, a: &Value) {
     page.note(
         "Aspect is the downslope direction from grid north. Latitude and longitude, the \
          bearings from each town, and where each road and airfield lie: --json.",
+    );
+}
+
+fn yes_no(v: &Value) -> String {
+    match v.as_bool() {
+        Some(true) => "yes".into(),
+        Some(false) => "no".into(),
+        None => "—".into(),
+    }
+}
+
+/// A frequency in the unit a pilot reads it in: kHz under 1 MHz, else MHz.
+fn frequency(v: &Value) -> String {
+    match num(v) {
+        Some(hz) if hz < 1e6 => format!("{} kHz", fixed(Some(hz / 1e3), 0)),
+        Some(hz) => format!("{} MHz", fixed(Some(hz / 1e6), 3)),
+        None => "—".into(),
+    }
+}
+
+fn mhz(v: &Value) -> String {
+    fixed(num(v).map(|hz| hz / 1e6), 3)
+}
+
+fn airfield_info(page: &mut Page, asked: &Asked, a: &Value) {
+    let empty = Vec::new();
+    let id = if a["id"].is_null() {
+        "no id".into()
+    } else {
+        format!("id {}", text(&a["id"]))
+    };
+    page.line(&format!(
+        "{} ({}, {id}): elevation {} m, at {}.",
+        text(&a["name"]),
+        text(&a["name_id"]),
+        whole(&a["elevation"]),
+        place_words(asked, a)
+    ));
+    page.line("Courses are true: there is no magnetic model.");
+
+    let runways = a["runways"].as_array().unwrap_or(&empty);
+    if runways.is_empty() {
+        page.blank();
+        page.line("No runways: the elevation is the highest ground at its stands.");
+    } else {
+        page.heading("Runways, a row per end");
+        let mut t = with_place(
+            Table::new()
+                .col("Runway", Align::Left)
+                .col("End", Align::Left)
+                .col("Course (°)", Align::Right)
+                .col("Length (m)", Align::Right)
+                .col("Width (m)", Align::Right)
+                .col("Height (m)", Align::Right),
+        );
+        for r in runways {
+            let ends = r["thresholds"].as_array().unwrap_or(&empty);
+            for (i, e) in ends.iter().enumerate() {
+                let (runway, length, width) = if i == 0 {
+                    (
+                        text(&r["designator"]),
+                        whole(&r["length"]),
+                        whole(&r["width"]),
+                    )
+                } else {
+                    Default::default()
+                };
+                let mut row = vec![
+                    runway,
+                    text(&e["designator"]),
+                    fixed(num(&e["course_true_deg"]), 1),
+                    length,
+                    width,
+                    fixed(num(&e["height"]), 1),
+                ];
+                row.extend(place(asked, e));
+                t.row(row);
+            }
+        }
+        page.table(&t);
+    }
+
+    let navaids = a["navaids"].as_array().unwrap_or(&empty);
+    if navaids.is_empty() {
+        page.blank();
+        page.line("No navaids.");
+    } else {
+        page.heading("Navaids");
+        let mut t = with_place(
+            Table::new()
+                .col("Callsign", Align::Left)
+                .cut("Kind", 6)
+                .col("Channel", Align::Right)
+                .col("Frequency", Align::Right),
+        );
+        for n in navaids {
+            let mut row = vec![
+                text(&n["callsign"]),
+                text(&n["kind"]),
+                text(&n["channel"]),
+                frequency(&n["frequency_hz"]),
+            ];
+            row.extend(place(asked, n));
+            t.row(row);
+        }
+        page.table(&t);
+    }
+
+    let radio = a["radio"].as_array().unwrap_or(&empty);
+    if radio.is_empty() {
+        page.blank();
+        page.line("No radio.");
+    } else {
+        page.heading("Radio");
+        let mut t = Table::new()
+            .cut("Callsign", 10)
+            .col("UHF (MHz)", Align::Right)
+            .col("VHF (MHz)", Align::Right)
+            .col("HF (MHz)", Align::Right)
+            .col("FM (MHz)", Align::Right);
+        for r in radio {
+            t.row(vec![
+                text(&r["callsign"]),
+                mhz(&r["uhf_hz"]),
+                mhz(&r["vhf_hz"]),
+                mhz(&r["hf_hz"]),
+                mhz(&r["fm_hz"]),
+            ]);
+        }
+        page.table(&t);
+    }
+
+    let stands = a["stands"].as_array().unwrap_or(&empty);
+    let fits = !asked.request["fits"].is_null();
+    if stands.is_empty() {
+        page.blank();
+        page.line("No stands.");
+    } else {
+        let sizes: Vec<String> = a["stand_sizes"]
+            .as_array()
+            .unwrap_or(&empty)
+            .iter()
+            .map(|s| {
+                format!(
+                    "{} of {} × {} m",
+                    whole(&s["count"]),
+                    whole(&s["width"]),
+                    whole(&s["length"])
+                )
+            })
+            .collect();
+        page.heading(&format!("Stands: {}", sizes.join(", ")));
+        if fits {
+            page.line(&format!(
+                "{} the airframe for certain. A dash under Fits: no known size fails it, but \
+                 one is unknown.",
+                count(
+                    num(&a["stands_fitting"]).unwrap_or(0.0) as usize,
+                    "stand fits",
+                    "stands fit"
+                )
+            ));
+        }
+        let mut t = Table::new()
+            .cut("Stand", 5)
+            .col("Width (m)", Align::Right)
+            .col("Length (m)", Align::Right)
+            .optional("Height (m)", Align::Right, 1)
+            .col("Heli", Align::Left)
+            .col("Planes", Align::Left);
+        if fits {
+            t = t.col("Fits", Align::Left);
+        }
+        let mut t = with_place(t);
+        for s in stands {
+            let mut row = vec![
+                text(&s["name"]),
+                whole(&s["width"]),
+                whole(&s["length"]),
+                whole(&s["height"]),
+                yes_no(&s["helicopters"]),
+                yes_no(&s["airplanes"]),
+            ];
+            if fits {
+                row.push(yes_no(&s["fits"]));
+            }
+            row.extend(place(asked, s));
+            t.row(row);
+        }
+        page.table(&t);
+    }
+    page.blank();
+    page.note(
+        "Grid courses, each end's latitude and longitude, the navaids' heights and the stands' \
+         classes: --json.",
     );
 }

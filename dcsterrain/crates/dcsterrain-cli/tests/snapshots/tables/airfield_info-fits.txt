@@ -1,0 +1,30 @@
+Synth Field (SYNTH, id 1): elevation 570 m, at 30025, -25000 (36T WR 74517 28140).
+Courses are true: there is no magnetic model.
+
+Runways, a row per end
+Runway  End  Course (°)  Length (m)  Width (m)  Height (m)      x       z  MGRS
+09-27   09         90.7        2500         50       570.2  30025  -26250  36T WR 73266 28140
+        27        270.7                              570.2  30025  -23750  36T WR 75767 28139
+
+Navaids
+Callsign  Kind  Channel    Frequency      x       z  MGRS
+SY1       —          10      750 kHz  30025  -26250  36T WR 73266 28140
+SY2       —           —  108.100 MHz  30025  -23750  36T WR 75767 28139
+
+Radio
+Callsign     UHF (MHz)  VHF (MHz)  HF (MHz)  FM (MHz)
+Synth Field    250.000    121.000     3.750    38.400
+
+Stands: 4 of 40 × 40 m
+0 stands fit the airframe for certain. A dash under Fits: no known size fails it, but one is
+unknown.
+Stand  Width (m)  Length (m)  Height (m)  Heli  Planes  Fits      x       z  MGRS
+01            40          40           —  yes   yes     —     30325  -26250  36T WR 73266 28440
+02            40          40           —  yes   yes     —     30325  -26150  36T WR 73367 28440
+03            40          40           —  yes   yes     —     30325  -26050  36T WR 73467 28440
+04            40          40           —  yes   yes     —     30325  -25950  36T WR 73567 28440
+
+Grid courses, each end's latitude and longitude, the navaids' heights and the stands' classes:
+--json.
+
+Every field, unrounded: add --json.
