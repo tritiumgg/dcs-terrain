@@ -29,6 +29,7 @@ pub fn readable(op: &str, asked: &Asked, answer: &Value) -> Option<String> {
         "airfield_info" => airfield_info(&mut page, asked, answer),
         "towns" => towns(&mut page, asked, answer),
         "visible" => visible(&mut page, asked, answer),
+        "geo" => geo(&mut page, asked, answer),
         _ => return None,
     }
     if let Some(path) = asked.geojson_out {
@@ -829,6 +830,65 @@ fn height_words(at: &Value) -> String {
         (None, Some(msl)) => format!("{} m above sea level", fixed(Some(msl), 1)),
         _ => "—".into(),
     }
+}
+
+/// A latitude or longitude as a place flag reads it back: unsigned, to six
+/// decimals, about a decimeter, with its hemisphere letter.
+fn hemisphere(v: &Value, positive: char, negative: char) -> String {
+    match num(v) {
+        Some(d) if d.is_finite() => {
+            let letter = if d < 0.0 { negative } else { positive };
+            format!("{}{letter}", fixed(Some(d.abs()), 6))
+        }
+        _ => "—".into(),
+    }
+}
+
+/// Every form of each point, whichever way it was converted, so one row
+/// answers a person who has any of them.
+fn geo(page: &mut Page, asked: &Asked, a: &Value) {
+    let empty = Vec::new();
+    let list = |v: &Value| v.as_array().unwrap_or(&empty).clone();
+    let (latlon_asked, latlon_got) = (list(&asked.request["to_latlon"]), list(&a["to_latlon"]));
+    let (xz_asked, xz_got) = (list(&asked.request["to_xz"]), list(&a["to_xz"]));
+    let n = latlon_got.len() + xz_got.len();
+    if n == 0 {
+        page.line("No points were given. Give one to --to-latlon or --to-xz.");
+        return;
+    }
+    let order = if !latlon_got.is_empty() && !xz_got.is_empty() {
+        " --to-latlon's first, then --to-xz's."
+    } else {
+        ""
+    };
+    page.line(&format!(
+        "{}, in the order given.{order}",
+        count(n, "point", "points")
+    ));
+    let mut t = with_place(Table::new().col("#", Align::Right))
+        .col("Latitude (°)", Align::Right)
+        .col("Longitude (°)", Align::Right);
+    let mut shown = 0;
+    let mut row = |xz: &Value, latlon: &Value, grid: Option<String>| {
+        shown += 1;
+        let [x, z, from_xz] = place(asked, xz);
+        let mut cells = vec![shown.to_string(), x, z, grid.unwrap_or(from_xz)];
+        cells.push(hemisphere(&latlon["lat"], 'N', 'S'));
+        cells.push(hemisphere(&latlon["lon"], 'E', 'W'));
+        t.row(cells);
+    };
+    for (at, got) in latlon_asked.iter().zip(&latlon_got) {
+        row(at, got, got["mgrs"].as_str().map(String::from));
+    }
+    for (at, got) in xz_asked.iter().zip(&xz_got) {
+        row(got, at, None);
+    }
+    page.table(&t);
+    page.blank();
+    page.note(
+        "Each row is one point in every form: copy any of them into an option that takes a \
+         place. Latitude and longitude are WGS84.",
+    );
 }
 
 fn visible(page: &mut Page, asked: &Asked, a: &Value) {

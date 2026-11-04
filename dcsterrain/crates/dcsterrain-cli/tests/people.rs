@@ -299,6 +299,7 @@ const TABLED: &[&str] = &[
     "airfield_info",
     "towns",
     "visible",
+    "geo",
 ];
 
 /// The questions each table is shown with on `Synth`: a name for its
@@ -366,6 +367,12 @@ const TABLE_CASES: &[(&str, &str)] = &[
         "visible-blocked",
         "visible --a \"town:Synth Town 1@2\" --b \"airport:Synth Field@570msl\"",
     ),
+    (
+        "geo",
+        "geo --to-latlon 12000,15000 \"town:Synth Town 1\" \
+         --to-xz \"36T XR 14517 10114\" 45.2352,34.4590 \"45.30N 34.10E\"",
+    ),
+    ("geo-none", "geo"),
 ];
 
 /// A command line split as a shell would, keeping quoted words whole.

@@ -1,0 +1,13 @@
+5 points, in the order given. --to-latlon's first, then --to-xz's.
+
+#      x       z  MGRS                Latitude (°)  Longitude (°)
+1  12000   15000  36T XR 14517 10115    45.235209N     34.458962E
+2      0   15000  36T XQ 14517 98115    45.127224N     34.456206E
+3  11999   15000  36T XR 14517 10114    45.235205N     34.458968E
+4  11999   15003  36T XR 14520 10114    45.235200N     34.459000E
+5  18751  -13274  36T WR 86243 16865    45.300000N     34.100000E
+
+Each row is one point in every form: copy any of them into an option that takes a place. Latitude
+and longitude are WGS84.
+
+Every field, unrounded: add --json.
