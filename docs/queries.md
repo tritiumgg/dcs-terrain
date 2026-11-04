@@ -316,6 +316,25 @@ the end and a node is not used when it reaches into one. With no route the
 answer is the issue `no_route`. The waypoints are every graph node and,
 between them, a point of the road's geometry each time 500 m have passed.
 
+**Off the road, planned (ADR 0013), not built yet.** `offroad: true` (default
+false; refused on `railroads`) plans each end's way to the road instead of
+snapping it, with `max_offroad` (default 5 km, at most what `trafficability`'s
+`max_distance` allows), `max_slope_deg` (default 30, more than 0, at most 60, as
+`trafficability` takes it) and `offroad_weight` (default 2, at least 1). From each end the 50 m cells within
+`max_offroad` are searched, 16 neighbors, each costing the off-road cost per
+meter `trafficability` uses, times `offroad_weight`, times one plus
+`exposure_weight` times whether an observer sees a vehicle 2 m up on it; water,
+no ground and a slope past `max_slope_deg` are not crossed. Every cell of the
+network either search reaches is a start or a goal of the one road search,
+carrying its off-road cost, and a way off the road the whole way is the route
+when it costs least. The answer adds `offroad_from` and `offroad_to`, each
+`{path, length, cost, ascent, descent, max_grade_pct, exposure}` or null where
+the end lies on the road; `length`, `ascent`, `descent` and `max_grade_pct`
+cover the whole way; `legs` stay the road's; `snapped_from` and `snapped_to` are
+where the way meets and leaves the road, null only when it never does; the
+waypoints begin and end with the off-road ways' turns. Without `offroad`, a
+`no_route` whose end lies on a piece joined to nothing says to set it.
+
 ### `route_alternatives`
 
 Request: everything `route` takes, plus `k` (default 3, max 10),
@@ -391,6 +410,16 @@ The cost per meter is 1 on open flat ground, divided by a factor for cover
 slope (1 − 0.75 × (slope / `max_slope_deg`)², a quarter at the limit): a
 coarse cross-country movement map of this tool's own, not measured against
 the game's ground units.
+
+**A searched way, planned (ADR 0013), not built yet.** The least-cost way from
+the point to the network over the 50 m cells within `max_distance` (default
+5 km, at most 20 km or the most that holds the engine to 64 MiB), 16 neighbors,
+at the cost per meter above, straightened where a straight cut costs no more.
+`reachable` then means such a way exists; `way` gives its path, length, cost,
+ascent, descent, the point where it meets the road and that edge; the straight
+line above moves to `straight`, with its cost, blocking point and reason. A
+road farther than `max_distance` is then `too_far`, its message naming the
+field: by default that is a road past 5 km, where today it is one past 20 km.
 
 ## 4. Operations added
 

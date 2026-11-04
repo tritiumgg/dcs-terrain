@@ -43,3 +43,4 @@ are in git at commit `4b85bd0`.
 | [0010](0010-tell-places-by-clusters-of-buildings-and-size-them-by-floor.md) | Accepted | 2026-11-02 | Tell places by clusters of buildings, and size them by floor |
 | [0011](0011-serve-the-engine-through-query-mcp-and-commands-for-people.md) | Accepted | 2026-11-02 | Serve the engine through `query`, an MCP server and commands for people |
 | [0012](0012-hold-the-engine-to-64-mib-not-the-answer-it-encodes.md) | Accepted | 2026-11-03 | Hold the engine to 64 MiB, not the answer it encodes |
+| [0013](0013-plan-a-routes-off-road-ends-over-the-off-road-cost.md) | Accepted | 2026-11-04 | Plan a route's off-road ends over the off-road cost |
