@@ -24,6 +24,7 @@ pub fn readable(op: &str, asked: &Asked, answer: &Value) -> Option<String> {
         "find_sites" => find_sites(&mut page, asked, answer),
         "nearest" => nearest(&mut page, asked, answer),
         "route" => route(&mut page, asked, answer),
+        "route_alternatives" => route_alternatives(&mut page, asked, answer),
         _ => return None,
     }
     if let Some(path) = asked.geojson_out {
@@ -342,4 +343,84 @@ fn route(page: &mut Page, asked: &Asked, a: &Value) {
     route_ends(page, asked, a);
     route_legs(page, asked, a, "Legs");
     waypoints_left_out(page, &[a]);
+}
+
+/// A list of numbers as one cell: `1, 2, 4`, or `none`.
+fn listed(v: &Value, each: impl Fn(&Value) -> String) -> String {
+    match v.as_array() {
+        Some(a) if a.is_empty() => "none".into(),
+        Some(a) => a.iter().map(each).collect::<Vec<_>>().join(", "),
+        None => "—".into(),
+    }
+}
+
+fn route_alternatives(page: &mut Page, asked: &Asked, a: &Value) {
+    let empty = Vec::new();
+    let routes = a["routes"].as_array().unwrap_or(&empty);
+    let network = text(&asked.request["network"]);
+    let k = num(&asked.request["k"]).unwrap_or(3.0) as usize;
+    page.line(&format!(
+        "{} by {network}, the least costly first.",
+        count(routes.len(), "route", "routes")
+    ));
+    if routes.len() < k {
+        let stretch = num(&asked.request["max_stretch"]).unwrap_or(1.5);
+        let overlap = num(&asked.request["max_overlap"]).unwrap_or(0.5);
+        page.line(&format!(
+            "{k} were asked for. No other route found was new, at most {} × the first's \
+             length, and sharing at most {} % of its length with each route kept.",
+            fixed(Some(stretch), 2),
+            fixed(Some(overlap * 100.0), 0)
+        ));
+    }
+    let Some(first) = routes.first() else {
+        return;
+    };
+    route_ends(page, asked, first);
+
+    page.heading("Routes");
+    let mut t = Table::new()
+        .col("#", Align::Right)
+        .col("Length (km)", Align::Right)
+        .col("Stretch", Align::Right)
+        .col("Up (m)", Align::Right)
+        .col("Down (m)", Align::Right)
+        .col("Grade (%)", Align::Right)
+        .col("Legs", Align::Right)
+        .cut("Overlap (%)", 6)
+        .cut("Chokepoint edges", 6);
+    for (n, r) in routes.iter().enumerate() {
+        let chokepoints = if r["chokepoints"].is_null() {
+            "not built yet".into()
+        } else {
+            listed(&r["chokepoints"], text)
+        };
+        t.row(vec![
+            (n + 1).to_string(),
+            km(&r["length"]),
+            format!("{} ×", fixed(num(&r["stretch"]), 2)),
+            whole(&r["ascent"]),
+            whole(&r["descent"]),
+            fixed(num(&r["max_grade_pct"]), 1),
+            r["legs"].as_array().map_or(0, Vec::len).to_string(),
+            listed(&r["overlap_with"], |s| fixed(num(s).map(|s| s * 100.0), 0)),
+            chokepoints,
+        ]);
+    }
+    page.table(&t);
+    page.blank();
+    page.note(
+        "Stretch is each route's length over the first's. Overlap is the share of its length \
+         each other route runs along, in order. Chokepoint edges are its edges in the top tenth \
+         of the network's betweenness.",
+    );
+    page.line(&format!(
+        "Edges every route runs along: {}.",
+        listed(&first["shared_edges_with_all"], text)
+    ));
+    let all: Vec<&Value> = routes.iter().collect();
+    for (n, r) in routes.iter().enumerate() {
+        route_legs(page, asked, r, &format!("Route {} legs", n + 1));
+    }
+    waypoints_left_out(page, &all);
 }
