@@ -91,7 +91,7 @@ Other commands:
 - `cache clear` deletes it. The tool builds it again when needed.
 - `schema` prints the fields of every question and answer.
 - `mcp` answers the same questions as tools for an AI assistant, about any of your terrains.
-- One command per kind of question, such as `nearest --terrain Caucasus --kind airdrome --at town:Zugdidi`, takes flags instead of JSON; `nearest --help` lists them. Not final: the answer is a plain list for now, and release 0.1.0 has none of these commands.
+- One command per kind of question, such as `nearest --terrain Caucasus --kind airdrome --at town:Zugdidi`, takes flags instead of JSON; `nearest --help` lists them. The main questions answer with tables, MGRS beside each place, and `--json` prints the full answer. Not final: release 0.1.0 has none of these commands.
 - `--help` lists every command and option.
 
 ## Use it from an AI assistant

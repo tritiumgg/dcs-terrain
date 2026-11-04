@@ -678,11 +678,20 @@ Over the same operations, for people (ADR 0011):
   the terrain's airport and town lists, and never guesses: a name with no
   kind, two numbers that could be degrees or meters, and a name two towns
   share are refused with what to type. The grammar is written once, at the
-  head of the parser. Each command prints a plain list, one line per
-  top-level field of the answer and a line per item of a list or member of
-  an object below it, so no field is dropped; planned, the main operations
-  print tables with units and MGRS beside x and z, with no color when the
-  output is not a terminal. `--json` prints `query`'s answer byte for byte.
+  head of the parser. `find-sites`, `route`, `route-alternatives`,
+  `nearest`, `point-info`, `airfield-info`, `towns` and `visible` print a
+  page through one table printer: a line of what was asked and how many
+  passed, then tables, the best first, with units in each header, numbers
+  rounded and aligned right, and beside every x and z the MGRS `geo` gives
+  for that point. A page is never wider than 100 characters: a name column
+  is cut with an ellipsis first, then the least needed columns are left out,
+  and the page names each one left out. It names what the tables leave out,
+  such as waypoints, and ends by pointing at `--json`; an empty answer is a
+  sentence saying why, never an empty table. Color only when stdout is a
+  terminal and `NO_COLOR` is unset. The other commands print a plain list,
+  one line per top-level field of the answer and a line per item of a list
+  or member of an object below it, so no field is dropped. `--json` prints
+  `query`'s answer byte for byte.
 
 ## 8. Targets
 
