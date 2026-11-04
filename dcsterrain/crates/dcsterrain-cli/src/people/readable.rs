@@ -25,6 +25,7 @@ pub fn readable(op: &str, asked: &Asked, answer: &Value) -> Option<String> {
         "nearest" => nearest(&mut page, asked, answer),
         "route" => route(&mut page, asked, answer),
         "route_alternatives" => route_alternatives(&mut page, asked, answer),
+        "point_info" => point_info(&mut page, asked, answer),
         _ => return None,
     }
     if let Some(path) = asked.geojson_out {
@@ -423,4 +424,79 @@ fn route_alternatives(page: &mut Page, asked: &Asked, a: &Value) {
         route_legs(page, asked, r, &format!("Route {} legs", n + 1));
     }
     waypoints_left_out(page, &all);
+}
+
+fn point_info(page: &mut Page, asked: &Asked, a: &Value) {
+    let empty = Vec::new();
+    let points = a["points"].as_array().unwrap_or(&empty);
+    if points.is_empty() {
+        page.line("No points were asked about.");
+        return;
+    }
+    page.line(&format!(
+        "{}, in the order asked.",
+        count(points.len(), "point", "points")
+    ));
+
+    page.heading("Ground");
+    let mut t = with_place(Table::new().col("#", Align::Right))
+        .col("Height (m)", Align::Right)
+        .col("Slope (°)", Align::Right)
+        .col("Aspect (°)", Align::Right)
+        .col("Water", Align::Left)
+        .optional("Depth (m)", Align::Right, 1)
+        .col("Cover", Align::Left);
+    for (n, p) in points.iter().enumerate() {
+        let mut row = vec![(n + 1).to_string()];
+        row.extend(place(asked, p));
+        row.extend([
+            fixed(num(&p["height"]), 1),
+            fixed(num(&p["slope"]), 1),
+            whole(&p["aspect"]),
+            text(&p["water"]),
+            fixed(num(&p["depth"]), 1),
+            text(&p["cover"]),
+        ]);
+        t.row(row);
+    }
+    page.table(&t);
+
+    page.heading("Nearby");
+    let mut t = Table::new()
+        .col("#", Align::Right)
+        .cut("Town", 12)
+        .cut("Place", 8)
+        .col("Road (m)", Align::Right)
+        .col("Road", Align::Left)
+        .cut("Airfield", 8)
+        .col("Airfield (km)", Align::Right);
+    for (n, p) in points.iter().enumerate() {
+        let place = &p["place"];
+        let place = if place.is_null() {
+            "—".into()
+        } else {
+            let name = place["name"].as_str().unwrap_or("unnamed");
+            format!("{name} ({})", text(&place["size"]))
+        };
+        t.row(vec![
+            (n + 1).to_string(),
+            p["town"]["description"].as_str().unwrap_or("—").into(),
+            place,
+            whole(&p["road"]["distance"]),
+            text(&p["road"]["class"]),
+            p["airfield"]["name"].as_str().unwrap_or("—").into(),
+            km(&p["airfield"]["distance"]),
+        ]);
+    }
+    page.table(&t);
+    page.blank();
+    if a["places_built"] == false {
+        page.note(
+            "The places are not built yet, so none is shown: `dcsterrain index` builds them.",
+        );
+    }
+    page.note(
+        "Aspect is the downslope direction from grid north. Latitude and longitude, the \
+         bearings from each town, and where each road and airfield lie: --json.",
+    );
 }

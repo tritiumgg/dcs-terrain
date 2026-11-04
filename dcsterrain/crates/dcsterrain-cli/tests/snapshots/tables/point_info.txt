@@ -1,0 +1,22 @@
+5 points, in the order asked.
+
+Ground
+#      x       z  MGRS                Height (m)  Slope (°)  Aspect (°)  Water  Depth (m)  Cover
+1  12000   15000  36T XR 14517 10114       390.0        0.6         180  land           —  plain
+2      0   15000  36T XQ 14517 98115       270.0        0.6         180  land           —  plain
+3  30025  -25000  36T WR 74517 28140       570.2        0.6         180  land           —  runway
+4  18751  -13274  36T WR 86243 16865       519.4        4.2          31  land           —  plain
+5  11999   15000  36T XR 14517 10114       390.0        0.6         180  land           —  plain
+
+Nearby
+#  Town                     Place  Road (m)  Road  Airfield     Airfield (km)
+1  at Synth Town 2          —          9421  rdb   Synth Field          43.87
+2  at Synth Town 1          —         20609  rdb   Synth Field          50.02
+3  40 km W of Synth Town 3  —          5000  road  Synth Field           0.00
+4  29 km W of Synth Town 3  —           799  rdb   Synth Field          16.27
+5  at Synth Town 2          —          9421  rdb   Synth Field          43.87
+
+Aspect is the downslope direction from grid north. Latitude and longitude, the bearings from each
+town, and where each road and airfield lie: --json.
+
+Every field, unrounded: add --json.
