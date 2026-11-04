@@ -372,6 +372,16 @@ const TABLE_CASES: &[(&str, &str)] = &[
         "geo --to-latlon 12000,15000 \"town:Synth Town 1\" \
          --to-xz \"36T XR 14517 10114\" 45.2352,34.4590 \"45.30N 34.10E\"",
     ),
+    // Each way a latitude and longitude is written: decimal, letters
+    // first, degrees and minutes, and degrees, minutes and seconds marked
+    // and apart by spaces. The shell splitting here takes `"` as a quote,
+    // so the seconds are marked with the `”` a word processor writes.
+    (
+        "geo-latlon",
+        "geo --to-xz \"45.2352N 34.4590E\" \"N45.2352 E34.4590\" \
+         \"45°14.112'N 34°27.540'E\" \"45°14’06.7”N 34°27’32.4”E\" \
+         \"N45 14 06.7 E34 27 32.4\"",
+    ),
     ("geo-none", "geo"),
 ];
 
@@ -485,7 +495,13 @@ fn rows_under_mgrs(page: &str) -> Vec<String> {
 /// gave them or the answer converted them, in the order asked.
 #[test]
 fn geo_rows_show_each_latitude_and_longitude_in_order() {
-    let line = TABLE_CASES.iter().find(|(n, _)| *n == "geo").unwrap().1;
+    for name in ["geo", "geo-latlon"] {
+        geo_rows_in_order(name);
+    }
+}
+
+fn geo_rows_in_order(name: &str) {
+    let line = TABLE_CASES.iter().find(|(n, _)| *n == name).unwrap().1;
     let mut asked = shell_words(line);
     asked.splice(1..1, ["--terrain".to_string(), "synth".into()]);
     let page = stdout(&run(&asked));

@@ -363,6 +363,37 @@ fn geo_converts_latitude_and_longitude_written_either_way() {
 }
 
 #[test]
+fn geo_converts_every_latitude_and_longitude_a_place_takes() {
+    // Decimal degrees, degrees and minutes, and degrees, minutes and
+    // seconds, marked or apart by spaces, letters before or after, either
+    // half first.
+    let forms = [
+        "45.2352N 34.4590E",
+        "N45.2352 E34.4590",
+        "45.2352N,34.4590E",
+        "34.4590E 45.2352N",
+        "45°14.112'N 34°27.540'E",
+        "45 14.112N 34 27.540E",
+        "45°14'06.7\"N 34°27'32.4\"E",
+        "45°14’06.7”N 34°27’32.4”E",
+        "45°14'06.7\"N, 34°27'32.4\"E",
+        "N45 14 06.7 E34 27 32.4",
+        "S33 51 W151 12",
+    ];
+    for form in forms {
+        let Ok(crate::place::Written::LatLon { lat, lon }) = crate::place::read(form) else {
+            panic!("{form} is no latitude and longitude as a place");
+        };
+        let d = read("geo", &[&["to-xz", form]]);
+        assert_eq!(
+            d.request["to_xz"],
+            json!([{"lat": lat, "lon": lon}]),
+            "{form}"
+        );
+    }
+}
+
+#[test]
 fn geo_converts_an_mgrs_to_x_and_z_from_the_center_of_its_square() {
     let d = read("geo", &[&["to-xz", "38T KM 59748 94822", "38tkm5994"]]);
     let center = |t: &str| {
