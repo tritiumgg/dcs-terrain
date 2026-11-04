@@ -481,6 +481,47 @@ fn rows_under_mgrs(page: &str) -> Vec<String> {
     rows
 }
 
+/// `geo`'s rows show each point's latitude and longitude, as the request
+/// gave them or the answer converted them, in the order asked.
+#[test]
+fn geo_rows_show_each_latitude_and_longitude_in_order() {
+    let line = TABLE_CASES.iter().find(|(n, _)| *n == "geo").unwrap().1;
+    let mut asked = shell_words(line);
+    asked.splice(1..1, ["--terrain".to_string(), "synth".into()]);
+    let page = stdout(&run(&asked));
+    let with = |extra: &str| {
+        let mut a = asked.clone();
+        a.push(extra.into());
+        serde_json::from_str::<Value>(&stdout(&run(&a))).unwrap()
+    };
+    let (answer, request) = (with("--json"), with("--show-request"));
+    let mut degrees: Vec<&Value> = answer["to_latlon"].as_array().unwrap().iter().collect();
+    degrees.extend(request["to_xz"].as_array().unwrap());
+    let shown = |v: &Value, pos: char, neg: char| {
+        let d = v.as_f64().unwrap();
+        format!("{:.6}{}", d.abs(), if d < 0.0 { neg } else { pos })
+    };
+    let rows: Vec<&str> = page
+        .lines()
+        // A row is a number, then x, z, the MGRS's four words and the two
+        // degrees; the sentences above it are not.
+        .filter(|l| {
+            let w: Vec<&str> = l.split_whitespace().collect();
+            w.len() == 9 && w[0].parse::<usize>().is_ok()
+        })
+        .collect();
+    assert_eq!(rows.len(), degrees.len(), "{page}");
+    for (row, d) in rows.iter().zip(degrees) {
+        let cells: Vec<&str> = row.split_whitespace().collect();
+        let tail = &cells[cells.len() - 2..];
+        assert_eq!(
+            tail,
+            [shown(&d["lat"], 'N', 'S'), shown(&d["lon"], 'E', 'W')],
+            "{row}"
+        );
+    }
+}
+
 #[test]
 fn tables_fit_100_columns_carry_geo_s_mgrs_and_no_color_when_piped() {
     let cases = TABLE_CASES;
