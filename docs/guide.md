@@ -97,6 +97,7 @@ The `.\` tells PowerShell to run the program in the current folder.
   `z` grows to the east.
 - **MGRS**: the military grid reference system, such as `38T KM 78924 65394`.
   The Mission Editor shows it.
+  To turn one into `x` and `z`, see [Convert a position](#convert-a-position).
 - **Criterion**: a test a site must pass, such as "no steeper than 3 degrees".
   The plural is criteria.
 - **Cache**: a folder where the tool keeps what it has worked out.
@@ -260,6 +261,56 @@ With MGRS, the height goes inside the quotes: `"38T KM 82562 61755@10"`.
 
 Copy an MGRS whole, with its zone, such as `38T`.
 Caucasus spans two zones, `37T` in the west and `38T` in the east.
+
+### Convert a position
+
+**When to use `geo`:** you have a position in one form and need another.
+For example, you have an MGRS and need DCS `x` and `z`.
+
+```powershell
+.\dcsterrain.exe geo --terrain Caucasus --to-xz "38T KM 59748 94822"
+```
+
+```text
+1 point, in the order given.
+
+#        x       z  MGRS                Latitude (°)  Longitude (°)
+1  -267283  648580  38T KM 59748 94822    42.368559N     42.082249E
+
+Each row is one point in every form: copy any of them into an option that takes a place. Latitude
+and longitude are WGS84.
+
+Every field, unrounded: add --json.
+```
+
+- Each row is one position, in every form.
+  `x` is -267283 and `z` is 648580.
+- `--to-xz` takes an MGRS, or a latitude and longitude.
+- `--to-latlon` takes any place: `x,z`, MGRS, latitude and longitude, `airport:` or `town:`.
+- Both print the same table.
+  Give several positions after either one, each in quotes if it has a space.
+
+This command gives the position of Kutaisi in every form:
+
+```powershell
+.\dcsterrain.exe geo --terrain Caucasus --to-latlon airport:Kutaisi
+```
+
+```text
+1 point, in the order given.
+
+#        x       z  MGRS                Latitude (°)  Longitude (°)
+1  -284887  683859  38T KM 91980 72567    42.177616N     42.481292E
+
+Each row is one point in every form: copy any of them into an option that takes a place. Latitude
+and longitude are WGS84.
+
+Every field, unrounded: add --json.
+```
+
+An MGRS names a square, not a point.
+The tool takes the center of the square.
+With five digits in each half, as above, the square is 1 m wide.
 
 ### More of the answer
 
@@ -816,7 +867,7 @@ Each command fits a situation.
 |---|---|
 | `sample` | need the height, slope or ground type at many points, or over an area |
 | `point-info` | have one position and want what is there and what is near it |
-| `geo` | need to convert between x and z, latitude and longitude, and MGRS |
+| `geo` | have a position in one form, such as MGRS, and need another, such as x and z ([Convert a position](#convert-a-position)) |
 | `describe` | want to confirm which terrain and build the tool is using |
 | `find-sites` | need the best places for something |
 | `score-site` | have a place in mind and want to test it |

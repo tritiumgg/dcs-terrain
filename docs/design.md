@@ -678,8 +678,12 @@ Over the same operations, for people (ADR 0011):
   the terrain's airport and town lists, and never guesses: a name with no
   kind, two numbers that could be degrees or meters, and a name two towns
   share are refused with what to type. The grammar is written once, at the
-  head of the parser. `find-sites`, `route`, `route-alternatives`,
-  `nearest`, `point-info`, `airfield-info`, `towns` and `visible` print a
+  head of the parser. `geo --to-xz` takes latitude and longitude or an MGRS,
+  read to its square's center before the request is made; `--to-latlon`
+  takes any place. `geo` prints one row per point given, either way, with
+  its x, z, MGRS, latitude and longitude. `find-sites`, `route`,
+  `route-alternatives`, `nearest`, `point-info`, `airfield-info`, `towns`
+  and `visible` print a
   page through one table printer: a line of what was asked and how many
   passed, then tables, the best first, with units in each header, numbers
   rounded and aligned right, and beside every x and z the MGRS `geo` gives
