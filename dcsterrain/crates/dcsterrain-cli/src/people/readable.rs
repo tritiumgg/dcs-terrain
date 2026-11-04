@@ -22,6 +22,7 @@ pub fn readable(op: &str, asked: &Asked, answer: &Value) -> Option<String> {
     let mut page = Page::new(asked.color);
     match op {
         "find_sites" => find_sites(&mut page, asked, answer),
+        "nearest" => nearest(&mut page, asked, answer),
         _ => return None,
     }
     if let Some(path) = asked.geojson_out {
@@ -53,6 +54,12 @@ fn place(asked: &Asked, at: &Value) -> [String; 3] {
         (Some(x), Some(z)) => [fixed(Some(x), 0), fixed(Some(z), 0), (asked.grid)(x, z)],
         _ => ["—".into(), "—".into(), "—".into()],
     }
+}
+
+/// A point in words: `12000, 15000 (36T XR 14517 10114)`.
+fn place_words(asked: &Asked, at: &Value) -> String {
+    let [x, z, grid] = place(asked, at);
+    format!("{x}, {z} ({grid})")
 }
 
 /// The place columns, appended to a table.
@@ -167,4 +174,61 @@ fn find_sites(page: &mut Page, asked: &Asked, a: &Value) {
     page.note(
         "Each criterion's score, 0 to 1, is in --json; the site's score is their weighted sum.",
     );
+}
+
+fn nearest(page: &mut Page, asked: &Asked, a: &Value) {
+    let empty = Vec::new();
+    let results = a["results"].as_array().unwrap_or(&empty);
+    let kind = text(&asked.request["kind"]);
+    let (one, many) = match kind.as_str() {
+        "rail" => ("railway", "railways"),
+        "scenery" => ("scenery object", "scenery objects"),
+        "node" => ("node side", "node sides"),
+        "place" => ("place", "places"),
+        "airdrome" => ("airdrome", "airdromes"),
+        "town" => ("town", "towns"),
+        "beacon" => ("beacon", "beacons"),
+        _ => ("road", "roads"),
+    };
+    let at = place_words(asked, asked.request);
+    if results.is_empty() {
+        page.line(&format!("No {many} near {at}: the terrain has none."));
+        return;
+    }
+    page.line(&match results.len() {
+        1 => format!("The nearest {one} to {at}."),
+        n => format!("The {n} nearest {many} to {at}, nearest first."),
+    });
+    if matches!(kind.as_str(), "road" | "rail") {
+        page.line("Each row is the nearest point of one edge of the network.");
+    }
+    let asked_for = num(&asked.request["n"]).unwrap_or(1.0) as usize;
+    if kind != "node" && results.len() < asked_for {
+        page.line(&format!(
+            "Only {} of the {asked_for} asked for: the terrain has no more.",
+            results.len()
+        ));
+    }
+    let mut t = Table::new()
+        .col("#", Align::Right)
+        .col("Distance (m)", Align::Right)
+        .cut("Name", 12);
+    if kind == "node" {
+        t = t.col("Side", Align::Left);
+    }
+    let mut t = with_place(
+        t.optional("Class", Align::Left, 2)
+            .optional("Id", Align::Right, 1),
+    );
+    for (n, r) in results.iter().enumerate() {
+        let mut row = vec![(n + 1).to_string(), whole(&r["distance"]), text(&r["name"])];
+        if kind == "node" {
+            let side = text(&r["kind"]);
+            row.push(side.strip_prefix("node_").unwrap_or(&side).to_string());
+        }
+        row.extend([text(&r["class"]), text(&r["id"])]);
+        row.extend(place(asked, r));
+        t.row(row);
+    }
+    page.table(&t);
 }

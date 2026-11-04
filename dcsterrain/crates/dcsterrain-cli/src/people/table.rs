@@ -71,6 +71,18 @@ impl Table {
         self
     }
 
+    /// A column always shown, cut to no fewer than `min` characters when the
+    /// page is too narrow.
+    pub fn cut(mut self, header: &str, min: usize) -> Self {
+        self.columns.push(Column {
+            header: header.into(),
+            align: Align::Left,
+            min: Some(min),
+            keep: KEEP,
+        });
+        self
+    }
+
     /// A column left out when the page is too narrow, the lowest `keep`
     /// first.
     pub fn optional(mut self, header: &str, align: Align, keep: u8) -> Self {

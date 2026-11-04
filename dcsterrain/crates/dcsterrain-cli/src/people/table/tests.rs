@@ -1,7 +1,7 @@
 use super::*;
 
 fn wide(n: usize) -> Table {
-    let mut t = Table::new().col("#", Align::Right).col("Name", Align::Left);
+    let mut t = Table::new().col("#", Align::Right).cut("Name", 6);
     for i in 0..n {
         t = t.optional(&format!("Extra {i}"), Align::Right, i as u8);
     }
@@ -39,8 +39,13 @@ fn a_page_too_narrow_cuts_then_leaves_out_and_says_which() {
             .contains("left out to fit 100 characters: Extra 0, Extra 1")
     );
     assert!(p.text.contains("Extra 11"));
-    // The name is whole again once columns are left out.
-    assert!(p.text.contains("A rather long name for a place"));
+    // The name is cut only by what the columns left still need: whole, or
+    // to the page's full width.
+    let row = p.text.lines().nth(1).unwrap();
+    assert!(
+        row.contains("A rather long name for a place") || chars(row) == WIDTH,
+        "{row}"
+    );
 }
 
 #[test]
@@ -71,4 +76,15 @@ fn color_is_escapes_only_when_asked() {
         let text = p.finish();
         assert_eq!(text.contains('\x1b'), color, "{text}");
     }
+}
+
+#[test]
+fn a_cut_cell_ends_in_an_ellipsis() {
+    let mut t = Table::new().cut("Name", 8).col("Wide", Align::Left);
+    t.row(vec!["x".repeat(40), "y".repeat(80)]);
+    let mut p = Page::new(false);
+    p.table(&t);
+    let row = p.text.lines().nth(1).unwrap();
+    assert!(row.starts_with(&format!("{}…  y", "x".repeat(17))), "{row}");
+    assert_eq!(chars(row), WIDTH);
 }

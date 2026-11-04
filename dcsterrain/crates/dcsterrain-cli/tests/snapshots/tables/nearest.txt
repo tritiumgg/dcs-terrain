@@ -1,0 +1,9 @@
+The 3 nearest roads to 11999, 15003 (36T XR 14520 10114), nearest first.
+Each row is the nearest point of one edge of the network.
+
+#  Distance (m)  Name  Class  Id      x      z  MGRS
+1          9423  —     rdb     7  20000  10025  36T XR 09541 18115
+2         13026  —     road    3  25025  15003  36T XR 14520 23139
+3         13945  —     road    2  25025  10025  36T XR 09542 23140
+
+Every field, unrounded: add --json.
