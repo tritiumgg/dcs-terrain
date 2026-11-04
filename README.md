@@ -5,106 +5,69 @@ Where can a FARP go? What can a SAM site see? Which road should a convoy take?
 
 ## How it works
 
-A DCS terrain is a set of files: the ground, the roads, the objects and the airfields.
-`dcsterrain` reads those files in your DCS install.
+`dcsterrain` reads a terrain's files in your DCS install: the ground, the roads, the objects and the airfields.
 From them, it works out heights, slopes, lines of sight and routes.
-It never changes the files.
-DCS does not need to be running.
+It never changes the files, and DCS does not need to be running.
 It keeps its results in a cache folder, so later questions are fast.
 This project ships no terrain files.
 
-You send a question as one line of JSON, a plain-text format for data.
-The answer comes back as JSON too.
-The [skill](skill/SKILL.md) teaches an AI assistant to ask the questions for you.
+There are three ways to ask, and all three give the same answers:
 
-## Quick start
+- **Commands, for people.** One command per kind of question, with the answer in tables.
+- **`query`, for software.** The question and the answer in JSON, a plain-text format for data.
+- **`mcp`, for AI assistants.** The same questions, as tools an assistant calls through MCP.
 
-Download the latest release.
+## Get it
+
+Download release 0.2.0.
+On Windows, run these in PowerShell:
+
+```powershell
+Invoke-WebRequest https://github.com/tritiumgg/dcs-terrain/releases/download/v0.2.0/dcsterrain-x86_64-pc-windows-msvc.zip -OutFile dcsterrain.zip
+```
+
+```powershell
+Expand-Archive -Force dcsterrain.zip -DestinationPath .
+```
+
+On macOS or Linux, copy part of a Windows install first, as the [guide](docs/guide.md#on-macos-or-linux) says.
 You can also [build it yourself](#build-it-yourself).
-On Windows, run this in PowerShell:
 
-```powershell
-Invoke-WebRequest https://github.com/tritiumgg/dcs-terrain/releases/latest/download/dcsterrain-x86_64-pc-windows-msvc.zip -OutFile dcsterrain.zip
-```
+## Use it
 
-```powershell
-Expand-Archive dcsterrain.zip -DestinationPath .
-```
-
-Run the commands below in the folder that holds `dcsterrain.exe`.
-The tool finds DCS by itself.
-If it cannot, add `--install <folder>` to name the DCS folder.
-On macOS or Linux, copy part of a Windows install first.
-The [guide](docs/guide.md#on-macos-or-linux) says which part.
-
-`list-terrains` shows your DCS version and the id of each terrain.
-You give that id to `--terrain`:
+Run these in PowerShell, in the folder that holds `dcsterrain.exe`.
+The tool finds DCS by itself; if it cannot, add `--install` and the DCS folder.
+`list-terrains` shows your DCS version and the id, the short name, of each terrain:
 
 ```powershell
 .\dcsterrain.exe list-terrains
 ```
 
-```text
-DCS 2.9.31.29434 at C:\Program Files\Eagle Dynamics\DCS World
-…
-id                  folder          cache                 files
-Caucasus            Caucasus        8 entries, 13.5 MiB   50 of 50 readable
-GermanyCW           GermanyColdWar  6 entries, 265.1 MiB  462 of 462 readable
-…
-```
-
-`index` builds a terrain's cache before your first question:
+Then ask a question.
+This one finds the airfield nearest to the town of Zugdidi:
 
 ```powershell
-.\dcsterrain.exe index --terrain Caucasus
+.\dcsterrain.exe nearest --terrain Caucasus --kind airdrome --at town:Zugdidi
 ```
 
 ```text
-Caucasus 2.9.31.29434 at C:\Users\tritiumgg\AppData\Local\dcs-terrain\cache\Caucasus
-mesh.toc: built
-…
-places: built
+#  Distance (m)  Name           Class  Id        x       z  MGRS
+1         33834  Senaki-Kolkhi  —      23  -281782  647279  38T KM 56437 80737
 ```
 
-`query` answers a question.
-`op` names the kind of question, and `request` holds its details.
-The `|` passes the line to the tool.
-This one asks for the airfield nearest to a point.
-`x` points north and `z` points east, in meters:
-
-```powershell
-'{"op": "nearest", "request": {"kind": "airdrome", "x": -284900, "z": 683800}}' | .\dcsterrain.exe query --terrain Caucasus
-```
-
-```text
-{"line":1,"op":"nearest","result":{…,"results":[{…,"distance":60.0606545632205,"id":"25","kind":"airdrome","name":"Kutaisi","x":-284887.375,"z":683858.71875}],"terrain":"Caucasus",…}}
-```
-
-Kutaisi is 60 m away.
-The [guide](docs/guide.md) walks through a whole siting question.
+A place can be a DCS position such as `-284887,683859`, a grid reference such as `"38T KM 91980 72567"`, a latitude and longitude, `airport:Kutaisi` or `town:Zugdidi`.
+`--help` after a command lists what it takes.
+The [guide](docs/guide.md) walks through a whole siting question, step by step, and shows how software uses `query`.
 [docs/queries.md](docs/queries.md) describes all 22 kinds of question.
-
-Other commands:
-
-- `check` reports which terrain files the tool can read.
-- `cache list` shows the cache.
-- `cache clear` deletes it. The tool builds it again when needed.
-- `schema` prints the fields of every question and answer.
-- `mcp` answers the same questions as tools for an AI assistant, about any of your terrains.
-- One command per kind of question, such as `nearest --terrain Caucasus --kind airdrome --at town:Zugdidi`, takes flags instead of JSON; `nearest --help` lists them. The main questions answer with tables, MGRS beside each place, and `--json` prints the full answer. Not final: release 0.1.0 has none of these commands.
-- `--help` lists every command and option.
 
 ## Use it from an AI assistant
 
-`dcsterrain mcp` gives an assistant one tool per kind of question through MCP, with no shell, for every terrain.
-Release 0.1.0 has no `mcp`; until the next release, build the tool yourself.
-The [guide](docs/guide.md#ask-through-an-ai-assistant) sets up Claude Code and
-Claude Desktop, with the [skill](skill/SKILL.md) that teaches the assistant the tools.
+`dcsterrain mcp` gives an assistant one tool for each kind of question, about every terrain you have.
+The [guide](docs/guide.md#ask-through-an-ai-assistant) sets up Claude Code and Claude Desktop, with the [skill](skill/SKILL.md) that teaches the assistant the tools.
 
 ## Build it yourself
 
-You need [git](https://git-scm.com) and [mise](https://mise.jdx.dev).
-mise installs the version of Rust that `rust-toolchain.toml` names.
+You need [git](https://git-scm.com) and [mise](https://mise.jdx.dev), which installs the Rust that `rust-toolchain.toml` names.
 
 ```bash
 git clone https://github.com/tritiumgg/dcs-terrain
@@ -114,8 +77,7 @@ mise install
 mise exec -- cargo build --release --manifest-path dcsterrain/Cargo.toml
 ```
 
-The program is `dcsterrain/target/release/dcsterrain`.
-On Windows, it is `dcsterrain.exe`.
+The program is `dcsterrain/target/release/dcsterrain`, or `dcsterrain.exe` on Windows.
 To run the tests, use `mise run check` from Git Bash.
 
 ## License
