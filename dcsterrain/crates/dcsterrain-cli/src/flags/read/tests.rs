@@ -404,6 +404,13 @@ fn geo_converts_an_mgrs_to_x_and_z_from_the_center_of_its_square() {
         d.request["to_xz"],
         json!([center("38T KM 59748 94822"), center("38TKM5994")])
     );
+    // Signed degrees out of range, or not plain numbers, are refused.
+    for bad in ["10,200", "95,10", "1e2,3", "inf,nan", "NaN,1", "0x10,5"] {
+        let e = refused("geo", &[&["to-xz", bad]]);
+        assert!(e.contains("is not a latitude and longitude"), "{bad}: {e}");
+    }
+    let d = read("geo", &[&["to-xz", "-33.5,+151.2"]]);
+    assert_eq!(d.request["to_xz"], json!([{"lat": -33.5, "lon": 151.2}]));
     // Any other place is for --to-latlon, which shows x and z as well.
     let e = refused("geo", &[&["to-xz", "airport:Kutaisi"]]);
     assert!(

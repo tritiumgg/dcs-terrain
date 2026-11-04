@@ -538,10 +538,18 @@ pub(super) fn order_of(fields: &[Field]) -> String {
 /// or an MGRS read to the center of its square, as a place flag reads it:
 /// a person with a grid reference asks for x and z with this flag.
 fn latlon(text: &str) -> Option<Value> {
+    // Signed degrees, south and west negative: digits and a point only, so
+    // no exponent, infinity or NaN, and within the ranges degrees have.
+    let signed = |s: &str| {
+        let s = s.trim();
+        let body = s.strip_prefix(['+', '-']).unwrap_or(s);
+        let plain = !body.is_empty() && body.chars().all(|c| c.is_ascii_digit() || c == '.');
+        plain.then(|| s.parse::<f64>().ok()).flatten()
+    };
     if let Some((a, b)) = text.split_once(',')
-        && let (Ok(lat), Ok(lon)) = (a.trim().parse::<f64>(), b.trim().parse::<f64>())
+        && let (Some(lat), Some(lon)) = (signed(a), signed(b))
     {
-        return Some(json!({"lat": lat, "lon": lon}));
+        return (lat.abs() <= 90.0 && lon.abs() <= 180.0).then(|| json!({"lat": lat, "lon": lon}));
     }
     match crate::place::read(text) {
         Ok(crate::place::Written::LatLon { lat, lon }) => Some(json!({"lat": lat, "lon": lon})),
