@@ -76,6 +76,14 @@ fn flag_line(out: &mut String, left: &str, help: &str) {
 /// A field's help with its default.
 fn field_help(f: &Field) -> String {
     let mut h = f.help.clone();
+    // The request takes degrees only; the flag also reads an MGRS.
+    let latlon = match &f.shape {
+        Shape::List(inner) => **inner == Shape::LatLon,
+        s => *s == Shape::LatLon,
+    };
+    if latlon {
+        h.push_str(" An MGRS is read to the center of its square.");
+    }
     if f.required {
         h.push_str(" Required.");
     } else if let Some(d) = &f.default {
