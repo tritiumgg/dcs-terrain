@@ -363,6 +363,25 @@ fn geo_converts_latitude_and_longitude_written_either_way() {
 }
 
 #[test]
+fn geo_converts_an_mgrs_to_x_and_z_from_the_center_of_its_square() {
+    let d = read("geo", &[&["to-xz", "38T KM 59748 94822", "38tkm5994"]]);
+    let center = |t: &str| {
+        let sq = dcsterrain_core::query::parse_mgrs(t).unwrap();
+        json!({"lat": sq.lat, "lon": sq.lon})
+    };
+    assert_eq!(
+        d.request["to_xz"],
+        json!([center("38T KM 59748 94822"), center("38TKM5994")])
+    );
+    // Any other place is for --to-latlon, which shows x and z as well.
+    let e = refused("geo", &[&["to-xz", "airport:Kutaisi"]]);
+    assert!(
+        e.contains("38T KM 59748 94822") && e.contains("--to-latlon"),
+        "{e}"
+    );
+}
+
+#[test]
 fn a_mistake_is_named_with_what_would_do() {
     let e = refused("find_sites", &[&["region", "circel", "a", "1"]]);
     assert!(e.contains("Did you mean `circle`?"), "{e}");

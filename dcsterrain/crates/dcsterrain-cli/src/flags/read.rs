@@ -269,8 +269,10 @@ impl Reader<'_> {
                 let v = single(values)?;
                 latlon(&v).ok_or_else(|| {
                     Usage(format!(
-                        "{flag}: \"{v}\" is not a latitude and longitude. Write \
-                         `42.18,42.48`, or `42.18N 42.48E`"
+                        "{flag}: \"{v}\" is not a latitude and longitude or an MGRS. Write \
+                         `42.18,42.48`, `42.18N 42.48E` or `38T KM 59748 94822`. For any \
+                         other place, use --to-latlon: it takes every place, and shows its x \
+                         and z too"
                     ))
                 })
             }
@@ -532,7 +534,9 @@ pub(super) fn order_of(fields: &[Field]) -> String {
     words.join(" ")
 }
 
-/// A latitude and longitude written `lat,lon`, or as a place writes one.
+/// A latitude and longitude written `lat,lon`, or as a place writes one,
+/// or an MGRS read to the center of its square, as a place flag reads it:
+/// a person with a grid reference asks for x and z with this flag.
 fn latlon(text: &str) -> Option<Value> {
     if let Some((a, b)) = text.split_once(',')
         && let (Ok(lat), Ok(lon)) = (a.trim().parse::<f64>(), b.trim().parse::<f64>())
@@ -541,6 +545,7 @@ fn latlon(text: &str) -> Option<Value> {
     }
     match crate::place::read(text) {
         Ok(crate::place::Written::LatLon { lat, lon }) => Some(json!({"lat": lat, "lon": lon})),
+        Ok(crate::place::Written::Mgrs(sq)) => Some(json!({"lat": sq.lat, "lon": sq.lon})),
         _ => None,
     }
 }

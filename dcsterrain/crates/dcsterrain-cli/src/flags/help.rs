@@ -18,7 +18,7 @@ pub fn typed(shape: &Shape) -> String {
         Shape::Place(_) => "<place>".into(),
         Shape::Height { agl_only: true } => "<place>@<m>".into(),
         Shape::Height { agl_only: false } => "<place>@<m>[msl]".into(),
-        Shape::LatLon => "<lat>,<lon>".into(),
+        Shape::LatLon => "<lat>,<lon>|<mgrs>".into(),
         Shape::Airdrome => "<airport>".into(),
         Shape::List(inner) => match **inner {
             Shape::Object(_) | Shape::OneOf(_) => typed(inner),
