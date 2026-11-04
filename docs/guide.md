@@ -1,11 +1,16 @@
 # Guide
 
 This guide shows you how to use `dcsterrain`, step by step.
-First you point it at your DCS install.
+First you let it find your DCS install.
 Then you ask it where to put a FARP, a forward arming and refueling point.
 You read the answer and turn it into a position for the Mission Editor.
 Next you combine several questions to solve a bigger problem.
 At the end, you learn what each error means and how to fix it.
+
+You ask each question with one command.
+The command's name says what you ask, such as `find-sites` or `visible`.
+Its options say where and how.
+The answer comes back as a table you can read.
 
 Every command after the download steps was run on a real install.
 Every output is what that command printed.
@@ -13,7 +18,8 @@ The terrain is Caucasus.
 The DCS version, which DCS calls the build, is 2.9.31.29434.
 Your numbers match if your build matches.
 Times and cache sizes always vary.
-On another build, other numbers can differ too, but each answer keeps the same layout.
+On another build, other numbers can differ too.
+Each answer keeps the same layout.
 
 ## What you need
 
@@ -24,10 +30,11 @@ On another build, other numbers can differ too, but each answer keeps the same l
 - PowerShell, which comes with Windows.
   Open the Start menu, type `PowerShell`, and open "Windows PowerShell".
   PowerShell 7 works too.
+  To run a command, type or paste the whole line in PowerShell, then press Enter.
 
 ## Get the tool
 
-The steps below download the latest release.
+The steps below download release 0.2.0.
 You can also build the tool yourself, as the [README](../README.md#build-it-yourself)
 explains.
 
@@ -37,7 +44,8 @@ Make a folder for your work, such as `C:\dcs-terrain`:
 mkdir C:\dcs-terrain
 ```
 
-Go to that folder:
+Go to that folder.
+`cd` means change folder:
 
 ```powershell
 cd C:\dcs-terrain
@@ -46,17 +54,30 @@ cd C:\dcs-terrain
 Download the Windows release, which works on Windows 10 and 11:
 
 ```powershell
-Invoke-WebRequest https://github.com/tritiumgg/dcs-terrain/releases/latest/download/dcsterrain-x86_64-pc-windows-msvc.zip -OutFile dcsterrain.zip
+Invoke-WebRequest https://github.com/tritiumgg/dcs-terrain/releases/download/v0.2.0/dcsterrain-x86_64-pc-windows-msvc.zip -OutFile dcsterrain.zip
 ```
 
 Unpack it into this folder:
 
 ```powershell
-Expand-Archive dcsterrain.zip -DestinationPath .
+Expand-Archive -Force dcsterrain.zip -DestinationPath .
 ```
 
 The folder now holds `dcsterrain.exe`.
+`-Force` replaces an older copy, if you had one.
 If you built the tool instead, copy your `dcsterrain.exe` into this folder.
+
+Check that you have release 0.2.0:
+
+```powershell
+.\dcsterrain.exe --version
+```
+
+```text
+dcsterrain 0.2.0
+```
+
+Release 0.1.0 does not have the commands this guide uses.
 
 Every command below runs from this folder.
 Each time you open PowerShell, go to it with `cd C:\dcs-terrain` first.
@@ -67,26 +88,27 @@ The `.\` tells PowerShell to run the program in the current folder.
 
 - **Terrain**: one DCS world, such as Caucasus or Syria.
 - **Terrain id**: the short name the tool uses for a terrain, such as `Caucasus`.
-- **JSON**: a plain-text format for data.
-  `{ }` holds a group of named values.
-  `[ ]` holds a list.
-  Names and text go in double quotes.
-  Commas separate the items.
-- **Request**: your question, written in JSON.
-- **Operation**: the kind of question, such as `find_sites` or `visible`.
-- **Answer**: what the tool prints back, also in JSON.
+- **Command**: the word after `.\dcsterrain.exe`, such as `find-sites`.
+  It names the kind of question.
+- **Option**: a word that starts with `--`, such as `--terrain`.
+  The values after it belong to it.
 - **x and z**: DCS's own coordinates, in meters.
   `x` grows to the north.
   `z` grows to the east.
-- **AGL**: above ground level.
-  `alt_agl` is a height above the ground, in meters.
+- **MGRS**: the military grid reference system, such as `38T KM 78924 65394`.
+  The Mission Editor shows it.
+- **Criterion**: a test a site must pass, such as "no steeper than 3 degrees".
+  The plural is criteria.
 - **Cache**: a folder where the tool keeps what it has worked out.
   It makes later questions fast.
   You can delete it at any time.
   The tool builds it again.
 - **Airdrome**: the tool's word for an airfield.
+  You write `--kind airdrome` to look for airfields.
+  You write `airport:` before an airfield's name.
+  Both mean an airfield.
 
-All distances are in meters.
+All distances are in meters, unless a column says km.
 All angles are in degrees.
 
 ## Step 1: see which terrains you have
@@ -107,7 +129,7 @@ cache at C:\Users\tritiumgg\AppData\Local\dcs-terrain\cache
 
 id                  folder          cache                 files
 Afghanistan         Afghanistan     6 entries, 110.1 MiB  60 of 60 readable
-Caucasus            Caucasus        8 entries, 13.5 MiB   50 of 50 readable
+Caucasus            Caucasus        8 entries, 13.4 MiB   50 of 50 readable
 GermanyCW           GermanyColdWar  6 entries, 265.1 MiB  462 of 462 readable
 MarianaIslands      MarianaIslands  6 entries, 9.8 MiB    24 of 24 readable
 MarianaIslandsWWII  MarianasWWII    6 entries, 7.1 MiB    30 of 30 readable
@@ -128,7 +150,7 @@ What it means:
   Germany's folder is `GermanyColdWar`.
   Its id is `GermanyCW`.
 - `cache` says how much the tool has stored for that terrain.
-  A terrain you have never asked about shows nothing here.
+  A terrain you have never asked about shows `none` here.
 - `files` says how many of the terrain's files the tool can read.
   "50 of 50" means all of them.
 
@@ -139,6 +161,7 @@ It never changes them.
 
 **When to use it:** once for each terrain, before your first question.
 Run it again after each DCS update.
+It is required only before `chokepoints` and `towns`.
 
 ```powershell
 .\dcsterrain.exe index --terrain Caucasus
@@ -149,7 +172,7 @@ Most questions build what they need by themselves.
 Two kinds of question do not: road chokepoints and towns.
 They need this step first.
 
-The first run on Caucasus took about 5 seconds and printed this:
+The first run on Caucasus takes about 5 seconds and prints this:
 
 ```text
 Caucasus 2.9.31.29434 at C:\Users\tritiumgg\AppData\Local\dcs-terrain\cache\Caucasus
@@ -166,7 +189,6 @@ Each line is one part of the cache.
 `built` means this run made that part.
 If you run the command again, each line says `current`.
 `current` means that part was already up to date.
-If you asked a question before this step, some lines say `current` too.
 
 Caucasus builds in seconds.
 Germany takes several minutes.
@@ -174,36 +196,80 @@ While Germany builds, the tool needs about 1.5 GB of free memory.
 
 ## How you ask a question
 
-You send a question into the tool on one line of text.
-The line names the operation in `op`.
-It holds the request in `request`.
-The `|` sign sends the line into the tool.
-
-Here is a short question.
-It asks for the airfield nearest to a point:
+Each kind of question has its own command.
+This one asks for the airfield nearest to the town of Zugdidi:
 
 ```powershell
-'{"op": "nearest", "request": {"kind": "airdrome", "x": -284900, "z": 683800}}' | .\dcsterrain.exe query --terrain Caucasus
+.\dcsterrain.exe nearest --terrain Caucasus --kind airdrome --at town:Zugdidi
 ```
 
 ```text
-{"line":1,"op":"nearest","result":{"cell_size":50.0,"dcs_build":"2.9.31.29434","elapsed_ms":1,"results":[{"class":null,"distance":60.0606545632205,"id":"25","kind":"airdrome","name":"Kutaisi","x":-284887.375,"z":683858.71875}],"terrain":"Caucasus","terrain_fingerprint":"6293651208-203468160-1140069192"}}
+The nearest airdrome to -252637, 630096 (37T GH 36504 11129).
+
+#  Distance (m)  Name           Class  Id        x       z  MGRS
+1         33834  Senaki-Kolkhi  —      23  -281782  647279  38T KM 56437 80737
+
+Every field, unrounded: add --json.
 ```
 
-- `query` asks a question.
+- `nearest` is the command: find the nearest thing.
 - `--terrain Caucasus` picks the terrain.
-- The single quotes `' '` keep the line together.
-  Always keep them.
-- `line` counts the lines you sent.
-- `result` holds the answer.
-  Here it found Kutaisi, 60 m from the point.
+  Every question needs it.
+- `--kind airdrome` says what to find.
+- `--at town:Zugdidi` says where to look from.
+- The answer is a table.
+  Senaki-Kolkhi is 33,834 m from Zugdidi.
+  The table gives its position in `x` and `z`, and in MGRS.
+- `—` means there is no value.
 
-Long requests are easier to write in a file.
-[Step 3](#step-3-ask-where-to-put-a-farp) shows how.
+To see every option a command takes, add `--help`:
+
+```powershell
+.\dcsterrain.exe nearest --help
+```
+
+It lists the options, says which are required, and ends with an example.
+`.\dcsterrain.exe --help` lists every command.
+
+### Places
+
+Many options take a place, such as `--at`.
+You can write a place in five ways:
+
+| Form | Example |
+|---|---|
+| DCS `x,z` in meters, with no space | `-284887,683859` |
+| MGRS, in quotes | `"38T KM 91980 72567"` |
+| Latitude and longitude, in quotes | `"42.177616N 42.481292E"` |
+| An airfield by name | `airport:Kutaisi` |
+| A town by name | `town:Zugdidi` |
+
+Put quotes around a place that has a space in it.
+Without them, PowerShell splits it into several words.
+The tool then refuses each word as a place.
+
+A plain name, such as `Kutaisi`, is refused.
+Write `airport:` or `town:` before it, so the tool knows which you mean.
+
+Some options also need a height, such as where an observer stands.
+Write it after the place, after `@`, in meters above the ground:
+`airport:Kutaisi@100` is 100 m above Kutaisi.
+`town:Zugdidi@1200msl` is 1,200 m above sea level: `msl` means mean sea level.
+With MGRS, the height goes inside the quotes: `"38T KM 82562 61755@10"`.
+
+Copy an MGRS whole, with its zone, such as `38T`.
+Caucasus spans two zones, `37T` in the west and `38T` in the east.
+
+### More of the answer
+
+The table shows the main fields, rounded.
+To see every field, unrounded, add `--json` to the command.
+It prints the whole answer in JSON, a plain-text format for data.
+[For software: `query`](#for-software-query) says more about JSON.
 
 ## Step 3: ask where to put a FARP
 
-**When to use `find_sites`:** you need a place for something.
+**When to use `find-sites`:** you need a place for something.
 You can describe the ground it needs.
 Examples are a FARP, a SAM site, a bunker or a landing zone.
 
@@ -212,164 +278,121 @@ It needs flat, open ground.
 It must be 3 to 15 km from Kutaisi.
 It must be close to a road.
 
-First, save the request in a file called `farp.json`.
-Copy this whole block, paste it into PowerShell, and press Enter:
-
 ```powershell
-@'
-{
-  "region": {"AirdromeBand": {"airdrome": "Kutaisi", "min_dist": 3000, "max_dist": 15000}},
-  "footprint": {"width": 120, "depth": 80},
-  "criteria": [
-    {"name": "surface_in", "params": {"classes": ["land"]}},
-    {"name": "slope_max", "params": {"deg": 3}},
-    {"name": "dist_road_band", "params": {"min": 100, "max": 1000}},
-    {"name": "clearing_max", "params": {"radius": 150, "max": 0}}
-  ],
-  "spacing": 2000,
-  "limit": 3
-}
-'@ | Set-Content farp.json
+.\dcsterrain.exe find-sites --terrain Caucasus --region airdrome-band Kutaisi 3000 15000 --footprint 120 80 --criteria surface-in land --criteria slope-max 3 --criteria dist-road-band 100 1000 --criteria clearing-max 0 --spacing 2000 --limit 3
 ```
 
-`@'` and `'@` mark the start and end of a block of text.
-`Set-Content farp.json` saves the block in the file.
-To change the request later, open it in Notepad with `notepad farp.json`.
+This is one long command on one line.
+Paste it as one line, with no line breaks.
+Here is what each option asks for:
 
-Here is what each part of the request asks for:
-
-- `region` is where to look.
-  `AirdromeBand` is a ring around an airfield.
-  Here the ring runs from 3,000 m to 15,000 m from Kutaisi.
-  [queries.md](queries.md) shows the other shapes: a box, a circle and a polygon.
-- `footprint` is the size of the site.
-  It is 120 m wide and 80 m deep.
-- `criteria` are the tests a site must pass.
+- `--region` is where to look.
+  `airdrome-band Kutaisi 3000 15000` is a ring around Kutaisi.
+  It runs from 3,000 m to 15,000 m from the airfield.
+  A region can also be a `box`, a `circle` or a `polygon`.
+  `find-sites --help` shows how to write each one.
+- `--footprint 120 80` is the size of the site: 120 m wide and 80 m deep.
+- `--criteria` is a test a site must pass.
+  Give `--criteria` once for each test.
   A site must pass all of them.
-  - `surface_in` with `land`: the whole site is on land, not water.
-  - `slope_max` with `deg` 3: no part of the site is steeper than 3 degrees.
-  - `dist_road_band`: the nearest road is 100 m to 1,000 m away.
+  - `surface-in land`: the whole site is on land, not water.
+  - `slope-max 3`: no part of the site is steeper than 3 degrees.
+  - `dist-road-band 100 1000`: the nearest road is 100 m to 1,000 m away.
     Trucks can reach the site.
-  - `clearing_max`: no building or other object stands within 150 m.
+  - `clearing-max 0`: no building or other object stands within 150 m of the site.
     DCS removes objects near a FARP when the mission starts.
     This test keeps houses out of its way.
-- `spacing` keeps the answers at least 2,000 m apart.
+- `--spacing 2000` keeps the answers at least 2,000 m apart.
   Without it, you would get three spots next to each other.
-- `limit` is how many answers you want.
+- `--limit 3` is how many answers you want.
 
-[queries.md](queries.md) lists every test you can use.
-
-Now send the request.
-This command reads `farp.json`, adds `"op": "find_sites"`, and sends it as one line:
-
-```powershell
-@{ op = 'find_sites'; request = (Get-Content -Raw farp.json | ConvertFrom-Json) } | ConvertTo-Json -Depth 10 -Compress | .\dcsterrain.exe query --terrain Caucasus > farp-answer.jsonl
-```
-
-- `Get-Content -Raw farp.json | ConvertFrom-Json` reads the request from the file.
-- `@{ op = 'find_sites'; request = ... }` puts the operation next to it.
-- `ConvertTo-Json -Depth 10 -Compress` turns both into one line of JSON.
-- `> farp-answer.jsonl` saves the answer in a new file.
-
-The command prints nothing when it works.
-To check that the answer arrived, list the file:
-
-```powershell
-Get-Item farp-answer.jsonl
-```
+`find-sites --help` lists every test you can use, with what each one takes.
 
 ## Step 4: read the answer
 
-The answer is one long line of JSON.
-It is hard to read in Notepad.
-PowerShell can show it in parts.
-First, load the answer into a variable.
-A variable is a name that holds a value.
-This one is called `$a`:
+```text
+3 sites, best first, of 67872 lattice points in the region; 15196 passed every test, and 15 tiles
+skipped whole.
+--limit asks for more sites, up to 200.
 
-```powershell
-$a = (Get-Content farp-answer.jsonl | ConvertFrom-Json).result
+#  Score        x       z  MGRS                Hdg (°)  surface_in (%)  slope_max (°)
+1  5.000  -293887  671859  38T KM 78924 65394        0             100            0.0
+2  5.000  -293287  694159  38T LM 00933 62872        0             100            0.0
+3  5.000  -291987  672559  38T KM 79878 67165        0             100            0.0
+2 columns left out to fit 100 characters: dist_road_band (m), clearing_max (count). --json has them.
+
+Each criterion's score, 0 to 1, is in --json; the site's score is their weighted sum.
+
+Every field, unrounded: add --json.
 ```
-
-`.result` picks the answer out of the line.
 
 ### How many positions passed
 
-```powershell
-$a.stats
-```
+The first line says how the search went.
 
-```text
-cells_considered cells_passed tiles_skipped
----------------- ------------ -------------
-           67872        15196            15
-```
-
-PowerShell may show this as a list instead of a table.
-The numbers are the same.
-
-- `cells_considered` is how many positions the tool tested in the ring: 67,872.
-  The positions are 100 m apart.
-- `cells_passed` is how many passed every test: 15,196.
+- The tool tested 67,872 positions in the ring.
+  It calls them lattice points.
+  They are 100 m apart.
+- 15,196 positions passed every test.
   That leaves plenty to choose from.
-- `tiles_skipped` is how many blocks of ground the tool ruled out as a whole.
-  It did not need to test each position in them.
+- 15 tiles, blocks of ground, were ruled out as a whole.
+  The tool did not need to test each position in them.
 
 If only a few positions pass, your tests are strict.
-If none pass, see [No candidates](#no-candidates).
+If none pass, see [No site passes](#no-site-passes).
 
 ### The best sites
 
-```powershell
-$a.candidates | Format-Table x, z, orientation_deg, score
-```
-
-```text
-          x            z orientation_deg score
-          -            - --------------- -----
--293887.375 671858.71875             0.0   5.0
--293287.375 694158.71875             0.0   5.0
--291987.375 672558.71875             0.0   5.0
-```
-
-PowerShell 7 rounds these numbers to two decimals.
-In PowerShell 7, use `Format-List x, z` to see every digit.
-
 Each row is one site.
-The tool calls each site a candidate.
 
-- `x` and `z` are the site's center.
-  [Step 5](#step-5-find-out-where-a-site-is) turns them into a grid
-  reference.
-- `orientation_deg` is the heading to give the FARP in the Mission Editor.
-  At 0, the 80 m side runs north to south.
-- `score` puts the candidates in order.
+- `#` is its place in the list, best first.
+- `Score` puts the sites in order.
   A higher score is better.
-  Here all three scored 5.0, so they tie.
+  Each test adds at most 1.
+  The tool adds one test of its own, `valid`, so 5 tests here give at most 5.
+  All three scored 5.000, so they tie.
   The ground around Kutaisi is a flat plain.
   Many sites there are equally good.
   The [worked example](#combine-questions-a-hidden-farp-and-its-fuel-convoy)
   breaks the tie by asking what the enemy can see.
+- `x` and `z` are the site's center, in DCS coordinates.
+- `MGRS` is the same center as a grid reference.
+  Use it to place the FARP in the Mission Editor.
+- `Hdg` is the heading to give the FARP in the Mission Editor, in degrees from north.
+  At 0, the 80 m side runs north to south.
+- The last columns show what the tool measured for some of the tests.
+  The table fits in 100 characters, so it leaves some out.
+  The line under the table names them.
 
 ### Why a site passed
 
-Each candidate carries the result of every test.
-The tool calls these results terms.
-This command shows the terms of the first candidate:
+`score-site` tests one site you name against the same tests.
+It shows the result of every test.
+Give it the first site's position with `--at`:
 
 ```powershell
-$a.candidates[0].terms | Format-Table
+.\dcsterrain.exe score-site --terrain Caucasus --at -293887,671859 --footprint 120 80 --criteria surface-in land --criteria slope-max 3 --criteria dist-road-band 100 1000 --criteria clearing-max 0
 ```
 
 ```text
-name           pass score value
-----           ---- ----- -----
-valid          True   1.0   1.0
-surface_in     True   1.0   1.0
-slope_max      True   1.0   0.0
-dist_road_band True   1.0 100.0
-clearing_max   True   1.0   0.0
+cell_size: 50.0
+dcs_build: 2.9.31.29434
+elapsed_ms: 12
+hard_fail: false
+orientation_deg: 0.0
+score: 5.0
+terms: 5 items
+  {"name":"valid","pass":true,"score":1.0,"value":1.0}
+  {"name":"surface_in","pass":true,"score":1.0,"value":1.0}
+  {"name":"slope_max","pass":true,"score":1.0,"value":0.0}
+  {"name":"dist_road_band","pass":true,"score":1.0,"value":100.0}
+  {"name":"clearing_max","pass":true,"score":1.0,"value":0.0}
+terrain: Caucasus
+terrain_fingerprint: 6293651208-203468160-1140069192
 ```
+
+This answer is a plain list, not a table.
+Each line under `terms` is one test.
 
 - `name` is the test.
 - `pass` says whether the site passed it.
@@ -379,29 +402,17 @@ clearing_max   True   1.0   0.0
   No objects stand within 150 m.
 - `score` is how well the site did on that test.
   It runs from 0 to 1.
-  The candidate's score is the sum of these.
-- `valid` is added to every request.
+  The site's score is the sum of these.
+  Here every test has the same weight, 1.
+  `--weights` in `find-sites --help` changes them.
+- `valid` is added to every question.
   It checks that no part of the site is on the sea.
   It also checks that no part is off the edge of the terrain.
 
-**The terms are the real answer.**
+**The tests are the real answer.**
 Read them before you trust a site.
 
-### Where the answer came from
-
-```powershell
-$a | Format-List terrain, dcs_build, terrain_fingerprint, cell_size, elapsed_ms
-```
-
-```text
-terrain             : Caucasus
-dcs_build           : 2.9.31.29434
-terrain_fingerprint : 6293651208-203468160-1140069192
-cell_size           : 50.0
-elapsed_ms          : 95
-```
-
-Every answer ends with these fields.
+The other lines say where the answer came from:
 
 - `terrain` and `dcs_build` say which terrain and DCS build answered.
   DCS changes its terrains only in updates.
@@ -411,92 +422,63 @@ Every answer ends with these fields.
 - `cell_size` is the spacing of the grid the tool reads the ground on, in meters.
 - `elapsed_ms` is how long the question took, in milliseconds.
 
-## Step 5: find out where a site is
+## Step 5: find out what is at a site
 
-**When to use `point_info`:** you have a position in `x` and `z`.
-You want its grid reference, or you want to know what is near it.
-
-The Mission Editor does not show `x` and `z`.
-`point_info` gives the grid reference in MGRS, the military grid reference system.
-It also gives the latitude and longitude, and the nearest town, road and airfield.
-
-Copy the first candidate's `x` and `z` from the table in Step 4.
-Copy every digit.
-Put them into this command:
+**When to use `point-info`:** you have a position.
+You want to know the ground there and what is near it.
 
 ```powershell
-'{"op": "point_info", "request": {"points": [{"x": -293887.375, "z": 671858.71875}]}}' | .\dcsterrain.exe query --terrain Caucasus > where.jsonl
-```
-
-Load the answer into a variable called `$w`:
-
-```powershell
-$w = (Get-Content where.jsonl | ConvertFrom-Json).result
-```
-
-Then show its main fields:
-
-```powershell
-$w.points[0] | Format-List mgrs, lat, lon, height, slope, cover
+.\dcsterrain.exe point-info --terrain Caucasus --points "38T KM 78924 65394"
 ```
 
 ```text
-mgrs   : 38T KM 78924 65394
-lat    : 42.109498476393064
-lon    : 42.32608283941332
-height : 38.003851824586924
-slope  : 0.0
-cover  : town
+1 point, in the order asked.
+
+Ground
+#        x       z  MGRS                Height (m)  Slope (°)  Aspect (°)  Water  Depth (m)  Cover
+1  -293887  671859  38T KM 78924 65394        38.0        0.0           —  land           —  town
+
+Nearby
+#  Town                Place  Road (m)  Road  Airfield  Airfield (km)
+1  1 km NW of Dapnari  —           125  road  Kutaisi           15.00
+
+Aspect is the downslope direction from grid north. Latitude and longitude, the bearings from each
+town, and where each road and airfield lie: --json.
+
+Every field, unrounded: add --json.
 ```
 
-- `mgrs` is the grid reference.
-  Use it to place the FARP in the Mission Editor.
-- `lat` and `lon` are latitude and longitude, in degrees.
-- `height` is the ground's height above sea level, in meters.
-- `slope` is how steep the ground is at that point, in degrees.
-- `cover` is the kind of ground there, such as field, forest or town.
+The first table is the ground:
+
+- `Height` is the ground's height above sea level.
+- `Slope` is how steep the ground is at that point.
+- `Aspect` is the direction the slope faces.
+  Flat ground has none.
+- `Water` and `Depth` say whether the point is on water, and how deep it is.
+- `Cover` is the kind of ground there, such as field, forest or town.
   `town` describes the ground, not a building.
-  The `clearing_max` test already checked for buildings.
+  The `clearing-max` test already checked for buildings.
 
-Show the nearest town:
+The second table is what is near:
 
-```powershell
-$w.points[0].town | Format-List
-```
+- `Town` names the nearest town and where the site lies from it.
+  The site is about 1 km northwest of Dapnari.
+  You can paste this into a mission briefing.
+- `Place` is the town or village whose outline holds the point.
+  `—` means the point is outside every one.
+- `Road (m)` is the distance to the nearest road: 125 m.
+- The next `Road` column is that road's kind.
+- `Airfield` is the nearest airfield, and `Airfield (km)` its distance.
 
-```text
-bearing_grid_deg : 307.3389103727331
-bearing_true_deg : 313.62865768230984
-compass          : NW
-description      : 1 km NW of Dapnari
-distance         : 964.7827174996041
-name             : Dapnari
-x                : -294472.5431930097
-z                : 672625.7805974906
-```
+The road here is 125 m away.
+`score-site` in Step 4 said 100 m.
+The two differ because the tests measure on a 50 m grid.
+The grid makes them fast, but less exact.
+`point-info` measures to the road itself.
+Trust the `point-info` number.
 
-The site lies about 1 km northwest of the village of Dapnari.
-You can paste `description` into a mission briefing.
-The two bearings point from the site to the town.
-`bearing_true_deg` is measured from true north.
-
-Show the nearest road:
-
-```powershell
-$w.points[0].road | Format-List distance, class
-```
-
-```text
-distance : 125.40836900182634
-class    : road
-```
-
-Here the road is 125 m away.
-The terms table in Step 4 said 100 m.
-The two differ because `find_sites` measures on a 50 m grid.
-The grid makes it fast, but less exact.
-`point_info` measures to the road itself.
-Trust the `point_info` number.
+`--points` takes several places.
+Give them one after another, separated by spaces.
 
 ## Step 6: check what can see the site
 
@@ -506,108 +488,81 @@ For example, can an enemy observer see your FARP?
 `visible` uses the same kind of line-of-sight test as DCS.
 Like DCS's test, it ignores buildings and trees.
 Only the ground blocks the view.
-It does not matter which point you call `a` and which `b`.
+The yes-or-no answer is the same whichever point you call `--a` and which `--b`.
 
-Can someone standing 2 m above the FARP see a hill to its southeast?
-In the request, `a` is the FARP and `b` is the hill:
+Can a lookout on a 10 m mast on the hill southeast of the FARP see someone
+standing at the FARP?
+`--a` is the lookout, 10 m above the ground.
+`--b` is the FARP, 2 m above the ground, the height of a person's eyes:
 
 ```powershell
-'{"op": "visible", "request": {"a": {"x": -293887.375, "z": 671858.71875, "alt_agl": 2}, "b": {"x": -305000, "z": 690000, "alt_agl": 2}}}' | .\dcsterrain.exe query --terrain Caucasus
+.\dcsterrain.exe visible --terrain Caucasus --a -297000,676000@10 --b -293887,671859@2
 ```
 
 ```text
-{"line":1,"op":"visible","result":{"blocking":{"alt":102.70377895993946,"x":-294590.15050691913,"z":673005.9947650398},"cell_size":50.0,"clearance_m":-58.62387875845445,"dcs_build":"2.9.31.29434","elapsed_ms":3,"terrain":"Caucasus","terrain_fingerprint":"6293651208-203468160-1140069192","visible":false}}
+No: the ground blocks the line, rising 55.7 m above it at its highest.
+The ends are 5.18 km apart.
+
+Point          x       z  MGRS                Height
+A        -297000  676000  38T KM 82562 61755  10.0 m above the ground
+B        -293887  671859  38T KM 78924 65394  2.0 m above the ground
+Blocked  -296099  674802  38T KM 81510 62808  237.8 m above sea level
+
+Blocked is where the ground first rises above the line from A.
+
+Every field, unrounded: add --json.
 ```
 
-- `visible` is `false`.
-  The two points cannot see each other.
-- `blocking` is the point where the ground blocks the view.
-  It is a rise 103 m above sea level, close to the FARP.
-- `clearance_m` is how close the line of sight comes to the ground.
-  A negative number means the ground rises above the line.
-  Here the ground is 59 m above it.
+- The first line answers: no, they cannot see each other.
+- The ground rises 55.7 m above the line of sight.
+- `Blocked` is where the ground first gets in the way.
 
 Now ask a different question.
 Can an aircraft 100 m above Kutaisi see the FARP?
-Kutaisi's position came from the `nearest` answer in
-[How you ask a question](#how-you-ask-a-question): `x` -284887.375, `z` 683858.71875.
 
 ```powershell
-'{"op": "visible", "request": {"a": {"x": -293887.375, "z": 671858.71875, "alt_agl": 2}, "b": {"x": -284887.375, "z": 683858.71875, "alt_agl": 100}}}' | .\dcsterrain.exe query --terrain Caucasus
+.\dcsterrain.exe visible --terrain Caucasus --a airport:Kutaisi@100 --b -293887,671859@2
 ```
 
 ```text
-{"line":1,"op":"visible","result":{"blocking":null,"cell_size":50.0,"clearance_m":2.0,"dcs_build":"2.9.31.29434","elapsed_ms":2,"terrain":"Caucasus","terrain_fingerprint":"6293651208-203468160-1140069192","visible":true}}
+Yes: A and B see each other. The line clears the ground by 2.0 m at its lowest.
+The ends are 15.00 km apart.
+
+Point        x       z  MGRS                Height
+A      -284887  683859  38T KM 91980 72567  100.0 m above the ground
+B      -293887  671859  38T KM 78924 65394  2.0 m above the ground
+
+Every field, unrounded: add --json.
 ```
 
 Yes, it can.
-`null` means there is no value.
-Nothing blocks the line, so `blocking` is `null`.
-`clearance_m` is 2.0.
-The line comes closest to the ground at the FARP, where it starts 2 m up.
+The line comes closest to the ground at the FARP, where it ends 2 m up.
 
 ## Step 7: see the answer on a map
 
-**When to use GeoJSON:** you want to see an answer drawn on a map.
+**When to use `--geojson-out`:** you want to see an answer drawn on a map.
 You can also load it into another program.
 
 GeoJSON is a standard file format for shapes on a map.
 QGIS, a free map program, opens it.
 So does the website [geojson.io](https://geojson.io).
 
-Make a new request file called `farp-map.json`.
-It is `farp.json` with one more line, `"geojson": true`:
+Add `--geojson-out` and a file name to the command from Step 3:
 
 ```powershell
-@'
-{
-  "region": {"AirdromeBand": {"airdrome": "Kutaisi", "min_dist": 3000, "max_dist": 15000}},
-  "footprint": {"width": 120, "depth": 80},
-  "criteria": [
-    {"name": "surface_in", "params": {"classes": ["land"]}},
-    {"name": "slope_max", "params": {"deg": 3}},
-    {"name": "dist_road_band", "params": {"min": 100, "max": 1000}},
-    {"name": "clearing_max", "params": {"radius": 150, "max": 0}}
-  ],
-  "spacing": 2000,
-  "limit": 3,
-  "geojson": true
-}
-'@ | Set-Content farp-map.json
+.\dcsterrain.exe find-sites --terrain Caucasus --region airdrome-band Kutaisi 3000 15000 --footprint 120 80 --criteria surface-in land --criteria slope-max 3 --criteria dist-road-band 100 1000 --criteria clearing-max 0 --spacing 2000 --limit 3 --geojson-out farp.geojson
 ```
 
-The answer now has a field called `geojson`.
-The first command sends the request and loads the answer into `$m`:
-
-```powershell
-$m = (@{ op = 'find_sites'; request = (Get-Content -Raw farp-map.json | ConvertFrom-Json) } | ConvertTo-Json -Depth 10 -Compress | .\dcsterrain.exe query --terrain Caucasus | ConvertFrom-Json).result
-```
-
-The second command saves the `geojson` field as its own file:
-
-```powershell
-$m.geojson | ConvertTo-Json -Depth 20 | Set-Content farp.geojson
-```
-
-This command lists the shapes in the file:
-
-```powershell
-$m.geojson.features | ForEach-Object { "$($_.geometry.type) $($_.properties | ConvertTo-Json -Compress)" }
-```
+The table is the same as before.
+Above the last line, the answer now says:
 
 ```text
-Point {"orientation_deg":0.0,"rank":1,"score":5.0}
-Polygon {"orientation_deg":0.0,"rank":1,"score":5.0}
-Point {"orientation_deg":0.0,"rank":2,"score":5.0}
-Polygon {"orientation_deg":0.0,"rank":2,"score":5.0}
-Point {"orientation_deg":0.0,"rank":3,"score":5.0}
-Polygon {"orientation_deg":0.0,"rank":3,"score":5.0}
+The GeoJSON is written to farp.geojson.
 ```
 
-Each candidate is two shapes.
-The `Point` is its center.
-The `Polygon` is its 120 × 80 m outline.
-`rank` is its place in the list.
+The file holds two shapes for each site.
+A point marks its center.
+A polygon draws its 120 × 80 m outline.
 
 To see the shapes, open `farp.geojson` in a map program.
 On geojson.io, click Import.
@@ -616,369 +571,292 @@ The shapes appear on a map of the real world.
 The file stores positions as longitude and latitude.
 So every map program puts them in the right place.
 
-### Which operations draw
+### Which commands draw
 
-These operations return GeoJSON when the request has `"geojson": true`:
+These commands take `--geojson-out`:
 
-| Operation | What it draws |
+| Command | What it draws |
 |---|---|
-| `find_sites`, `score_site` | each site's center and outline |
+| `find-sites`, `score-site` | each site's center and outline |
 | `visible` | the line of sight, and the point where the ground blocks it |
 | `viewshed` | the area one observer can see |
-| `radar_floor` | bands that show how low an aircraft can fly unseen by a site |
+| `radar-floor` | bands that show how low an aircraft can fly unseen by a site |
 | `coverage` | the gaps in a site's view at each altitude |
-| `approach_spectrum` | the directions a site cannot see, as wedges |
-| `unmask_profile` | a flight path, and the parts of it a site cannot see |
+| `approach-spectrum` | the directions a site cannot see, as wedges |
+| `unmask-profile` | a flight path, and the parts of it a site cannot see |
 | `exposure` | the area that no site in a group can see |
-| `route`, `route_alternatives` | the route along the roads or railways |
+| `route`, `route-alternatives` | the route along the roads or railways |
 | `chokepoints` | the roads that matter most |
 | `sample` | each point sampled, with its layer values |
 | `nearest` | each thing found, and the road or railway it lies on |
-| `scenery_in` | each object's outline, and the area you asked about |
+| `scenery-in` | each object's outline, and the area you asked about |
 | `trafficability` | the line from a point to the nearest road |
-| `point_info` | each point you asked about |
-| `airfield_info` | the runways and parking spots |
-| `validate_placements` | each placement, and anything in its way |
+| `point-info` | each point you asked about |
+| `airfield-info` | the runways and parking spots |
+| `validate-placements` | each placement, and anything in its way |
 | `towns` | each town's center, and its outline if you ask for it |
 
 `describe` and `geo` draw nothing.
-They accept `"geojson": true`, but their answer has no `geojson` field.
-
-## Many questions at once
-
-**When to use a batch:** you have more than a few questions about one terrain.
-The tool starts once and reads the terrain once, so a batch is faster.
-
-A batch is a file with one question per line, each in the same form as in
-[How you ask a question](#how-you-ask-a-question).
-Each line can also have an `id`.
-You choose the `id`, so you can tell the answers apart.
-Save this two-line batch as `questions.jsonl`:
-
-```powershell
-@'
-{"id": "kutaisi", "op": "nearest", "request": {"kind": "airdrome", "x": -284900, "z": 683800}}
-{"id": "site1", "op": "point_info", "request": {"points": [{"x": -293887.375, "z": 671858.71875}]}}
-'@ | Set-Content questions.jsonl
-```
-
-Then send the file's lines into the tool:
-
-```powershell
-Get-Content questions.jsonl | .\dcsterrain.exe query --terrain Caucasus > answers.jsonl
-```
-
-Each line of `answers.jsonl` answers one line of your file.
-The answers come in the same order, with the same `id`.
-These are the first 100 characters of each answer line:
-
-```text
-{"line":1,"id":"kutaisi","op":"nearest","result":{"cell_size":50.0,"dcs_build":"2.9.31.29434","elaps
-{"line":2,"id":"site1","op":"point_info","result":{"cell_size":50.0,"dcs_build":"2.9.31.29434","elap
-```
-
-If a line fails, it has `issues` instead of `result`.
-The other lines still run.
 
 ## Combine questions: a hidden FARP and its fuel convoy
 
 Real problems take more than one question.
-The answer to one question becomes part of the next request.
-This example starts from the three FARP candidates of Step 3.
+The answer to one question becomes part of the next.
+This example starts from the FARP question of Step 3.
 It answers three more questions:
 
-1. Which candidate can the enemy not see?
-   A batch of `visible` questions answers it.
-2. Which road does the fuel convoy take from Kutaisi to that site?
-   `route` answers it.
-3. How much of that road can the enemy see?
-   The same `route` answer holds that too.
+1. Which site can the enemy not see?
+2. Which road does the fuel convoy take from Kutaisi to that site, and how
+   much of it can the enemy see?
+3. How do you see the site and the road together on a map?
 
 The setup is made up for this example.
 The enemy holds the hills south of Kutaisi.
 It has two observation posts there, A and B.
 Each post has a lookout on a 10 m mast.
-Their positions are:
 
-| Post | x | z | Ground height | Near |
-|---|---|---|---|---|
-| A | -297000 | 676000 | 308 m | 1 km N of Didi-Opeti |
-| B | -296000 | 668000 | 139 m | 4 km NE of Tolebi |
-
-The heights and places came from one `point_info` question with both points.
-They are for your information only.
-The next questions use the 10 m mast height above the ground instead.
+First, look at the two posts with one `point-info` question:
 
 ```powershell
-'{"op": "point_info", "request": {"points": [{"x": -297000, "z": 676000}, {"x": -296000, "z": 668000}]}}' | .\dcsterrain.exe query --terrain Caucasus > posts.jsonl
-```
-
-```powershell
-(Get-Content posts.jsonl | ConvertFrom-Json).result.points | Format-Table x, z, height, @{ n = 'town'; e = { $_.town.description } }
+.\dcsterrain.exe point-info --terrain Caucasus --points -297000,676000 -296000,668000
 ```
 
 ```text
-        x        z             height town
-        -        -             ------ ----
--297000.0 676000.0  308.3237757780157 1 km N of Didi-Opeti
--296000.0 668000.0 139.18046713700417 4 km NE of Tolebi
+2 points, in the order asked.
+
+Ground
+#        x       z  MGRS                Height (m)  Slope (°)  Aspect (°)  Water  Depth (m)  Cover
+1  -297000  676000  38T KM 82562 61755       308.3       11.3           3  land           —  forest
+2  -296000  668000  38T KM 74834 63855       139.2       10.7         323  land           —  town
+
+Nearby
+#  Town                  Place              Road (m)  Road  Airfield  Airfield (km)
+1  1 km N of Didi-Opeti  —                      2693  road  Kutaisi           14.44
+2  4 km NE of Tolebi     unnamed (village)       190  road  Kutaisi           19.36
+
+Aspect is the downslope direction from grid north. Latitude and longitude, the bearings from each
+town, and where each road and airfield lie: --json.
+
+Every field, unrounded: add --json.
 ```
 
-### Hand-off 1: from candidates to lines of sight
+Post A stands 308 m above sea level, 1 km north of Didi-Opeti.
+Post B stands 139 m above sea level, 4 km northeast of Tolebi.
 
-Each candidate needs a `visible` check from each post.
-That is 3 candidates times 2 posts, so 6 questions.
-A batch asks them all at once.
+### Question 1: a site the posts cannot see
 
-You could type the 6 lines by hand.
-It is safer to let PowerShell write them from `farp-answer.jsonl`.
-Then no digit gets lost in copying.
-Paste this whole block into PowerShell and press Enter:
+`find-sites` has a test for this: `not-visible-from`.
+It takes the observers, then the share of them that may see the site.
+Add it to the command from Step 3:
 
 ```powershell
-$a = (Get-Content farp-answer.jsonl | ConvertFrom-Json).result
-$posts = @{ A = @{ x = -297000; z = 676000; alt_agl = 10 }; B = @{ x = -296000; z = 668000; alt_agl = 10 } }
-$n = 0
-$lines = foreach ($site in $a.candidates) {
-  $n++
-  foreach ($name in 'A', 'B') {
-    @{ id = "site$n-$name"; op = 'visible'; request = @{ a = $posts[$name]; b = @{ x = $site.x; z = $site.z; alt_agl = 2 } } } | ConvertTo-Json -Depth 5 -Compress
-  }
-}
-$lines | Set-Content lookout.jsonl
+.\dcsterrain.exe find-sites --terrain Caucasus --region airdrome-band Kutaisi 3000 15000 --footprint 120 80 --criteria surface-in land --criteria slope-max 3 --criteria dist-road-band 100 1000 --criteria clearing-max 0 --criteria not-visible-from -297000,676000@10 -296000,668000@10 0 --spacing 2000 --limit 3
 ```
 
-Here is what it does:
-
-- The first line loads the Step 3 answer into `$a` again.
-  A new PowerShell window would not have it.
-- The second line writes down the two posts, each 10 m above the ground.
-- `$n` counts the candidates.
-- The two `foreach` lines go through each candidate, and for each one through
-  post A and post B.
-- The long line writes one `visible` question.
-  `a` is the post.
-  `b` is the candidate, 2 m above the ground, the height of a person there.
-  The `id` names the pair, such as `site1-A`.
-- The last line saves all 6 lines in `lookout.jsonl`.
-
-To use it for your own problem, change three things:
-the answer file in the first line, the posts in the second line, and the
-two names `'A', 'B'` if you have other posts.
-
-The first line of `lookout.jsonl` looks like this.
-PowerShell may put the fields in another order, which does not matter:
+- `-297000,676000@10` is post A, 10 m above the ground.
+- `-296000,668000@10` is post B, 10 m above the ground.
+- `0` is the share of the posts that may see the site.
+  0 means none of them.
+  0.5 would allow one of the two.
+- The test looks from each post to a point 2 m above the site, the height
+  of a person's eyes.
 
 ```text
-{"op":"visible","id":"site1-A","request":{"a":{"alt_agl":10,"z":676000,"x":-297000},"b":{"alt_agl":2,"z":671858.71875,"x":-293887.375}}}
-```
+3 sites, best first, of 67872 lattice points in the region; 630 passed every test, and 15 tiles
+skipped whole.
+--limit asks for more sites, up to 200.
 
-Now send the batch:
+#  Score        x       z  MGRS                Hdg (°)  surface_in (%)  slope_max (°)
+1  6.000  -293887  671859  38T KM 78924 65394        0             100            0.0
+2  5.891  -270687  683959  38T KM 94066 86514        0             100            0.3
+3  5.797  -294087  690859  38T KM 97577 62546        0             100            0.6
+3 columns left out to fit 100 characters: dist_road_band (m), clearing_max (count), not_visible_from
+(%). --json has them.
 
-```powershell
-Get-Content lookout.jsonl | .\dcsterrain.exe query --terrain Caucasus > lookout-answers.jsonl
-```
+Each criterion's score, 0 to 1, is in --json; the site's score is their weighted sum.
 
-Show the answers as a table:
-
-```powershell
-Get-Content lookout-answers.jsonl | ConvertFrom-Json | Format-Table id, @{ n = 'visible'; e = { $_.result.visible } }, @{ n = 'clearance_m'; e = { [math]::Round($_.result.clearance_m) } }
-```
-
-```text
-id      visible clearance_m
---      ------- -----------
-site1-A   False         -56
-site1-B   False          -7
-site2-A    True           2
-site2-B   False        -141
-site3-A    True           2
-site3-B    True           0
+Every field, unrounded: add --json.
 ```
 
 What it means:
 
-- Post A sees candidates 2 and 3.
-- Post B sees candidate 3.
-- Neither post sees candidate 1.
-- All three candidates had the same score.
-  Being hidden breaks the tie.
-  Candidate 1 is the site to use.
-- At post B, the ground rises only 7 m above the line to candidate 1.
-  If B had a taller mast, it might see candidate 1.
+- Only 630 positions pass now, against 15,196 before.
+  The posts see most of the plain.
+- Every site in the list is hidden from both posts.
+- Site 1 has the best score, so it is the site to use.
+  It is the same site as site 1 in the Step 4 table.
+  The other two sites of that table are gone: a post sees each of them.
 
-### Hand-off 2: from the chosen site to a route
+Check site 1 against post B with `visible`.
+Step 6 already checked post A.
+
+```powershell
+.\dcsterrain.exe visible --terrain Caucasus --a -296000,668000@10 --b -293887,671859@2
+```
+
+```text
+No: the ground blocks the line, rising 6.5 m above it at its highest.
+The ends are 4.40 km apart.
+
+Point          x       z  MGRS                Height
+A        -296000  668000  38T KM 74834 63855  10.0 m above the ground
+B        -293887  671859  38T KM 78924 65394  2.0 m above the ground
+Blocked  -295913  668160  38T KM 75003 63918  144.7 m above sea level
+
+Blocked is where the ground first rises above the line from A.
+
+Every field, unrounded: add --json.
+```
+
+Post B cannot see site 1.
+But the ground rises only 6.5 m above the line.
+If B had a taller mast, it might see the site.
+
+### Question 2: the convoy's road
 
 **When to use `route`:** you need the way from one point to another along the
 roads or railways.
 
-The route needs a start and an end:
-
-- The start is Kutaisi, at `x` -284887.375, `z` 683858.71875.
-  That position came from the `nearest` answer in
-  [How you ask a question](#how-you-ask-a-question).
-- The end is candidate 1, at `x` -293887.375, `z` 671858.71875.
-  That position came from the table in Step 4.
-
-The route request can also take a list of observers, called
-`exposure_observers`.
-Then the answer says how much of each stretch of road those observers can see.
-The observers here are posts A and B, copied from the script above.
-`"geojson": true` asks for a map file too:
+The convoy starts at Kutaisi and ends at site 1.
+`--exposure-observers` names the posts.
+Then the answer says how much of each stretch of road those posts can see.
 
 ```powershell
-'{"op": "route", "request": {"network": "roads", "from": {"x": -284887.375, "z": 683858.71875}, "to": {"x": -293887.375, "z": 671858.71875}, "exposure_observers": [{"x": -297000, "z": 676000, "alt_agl": 10}, {"x": -296000, "z": 668000, "alt_agl": 10}], "geojson": true}}' | .\dcsterrain.exe query --terrain Caucasus > convoy.jsonl
-```
-
-Load the answer and show the totals:
-
-```powershell
-$r = (Get-Content convoy.jsonl | ConvertFrom-Json).result
-```
-
-```powershell
-$r | Format-List length, straight_line, ascent, descent
+.\dcsterrain.exe route --terrain Caucasus --network roads --from airport:Kutaisi --to -293887,671859 --exposure-observers -297000,676000@10 -296000,668000@10
 ```
 
 ```text
-length        : 25821.084562457352
-straight_line : 15000.0
-ascent        : 68.57054947481198
-descent       : 75.44872775378546
+The route by roads: 25.82 km, 1.72 × the 15.00 km straight line.
+It climbs 69 m and descends 75 m; its steepest 100 m is 9.3 %.
+
+Ends, each where it joins the network
+End         x       z  MGRS                Moved (m)
+From  -285357  683675  38T KM 91734 72132        504
+To    -293900  671983  38T KM 79045 65364        125
+
+Legs
+ #  Class  Length (km)  Up (m)  Down (m)  Grade (%)  Seen (%)        x       z  MGRS
+ 1  road          0.20       0         0        0.0       100  -285544  683730  38T KM 91762 71940
+ 2  road          1.48       0         0        0.0       100  -285112  685134  38T KM 93203 72169
+ 3  road          3.23      15         0        2.4        97  -282537  685933  38T KM 94348 74589
+ 4  road          1.55       0        15        1.7       100  -283226  684565  38T KM 92907 74102
+ 5  road          0.31       0         0        0.2       100  -283395  684306  38T KM 92629 73972
+ 6  road          1.20       1         0        0.2       100  -283975  683252  38T KM 91512 73549
+ 7  road          0.09       0         0        0.2       100  -284014  683171  38T KM 91427 73522
+ 8  road          0.47       0         0        0.1       100  -284199  682742  38T KM 90979 73401
+ 9  road          2.20       0         8        0.7       100  -285183  680772  38T KM 88904 72708
+10  road          1.76      15        14        4.8       100  -285418  679238  38T KM 87363 72691
+11  road          3.34       0         4        0.9       100  -287011  676469  38T KM 84418 71513
+12  road          2.18       0         2        0.3       100  -287253  674383  38T KM 82333 71565
+13  road          2.71       0         7        0.4       100  -288895  672245  38T KM 80001 70250
+14  road          5.10      38        24        9.3        79  -293900  671983  38T KM 79045 65364
+1 column left out to fit 100 characters: Edge. --json has it.
+
+Each leg's x, z and MGRS are where it ends. 59 waypoints are left out: --json lists them,
+--geojson-out draws the way.
+
+Every field, unrounded: add --json.
 ```
 
-- `length` is the length of the route: about 25.8 km.
-- `straight_line` is the straight distance: 15 km.
-  The roads add about 11 km.
-- `ascent` and `descent` are how far the route climbs and falls in total, in meters.
+What it means:
 
-The answer also has a list called `legs`.
-A leg is one stretch of road between two junctions.
-This route has 14 legs.
-Each leg has a `length` and an `exposure`.
-`exposure` is the share of the leg the posts can see, from 0 to 1.
-These are the first three legs:
-
-```powershell
-$r.legs | Select-Object -First 3 | Format-Table length, exposure
-```
-
-```text
-            length           exposure
-            ------           --------
-195.32288587666912                1.0
-1478.2657802697236                1.0
-3233.4260026464012 0.9694656488549618
-```
-
-To find how many meters the posts can see, multiply each leg's length by its
-exposure, and add them up:
-
-```powershell
-($r.legs | ForEach-Object { $_.length * $_.exposure } | Measure-Object -Sum).Sum
-```
-
-```text
-24653.4246850342
-```
-
-The posts can see about 24.7 km of the 25.8 km route.
-24.7 divided by 25.8 is about 95 %.
-The site is hidden, but the road to it is not.
+- The route is 25.82 km long.
+  The straight line is 15 km, so the roads add almost 11 km.
+- `Ends` says where the route joins the road.
+  Kutaisi's center is 504 m from the nearest road.
+  The site is 125 m from it.
+- `Legs` lists the stretches of road between junctions, in order.
+- `Seen` is the share of each leg the posts can see.
+  The posts see all of 12 legs, 97 % of leg 3 and 79 % of leg 14.
+- The site is hidden, but the road to it is not.
 
 Is there a better road?
-`route_alternatives` looks for different routes between the same two points.
-`k` is how many routes to look for:
+`route-alternatives` looks for different routes between the same two points.
+`--k` is how many routes to look for:
 
 ```powershell
-'{"op": "route_alternatives", "request": {"network": "roads", "from": {"x": -284887.375, "z": 683858.71875}, "to": {"x": -293887.375, "z": 671858.71875}, "k": 3}}' | .\dcsterrain.exe query --terrain Caucasus > alternatives.jsonl
+.\dcsterrain.exe route-alternatives --terrain Caucasus --network roads --from airport:Kutaisi --to -293887,671859 --k 3
 ```
 
-This command counts the routes it found:
-
-```powershell
-(Get-Content alternatives.jsonl | ConvertFrom-Json).result.routes.Count
-```
+The answer starts like this:
 
 ```text
-1
+1 route by roads, the least costly first.
+3 were asked for. A route is kept only when it is new, at most 1.50 × the first's length, and shares
+at most 50 % of its length with each route kept; the search, at most 12 tries, found no more.
 ```
 
 It found only one route.
-No other road reaches the site without a long detour.
+Any other route is over 1.5 times as long, or shares more than half its road with this one.
 So the convoy cannot hide by its choice of road.
 Run it at night, escort it, or deal with the posts first.
 
-### Hand-off 3: from answers to a map
+### Question 3: both on one map
 
-The route answer has a `geojson` field, because the request asked for one.
-Save it next to the FARP file from Step 7:
+Add `--geojson-out` to the `route` command, to draw the route:
 
 ```powershell
-$r.geojson | ConvertTo-Json -Depth 20 | Set-Content convoy.geojson
+.\dcsterrain.exe route --terrain Caucasus --network roads --from airport:Kutaisi --to -293887,671859 --exposure-observers -297000,676000@10 -296000,668000@10 --geojson-out convoy.geojson
 ```
 
-Open `farp.geojson` and `convoy.geojson` together in QGIS.
+Open `farp.geojson` from Step 7 and `convoy.geojson` together in QGIS.
 Or open them one after the other on geojson.io.
-You see the three candidates, and the road from Kutaisi to candidate 1.
+`farp.geojson` shows the three sites of Step 4.
+Site 1 is the one the convoy goes to.
+`convoy.geojson` shows the road from Kutaisi to it.
 
 ## Other questions you can ask
 
-Each operation fits a situation.
+Each command fits a situation.
+`--help` after a command lists what it takes.
 [queries.md](queries.md) describes each one in full.
-`.\dcsterrain.exe schema --op <operation>` prints every field a request can take.
 
-| Use | When you |
+| Command | When you |
 |---|---|
 | `sample` | need the height, slope or ground type at many points, or over an area |
-| `point_info` | have one position and want its grid reference and what is near it |
+| `point-info` | have one position and want what is there and what is near it |
 | `geo` | need to convert between x and z, latitude and longitude, and MGRS |
 | `describe` | want to confirm which terrain and build the tool is using |
-| `find_sites` | need the best places for something |
-| `score_site` | have a place in mind and want to test it |
-| `validate_placements` | want to check that units do not sit on water, a slope, a building or a runway |
+| `find-sites` | need the best places for something |
+| `score-site` | have a place in mind and want to test it |
+| `validate-placements` | want to check that units do not sit on water, a slope, a building or a runway |
 | `visible` | want to know if one point can see another |
 | `viewshed` | want the whole area one observer can see |
-| `radar_floor` | want to know how low a plane can fly past a site unseen |
+| `radar-floor` | want to know how low a plane can fly past a site unseen |
 | `coverage` | are placing a radar or SAM and want the gaps it leaves at each altitude |
-| `approach_spectrum` | want the directions from which a site can be approached unseen |
-| `unmask_profile` | have a flight path and want to know where a site first sees it |
+| `approach-spectrum` | want the directions from which a site can be approached unseen |
+| `unmask-profile` | have a flight path and want to know where a site first sees it |
 | `exposure` | have several radars or SAMs and want the holes between them |
 | `route` | need the way by road or rail |
-| `route_alternatives` | want several different ways |
+| `route-alternatives` | want several different ways |
 | `chokepoints` | want the roads or bridges that matter most, to cut or to guard (needs Step 2) |
 | `trafficability` | want to know if a ground group can drive from the road to a point |
 | `nearest` | want the nearest road, railway, airfield, town or object |
-| `scenery_in` | want the objects standing in an area |
+| `scenery-in` | want the objects standing in an area |
 | `towns` | want a real town for an objective or a briefing (needs Step 2) |
-| `airfield_info` | need an airfield's runways, radios and parking |
+| `airfield-info` | need an airfield's runways, radios and parking |
 
-**When you need the airfields' names and positions**, ask `nearest` for many of
-them from any point:
-
-```powershell
-'{"op": "nearest", "request": {"kind": "airdrome", "x": -284900, "z": 683800, "n": 30}}' | .\dcsterrain.exe query --terrain Caucasus > airfields.jsonl
-```
-
-This shows the first five as a table:
+**When you need the airfields' names and positions**, ask `nearest` for several:
 
 ```powershell
-(Get-Content airfields.jsonl | ConvertFrom-Json).result.results | Select-Object -First 5 | Format-Table id, name, x, z
+.\dcsterrain.exe nearest --terrain Caucasus --kind airdrome --at airport:Kutaisi --n 5
 ```
 
 ```text
-id name                           x                 z
--- ----                           -                 -
-25 Kutaisi              -284887.375      683858.71875
-23 Senaki-Kolkhi      -281782.46875 647279.4687499999
-24 Kobuleti          -317962.296875      635632.96875
-22 Batumi            -355810.703125       617386.1875
-20 Sukhumi-Babushara -220592.328125      564391.96875
+The 5 nearest airdromes to -284887, 683859 (38T KM 91980 72567), nearest first.
+
+#  Distance (m)  Name               Class  Id        x       z  MGRS
+1             0  Kutaisi            —      25  -284887  683859  38T KM 91980 72567
+2         36711  Senaki-Kolkhi      —      23  -281782  647279  38T KM 56437 80737
+3         58478  Kobuleti           —      24  -317962  635633  37T GG 37400 45960
+4         97205  Batumi             —      22  -355811  617386  37T GG 16665 09697
+5        135669  Sukhumi-Babushara  —      20  -220592  564392  37T FH 73597 47579
+
+Every field, unrounded: add --json.
 ```
 
-In a request, an airfield can be named by its `name`, such as `"Senaki-Kolkhi"`.
-It can also be named by its `id`, such as `"23"` or `23`.
-Use its `x` and `z` as the start or end of a route.
+`--n` takes up to 50.
+Use a name from this list after `airport:`, such as `airport:Senaki-Kolkhi`.
 
 The other commands:
 
@@ -987,79 +865,113 @@ The other commands:
 - **`cache list`**: use it to see how much space the cache takes.
 - **`cache clear`**: use it to free that space.
   The tool builds the cache again when it needs it.
-- **`schema`**: use it to look up every field of a request or an answer.
-- **`--help`**: use it after any command to list its options.
 
 ## When something goes wrong
 
-When a question fails, its answer line has `issues` instead of `result`.
-Each issue has a `code`, a `message` and a `path`.
-The `message` says what is wrong.
-The `path` names the part of your request that is wrong.
-It is empty when no single part is wrong.
+When a question fails, the tool prints a line that starts with `error:`.
+The line says what is wrong, and often what to type instead.
+Where a message shows a command starting with `dcsterrain`, type `.\dcsterrain.exe` instead.
+Here are the errors you are most likely to meet.
 
-### A misspelled field
-
-`slope_max` takes `deg`.
-This request gave it `degrees`:
+### A name without its kind
 
 ```powershell
-'{"op": "find_sites", "request": {"region": {"Circle": {"x": -284887, "z": 683859, "radius": 5000}}, "footprint": {"width": 60, "depth": 40}, "criteria": [{"name": "slope_max", "params": {"degrees": 3}}], "spacing": 1000}}' | .\dcsterrain.exe query --terrain Caucasus
+.\dcsterrain.exe nearest --terrain Caucasus --kind airdrome --at Kutaisi
 ```
 
 ```text
-{"line":1,"op":"find_sites","issues":[{"code":"invalid_request","message":"missing field `deg`","path":"criteria"}]}
+error: --at: "Kutaisi" needs a kind. Type airport:Kutaisi or town:KUTAISI.
 ```
 
-The message names the field the tool wanted.
-`path` says the problem is in `criteria`.
-Fix the spelling and run the command again.
+A place name needs `airport:` or `town:` before it.
+Kutaisi is both an airfield and a town, so the message offers both.
+Type the one you mean.
+Capital letters do not matter.
 
-### A line that is not JSON
-
-This line has no double quotes around its names:
+### A name it does not know
 
 ```powershell
-'{op: visible}' | .\dcsterrain.exe query --terrain Caucasus
+.\dcsterrain.exe nearest --terrain Caucasus --kind airdrome --at airport:Kutaisy
 ```
 
 ```text
-{"line":1,"issues":[{"code":"invalid_request","message":"the line is not JSON: key must be a string at line 1 column 2","path":""}]}
+error: --at: no airport on Caucasus is named "Kutaisy".
+The closest names: airport:Kutaisi, airport:Gudauta, airport:Krymsk, airport:Anapa-Vityazevo, airport:Batumi.
 ```
 
-Check the quotes, commas and brackets.
-Every name and every piece of text needs double quotes.
+The message lists the closest names.
+Check the spelling, and use one of them.
 
-### The request after the operation, in Windows PowerShell
-
-The tool can also take a request after the operation's name:
+### A town name two towns share
 
 ```powershell
-.\dcsterrain.exe query --terrain Caucasus nearest '{"kind": "airdrome", "x": -284900, "z": 683800}'
+.\dcsterrain.exe nearest --terrain Caucasus --kind airdrome --at town:Mayskiy
 ```
-
-That works in PowerShell 7.
-In Windows PowerShell 5.1, it fails:
 
 ```text
-ERROR invalid_request: the request is not JSON: key must be a string at line 1 column 2
-{"issues":[{"code":"invalid_request","message":"the request is not JSON: key must be a string at line 1 column 2","path":""}]}
+error: --at: "Mayskiy" names 2 towns on Caucasus. Type the position of the one you mean:
+  38T MP 24680 31287   x -107364 z 793444
+  38T KQ 93791 08909   x -49159 z 651511
 ```
 
-Windows PowerShell 5.1 removes the double quotes before the tool sees them.
-Send the question with `|`, as this guide does.
-That works in every PowerShell.
+Copy the position of the town you mean, in MGRS or as `x,z`.
+For the first one, type `--at "38T MP 24680 31287"` or `--at -107364,793444`.
+
+### An MGRS without quotes
+
+```powershell
+.\dcsterrain.exe point-info --terrain Caucasus --points 38T KM 78924 65394
+```
+
+```text
+error: --points: "38T" is not a place: a name needs its kind, and no airport or town on Caucasus has it.
+```
+
+This is the first of four errors, one for each part.
+Each one is followed by a list of the forms a place takes.
+PowerShell split the MGRS at its spaces.
+Put it in quotes: `"38T KM 78924 65394"`.
+
+### A misspelled test
+
+```powershell
+.\dcsterrain.exe find-sites --terrain Caucasus --region circle airport:Kutaisi 5000 --footprint 60 40 --criteria slop-max 3 --spacing 1000
+```
+
+```text
+error: --criteria #1 is one of slope-max, span-max, surface-in, surface-enum-in, cover-in, cover-fraction-min, dist-cover-band, dist-road-band, dist-rail-band, dist-water-min, dist-airdrome-band, scenery-max, scenery-in-footprint-max, clearing-max, enclosure-min, masked-from, not-visible-from, visible-to, tpi-class-in, valid, not "slop-max". Did you mean `slope-max`?
+
+For the flags find-sites takes, run: dcsterrain find-sites --help
+```
+
+`#1` means the first `--criteria`.
+The message lists every test and suggests the one you probably meant.
+
+### A missing option
+
+```powershell
+.\dcsterrain.exe find-sites --terrain Caucasus
+```
+
+```text
+error: --region is required: Where to look.
+
+For the flags find-sites takes, run: dcsterrain find-sites --help
+```
+
+Add the option the message names.
+`--help` shows every required option.
 
 ### The wrong terrain id
 
 This command used the folder name `GermanyColdWar` instead of the id:
 
 ```powershell
-'{"op": "describe"}' | .\dcsterrain.exe query --terrain GermanyColdWar
+.\dcsterrain.exe nearest --terrain GermanyColdWar --kind airdrome --at 0,0
 ```
 
 ```text
-{"line":1,"op":"describe","issues":[{"code":"terrain_refused","message":"no terrain GermanyColdWar in this install; the ids it holds are Afghanistan, Caucasus, GermanyCW, MarianaIslands, MarianaIslandsWWII, Nevada, PersianGulf, Syria","path":""}]}
+error: no terrain GermanyColdWar in this install; the ids it holds are Afghanistan, Caucasus, GermanyCW, MarianaIslands, MarianaIslandsWWII, Nevada, PersianGulf, Syria
 ```
 
 The message lists the ids you can use.
@@ -1070,11 +982,11 @@ The message lists the ids you can use.
 This command pointed the tool at a folder with no DCS in it:
 
 ```powershell
-'{"op": "describe"}' | .\dcsterrain.exe query --install C:\Games --terrain Caucasus
+.\dcsterrain.exe nearest --install C:\Games --terrain Caucasus --kind airdrome --at 0,0
 ```
 
 ```text
-{"line":1,"op":"describe","issues":[{"code":"terrain_refused","message":"C:\\Games has no Mods/terrains to read: The system cannot find the path specified. (os error 3)","path":""}]}
+error: C:\Games has no Mods/terrains to read: The system cannot find the path specified. (os error 3)
 ```
 
 The tool found no terrains in that folder.
@@ -1083,119 +995,97 @@ It also happens when you have moved DCS since you installed it.
 Give `--install` the DCS folder.
 On Windows, that folder holds the `bin` and `Mods` folders.
 For example: `--install "D:\DCS World"`.
-Put `--install` after `query`, `index` or `list-terrains`, next to `--terrain`.
 
-### An airfield name it does not know
-
-This request misspelled Kutaisi:
+### Off the terrain
 
 ```powershell
-'{"op": "airfield_info", "request": {"airdrome": "Kutaisy"}}' | .\dcsterrain.exe query --terrain Caucasus
+.\dcsterrain.exe visible --terrain Caucasus --a 900000,900000@2 --b airport:Kutaisi@100
 ```
 
 ```text
-{"line":1,"op":"airfield_info","issues":[{"code":"unknown_airdrome","message":"no airdrome has the name, name_id or id `Kutaisy`","path":"airdrome"}]}
+error: --a: 900000,900000 lies off Caucasus, which covers x -490050 to 270000 and z -570000 to 960050.
 ```
 
-To see the right names, list the airfields as
-[Other questions you can ask](#other-questions-you-can-ask) shows.
+The point is outside the terrain.
+Check that you did not swap `x` and `z`.
 
 ### The region is too big
 
-This request asked for sites in a circle 120 km across:
-
 ```powershell
-'{"op": "find_sites", "request": {"region": {"Circle": {"x": -284887, "z": 683859, "radius": 60000}}, "footprint": {"width": 60, "depth": 40}, "criteria": [{"name": "slope_max", "params": {"deg": 3}}], "spacing": 1000}}' | .\dcsterrain.exe query --terrain Caucasus
+.\dcsterrain.exe find-sites --terrain Caucasus --region circle airport:Kutaisi 60000 --footprint 60 40 --criteria slope-max 3 --spacing 1000
 ```
 
 ```text
-{"line":1,"op":"find_sites","issues":[{"code":"too_large","message":"the region holds more than 131072 lattice points at this step, over the 262144 sites a search may weigh at 2 orientations; widen the step or split the region","path":"region"}]}
+error: --region: the region holds more than 131072 lattice points at this step, over the 262144 sites a search may weigh at 2 orientations; widen the step or split the region
 ```
 
-`find_sites` tests positions on a grid.
-This region holds too many positions.
+This circle is 120 km across.
+`find-sites` tests positions on a grid, and this region holds too many.
 There are three fixes:
 
 - Make the region smaller.
 - Split it into pieces, and ask about each piece.
-- Add a larger `step` to the request, such as `"step": 300`.
-  `step` is the distance between the positions it tests.
+- Add `--step 300`.
+  `--step` is the distance between the positions it tests.
   It is 100 m unless you set it.
 
-### No candidates
+### No site passes
 
-This request asked for a site on the sea, near Kutaisi, where there is no sea:
+This command asked for a site on the sea, near Kutaisi, where there is no sea:
 
 ```powershell
-'{"op": "find_sites", "request": {"region": {"Circle": {"x": -284887, "z": 683859, "radius": 5000}}, "footprint": {"width": 60, "depth": 40}, "criteria": [{"name": "surface_in", "params": {"classes": ["sea"]}}], "spacing": 1000}}' | .\dcsterrain.exe query --terrain Caucasus
+.\dcsterrain.exe find-sites --terrain Caucasus --region circle airport:Kutaisi 5000 --footprint 60 40 --criteria surface-in sea --spacing 1000
 ```
 
 ```text
-{"line":1,"op":"find_sites","result":{"candidates":[],"cell_size":50.0,"dcs_build":"2.9.31.29434","elapsed_ms":3,"stats":{"cells_considered":7845,"cells_passed":0,"tiles_skipped":15},"terrain":"Caucasus","terrain_fingerprint":"6293651208-203468160-1140069192"}}
+No site passes every test: of 7845 lattice points in the region, 0 passed, and 15 tiles skipped
+whole. Loosen a criterion, or widen the region.
 ```
 
 This is not an error.
-The request worked.
-But `candidates` is empty, and `cells_passed` is 0.
-No position passed every test.
+The question worked, but no position passed every test.
 Make one test less strict and ask again.
 Repeat until some positions pass.
 
-### The terrain is not prepared
-
-`chokepoints` and `towns` answer this until you run [Step 2](#step-2-prepare-the-terrain):
-
-```text
-{"line":1,"op":"chokepoints","issues":[{"code":"not_ready","message":"betweenness is not built yet; `dcsterrain index --terrain Caucasus` builds it","path":""}]}
-```
-
-Run the command in the message.
-Then ask your question again.
-
 ### No route
 
-This request allowed no detour at all:
+This command allowed no detour at all:
 
 ```powershell
-'{"op": "route", "request": {"network": "roads", "from": {"x": -284887, "z": 683859}, "to": {"x": -250000, "z": 650000}, "max_detour_factor": 1.0}}' | .\dcsterrain.exe query --terrain Caucasus
+.\dcsterrain.exe route --terrain Caucasus --network roads --from airport:Kutaisi --to -250000,650000 --max-detour-factor 1.0
 ```
 
 ```text
-{"line":1,"op":"route","issues":[{"code":"no_route","message":"the network joins no route between the ends within the detour allowed, past the regions avoided","path":""}]}
+error: the network joins no route between the ends within the detour allowed, past the regions avoided
 ```
 
 `route` found no way along the roads between the start and the end.
-There are three reasons this can happen:
+There are four reasons this can happen:
 
 - No road joins the start to the end.
+- The start or the end joins a short road that meets no other road.
+  `route` begins on the road nearest to the start, and ends on the road nearest to the end.
+  Kobuleti's nearest road is one such piece, so every route from `airport:Kobuleti` fails.
+  `nearest --kind road --n 3` lists the roads near a point.
+  Start from a point on another of them instead.
 - An area you asked it to avoid cuts every way through.
 - Every way is too long.
   By default, a route may be at most 3 times as long as the straight line.
-  `max_detour_factor` sets that limit.
-  This request set it to 1.0.
+  `--max-detour-factor` sets that limit.
+  This command set it to 1.0.
   No road is that straight.
 
-### Off the terrain
+### The terrain is not prepared
 
-A point outside the terrain has no ground.
-Most operations refuse it with the code `off_terrain`:
-
-```powershell
-'{"op": "visible", "request": {"a": {"x": 900000, "z": 900000, "alt_agl": 2}, "b": {"x": -284887.375, "z": 683858.71875, "alt_agl": 100}}}' | .\dcsterrain.exe query --terrain Caucasus
-```
+`chokepoints` and `towns` refuse until you run [Step 2](#step-2-prepare-the-terrain):
 
 ```text
-{"line":1,"op":"visible","issues":[{"code":"off_terrain","message":"no mesh covers this point, so it has no ground to stand on","path":"a"}]}
+error: betweenness is not built yet; `dcsterrain index --terrain Caucasus` builds it
 ```
 
-`path` is `a`, so point `a` is the one off the terrain.
-`point_info` answers anyway, with `height`, `slope` and `cover` set to `null`.
-Do not trust its other fields for such a point.
-Check that you did not swap `x` and `z`.
-
-### Other codes
-
-`.\dcsterrain.exe schema` lists every code under `issue_codes`, with its meaning.
+Betweenness is how the tool ranks chokepoints.
+Run the command in the message, as `.\dcsterrain.exe index --terrain Caucasus`.
+Then ask your question again.
 
 ## On macOS or Linux
 
@@ -1214,10 +1104,10 @@ Copy these three things from a Windows DCS install to your computer:
 Put them in one folder, such as `dcs` in your home folder.
 Keep the folders inside it as they were.
 For example, `dcs/Mods/terrains/Caucasus` holds Caucasus.
-Then add `--install ~/dcs` to every `query`, `index` and `list-terrains`.
+Then add `--install ~/dcs` to every command.
 `~` means your home folder.
 
-Download the file for your computer from the latest release:
+Download the file for your computer from release 0.2.0:
 
 - `dcsterrain-aarch64-apple-darwin.tar.gz` for a Mac with Apple silicon.
 - `dcsterrain-x86_64-apple-darwin.tar.gz` for a Mac with an Intel chip.
@@ -1226,7 +1116,7 @@ Download the file for your computer from the latest release:
 For example, on a Mac with Apple silicon, open Terminal and run:
 
 ```bash
-curl -LO https://github.com/tritiumgg/dcs-terrain/releases/latest/download/dcsterrain-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/tritiumgg/dcs-terrain/releases/download/v0.2.0/dcsterrain-aarch64-apple-darwin.tar.gz
 ```
 
 ```bash
@@ -1241,29 +1131,135 @@ xattr -d com.apple.quarantine dcsterrain
 ```
 
 The program is `./dcsterrain` instead of `.\dcsterrain.exe`.
-Questions go in the same way, with `|`:
+Every command works the same way:
 
 ```bash
-echo '{"op": "nearest", "request": {"kind": "airdrome", "x": -284900, "z": 683800}}' | ./dcsterrain query --install ~/dcs --terrain Caucasus
+./dcsterrain nearest --install ~/dcs --terrain Caucasus --kind airdrome --at town:Zugdidi
 ```
-
-To pick fields out of an answer, use `jq`, a free tool that reads JSON in the terminal.
 
 A DCS update can change a terrain file while a question is reading it.
 Then the question may stop with the message "bus error".
 Ask the question again.
+
+## For software: `query`
+
+The commands above are for people.
+Software, scripts and AI assistants use `query` instead.
+`query` takes a question in JSON and answers in JSON.
+JSON is a plain-text format for data.
+Each command above makes the same question `query` takes, and gets the same
+answer.
+
+### One question
+
+A question names its operation in `op` and its details in `request`.
+The `|` sign sends it into the tool:
+
+```powershell
+'{"op": "nearest", "request": {"kind": "airdrome", "x": -284900, "z": 683800}}' | .\dcsterrain.exe query --terrain Caucasus
+```
+
+```text
+{"line":1,"op":"nearest","result":{"cell_size":50.0,"dcs_build":"2.9.31.29434","elapsed_ms":1,"results":[{"class":null,"distance":60.0606545632205,"id":"25","kind":"airdrome","name":"Kutaisi","x":-284887.375,"z":683858.71875}],"terrain":"Caucasus","terrain_fingerprint":"6293651208-203468160-1140069192"}}
+```
+
+- The single quotes `' '` keep the line together.
+- `line` counts the lines you sent.
+- `result` holds the answer.
+
+An operation's name is its command's name with `_` for `-`: `find-sites`
+is `find_sites`.
+
+### From a command to a request
+
+`--show-request` prints the request a command makes, and stops.
+It is the easiest way to write a request:
+
+```powershell
+.\dcsterrain.exe nearest --terrain Caucasus --kind airdrome --at town:Zugdidi --show-request
+```
+
+`--json` on a command prints the answer `query` gives, byte for byte, without
+the `line` and `op` around it.
+
+`.\dcsterrain.exe schema` prints every request and answer, field by field.
+`.\dcsterrain.exe schema --op find_sites` prints one.
+[queries.md](queries.md) describes them in full.
+
+### Many questions at once
+
+A batch is a file with one question per line.
+The tool starts once and reads the terrain once, so a batch is faster.
+Each line can also have an `id`, so you can tell the answers apart.
+A file of JSON lines is called `.jsonl`.
+This command makes a file, `questions.jsonl`, with two questions in it:
+
+```powershell
+@'
+{"id": "kutaisi", "op": "nearest", "request": {"kind": "airdrome", "x": -284900, "z": 683800}}
+{"id": "site1", "op": "point_info", "request": {"points": [{"x": -293887.375, "z": 671858.71875}]}}
+'@ | Set-Content questions.jsonl
+```
+
+Then send the file's lines into the tool:
+
+```powershell
+Get-Content questions.jsonl | .\dcsterrain.exe query --terrain Caucasus | Set-Content answers.jsonl
+```
+
+`Set-Content` saves the answers as plain text.
+In Windows PowerShell 5.1, `>` would save them in a form other tools may not read.
+
+Each line of `answers.jsonl` answers one line of your file, in the same order,
+with the same `id`.
+If a line fails, it has `issues` instead of `result`.
+The other lines still run.
+
+### Errors in JSON
+
+A failed question has `issues` instead of `result`.
+Each issue has a `code`, a `message` and a `path`.
+This question misspells Kutaisi:
+
+```powershell
+'{"op": "airfield_info", "request": {"airdrome": "Kutaisy"}}' | .\dcsterrain.exe query --terrain Caucasus
+```
+
+```text
+{"line":1,"op":"airfield_info","issues":[{"code":"unknown_airdrome","message":"no airdrome has the name, name_id or id `Kutaisy`","path":"airdrome"}]}
+```
+
+The `path` names the part of the request that is wrong.
+`.\dcsterrain.exe schema` lists every code under `issue_codes`.
+
+### Putting the request on the command line
+
+`query` can also take a request after the operation's name:
+
+```powershell
+.\dcsterrain.exe query --terrain Caucasus nearest '{"kind": "airdrome", "x": -284900, "z": 683800}'
+```
+
+That works in PowerShell 7.
+Windows PowerShell 5.1 removes the double quotes before the tool sees them, so
+it fails there.
+`$PSVersionTable.PSVersion` shows which PowerShell you have.
+Send the question with `|`, which works in every PowerShell.
+
+### GeoJSON in an answer
+
+A request with `"geojson": true` adds a `geojson` field to the answer.
+It holds what `--geojson-out` writes to a file.
 
 ## Ask through an AI assistant
 
 An AI assistant can ask the questions for you.
 It talks to `dcsterrain` through MCP, the Model Context Protocol.
 MCP is the standard way an assistant calls tools on your computer.
-`dcsterrain mcp` starts a server with one tool per kind of question.
-The assistant starts the server itself, when it opens.
-It needs no shell, the window where you type commands.
+`dcsterrain mcp` is a small program, a server, with one tool per kind of question.
+The assistant starts it by itself, when the assistant opens.
+You do not type any commands.
 
-Release 0.1.0 has no `mcp` command.
-Until a later release, [build the tool yourself](../README.md#build-it-yourself).
 The steps below take the program to be `C:\dcs-terrain\dcsterrain.exe`.
 Put your own path wherever it appears.
 In a command, put a path with a space in it in quotes, such as
@@ -1291,6 +1287,8 @@ Expand-Archive -Force source.zip -DestinationPath .
 ```
 
 The skill is now in `C:\dcs-terrain\dcs-terrain-main\skill`.
+Run the steps below in the same window.
+In a new window, run `cd C:\dcs-terrain` first.
 
 ### Claude Code
 
@@ -1317,8 +1315,16 @@ Copy-Item -Recurse -Force dcs-terrain-main\skill\* $HOME\.claude\skills\dcs-terr
 
 Start `claude`, and type `/mcp`.
 `dcsterrain` shows as connected.
-On macOS or Linux, the same commands work with your own paths, and the skill
-goes in `~/.claude/skills/dcs-terrain`.
+On macOS or Linux, `claude mcp add` is the same, with your own path.
+The skill goes in `~/.claude/skills/dcs-terrain`:
+
+```bash
+mkdir -p ~/.claude/skills/dcs-terrain
+```
+
+```bash
+cp -R dcs-terrain-main/skill/* ~/.claude/skills/dcs-terrain
+```
 
 ### Claude Desktop
 
@@ -1379,7 +1385,7 @@ The assistant asks for your approval before it uses a tool, unless you allow it
 for good.
 It says which terrain and DCS version the answer came from.
 
-A very large answer, such as a map drawing of a big area, does not fit in a chat.
+A very large answer, such as the GeoJSON of a big area, does not fit in a chat.
 The tool writes it to a file instead and gives the assistant its path.
 The file is in the `dcsterrain` folder of your temporary folder, which on
 Windows is `%TEMP%`.
@@ -1390,18 +1396,17 @@ If the server does not connect, or every tool fails, ask one question by hand
 with the same program, here about Caucasus:
 
 ```powershell
-C:\dcs-terrain\dcsterrain.exe query --terrain Caucasus describe
+C:\dcs-terrain\dcsterrain.exe describe --terrain Caucasus
 ```
 
-An error there is the reason.
+If it prints an error, that error is the cause.
 [When something goes wrong](#when-something-goes-wrong) explains each one.
 Claude Desktop writes what the server printed to
 `%APPDATA%\Claude\logs\mcp-server-dcsterrain.log`.
 
 ## Where to go next
 
+- `.\dcsterrain.exe <command> --help` shows what one command takes.
 - [queries.md](queries.md) describes every operation, test and layer.
-- `.\dcsterrain.exe schema --op <operation>` prints what one operation takes and
-  returns.
 - The [skill](../skill/SKILL.md) teaches an AI assistant to ask these questions
   for you.
