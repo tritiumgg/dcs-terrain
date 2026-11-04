@@ -71,10 +71,13 @@ fn color_is_escapes_only_when_asked() {
     t.row(vec!["1".into()]);
     for color in [false, true] {
         let mut p = Page::new(color);
+        p.heading("Heading");
         p.table(&t);
         p.note("A note.");
         let text = p.finish();
         assert_eq!(text.contains('\x1b'), color, "{text}");
+        // A heading's table follows it with no empty line.
+        assert!(!text.contains("Heading\n\n") && !text.contains("Heading\x1b[0m\n\n"));
     }
 }
 

@@ -23,6 +23,7 @@ pub fn readable(op: &str, asked: &Asked, answer: &Value) -> Option<String> {
     match op {
         "find_sites" => find_sites(&mut page, asked, answer),
         "nearest" => nearest(&mut page, asked, answer),
+        "route" => route(&mut page, asked, answer),
         _ => return None,
     }
     if let Some(path) = asked.geojson_out {
@@ -231,4 +232,114 @@ fn nearest(page: &mut Page, asked: &Asked, a: &Value) {
         t.row(row);
     }
     page.table(&t);
+}
+
+/// Kilometers to two places: ten meters.
+fn km(v: &Value) -> String {
+    fixed(num(v).map(|m| m / 1000.0), 2)
+}
+
+/// Where each end of a route was given and where it joined the network.
+fn route_ends(page: &mut Page, asked: &Asked, route: &Value) {
+    page.heading("Ends, each where it joins the network");
+    let mut t = with_place(Table::new().col("End", Align::Left)).col("Moved (m)", Align::Right);
+    for (end, given, snapped) in [
+        ("From", &asked.request["from"], &route["snapped_from"]),
+        ("To", &asked.request["to"], &route["snapped_to"]),
+    ] {
+        let moved = match (
+            num(&given["x"]),
+            num(&given["z"]),
+            num(&snapped["x"]),
+            num(&snapped["z"]),
+        ) {
+            (Some(gx), Some(gz), Some(sx), Some(sz)) => Some((gx - sx).hypot(gz - sz)),
+            _ => None,
+        };
+        let mut row = vec![end.to_string()];
+        row.extend(place(asked, snapped));
+        row.push(fixed(moved, 0));
+        t.row(row);
+    }
+    page.table(&t);
+}
+
+/// A route's legs, each with where it ends.
+fn route_legs(page: &mut Page, asked: &Asked, route: &Value, heading: &str) {
+    let empty = Vec::new();
+    let legs = route["legs"].as_array().unwrap_or(&empty);
+    let exposure = asked.request["exposure_observers"]
+        .as_array()
+        .is_some_and(|o| !o.is_empty());
+    page.heading(heading);
+    let mut t = Table::new()
+        .col("#", Align::Right)
+        .col("Class", Align::Left)
+        .optional("Edge", Align::Right, 1)
+        .col("Length (km)", Align::Right)
+        .col("Up (m)", Align::Right)
+        .col("Down (m)", Align::Right)
+        .col("Grade (%)", Align::Right);
+    if exposure {
+        t = t.optional("Seen (%)", Align::Right, 2);
+    }
+    let mut t = with_place(t);
+    for (n, l) in legs.iter().enumerate() {
+        let mut row = vec![
+            (n + 1).to_string(),
+            text(&l["class"]),
+            text(&l["edge_id"]),
+            km(&l["length"]),
+            whole(&l["ascent"]),
+            whole(&l["descent"]),
+            fixed(num(&l["max_grade_pct"]), 1),
+        ];
+        if exposure {
+            row.push(fixed(num(&l["exposure"]).map(|s| s * 100.0), 0));
+        }
+        row.extend(place(asked, &l["to"]));
+        t.row(row);
+    }
+    page.table(&t);
+}
+
+/// How much longer than the straight line a route is: `1.15 ×`.
+fn stretch(route: &Value) -> String {
+    match (num(&route["length"]), num(&route["straight_line"])) {
+        (Some(l), Some(s)) if s > 0.0 => format!("{} ×", fixed(Some(l / s), 2)),
+        _ => "—".into(),
+    }
+}
+
+/// What a route's table leaves out.
+fn waypoints_left_out(page: &mut Page, routes: &[&Value]) {
+    let n: usize = routes
+        .iter()
+        .map(|r| r["waypoints"].as_array().map_or(0, Vec::len))
+        .sum();
+    page.blank();
+    page.note(&format!(
+        "Each leg's x, z and MGRS are where it ends. {} left out: --json lists them, \
+         --geojson-out draws the way.",
+        count(n, "waypoint is", "waypoints are")
+    ));
+}
+
+fn route(page: &mut Page, asked: &Asked, a: &Value) {
+    let network = text(&asked.request["network"]);
+    page.line(&format!(
+        "The route by {network}: {} km, {} the {} km straight line.",
+        km(&a["length"]),
+        stretch(a),
+        km(&a["straight_line"])
+    ));
+    page.line(&format!(
+        "It climbs {} m and descends {} m; its steepest 100 m is {} %.",
+        whole(&a["ascent"]),
+        whole(&a["descent"]),
+        fixed(num(&a["max_grade_pct"]), 1),
+    ));
+    route_ends(page, asked, a);
+    route_legs(page, asked, a, "Legs");
+    waypoints_left_out(page, &[a]);
 }

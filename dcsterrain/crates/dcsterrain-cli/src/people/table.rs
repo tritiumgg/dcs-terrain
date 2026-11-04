@@ -214,6 +214,14 @@ impl Page {
         self.wrapped(words, Some("2"));
     }
 
+    /// A heading over a table.
+    pub fn heading(&mut self, words: &str) {
+        self.blank();
+        self.styled("1", words);
+        self.text.push('\n');
+        self.headed = true;
+    }
+
     /// An empty line, never two in a row.
     pub fn blank(&mut self) {
         if !self.text.is_empty() && !self.text.ends_with("\n\n") {

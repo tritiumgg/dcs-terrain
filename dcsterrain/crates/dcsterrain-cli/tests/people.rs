@@ -290,7 +290,7 @@ fn help_reads_from_the_schema_with_an_example() {
 }
 
 /// The operations that print a table rather than the plain list.
-const TABLED: &[&str] = &["find_sites", "nearest"];
+const TABLED: &[&str] = &["find_sites", "nearest", "route"];
 
 /// The questions each table is shown with on `Synth`: a name for its
 /// snapshot, and the command line after the command, where a quoted
@@ -315,6 +315,15 @@ const TABLE_CASES: &[(&str, &str)] = &[
     (
         "nearest-airdromes",
         "nearest --kind airdrome --at \"town:Synth Town 1\" --n 2",
+    ),
+    (
+        "route",
+        "route --network roads --from 10000,-12000 --to 20000,10000",
+    ),
+    (
+        "route-seen",
+        "route --network roads --from 10000,-12000 --to \"airport:Synth Field\" \
+         --exposure-observers 24000,-15000@10",
     ),
 ];
 

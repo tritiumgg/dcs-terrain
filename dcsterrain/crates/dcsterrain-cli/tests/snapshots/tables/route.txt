@@ -1,0 +1,19 @@
+The route by roads: 42.55 km, 1.76 × the 24.17 km straight line.
+It climbs 314 m and descends 214 m; its steepest 100 m is 9.5 %.
+
+Ends, each where it joins the network
+End       x       z  MGRS                Moved (m)
+From  10000  -12475  36T WR 87042 08114        475
+To    20000   10025  36T XR 09541 18115         25
+
+Legs
+#  Class  Edge  Length (km)  Up (m)  Down (m)  Grade (%)      x       z  MGRS
+1  rdb       4        15.03     314       164        9.5  25025  -12475  36T WR 87042 23140
+2  road      1         8.00       0         0        0.0  25025   -4475  36T WR 95042 23139
+3  road      2        14.50       0         0        0.0  25025   10025  36T XR 09542 23140
+4  rdb       7         5.03       0        50        1.0  20000   10025  36T XR 09541 18115
+
+Each leg's x, z and MGRS are where it ends. 87 waypoints are left out: --json lists them,
+--geojson-out draws the way.
+
+Every field, unrounded: add --json.
