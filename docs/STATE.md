@@ -4,16 +4,17 @@ Where the work is. Updated at the end of every working session, before handing
 back. This file holds progress; `plan.md` holds the task graph and
 `design.md` and `queries.md` hold the design.
 
-**Last updated:** 2026-11-04T18:27Z
+**Last updated:** 2026-11-04T18:35Z
 
 ## Done
 
 Newest first. Max 5 entries — drop the oldest when adding a sixth.
 
 1. **H5 fix: `geo` for a person with an MGRS.** `--to-xz` takes an MGRS,
-   read to its square's center; `geo` prints one row per point with x, z,
-   MGRS, latitude and longitude; the guide's "Convert a position" shows it.
-   *Verified by:* an agent, through `mise run check` on `Synth` (two `geo`
+   read to its square's center, and every latitude and longitude form a
+   place takes; `geo` prints one row per point with x, z, MGRS, latitude
+   and longitude; the guide's "Convert a position" shows it.
+   *Verified by:* an agent, through `mise run check` on `Synth` (three `geo`
    snapshots); the new guide commands run in PowerShell 5.1 and 7 on
    Caucasus of 2.9.31.29434, output pasted as printed. The user's rerun of
    H5 is pending.
