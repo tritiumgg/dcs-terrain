@@ -27,6 +27,8 @@ pub fn readable(op: &str, asked: &Asked, answer: &Value) -> Option<String> {
         "route_alternatives" => route_alternatives(&mut page, asked, answer),
         "point_info" => point_info(&mut page, asked, answer),
         "airfield_info" => airfield_info(&mut page, asked, answer),
+        "towns" => towns(&mut page, asked, answer),
+        "visible" => visible(&mut page, asked, answer),
         _ => return None,
     }
     if let Some(path) = asked.geojson_out {
@@ -695,4 +697,112 @@ fn airfield_info(page: &mut Page, asked: &Asked, a: &Value) {
         "Grid courses, each end's latitude and longitude, the navaids' heights and the stands' \
          classes: --json.",
     );
+}
+
+fn towns(page: &mut Page, asked: &Asked, a: &Value) {
+    let empty = Vec::new();
+    let places = a["places"].as_array().unwrap_or(&empty);
+    let matched = num(&a["matched"]).unwrap_or(0.0) as usize;
+    if places.is_empty() {
+        page.line(
+            "No place matches. Widen the region, or loosen --size, --form or --min-buildings.",
+        );
+        return;
+    }
+    let by = if asked.request["sort"] == "floor" {
+        "the most floor area"
+    } else {
+        "the most buildings"
+    };
+    page.line(&format!(
+        "{} of the {matched} that match, {by} first.",
+        count(places.len(), "place", "places")
+    ));
+    if matched > places.len() {
+        page.line("--limit shows more, up to 1 000.");
+    }
+    let mut t = Table::new()
+        .col("#", Align::Right)
+        .cut("Name", 10)
+        .col("Size", Align::Left)
+        .col("Form", Align::Left)
+        .col("Buildings", Align::Right)
+        .optional("Floor (m²)", Align::Right, 2)
+        .optional("Area (ha)", Align::Right, 1);
+    t = with_place(t);
+    for (n, p) in places.iter().enumerate() {
+        let mut row = vec![
+            (n + 1).to_string(),
+            p["name"].as_str().unwrap_or("(unnamed)").into(),
+            text(&p["size"]),
+            text(&p["form"]),
+            whole(&p["buildings"]),
+            whole(&p["floor"]),
+            whole(&p["hectares"]),
+        ];
+        row.extend(place(asked, p));
+        t.row(row);
+    }
+    page.table(&t);
+    page.blank();
+    let outlines = if asked.request["outlines"] == true {
+        ", and the outlines, which --geojson-out draws"
+    } else {
+        ""
+    };
+    page.note(&format!(
+        "Each place's other names, id and the box of its group{outlines}: --json."
+    ));
+}
+
+/// A point's height as a request gives it.
+fn height_words(at: &Value) -> String {
+    match (num(&at["alt_agl"]), num(&at["alt"])) {
+        (Some(agl), _) => format!("{} m above the ground", fixed(Some(agl), 1)),
+        (None, Some(msl)) => format!("{} m above sea level", fixed(Some(msl), 1)),
+        _ => "—".into(),
+    }
+}
+
+fn visible(page: &mut Page, asked: &Asked, a: &Value) {
+    let (from, to) = (&asked.request["a"], &asked.request["b"]);
+    let clearance = fixed(num(&a["clearance_m"]).map(f64::abs), 1);
+    if a["visible"] == true {
+        page.line(&format!(
+            "Yes: A and B see each other. The line clears the ground by {clearance} m at its lowest."
+        ));
+    } else {
+        page.line(&format!(
+            "No: the ground blocks the line, rising {clearance} m above it at its highest."
+        ));
+    }
+    if let (Some(ax), Some(az), Some(bx), Some(bz)) = (
+        num(&from["x"]),
+        num(&from["z"]),
+        num(&to["x"]),
+        num(&to["z"]),
+    ) {
+        page.line(&format!(
+            "The ends are {} km apart.",
+            fixed(Some((ax - bx).hypot(az - bz) / 1000.0), 2)
+        ));
+    }
+    let mut t = with_place(Table::new().col("Point", Align::Left)).col("Height", Align::Left);
+    for (name, at) in [("A", from), ("B", to)] {
+        let mut row = vec![name.to_string()];
+        row.extend(place(asked, at));
+        row.push(height_words(at));
+        t.row(row);
+    }
+    if !a["blocking"].is_null() {
+        let mut row = vec!["Blocked".to_string()];
+        row.extend(place(asked, &a["blocking"]));
+        row.push(height_words(&a["blocking"]));
+        t.row(row);
+    }
+    page.table(&t);
+    if !a["blocking"].is_null() {
+        page.blank();
+        page.note("Blocked is where the ground first rises above the line from A.");
+    }
 }

@@ -1,0 +1,10 @@
+2 places of the 3 that match, the most buildings first.
+--limit shows more, up to 1 000.
+
+#  Name       Size    Form     Buildings  Floor (m²)  Area (ha)      x       z  MGRS
+1  (unnamed)  hamlet  compact          5        4320          4  26242  -14437  36T WR 85080 24356
+2  (unnamed)  hamlet  compact          3        2592          3  26447  -15099  36T WR 84417 24561
+
+Each place's other names, id and the box of its group: --json.
+
+Every field, unrounded: add --json.

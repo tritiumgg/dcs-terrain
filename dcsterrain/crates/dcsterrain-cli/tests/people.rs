@@ -297,6 +297,8 @@ const TABLED: &[&str] = &[
     "route_alternatives",
     "point_info",
     "airfield_info",
+    "towns",
+    "visible",
 ];
 
 /// The questions each table is shown with on `Synth`: a name for its
@@ -350,6 +352,19 @@ const TABLE_CASES: &[(&str, &str)] = &[
     (
         "airfield_info-fits",
         "airfield-info --airdrome SYNTH --fits width=16 length=17 height=5 helicopter",
+    ),
+    (
+        "towns",
+        "towns --region circle \"airport:Synth Field\" 30000 --limit 2",
+    ),
+    ("towns-none", "towns --size city"),
+    (
+        "visible",
+        "visible --a \"town:Synth Town 2@10\" --b 45.2352N,34.4975E@100",
+    ),
+    (
+        "visible-blocked",
+        "visible --a \"town:Synth Town 1@2\" --b \"airport:Synth Field@570msl\"",
     ),
 ];
 
@@ -505,8 +520,8 @@ fn tables_fit_100_columns_carry_geo_s_mgrs_and_no_color_when_piped() {
                 "{name}: {grid} at {x}, {z}, where geo gives {matches:?}"
             );
         }
-        let tabled = name.split('-').next().unwrap();
-        if !name.contains('-') && tabled != "visible" {
+        // Only an answer that is empty shows no place.
+        if !name.ends_with("-none") {
             assert!(!shown.is_empty(), "{name}: no MGRS shown");
         }
     }

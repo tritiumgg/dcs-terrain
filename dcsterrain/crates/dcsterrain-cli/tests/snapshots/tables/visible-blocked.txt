@@ -1,0 +1,11 @@
+No: the ground blocks the line, rising 83.7 m above it at its highest.
+The ends are 50.02 km apart.
+
+Point        x       z  MGRS                Height
+A            0   15000  36T XQ 14517 98115  2.0 m above the ground
+B        30025  -25000  36T WR 74517 28140  570.0 m above sea level
+Blocked  15046   -5045  36T WR 94471 13161  421.3 m above sea level
+
+Blocked is where the ground first rises above the line from A.
+
+Every field, unrounded: add --json.
