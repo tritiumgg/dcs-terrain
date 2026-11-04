@@ -1,6 +1,6 @@
 2 routes by roads, the least costly first.
-4 were asked for. No other route found was new, at most 3.00 × the first's length, and sharing at
-most 90 % of its length with each route kept.
+4 were asked for. A route is kept only when it is new, at most 3.00 × the first's length, and shares
+at most 90 % of its length with each route kept; the search, at most 16 tries, found no more.
 
 Ends, each where it joins the network
 End       x       z  MGRS                Moved (m)

@@ -46,6 +46,15 @@ fn whole(v: &Value) -> String {
     fixed(num(v), 0)
 }
 
+/// A direction in degrees, where 359.96 rounds to 0 and not to 360.
+fn bearing(v: &Value, places: usize) -> String {
+    let scale = 10f64.powi(places as i32);
+    fixed(
+        num(v).map(|d| ((d * scale).round() / scale).rem_euclid(360.0)),
+        places,
+    )
+}
+
 fn text(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
@@ -130,7 +139,7 @@ fn find_sites(page: &mut Page, asked: &Asked, a: &Value) {
         count(candidates.len(), "site", "sites")
     ));
     let limit = num(&asked.request["limit"]).unwrap_or(20.0) as usize;
-    if candidates.len() >= limit {
+    if candidates.len() >= limit && limit < 200 {
         page.line("--limit asks for more sites, up to 200.");
     }
 
@@ -168,7 +177,7 @@ fn find_sites(page: &mut Page, asked: &Asked, a: &Value) {
     for (n, c) in candidates.iter().enumerate() {
         let mut row = vec![(n + 1).to_string(), fixed(num(&c["score"]), 3)];
         row.extend(place(asked, c));
-        row.push(fixed(num(&c["orientation_deg"]), 0));
+        row.push(bearing(&c["orientation_deg"], 0));
         let terms = c["terms"].as_array().unwrap_or(&empty);
         for &i in &shown {
             row.push(term_value(&names[i], &terms.get(i).unwrap_or(&Value::Null)["value"]).1);
@@ -197,8 +206,14 @@ fn nearest(page: &mut Page, asked: &Asked, a: &Value) {
         _ => ("road", "roads"),
     };
     let at = place_words(asked, asked.request);
+    let of_class = match asked.request["class"].as_str() {
+        Some(c) if kind == "scenery" => format!(" of class {c}"),
+        _ => String::new(),
+    };
     if results.is_empty() {
-        page.line(&format!("No {many} near {at}: the terrain has none."));
+        page.line(&format!(
+            "No {many}{of_class} near {at}: the terrain has none."
+        ));
         return;
     }
     page.line(&match results.len() {
@@ -211,7 +226,7 @@ fn nearest(page: &mut Page, asked: &Asked, a: &Value) {
     let asked_for = num(&asked.request["n"]).unwrap_or(1.0) as usize;
     if kind != "node" && results.len() < asked_for {
         page.line(&format!(
-            "Only {} of the {asked_for} asked for: the terrain has no more.",
+            "Only {} of the {asked_for} asked for: the terrain has no more{of_class}.",
             results.len()
         ));
     }
@@ -227,7 +242,13 @@ fn nearest(page: &mut Page, asked: &Asked, a: &Value) {
             .optional("Id", Align::Right, 1),
     );
     for (n, r) in results.iter().enumerate() {
-        let mut row = vec![(n + 1).to_string(), whole(&r["distance"]), text(&r["name"])];
+        // A place no town names has no name; every other result shows a
+        // dash for a missing one.
+        let name = match (&r["name"], kind.as_str()) {
+            (Value::Null, "place") => "(unnamed)".into(),
+            (v, _) => text(v),
+        };
+        let mut row = vec![(n + 1).to_string(), whole(&r["distance"]), name];
         if kind == "node" {
             let side = text(&r["kind"]);
             row.push(side.strip_prefix("node_").unwrap_or(&side).to_string());
@@ -332,12 +353,20 @@ fn waypoints_left_out(page: &mut Page, routes: &[&Value]) {
 
 fn route(page: &mut Page, asked: &Asked, a: &Value) {
     let network = text(&asked.request["network"]);
-    page.line(&format!(
-        "The route by {network}: {} km, {} the {} km straight line.",
-        km(&a["length"]),
-        stretch(a),
-        km(&a["straight_line"])
-    ));
+    let straight = num(&a["straight_line"]).unwrap_or(0.0);
+    page.line(&if straight > 0.0 {
+        format!(
+            "The route by {network}: {}, {} the {} straight line.",
+            distance(&a["length"]),
+            stretch(a),
+            distance(&a["straight_line"])
+        )
+    } else {
+        format!(
+            "The route by {network}: {}, from and to the same place.",
+            distance(&a["length"])
+        )
+    });
     page.line(&format!(
         "It climbs {} m and descends {} m; its steepest 100 m is {} %.",
         whole(&a["ascent"]),
@@ -347,6 +376,14 @@ fn route(page: &mut Page, asked: &Asked, a: &Value) {
     route_ends(page, asked, a);
     route_legs(page, asked, a, "Legs");
     waypoints_left_out(page, &[a]);
+}
+
+/// A length in words: meters under a kilometer, else kilometers.
+fn distance(v: &Value) -> String {
+    match num(v) {
+        Some(m) if m < 1000.0 => format!("{} m", fixed(Some(m), 0)),
+        _ => format!("{} km", km(v)),
+    }
 }
 
 /// A list of numbers as one cell: `1, 2, 4`, or `none`.
@@ -371,10 +408,14 @@ fn route_alternatives(page: &mut Page, asked: &Asked, a: &Value) {
         let stretch = num(&asked.request["max_stretch"]).unwrap_or(1.5);
         let overlap = num(&asked.request["max_overlap"]).unwrap_or(0.5);
         page.line(&format!(
-            "{k} were asked for. No other route found was new, at most {} × the first's \
-             length, and sharing at most {} % of its length with each route kept.",
+            "{k} were asked for. A route is kept only when it is new, at most {} × the \
+             first's length, and shares at most {} % of its length with each route kept; \
+             the search, at most {} tries, found no more.",
             fixed(Some(stretch), 2),
-            fixed(Some(overlap * 100.0), 0)
+            fixed(Some(overlap * 100.0), 0),
+            // The penalty method routes again at most four times per route
+            // asked for.
+            4 * k
         ));
     }
     let Some(first) = routes.first() else {
@@ -391,8 +432,9 @@ fn route_alternatives(page: &mut Page, asked: &Asked, a: &Value) {
         .col("Down (m)", Align::Right)
         .col("Grade (%)", Align::Right)
         .col("Legs", Align::Right)
-        .cut("Overlap (%)", 6)
-        .cut("Chokepoint edges", 6);
+        // Left out whole rather than cut, so no list ends mid-number.
+        .optional("Overlap (%)", Align::Left, 2)
+        .optional("Chokepoint edges", Align::Left, 1);
     for (n, r) in routes.iter().enumerate() {
         let chokepoints = if r["chokepoints"].is_null() {
             "not built yet".into()
@@ -455,7 +497,7 @@ fn point_info(page: &mut Page, asked: &Asked, a: &Value) {
         row.extend([
             fixed(num(&p["height"]), 1),
             fixed(num(&p["slope"]), 1),
-            whole(&p["aspect"]),
+            bearing(&p["aspect"], 0),
             text(&p["water"]),
             fixed(num(&p["depth"]), 1),
             text(&p["cover"]),
@@ -571,7 +613,7 @@ fn airfield_info(page: &mut Page, asked: &Asked, a: &Value) {
                 let mut row = vec![
                     runway,
                     text(&e["designator"]),
-                    fixed(num(&e["course_true_deg"]), 1),
+                    bearing(&e["course_true_deg"], 1),
                     length,
                     width,
                     fixed(num(&e["height"]), 1),
@@ -704,9 +746,25 @@ fn towns(page: &mut Page, asked: &Asked, a: &Value) {
     let places = a["places"].as_array().unwrap_or(&empty);
     let matched = num(&a["matched"]).unwrap_or(0.0) as usize;
     if places.is_empty() {
-        page.line(
-            "No place matches. Widen the region, or loosen --size, --form or --min-buildings.",
-        );
+        let r = asked.request;
+        let given = |k: &str| r[k].as_array().is_some_and(|a| !a.is_empty());
+        let mut loosen = Vec::new();
+        if !r["region"].is_null() {
+            loosen.push("widen the region");
+        }
+        if given("size") {
+            loosen.push("loosen --size");
+        }
+        if given("form") {
+            loosen.push("loosen --form");
+        }
+        if num(&r["min_buildings"]).is_some_and(|n| n > 0.0) {
+            loosen.push("lower --min-buildings");
+        }
+        page.line(&match loosen.len() {
+            0 => "No place: the terrain has none.".to_string(),
+            _ => format!("No place matches. To find some, {}.", loosen.join(", or ")),
+        });
         return;
     }
     let by = if asked.request["sort"] == "floor" {
@@ -718,8 +776,17 @@ fn towns(page: &mut Page, asked: &Asked, a: &Value) {
         "{} of the {matched} that match, {by} first.",
         count(places.len(), "place", "places")
     ));
-    if matched > places.len() {
-        page.line("--limit shows more, up to 1 000.");
+    // Outlines hold a place's whole ground, so fewer are allowed.
+    let most = if asked.request["outlines"] == true {
+        100
+    } else {
+        1000
+    };
+    if matched > places.len() && places.len() < most {
+        page.line(&format!(
+            "--limit shows more, up to {}.",
+            if most == 1000 { "1 000" } else { "100" }
+        ));
     }
     let mut t = Table::new()
         .col("#", Align::Right)

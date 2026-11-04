@@ -456,6 +456,24 @@ fn grids_shown(page: &str) -> Vec<(f64, f64, String)> {
     found
 }
 
+/// The rows of every table with an MGRS column, its notes aside.
+fn rows_under_mgrs(page: &str) -> Vec<String> {
+    let mut rows = Vec::new();
+    let mut under = false;
+    for line in page.lines() {
+        // A header names its z column just before MGRS; a sentence does not.
+        let words: Vec<&str> = line.split_whitespace().collect();
+        if words.windows(2).any(|w| w == ["z", "MGRS"]) {
+            under = true;
+        } else if line.is_empty() {
+            under = false;
+        } else if under && !line.contains("left out to fit") {
+            rows.push(line.to_string());
+        }
+    }
+    rows
+}
+
 #[test]
 fn tables_fit_100_columns_carry_geo_s_mgrs_and_no_color_when_piped() {
     let cases = TABLE_CASES;
@@ -495,6 +513,15 @@ fn tables_fit_100_columns_carry_geo_s_mgrs_and_no_color_when_piped() {
             points(&v, &mut at);
         }
         let shown = grids_shown(&page);
+        assert!(!page.contains("(no MGRS)"), "{name}: a point with no MGRS");
+        // Every row of a table with an MGRS column shows one.
+        let rows = rows_under_mgrs(&page);
+        for row in &rows {
+            assert!(
+                shown.iter().any(|(_, _, g)| row.contains(g.as_str())),
+                "{name}: no MGRS in the row: {row}"
+            );
+        }
         let to_latlon: Vec<Value> = at.iter().map(|&(x, z)| json!({"x": x, "z": z})).collect();
         let geo = run(&[
             "query".into(),

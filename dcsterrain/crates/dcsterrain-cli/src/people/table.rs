@@ -217,8 +217,7 @@ impl Page {
     /// A heading over a table.
     pub fn heading(&mut self, words: &str) {
         self.blank();
-        self.styled("1", words);
-        self.text.push('\n');
+        self.wrapped(words, Some("1"));
         self.headed = true;
     }
 
@@ -229,6 +228,8 @@ impl Page {
         }
     }
 
+    /// `words` in lines no wider than the page, broken at spaces, and a word
+    /// wider than the page, such as a long path, broken across lines.
     fn wrapped(&mut self, words: &str, code: Option<&str>) {
         let mut line = String::new();
         let mut lines = Vec::new();
@@ -239,7 +240,12 @@ impl Page {
             if !line.is_empty() {
                 line.push(' ');
             }
-            line.push_str(word);
+            for c in word.chars() {
+                if chars(&line) == WIDTH {
+                    lines.push(std::mem::take(&mut line));
+                }
+                line.push(c);
+            }
         }
         lines.push(line);
         for l in lines {

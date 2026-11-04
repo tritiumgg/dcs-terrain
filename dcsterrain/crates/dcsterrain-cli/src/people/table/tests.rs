@@ -91,3 +91,12 @@ fn a_cut_cell_ends_in_an_ellipsis() {
     assert!(row.starts_with(&format!("{}…  y", "x".repeat(17))), "{row}");
     assert_eq!(chars(row), WIDTH);
 }
+
+#[test]
+fn a_word_wider_than_the_page_breaks_and_headings_wrap() {
+    let mut p = Page::new(false);
+    p.note(&format!("Written to C:/{}.", "d".repeat(250)));
+    p.heading(&"Stands: 4 of 40 × 40 m, ".repeat(8));
+    assert!(p.text.lines().count() >= 5, "{}", p.text);
+    assert!(p.text.lines().all(|l| chars(l) <= WIDTH), "{}", p.text);
+}

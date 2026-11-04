@@ -1,3 +1,3 @@
-No place matches. Widen the region, or loosen --size, --form or --min-buildings.
+No place matches. To find some, loosen --size.
 
 Every field, unrounded: add --json.
