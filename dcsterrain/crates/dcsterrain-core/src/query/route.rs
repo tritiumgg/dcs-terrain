@@ -44,7 +44,7 @@ use crate::decode::rn4::{KIND_RAIL, KIND_ROAD};
 use crate::grid::Grid;
 use crate::layers::Cells;
 use crate::offroad::CostField;
-use crate::offroad::way::{self, Blocks, Ground, RoadCells, Way, found, straighten};
+use crate::offroad::way::{self, Blocks, Ground, RoadCells, Way, found, straighten_where};
 use crate::roads::{Edge, Graph, Pass, dist};
 use crate::search;
 use crate::source::{Refusal, Source};
@@ -258,11 +258,14 @@ impl EndSearch {
     }
 
     /// The way the search found to `cell`, ending at `end`, straightened.
-    fn way(&self, cell: usize, end: [f64; 2]) -> Result<Way, Refusal> {
+    fn way(&self, cell: usize, end: [f64; 2], avoid: &[Area]) -> Result<Way, Refusal> {
         let ground = self.ground(true);
         let w = found(&ground, &self.searched, self.point, cell, end)
             .ok_or_else(|| Refusal("the way the search found could not be judged again".into()))?;
-        Ok(straighten(&ground, &w))
+        // A straight cut never runs through a region avoided, which the
+        // search kept out of by its cells alone.
+        let allowed = |a: [f64; 2], b: [f64; 2]| !avoid.iter().any(|r| r.meets(a, b));
+        Ok(straighten_where(&ground, &w, &allowed))
     }
 
     /// What `w` costs over the ground alone, as `trafficability` counts it.
@@ -638,7 +641,10 @@ impl<'a> Planner<'a> {
             exposure_weight: q.exposure_weight,
             exposure: vec![f32::NAN; g.edges.len()],
             heights,
-            bound: (q.max_detour_factor * line).max(line + MIN_DETOUR_M),
+            // Off the road, a join lies up to max_offroad from its end, so a
+            // route through it may sum that much farther from both ends.
+            bound: (q.max_detour_factor * line).max(line + MIN_DETOUR_M)
+                + if q.offroad { 2.0 * q.max_offroad } else { 0.0 },
         })
     }
 
@@ -802,15 +808,15 @@ impl<'a> Planner<'a> {
             Some((i, j)) => {
                 let (a, b) = (&self.joins.starts[i], &self.joins.goals[j]);
                 [
-                    Some(ends[0].way(a.cell, a.meet)?),
-                    Some(ends[1].way(b.cell, b.meet)?),
+                    Some(ends[0].way(a.cell, a.meet, &self.avoid)?),
+                    Some(ends[1].way(b.cell, b.meet, &self.avoid)?),
                 ]
             }
             None => {
                 let (cell, _) = ends[0]
                     .direct
                     .expect("a route with no road was the way the whole way");
-                [Some(ends[0].way(cell, self.places[1])?), None]
+                [Some(ends[0].way(cell, self.places[1], &self.avoid)?), None]
             }
         })
     }
@@ -1308,8 +1314,8 @@ fn shared(g: &Graph, a: &Found, b: &Found) -> f64 {
         .iter()
         .zip(&b.offroad)
         .filter_map(|(x, y)| x.as_ref().filter(|x| Some(*x) == y.as_ref()))
-        .map(Way::length)
-        .sum();
+        // Folded from 0, not summed: an empty sum is -0, which would print.
+        .fold(0.0, |s, w| s + w.length());
     for p in &a.pieces {
         for q in b.pieces.iter().filter(|q| q.edge == p.edge) {
             let ((p0, p1), (q0, q1)) = (p.span(), q.span());
@@ -1589,6 +1595,11 @@ pub fn route_alternatives(
     for _ in 1..SEARCHES_PER_K * q.k {
         if kept.len() == q.k as usize {
             break;
+        }
+        // A way off the road the whole way has no road to penalize: the
+        // searches after it take the road.
+        if last.joined.is_none() {
+            p.joins.direct = None;
         }
         let mut used: Vec<usize> = last.pieces.iter().map(|p| p.edge).collect();
         used.sort_unstable();

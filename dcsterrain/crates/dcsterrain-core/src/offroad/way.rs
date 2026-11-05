@@ -531,6 +531,16 @@ pub fn found(
 /// costs, judged over the cells it crosses, stopping at the first that
 /// cannot. The turns' cells are where each piece of the way ends.
 pub fn straighten(ground: &Ground, way: &Way) -> Way {
+    straighten_where(ground, way, &|_, _| true)
+}
+
+/// `way` straightened as `straighten` does, taking only the straight lines
+/// `allowed` lets it.
+pub fn straighten_where(
+    ground: &Ground,
+    way: &Way,
+    allowed: &dyn Fn([f64; 2], [f64; 2]) -> bool,
+) -> Way {
     let path = &way.path;
     let n = path.len();
     if n < 3 {
@@ -561,7 +571,9 @@ pub fn straighten(ground: &Ground, way: &Way) -> Way {
         for j in i + 2..n {
             let between = spent[j] - spent[i];
             match ground.line(path[i], path[j], Some(ends[j])) {
-                Ok(c) if c <= between * (1.0 + 1e-12) + 1e-9 => best = (j, c),
+                Ok(c) if c <= between * (1.0 + 1e-12) + 1e-9 && allowed(path[i], path[j]) => {
+                    best = (j, c)
+                }
                 _ => break,
             }
         }

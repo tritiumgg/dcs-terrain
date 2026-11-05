@@ -387,3 +387,41 @@ fn off_road_fields_are_bounded_and_refused_on_railroads() {
     );
     assert!(e[0].message.contains("a lake"), "{}", e[0].message);
 }
+
+#[test]
+fn a_way_off_the_road_keeps_out_of_a_region_avoided() {
+    let t = synth();
+    let mut req = json!({
+        "network": "roads",
+        "from": at(&t, ROAD_EW_NORTH_M - 1000.0, 10000.0),
+        "to": at(&t, ROAD_EW_NORTH_M - 1000.0, 14000.0),
+        "offroad": true,
+    });
+    let free = ask(&t, "route", req.clone()).unwrap();
+    let way = path(&free["offroad_from"]);
+    // Across the middle of the way it takes when free.
+    let mid = [
+        (way[0][0] + way[way.len() - 1][0]) / 2.0,
+        (way[0][1] + way[way.len() - 1][1]) / 2.0,
+    ];
+    let radius = 200.0;
+    req["avoid"] = json!([{"Circle": {"x": mid[0], "z": mid[1], "radius": radius}}]);
+    let kept = ask(&t, "route", req).unwrap();
+    for leg in [&kept["offroad_from"], &kept["offroad_to"]] {
+        for s in path(leg).windows(2) {
+            let q = crate::roads::closest_on(s[0], s[1], mid);
+            // A turn lies at a cell's center outside the region, so a piece
+            // between two may clip its edge by at most half a cell.
+            assert!(
+                dist(q, mid) > radius - 36.0,
+                "{s:?} passes {}",
+                dist(q, mid)
+            );
+        }
+    }
+    // Free, the way runs through the region.
+    assert!(
+        way.windows(2)
+            .any(|s| dist(crate::roads::closest_on(s[0], s[1], mid), mid) < radius)
+    );
+}
