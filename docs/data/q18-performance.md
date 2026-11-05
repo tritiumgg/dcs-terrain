@@ -70,6 +70,29 @@ reads every cell within 20 km, peaks at 46.8 MiB on GermanyCW in one process
 answering all three; each takes a median 141 ms held, warm. 20 km
 stays its default and its limit.
 
+`route` off the road, measured on DCS 2.9.31.29434 (timestamp
+20261027-141234): `route_offroad_50km`, ten pairs of ends 1.5 km from a road
+and 45 to 55 km apart, and `route_alternatives_offroad_50km`, three of them
+with `k` 3, each case one process. The bench's random land points lie mostly
+past any road's reach on GermanyCW, whose mesh spans about 1 000 by 1 200 km,
+so these ends are moved toward their nearest road.
+
+| `max_offroad`, cache kept | Ten routes, MiB | Alternatives, MiB |
+|---|---|---|
+| 5 km, as for every request | 78.2 | 63.0–65.5 |
+| 5 km, 4 MiB of blocks | 64.6 | 60.0 |
+| 5 km, 4 MiB of blocks and 32 tiles | 59.6–60.5 | 58.1–58.7 |
+| 10 km, 4 MiB and 32 tiles | — | 65.2 |
+| 15 km, 4 MiB and 32 tiles | — | 75.0 |
+| 20 km, 4 MiB and 32 tiles | — | 87.8 |
+
+One route alone peaks at 53.1–57.6 MiB, as a snapped route does: the rest
+was each end's ground kept from request to request. The searches now keep
+4 MiB of blocks and 32 tiles while they run, and 5 km is both the default and
+the limit. On Caucasus the two cases peak at 15.6 and 9.0 MiB. Held and warm,
+a route off the road takes a median 31 ms on Caucasus and 42 ms on GermanyCW,
+three alternatives 32 and 102 ms.
+
 Exempt and measured beside it: `dcsterrain index` from an empty cache on
 GermanyCW peaks at about 1.5 GiB, by a coarse poll of the process before the
 last changes to the code; it was not measured again.

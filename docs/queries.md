@@ -287,9 +287,11 @@ heights above ground is not judged.
 
 Request: `network: "roads" | "railroads"`, `from`, `to`, `avoid:
 Vec<Region>`, `exposure_observers: Vec<Observer>`, `exposure_weight` (default
-1, at most 1000), `max_detour_factor` (default 3). Response: `{waypoints, length, ascent,
+1, at most 1000), `max_detour_factor` (default 3), and off the road `offroad`,
+`max_offroad`, `max_slope_deg` and `offroad_weight`, below. Response: `{waypoints, length, ascent,
 descent, max_grade_pct, legs: [{from, to, edge_id, class, length, ascent,
-descent, max_grade_pct, exposure}], snapped_from, snapped_to, straight_line}`.
+descent, max_grade_pct, exposure}], snapped_from, snapped_to, straight_line}`,
+and with `offroad` `offroad_from` and `offroad_to`.
 
 Each end snaps to the nearest point of its network, part way along an edge.
 `length` is the planar length of the way between the snapped ends, as the
@@ -316,24 +318,49 @@ the end and a node is not used when it reaches into one. With no route the
 answer is the issue `no_route`. The waypoints are every graph node and,
 between them, a point of the road's geometry each time 500 m have passed.
 
-**Off the road, planned (ADR 0013), not built yet.** `offroad: true` (default
-false; refused on `railroads`) plans each end's way to the road instead of
-snapping it, with `max_offroad` (default 5 km, at most what `trafficability`'s
-`max_distance` allows), `max_slope_deg` (default 30, more than 0, at most 60, as
-`trafficability` takes it) and `offroad_weight` (default 2, at least 1). From each end the 50 m cells within
-`max_offroad` are searched, 16 neighbors, each costing the off-road cost per
-meter `trafficability` uses, times `offroad_weight`, times one plus
-`exposure_weight` times whether an observer sees a vehicle 2 m up on it; water,
-no ground and a slope past `max_slope_deg` are not crossed. Every cell of the
-network either search reaches is a start or a goal of the one road search,
-carrying its off-road cost, and a way off the road the whole way is the route
-when it costs least. The answer adds `offroad_from` and `offroad_to`, each
-`{path, length, cost, ascent, descent, max_grade_pct, exposure}` or null where
-the end lies on the road; `length`, `ascent`, `descent` and `max_grade_pct`
-cover the whole way; `legs` stay the road's; `snapped_from` and `snapped_to` are
-where the way meets and leaves the road, null only when it never does; the
-waypoints begin and end with the off-road ways' turns. Without `offroad`, a
-`no_route` whose end lies on a piece joined to nothing says to set it.
+**Off the road (ADR 0013).** `offroad: true` (default false; refused on
+`railroads`) plans each end's way to the road instead of snapping it, with
+`max_offroad` (default 5 km, more than 0, at most 5 km), `max_slope_deg` (default 30, more than 0, at most 60, as
+`trafficability` takes it) and `offroad_weight` (default 2, at least 1, at most
+1000, as `exposure_weight` is bounded). From each end the 50 m cells within
+`max_offroad` are searched as `trafficability` searches, 16 neighbors, each cell
+costing the off-road cost per meter `trafficability` uses, times
+`offroad_weight`, times one plus `exposure_weight` where an observer sees a
+vehicle 2 m above its center, judged as a leg's samples are; water, no ground
+and a slope past `max_slope_deg` are not crossed. Unlike `trafficability`'s
+search it goes on past the first road: every road's cell it reaches is a goal,
+and a way may cross a road's cell whose own ground can be crossed, so a vehicle
+crosses a road it does not take; a road's cell over water, a bridge's, is
+reached but never crossed, or a way would ford the river beside the bridge. A
+cell whose center lies in an `avoid` region is not entered, and a way does not
+join the road inside one. Every road's cell either search reaches is a start or
+a goal of the one road search, joined at the point where its road runs closest
+to the cell's center and carrying the cost of its way there. When the other end
+lies within reach of the first, the way off the road the whole way is a route
+too, and it is the answer when it costs least. Every way costs at least its
+length, so A* keeps its estimate, now the straight line to the end as given;
+the ellipse that bounds the search has the ends as given for its foci. An end
+that stands where no vehicle can, or from which no way reaches a road within
+`max_offroad` and the other end lies out of reach, is the issue `no_route` at
+that end's path, naming what blocks.
+
+The answer adds `offroad_from` and `offroad_to`, each `{path, length, cost,
+ascent, descent, max_grade_pct, exposure}`, present only with `offroad`. `path`
+runs in the route's order; `cost` is the way's ground cost, as `trafficability`
+counts it, without the weight or the observers. Each is null where its end lies
+on the road's own line; a way off the road the whole way is `offroad_from`, and
+`offroad_to` is then null. Every turn of each way is straightened as
+`trafficability` straightens its way. `length`, `ascent`, `descent` and
+`max_grade_pct` cover the whole way; `legs` stay the road's, and a piece of no
+length is no leg; `snapped_from` and `snapped_to` are where the way joins and
+leaves the road, null only when it never does; the waypoints begin with every
+turn of `offroad_from` and end with every turn of `offroad_to`. The searches'
+memory grows with the square of `max_offroad`, and the ground they read is kept
+in few tiles and 4 MiB of mesh blocks while they run, as it is read once: 5 km
+is the most that holds ten routes in one process to 64 MiB on GermanyCW
+(`data/q18-performance.md`), not the 20 km `trafficability` reaches. Without `offroad`,
+every answer is as before, and a `no_route` whose end snapped to a piece of road
+no passage joins to the other end's says to set it.
 
 ### `route_alternatives`
 
@@ -354,6 +381,9 @@ least-cost route's length, and shares at most `max_overlap` of its length
 with each route kept, and they of theirs with it; the search stops at `k` routes. Yen's
 k-shortest is not used: its alternatives differ by one edge and look the same
 to a player. The method promises nothing of the alternatives it misses.
+With `offroad`, each route's ways off the road are planned as `route` plans
+them, the penalty falls on the road alone, and a way two routes both take
+counts whole toward their overlap.
 
 ### `nearest`
 

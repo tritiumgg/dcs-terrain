@@ -54,3 +54,23 @@ islands, or whose route runs past the detour allowed.
 
 Route lengths against the game's own `findPathOnRoads` are not compared
 here; that needs a running DCS.
+
+## Off the road on Caucasus
+
+Measured 2026-11-05 on DCS 2.9.31.29434 (timestamp 20261027-141234), release
+build, a scratch cache.
+
+- `airport:Kobuleti` to `airport:Batumi`, every road route from which fails
+  snapped: without `offroad`, `no_route`, saying the from end snaps to a piece
+  of road that joins none the other end's road reaches. With it, 50.34 km
+  against a 42.02 km straight line: 1.39 km across country to the road,
+  48.45 km of road in 72 legs, 0.51 km across country to the end; and three
+  alternatives. The opt-in test is `kobuleti_to_batumi_answers_off_the_road`
+  in `query/route.rs`.
+- The guide's convoy from `airport:Kutaisi`, 504 m from its nearest road:
+  25.82 km snapped, 18.91 km with `offroad`, whose 765 m across country reach
+  a road that runs more directly.
+- Without `offroad`, both of V1's recorded samples route as before through
+  `tools/validate`'s `recorded` test: seed 1, 198 compared and 22 refused by
+  both, none in disagreement; seed 2, 205 compared and 15 refused by both,
+  none in disagreement, the worst margin 7.8 m.
