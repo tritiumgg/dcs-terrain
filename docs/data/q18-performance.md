@@ -81,7 +81,7 @@ so these ends are moved toward their nearest road.
 |---|---|---|
 | 5 km, as for every request | 78.2 | 63.0–65.5 |
 | 5 km, 4 MiB of blocks | 64.6 | 60.0 |
-| 5 km, 4 MiB of blocks and 32 tiles | 59.6–60.5 | 58.1–58.7 |
+| 5 km, 4 MiB of blocks and 32 tiles | 59.6–61.4 | 58.1–59.1 |
 | 10 km, 4 MiB and 32 tiles | — | 65.2 |
 | 15 km, 4 MiB and 32 tiles | — | 75.0 |
 | 20 km, 4 MiB and 32 tiles | — | 87.8 |
@@ -89,7 +89,9 @@ so these ends are moved toward their nearest road.
 One route alone peaks at 53.1–57.6 MiB, as a snapped route does: the rest
 was each end's ground kept from request to request. The searches now keep
 4 MiB of blocks and 32 tiles while they run, and 5 km is both the default and
-the limit. On Caucasus the two cases peak at 15.6 and 9.0 MiB. Held and warm,
+the limit. On Caucasus the two cases peak at 14.5–15.6 and 9.0–9.5 MiB. The ranges are
+runs of the same requests, before and after the bound on the road search
+widened by twice `max_offroad`. Held and warm,
 a route off the road takes a median 31 ms on Caucasus and 42 ms on GermanyCW,
 three alternatives 32 and 102 ms.
 
