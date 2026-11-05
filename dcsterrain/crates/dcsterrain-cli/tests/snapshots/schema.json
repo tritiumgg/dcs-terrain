@@ -3915,7 +3915,7 @@
         },
         "max_offroad": {
           "default": 5000.0,
-          "description": "How far from each end its way to the road is searched, in meters, at\nmost 20 000.",
+          "description": "How far from each end its way to the road is searched, in meters, at\nmost 5000.",
           "format": "double",
           "type": "number"
         },
@@ -4053,7 +4053,7 @@
         },
         "max_offroad": {
           "default": 5000.0,
-          "description": "How far from each end its way to the road is searched, in meters, at\nmost 20 000.",
+          "description": "How far from each end its way to the road is searched, in meters, at\nmost 5000.",
           "format": "double",
           "type": "number"
         },

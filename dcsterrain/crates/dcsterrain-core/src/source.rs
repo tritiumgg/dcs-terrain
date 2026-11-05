@@ -55,6 +55,14 @@ pub trait Source: Sync {
         let _ = tight;
     }
 
+    /// Keeps few ground tiles, and blocks as `tight` keeps them, from now
+    /// until asked to stop: for ground read once and not again, such as
+    /// the cells round a route's ends, which kept would pile up request
+    /// after request.
+    fn passing(&self, passing: bool) {
+        self.tight(passing);
+    }
+
     /// One tile of a layer, `tile_size` squared samples, row-major with
     /// columns fastest. A cell past the grid, or one no mesh triangle covers,
     /// is the layer's `nodata`.

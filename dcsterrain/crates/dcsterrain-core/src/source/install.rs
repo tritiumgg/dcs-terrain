@@ -40,6 +40,11 @@ const TIGHT_BLOCK_BUDGET: usize = 4 << 20;
 const FEW_POINTS: usize = 32;
 /// Rasterized tiles kept between requests, of every layer: about 20 KiB each.
 pub const TILE_COUNT: usize = 256;
+/// The tiles kept while ground is read in passing: enough for a search's
+/// strips of cells to find the tiles each derived layer reads twice, and
+/// few enough that ten routes' ends in one process hold no more than one
+/// route's, about 4 MiB less on GermanyCW.
+const PASSING_TILES: usize = 32;
 /// Tiles rasterized together: a few for each core, and few enough that the
 /// blocks under them, all held at once, stay a small part of the terrain.
 const BAND: usize = 64;
@@ -742,6 +747,12 @@ impl Source for Install {
             BLOCK_BUDGET
         };
         self.blocks.lock().unwrap().set_budget(budget);
+    }
+
+    fn passing(&self, passing: bool) {
+        self.tight(passing);
+        let tiles = if passing { PASSING_TILES } else { TILE_COUNT };
+        self.tiles.lock().unwrap().set_budget(tiles);
     }
 
     fn tile(&self, layer: Layer, tx: u32, tz: u32) -> Result<Vec<i32>, Refusal> {

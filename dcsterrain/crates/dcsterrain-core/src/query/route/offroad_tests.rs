@@ -362,7 +362,7 @@ fn off_road_fields_are_bounded_and_refused_on_railroads() {
     });
     for (field, value) in [
         ("max_offroad", json!(0)),
-        ("max_offroad", json!(20_001)),
+        ("max_offroad", json!(5001)),
         ("max_slope_deg", json!(0)),
         ("max_slope_deg", json!(61)),
         ("offroad_weight", json!(0.99)),

@@ -749,7 +749,7 @@ pub struct RouteRequest {
     #[serde(default)]
     pub offroad: bool,
     /// How far from each end its way to the road is searched, in meters, at
-    /// most 20 000.
+    /// most 5000.
     #[serde(default = "default_max_offroad")]
     pub max_offroad: f64,
     /// Steeper ground than this blocks a way off the road; at most 60.

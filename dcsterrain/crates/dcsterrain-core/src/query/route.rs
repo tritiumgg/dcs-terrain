@@ -38,7 +38,7 @@ use serde_json::json;
 use super::geojson::{Features, props};
 use super::region::{Area, resolve};
 use super::sightline::{Heights, walk};
-use super::trafficability::{MAX_DISTANCE_M, MAX_SLOPE_LIMIT_DEG};
+use super::trafficability::MAX_SLOPE_LIMIT_DEG;
 use super::{Terrain, refused};
 use crate::decode::rn4::{KIND_RAIL, KIND_ROAD};
 use crate::grid::Grid;
@@ -76,6 +76,11 @@ const EXPOSURE_WEIGHT_MAX: f64 = 1000.0;
 const PENALTY_MAX: f64 = 10.0;
 /// The largest off-road weight taken, for the same reason.
 const OFFROAD_WEIGHT_MAX: f64 = 1000.0;
+/// The farthest each end's way across country is searched: past it, the
+/// ground the searches read for a batch of routes on GermanyCW passes the
+/// engine's 64 MiB (ADR 0008), 10 km reaching 65 MiB for three routes and 20 km
+/// 88 MiB.
+const MAX_OFFROAD_M: f64 = 5000.0;
 
 /// The share of the straight line the search estimates is left: an end's
 /// place is rounded to centimeters, so the line itself may overstate a short
@@ -476,10 +481,10 @@ impl<'a> Planner<'a> {
                 "max_detour_factor",
             ));
         }
-        if !(q.max_offroad > 0.0 && q.max_offroad <= MAX_DISTANCE_M) {
+        if !(q.max_offroad > 0.0 && q.max_offroad <= MAX_OFFROAD_M) {
             return Err(issue(
                 "invalid_request",
-                &format!("must be more than 0 and at most {MAX_DISTANCE_M}"),
+                &format!("must be more than 0 and at most {MAX_OFFROAD_M}"),
                 "max_offroad",
             ));
         }
@@ -584,8 +589,13 @@ impl<'a> Planner<'a> {
                     other,
                 )
             };
-            let (start, starts, from_blocks) = end(a, "from", Some(b))?;
-            let (goal, goals, to_blocks) = end(b, "to", None)?;
+            // The ground round each end is read once and searched: the mesh
+            // blocks under it are worth little kept, and kept they lie beside
+            // the road graph, which the route then needs whole.
+            src.passing(true);
+            let searched = end(a, "from", Some(b)).and_then(|s| Ok((s, end(b, "to", None)?)));
+            src.passing(false);
+            let ((start, starts, from_blocks), (goal, goals, to_blocks)) = searched?;
             let direct = start.direct.map(|(_, c)| c);
             if direct.is_none() {
                 for (joins, blocks, path) in
@@ -1400,6 +1410,8 @@ fn no_way_words(blocks: Blocks, max_slope_deg: f64, reach: f64) -> String {
     let mut out = format!("no way across country reaches the road within {reach} m");
     match words.as_slice() {
         [] => {}
+        // Slopes are many; every other block is one thing.
+        [one] if one.starts_with("slopes") => out.push_str(&format!(": {one} block it")),
         [one] => out.push_str(&format!(": {one} blocks it")),
         [rest @ .., last] => out.push_str(&format!(": {} and {last} block it", rest.join(", "))),
     }
