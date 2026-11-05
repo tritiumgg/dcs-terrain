@@ -330,16 +330,20 @@ vehicle 2 m above its center, judged as a leg's samples are; water, no ground
 and a slope past `max_slope_deg` are not crossed. Unlike `trafficability`'s
 search it goes on past the first road: every road's cell it reaches is a goal,
 and a way may cross a road's cell whose own ground can be crossed, so a vehicle
-crosses a road it does not take; a road's cell over water, a bridge's, is
-reached but never crossed, or a way would ford the river beside the bridge. A
-cell whose center lies in an `avoid` region is not entered, and a way does not
-join the road inside one. Every road's cell either search reaches is a start or
+crosses a road it does not take; a road's cell whose own ground blocks, a
+bridge's over water, is reached but never crossed, or a way would ford the
+river beside the bridge. A cell whose center lies in an `avoid` region is not
+entered, a straightened way cuts through none, and a way does not join the road
+inside one. Every road's cell either search reaches is a start or
 a goal of the one road search, joined at the point where its road runs closest
 to the cell's center and carrying the cost of its way there. When the other end
 lies within reach of the first, the way off the road the whole way is a route
 too, and it is the answer when it costs least. Every way costs at least its
 length, so A* keeps its estimate, now the straight line to the end as given;
-the ellipse that bounds the search has the ends as given for its foci. An end
+the ellipse that bounds the search has the ends as given for its foci, and
+`max_offroad` twice more, as a join lies that far from its end. The route is
+the least-cost one over the ways through the cells' centers; each chosen way is
+then straightened, which only lowers its cost. An end
 that stands where no vehicle can, or from which no way reaches a road within
 `max_offroad` and the other end lies out of reach, is the issue `no_route` at
 that end's path, naming what blocks.
@@ -383,7 +387,8 @@ k-shortest is not used: its alternatives differ by one edge and look the same
 to a player. The method promises nothing of the alternatives it misses.
 With `offroad`, each route's ways off the road are planned as `route` plans
 them, the penalty falls on the road alone, and a way two routes both take
-counts whole toward their overlap.
+counts whole toward their overlap. A way off the road the whole way, having no
+road to penalize, is left out of the searches after it.
 
 ### `nearest`
 
