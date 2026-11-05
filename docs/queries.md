@@ -424,14 +424,16 @@ height every 25 m along it. The search reads a disk of twice the distance to
 the nearest road and 1 km more, and doubles it, up to `max_distance`, until the
 way found costs no more than its radius: every cell costs at least 1 per
 meter, so no way leaving the disk costs less, and a near road costs a small
-search. A point that cannot be driven from is unreachable at once.
+search. At `max_distance` the least-cost way within the disk is the answer,
+whatever it costs. The point's own cell is always searched, and a point that
+cannot be driven from is unreachable at once.
 
 `straight` judges the straight line to `nearest_road` over the cells it
 crosses, a road's cells never blocking: `cost` is its length weighted by each
 cell's cost per meter, null when it is blocked; `blocking` is where it enters
 the first cell that blocks. Where it passes and costs less than the searched
 way, it is the way. `reason` says why the point is or is not reachable,
-naming what blocks every way within reach: a river, a lake, the sea, slopes
+naming each thing the search met that blocks a way: a river, a lake, the sea, slopes
 over the limit, the edge of the terrain, or the reach itself.
 
 The cost per meter is 1 on open flat ground, divided by a factor for cover
