@@ -299,6 +299,7 @@ const TABLED: &[&str] = &[
     "airfield_info",
     "towns",
     "visible",
+    "trafficability",
     "geo",
 ];
 
@@ -366,6 +367,14 @@ const TABLE_CASES: &[(&str, &str)] = &[
     (
         "visible-blocked",
         "visible --a \"town:Synth Town 1@2\" --b \"airport:Synth Field@570msl\"",
+    ),
+    (
+        "trafficability",
+        "trafficability --at 16000,-19000 --max-slope-deg 8 --network roads",
+    ),
+    (
+        "trafficability-blocked",
+        "trafficability --at 10000,100 --max-slope-deg 30 --network roads --max-distance 13000",
     ),
     (
         "geo",

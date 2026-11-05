@@ -29,6 +29,7 @@ pub fn readable(op: &str, asked: &Asked, answer: &Value) -> Option<String> {
         "airfield_info" => airfield_info(&mut page, asked, answer),
         "towns" => towns(&mut page, asked, answer),
         "visible" => visible(&mut page, asked, answer),
+        "trafficability" => trafficability(&mut page, asked, answer),
         "geo" => geo(&mut page, asked, answer),
         _ => return None,
     }
@@ -931,5 +932,71 @@ fn visible(page: &mut Page, asked: &Asked, a: &Value) {
     if !a["blocking"].is_null() {
         page.blank();
         page.note("Blocked is where the ground first rises above the line from A.");
+    }
+}
+
+/// A reason as a sentence, after `prefix` and with a full stop.
+fn sentence(prefix: &str, reason: &Value) -> String {
+    format!("{prefix}{}.", text(reason))
+}
+
+fn trafficability(page: &mut Page, asked: &Asked, a: &Value) {
+    let way = &a["way"];
+    let reachable = a["reachable"] == true;
+    page.line(&sentence(
+        if reachable { "Yes: " } else { "No: " },
+        &a["reason"],
+    ));
+    if reachable {
+        page.line(&format!(
+            "The way is {}, as hard to cross as {} of open flat ground; it climbs {} m \
+             and descends {} m.",
+            distance(&way["length"]),
+            distance(&way["cost"]),
+            whole(&way["ascent"]),
+            whole(&way["descent"]),
+        ));
+    }
+    // The way may be the straight line itself, which the first line said.
+    let turns = way["path"].as_array().map_or(0, Vec::len);
+    let is_straight = turns == 2 && way["meets"] == a["nearest_road"];
+    if !is_straight {
+        page.line(&format!(
+            "The straight line to the nearest road is {}: {}.",
+            distance(&a["distance"]),
+            text(&a["straight"]["reason"])
+        ));
+    }
+    let mut t = with_place(Table::new().col("Point", Align::Left).optional(
+        "Edge",
+        Align::Right,
+        1,
+    ));
+    let mut row = |name: &str, edge: String, at: &Value| {
+        let mut r = vec![name.to_string(), edge];
+        r.extend(place(asked, at));
+        t.row(r);
+    };
+    row("From", String::new(), asked.request);
+    if reachable {
+        row("Meets the road", text(&way["edge_id"]), &way["meets"]);
+    }
+    row("Nearest road", String::new(), &a["nearest_road"]);
+    if !a["straight"]["blocking"].is_null() {
+        row(
+            "Straight blocked",
+            String::new(),
+            &a["straight"]["blocking"],
+        );
+    }
+    page.table(&t);
+    if reachable && turns > 2 {
+        page.blank();
+        page.note(&format!(
+            "The way's {} between its ends {} left out: --json lists them, --geojson-out \
+             draws the way.",
+            count(turns - 2, "turn", "turns"),
+            if turns == 3 { "is" } else { "are" }
+        ));
     }
 }

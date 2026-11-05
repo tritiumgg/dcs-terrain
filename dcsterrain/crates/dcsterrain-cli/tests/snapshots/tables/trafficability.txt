@@ -1,0 +1,15 @@
+Yes: a way of 8393 m reaches the road round what blocks the straight line.
+The way is 8.39 km, as hard to cross as 8.90 km of open flat ground; it climbs 52 m and descends 22
+m.
+The straight line to the nearest road is 6.53 km: a slope of 8.3°, over the 8° allowed, 1300 m along
+the line.
+
+Point             Edge      x       z  MGRS
+From                    16000  -19000  36T WR 80517 14115
+Meets the road       4  19875  -12475  36T WR 87042 17990
+Nearest road            16000  -12475  36T WR 87042 14115
+Straight blocked        16000  -17700  36T WR 81817 14115
+
+The way's 3 turns between its ends are left out: --json lists them, --geojson-out draws the way.
+
+Every field, unrounded: add --json.

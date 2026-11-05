@@ -1,0 +1,9 @@
+No: no way to the road within 13000 m: a river and the reach of 13000 m block it.
+The straight line to the nearest road is 12.57 km: a river 50 m along the line.
+
+Point             Edge      x       z  MGRS
+From                    10000     100  36T WR 99617 08115
+Nearest road            10000  -12475  36T WR 87042 08115
+Straight blocked        10000      50  36T WR 99567 08115
+
+Every field, unrounded: add --json.
