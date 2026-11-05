@@ -163,6 +163,23 @@ pub(super) fn search_way(
     max_distance: f64,
 ) -> Result<Search, Refusal> {
     let grid = src.grid();
+    // The point's own cell first, so a point that cannot be driven from
+    // reads no more.
+    let (field, roads) = ground_over(src, g, kind, &grid, [p[0], p[1], p[0], p[1]], max_slope_deg)?;
+    let ground = Ground {
+        grid: &grid,
+        field: &field,
+        roads: &roads,
+    };
+    let own = ground.cell_of(p).map(|i| ground.passage(i));
+    if let None | Some(Err(_)) = own {
+        return Ok(Search {
+            outcome: Searched::StandsOn(own.and_then(Result::err).unwrap_or(Block::NoGround)),
+            most: 0.0,
+            goal: None,
+            reach: 0.0,
+        });
+    }
     let mut reach = (2.0 * distance + FIRST_REACH_MARGIN_M).min(max_distance);
     let mut most = 0.0f64;
     loop {
