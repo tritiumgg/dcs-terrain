@@ -99,6 +99,7 @@ fn straight_line(
         grid: &grid,
         field: &field,
         roads: &roads,
+        scale: None,
     };
     let distance = (road[0] - p[0]).hypot(road[1] - p[1]);
     Ok(match ground.line(p, road, None) {
@@ -170,6 +171,7 @@ pub(super) fn search_way(
         grid: &grid,
         field: &field,
         roads: &roads,
+        scale: None,
     };
     let own = ground.cell_of(p).map(|i| ground.passage(i));
     if let None | Some(Err(_)) = own {
@@ -189,6 +191,7 @@ pub(super) fn search_way(
             grid: &grid,
             field: &field,
             roads: &roads,
+            scale: None,
         };
         let done = |outcome| Search {
             outcome,

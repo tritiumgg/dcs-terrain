@@ -52,7 +52,7 @@ fn ground_of(rows: u32, cols: u32, seed: u64) -> (CostField, RoadCells) {
 }
 
 /// Bellman–Ford over the same moves: every edge relaxed until none
-/// changes, no move leaving a road's cell.
+/// changes, no move leaving a road's cell but a start's.
 fn bellman_ford(ground: &Ground, starts: &[(usize, f64)]) -> Vec<f64> {
     let moves = crossings(ground.grid.cell_size);
     let n = ground.field.values.len();
@@ -65,7 +65,8 @@ fn bellman_ford(ground: &Ground, starts: &[(usize, f64)]) -> Vec<f64> {
     loop {
         let mut changed = false;
         for v in 0..n {
-            if !cost[v].is_finite() || ground.roads.is_road(v) {
+            let start = starts.iter().any(|&(s, _)| s == v);
+            if !cost[v].is_finite() || (ground.roads.is_road(v) && !start) {
                 continue;
             }
             for m in 0..MOVES.len() {
@@ -128,6 +129,7 @@ fn a_diagonal_cannot_slip_between_two_cells_that_block() {
         grid: &g,
         field: &field,
         roads: &roads,
+        scale: None,
     };
     let s = search(&ground, &[(0, 0.0)], &|_| true, true);
     assert!(s.goals.is_empty());
@@ -144,6 +146,7 @@ fn the_search_equals_bellman_ford_and_its_straightened_way_costs_no_more() {
             grid: &g,
             field: &field,
             roads: &roads,
+            scale: None,
         };
         let start = (12 * 31 + 15, 0.0);
         // Every cell reached, every road's cell a goal.
@@ -197,6 +200,7 @@ fn many_starts_each_carry_their_cost() {
         grid: &g,
         field: &field,
         roads: &roads,
+        scale: None,
     };
     let starts = [(0, 500.0), (399, 0.0), (210, 25.0)];
     let s = search(&ground, &starts, &|_| true, false);
@@ -225,6 +229,7 @@ fn a_disk_bounds_the_search_and_says_so() {
         grid: &g,
         field: &field,
         roads: &roads,
+        scale: None,
     };
     let center = ground.center(220);
     let inside = |i: usize| {
@@ -256,6 +261,7 @@ fn a_meeting_point_on_a_cells_edge_is_moved_into_the_cell() {
         grid: &g,
         field: &field,
         roads: &roads,
+        scale: None,
     };
     // On the edge between cells 0 and 2, and a rounding past it.
     for q in [[50.0, 30.0], [50.0 + 1e-12, 30.0], [50.0, 50.0]] {
@@ -267,4 +273,69 @@ fn a_meeting_point_on_a_cells_edge_is_moved_into_the_cell() {
     }
     // A point inside the cell is kept as it is.
     assert_eq!(ground.inward([10.0, 20.0], 0), [10.0, 20.0]);
+}
+
+#[test]
+fn a_start_in_a_roads_cell_is_left_when_the_search_goes_on() {
+    let g = grid();
+    let field = CostField {
+        cells: Cells {
+            row0: 0,
+            col0: 0,
+            rows: 1,
+            cols: 9,
+        },
+        values: vec![Ok(1.0); 9],
+    };
+    // A piece of road in the first cell, another in the last.
+    let mut edge = vec![NO_EDGE; 9];
+    edge[0] = 0;
+    edge[8] = 1;
+    let roads = RoadCells { edge };
+    let ground = Ground {
+        grid: &g,
+        field: &field,
+        roads: &roads,
+        scale: None,
+    };
+    let first = search(&ground, &[(0, 0.0)], &|_| true, true);
+    assert_eq!(first.goals, vec![(0, 0.0)]);
+    let all = search(&ground, &[(0, 0.0)], &|_| true, false);
+    assert_eq!(all.goals.len(), 2);
+    assert_eq!(all.goals[1].0, 8);
+    assert!((all.goals[1].1 - 400.0).abs() < 1e-9, "{}", all.goals[1].1);
+    assert_eq!(all.cost, bellman_ford(&ground, &[(0, 0.0)]));
+    // The way judged again from the start's cell, which is a road's.
+    let way = found(&ground, &all, ground.center(0), 8, ground.center(8)).unwrap();
+    assert!((way.cost - 400.0).abs() < 1e-9);
+    assert_eq!(straighten(&ground, &way).path.len(), 2);
+}
+
+#[test]
+fn a_scale_multiplies_each_cells_cost() {
+    let g = grid();
+    let (field, roads) = ground_of(20, 20, 4);
+    let scale: Vec<f32> = (0..400).map(|i| 1.0 + (i % 5) as f32).collect();
+    let plain = Ground {
+        grid: &g,
+        field: &field,
+        roads: &roads,
+        scale: None,
+    };
+    let scaled = Ground {
+        scale: Some(&scale),
+        ..plain
+    };
+    for (i, &k) in scale.iter().enumerate() {
+        match (plain.passage(i), scaled.passage(i)) {
+            (Ok(a), Ok(b)) => assert!((b - a * f64::from(k)).abs() < 1e-9),
+            (a, b) => assert_eq!(a, b),
+        }
+    }
+    let start = [(210, 0.0)];
+    let s = search(&scaled, &start, &|_| true, false);
+    let bf = bellman_ford(&scaled, &start);
+    for (&a, &b) in s.cost.iter().zip(&bf) {
+        assert!(a == b || (a - b).abs() <= 1e-9 * b.max(1.0));
+    }
 }

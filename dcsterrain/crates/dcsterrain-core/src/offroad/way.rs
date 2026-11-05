@@ -10,7 +10,9 @@
 //!
 //! A cell a road of the network runs through is a goal. The search reaches
 //! it but never leaves it, so a way ends at the first road it meets; and a
-//! move may cross a road's cell only to end in it. A road's cell is crossed
+//! move may cross a road's cell only to end in it. A start in a road's cell
+//! is left, when the search goes on past its first goal, so a point beside a
+//! piece of road joined to nothing can reach another. A road's cell is crossed
 //! at the cost of its ground, or at one per meter where its ground cannot
 //! be crossed, as on a bridge.
 //!
@@ -70,11 +72,14 @@ impl RoadCells {
     }
 }
 
-/// The ground a search runs over: each cell's cost, and the network's cells.
+/// The ground a search runs over: each cell's cost, and the network's cells,
+/// and each cell's cost multiplied by a factor of its own where `scale` is
+/// given, at least one, so a way never costs less than its length.
 pub struct Ground<'a> {
     pub grid: &'a Grid,
     pub field: &'a CostField,
     pub roads: &'a RoadCells,
+    pub scale: Option<&'a [f32]>,
 }
 
 /// Where a way may not go: water of each class, slopes, no ground, cover,
@@ -200,11 +205,12 @@ pub enum Stop {
 impl Ground<'_> {
     /// The cost per meter of crossing cell `i`.
     pub fn passage(&self, i: usize) -> Result<f64, Block> {
-        match self.field.values[i] {
-            Ok(c) => Ok(f64::from(c)),
-            Err(_) if self.roads.is_road(i) => Ok(1.0),
-            Err(b) => Err(b),
-        }
+        let base = match self.field.values[i] {
+            Ok(c) => f64::from(c),
+            Err(_) if self.roads.is_road(i) => 1.0,
+            Err(b) => return Err(b),
+        };
+        Ok(self.scale.map_or(base, |s| base * f64::from(s[i])))
     }
 
     /// The cost of the move `m` out of cell `i`, and the cell it ends in.
@@ -216,7 +222,7 @@ impl Ground<'_> {
         for (k, x) in cells.iter().enumerate() {
             let j = self.field.index(r + x.dr, c + x.dc).ok_or(Stop::Outside)?;
             let last = k + 1 == cells.len();
-            if !last && x.meters > 0.0 && self.roads.is_road(j) {
+            if !last && j != i && x.meters > 0.0 && self.roads.is_road(j) {
                 return Err(Stop::Road);
             }
             cost += x.meters * self.passage(j).map_err(Stop::Blocked)?;
@@ -227,8 +233,8 @@ impl Ground<'_> {
 
     /// The cost of the straight line from `a` to `b`, or why it cannot be
     /// driven and how far along it that is, as a share. With `end`, it may
-    /// run through no road's cell but that one, as a move may not; without
-    /// it, roads' cells are crossed like any other.
+    /// run through no road's cell but that one and the one it starts in, as a
+    /// move may not; without it, roads' cells are crossed like any other.
     pub fn line(&self, a: [f64; 2], b: [f64; 2], end: Option<usize>) -> Result<f64, (Stop, f64)> {
         let length = (b[0] - a[0]).hypot(b[1] - a[1]);
         let mut cost = 0.0;
@@ -241,6 +247,7 @@ impl Ground<'_> {
             if let Some(end) = end
                 && j != end
                 && t1 > t0
+                && t0 > 0.0
                 && self.roads.is_road(j)
             {
                 stop = Some((Stop::Road, t0));
@@ -372,7 +379,8 @@ impl Searched {
 /// Searches the cells of `ground` from `starts`, each a cell and the cost
 /// already spent to reach it, through the cells `inside` admits, and stops
 /// at the first road's cell when `first` is set. A start that cannot be
-/// crossed is left out.
+/// crossed is left out; a start in a road's cell is a goal, and is left
+/// when the search goes on.
 pub fn search(
     ground: &Ground,
     starts: &[(usize, f64)],
@@ -420,7 +428,9 @@ pub fn search(
             if first {
                 break;
             }
-            continue;
+            if from[v] != START {
+                continue;
+            }
         }
         for m in 0..MOVES.len() {
             match ground.step(&moves, v, m) {
