@@ -1,6 +1,8 @@
 1 route by roads, the least costly first.
 3 were asked for. A route is kept only when it is new, at most 1.50 × the first's length, and shares
 at most 50 % of its length with each route kept; the search, at most 12 tries, found no more.
+The from end is 475 m from the road, a stretch this route does not plan: --offroad plans it across
+country.
 
 Ends, each where it joins the network
 End       x       z  MGRS                Moved (m)

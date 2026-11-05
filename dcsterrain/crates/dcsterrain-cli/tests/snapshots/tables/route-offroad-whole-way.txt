@@ -1,0 +1,11 @@
+The route by roads: 500 m, 1.00 × the 500 m straight line.
+It climbs 4 m and descends 0 m; its steepest 100 m is 0.8 %.
+It never joins the road: the way runs 500 m across country, as hard to cross as 500 m of open flat
+ground.
+
+Across country, every turn
+Way         #    x      z  MGRS
+From to to  1    0  -7000  36T WQ 92517 98115
+From to to  2  400  -6700  36T WQ 92817 98515
+
+Every field, unrounded: add --json.

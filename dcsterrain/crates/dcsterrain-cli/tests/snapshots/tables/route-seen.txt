@@ -1,5 +1,7 @@
 The route by roads: 27.55 km, 1.15 × the 23.87 km straight line.
 It climbs 314 m and descends 164 m; its steepest 100 m is 9.5 %.
+The from end is 475 m and the to end 5000 m from the road, stretches this route does not plan:
+--offroad plans them across country.
 
 Ends, each where it joins the network
 End       x       z  MGRS                Moved (m)

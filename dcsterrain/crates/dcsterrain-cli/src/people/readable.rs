@@ -267,27 +267,154 @@ fn km(v: &Value) -> String {
     fixed(num(v).map(|m| m / 1000.0), 2)
 }
 
+/// How far from an end as given a route joins the network.
+fn moved(given: &Value, snapped: &Value) -> Option<f64> {
+    match (
+        num(&given["x"]),
+        num(&given["z"]),
+        num(&snapped["x"]),
+        num(&snapped["z"]),
+    ) {
+        (Some(gx), Some(gz), Some(sx), Some(sz)) => Some((gx - sx).hypot(gz - sz)),
+        _ => None,
+    }
+}
+
+/// Whether the route planned its ends' ways across country.
+fn offroad(asked: &Asked) -> bool {
+    asked.request["offroad"] == true
+}
+
 /// Where each end of a route was given and where it joined the network.
 fn route_ends(page: &mut Page, asked: &Asked, route: &Value) {
+    if route["snapped_from"].is_null() && route["snapped_to"].is_null() {
+        return;
+    }
     page.heading("Ends, each where it joins the network");
     let mut t = with_place(Table::new().col("End", Align::Left)).col("Moved (m)", Align::Right);
     for (end, given, snapped) in [
         ("From", &asked.request["from"], &route["snapped_from"]),
         ("To", &asked.request["to"], &route["snapped_to"]),
     ] {
-        let moved = match (
-            num(&given["x"]),
-            num(&given["z"]),
-            num(&snapped["x"]),
-            num(&snapped["z"]),
-        ) {
-            (Some(gx), Some(gz), Some(sx), Some(sz)) => Some((gx - sx).hypot(gz - sz)),
-            _ => None,
-        };
         let mut row = vec![end.to_string()];
         row.extend(place(asked, snapped));
-        row.push(fixed(moved, 0));
+        row.push(fixed(moved(given, snapped), 0));
         t.row(row);
+    }
+    page.table(&t);
+}
+
+/// The least distance from the road at which the page says an end's
+/// stretch to it was not planned: five cells, the ground's own grain.
+const UNPLANNED_M: f64 = 250.0;
+
+/// Without `--offroad`, the ends that lie far from where the route joins the
+/// road, whose stretch to it the route does not plan.
+fn unplanned(page: &mut Page, asked: &Asked, route: &Value) {
+    if offroad(asked) {
+        return;
+    }
+    let far: Vec<(&str, f64)> = [
+        (
+            "from",
+            moved(&asked.request["from"], &route["snapped_from"]),
+        ),
+        ("to", moved(&asked.request["to"], &route["snapped_to"])),
+    ]
+    .into_iter()
+    .filter_map(|(end, m)| m.filter(|&m| m > UNPLANNED_M).map(|m| (end, m)))
+    .collect();
+    match far.as_slice() {
+        [] => {}
+        [(end, m)] => page.line(&format!(
+            "The {end} end is {} m from the road, a stretch this route does not plan: \
+             --offroad plans it across country.",
+            fixed(Some(*m), 0)
+        )),
+        [(_, a), (_, b), ..] => page.line(&format!(
+            "The from end is {} m and the to end {} m from the road, stretches this route \
+             does not plan: --offroad plans them across country.",
+            fixed(Some(*a), 0),
+            fixed(Some(*b), 0)
+        )),
+    }
+}
+
+/// The ways across country at a route's ends, `[from, to]`, each present
+/// when the route has it.
+fn ways(route: &Value) -> [&Value; 2] {
+    [&route["offroad_from"], &route["offroad_to"]]
+}
+
+/// The turns of the ways across country, which the waypoints include.
+fn offroad_turns(route: &Value) -> usize {
+    ways(route)
+        .iter()
+        .map(|w| w["path"].as_array().map_or(0, Vec::len))
+        .sum()
+}
+
+/// How much of a route runs off the road, in words.
+fn offroad_share(page: &mut Page, route: &Value) {
+    let [from, to] = ways(route);
+    let length = |w: &Value| num(&w["length"]).unwrap_or(0.0);
+    let off = length(from) + length(to);
+    let total = num(&route["length"]).unwrap_or(0.0);
+    if route["snapped_from"].is_null() {
+        page.line(&format!(
+            "It never joins the road: the way runs {} across country, as hard to cross as {} \
+             of open flat ground.",
+            distance(&from["length"]),
+            distance(&from["cost"])
+        ));
+        return;
+    }
+    if off == 0.0 {
+        page.line("Both ends lie on the road: no way across country.");
+        return;
+    }
+    let share = if total > 0.0 {
+        off / total * 100.0
+    } else {
+        0.0
+    };
+    let part = |w: &Value, words: &str| {
+        if w.is_null() {
+            format!("none {words}")
+        } else {
+            format!("{} {words}", distance(&w["length"]))
+        }
+    };
+    page.line(&format!(
+        "Across country: {} of it, {} %: {} and {}.",
+        distance(&Value::from(off)),
+        fixed(Some(share), 0),
+        part(from, "from the start to the road"),
+        part(to, "from the road to the end")
+    ));
+}
+
+/// The turns of a route's ways across country, every one.
+fn offroad_waypoints(page: &mut Page, asked: &Asked, route: &Value, heading: &str) {
+    if offroad_turns(route) == 0 {
+        return;
+    }
+    page.heading(heading);
+    let mut t = with_place(Table::new().col("Way", Align::Left).col("#", Align::Right));
+    let names = if route["snapped_from"].is_null() {
+        ["From to to", ""]
+    } else {
+        ["From to road", "Road to to"]
+    };
+    for (w, name) in ways(route).iter().zip(names) {
+        let Some(turns) = w["path"].as_array() else {
+            continue;
+        };
+        for (n, at) in turns.iter().enumerate() {
+            let mut row = vec![name.to_string(), (n + 1).to_string()];
+            row.extend(place(asked, at));
+            t.row(row);
+        }
     }
     page.table(&t);
 }
@@ -341,10 +468,19 @@ fn stretch(route: &Value) -> String {
 
 /// What a route's table leaves out.
 fn waypoints_left_out(page: &mut Page, routes: &[&Value]) {
+    // The turns across country are listed, and so not left out.
     let n: usize = routes
         .iter()
-        .map(|r| r["waypoints"].as_array().map_or(0, Vec::len))
+        .map(|r| {
+            r["waypoints"]
+                .as_array()
+                .map_or(0, Vec::len)
+                .saturating_sub(offroad_turns(r))
+        })
         .sum();
+    if n == 0 {
+        return;
+    }
     page.blank();
     page.note(&format!(
         "Each leg's x, z and MGRS are where it ends. {} left out: --json lists them, \
@@ -375,8 +511,15 @@ fn route(page: &mut Page, asked: &Asked, a: &Value) {
         whole(&a["descent"]),
         fixed(num(&a["max_grade_pct"]), 1),
     ));
+    if offroad(asked) {
+        offroad_share(page, a);
+    }
+    unplanned(page, asked, a);
     route_ends(page, asked, a);
-    route_legs(page, asked, a, "Legs");
+    offroad_waypoints(page, asked, a, "Across country, every turn");
+    if a["legs"].as_array().is_some_and(|l| !l.is_empty()) {
+        route_legs(page, asked, a, "Legs");
+    }
     waypoints_left_out(page, &[a]);
 }
 
@@ -423,6 +566,7 @@ fn route_alternatives(page: &mut Page, asked: &Asked, a: &Value) {
     let Some(first) = routes.first() else {
         return;
     };
+    unplanned(page, asked, first);
     route_ends(page, asked, first);
 
     page.heading("Routes");
@@ -433,17 +577,22 @@ fn route_alternatives(page: &mut Page, asked: &Asked, a: &Value) {
         .col("Up (m)", Align::Right)
         .col("Down (m)", Align::Right)
         .col("Grade (%)", Align::Right)
-        .col("Legs", Align::Right)
-        // Left out whole rather than cut, so no list ends mid-number.
-        .optional("Overlap (%)", Align::Left, 2)
-        .optional("Chokepoint edges", Align::Left, 1);
+        .col("Legs", Align::Right);
+    let off = offroad(asked);
+    if off {
+        t = t.col("Across country (km)", Align::Right);
+    }
+    // Left out whole rather than cut, so no list ends mid-number.
+    let mut t =
+        t.optional("Overlap (%)", Align::Left, 2)
+            .optional("Chokepoint edges", Align::Left, 1);
     for (n, r) in routes.iter().enumerate() {
         let chokepoints = if r["chokepoints"].is_null() {
             "not built yet".into()
         } else {
             listed(&r["chokepoints"], text)
         };
-        t.row(vec![
+        let mut row = vec![
             (n + 1).to_string(),
             km(&r["length"]),
             format!("{} ×", fixed(num(&r["stretch"]), 2)),
@@ -451,9 +600,17 @@ fn route_alternatives(page: &mut Page, asked: &Asked, a: &Value) {
             whole(&r["descent"]),
             fixed(num(&r["max_grade_pct"]), 1),
             r["legs"].as_array().map_or(0, Vec::len).to_string(),
+        ];
+        if off {
+            let [a, b] = ways(r);
+            let length = |w: &Value| num(&w["length"]).unwrap_or(0.0);
+            row.push(km(&Value::from(length(a) + length(b))));
+        }
+        row.extend([
             listed(&r["overlap_with"], |s| fixed(num(s).map(|s| s * 100.0), 0)),
             chokepoints,
         ]);
+        t.row(row);
     }
     page.table(&t);
     page.blank();
@@ -469,6 +626,12 @@ fn route_alternatives(page: &mut Page, asked: &Asked, a: &Value) {
     let all: Vec<&Value> = routes.iter().collect();
     for (n, r) in routes.iter().enumerate() {
         route_legs(page, asked, r, &format!("Route {} legs", n + 1));
+        offroad_waypoints(
+            page,
+            asked,
+            r,
+            &format!("Route {} across country, every turn", n + 1),
+        );
     }
     waypoints_left_out(page, &all);
 }
