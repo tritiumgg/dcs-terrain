@@ -51,6 +51,7 @@ the least interesting to attack, and one the player learns to expect.
 | `length`, `straight_line` | `route` | Their ratio is the detour: 1.1 is a direct road, 2 a valley or river forcing the long way. Time is length over road speed; ground groups do roughly 50 to 70 km/h, so 23 km is 20 to 30 minutes |
 | `ascent`, `descent`, `max_grade_pct` | `route` | 600 m of ascent over 20 km is a mountain road. DCS slows ground groups on grades, so widen the arrival window |
 | `exposure` per leg | `route` | The share of a leg the observers see. A convoy is ambushable on exposed legs |
+| `offroad_from`, `offroad_to` | `route` with `offroad` | Each end's way across country: its `length`, its `cost` in meters of open flat ground (a forest meter costs 4), its climb and `exposure`. A way that costs twice its length is slow going; the share of the route's `length` off the road is the share driven at cross-country speed |
 | `stretch`, `overlap_with`, `shared_edges_with_all` | `route_alternatives` | How much longer than the shortest, what it shares with each other route, and the edges all must use. Stretch is the price of variety; shared edges are where a player can wait whichever route is taken |
 | `betweenness` | `chokepoints` | How many shortest paths use an edge. Cut a high one and traffic reroutes far |
 | `reachable`, `way`, `straight` | `trafficability` | Whether a group can drive between the road and a point round steep slopes and water, the way it takes (its `length`, climb and where it `meets` the road), and where the straight line fails |

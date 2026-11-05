@@ -129,7 +129,7 @@ and `path` names the field at fault, such as `criteria.2.params.deg`.
 | From which directions can a site be approached masked | `approach_spectrum` |
 | Where on a given route does a site first see it | `unmask_profile` |
 | Where do many sites together leave a gap | `exposure` |
-| The route by `network` `roads` or `railroads`, optionally avoiding areas or observers | `route` |
+| The route by `network` `roads` or `railroads`, optionally avoiding areas or observers; with `offroad`, each end's way across country to the road planned and counted | `route` |
 | Several different routes between two points | `route_alternatives` |
 | The roads or bridges that matter most in a region | `chokepoints` |
 | Can a ground group reach this point from the road | `trafficability` |
@@ -221,7 +221,7 @@ Mind these:
 | `too_many_rows` | Raise `max_rows` on `sample` or `scenery_in`, or narrow the request. An answer is never cut short |
 | `too_large` | Coarsen `step` or `resolution`, or split the region |
 | `off_terrain` | A point lies off the mesh. Drop it and say so; a ring near an edge hits this |
-| `no_route` | Nothing joins the ends: an `avoid` cut the network, the ends are on separate networks, a rail route would have to reverse at a switch, or the route would pass `max_detour_factor` (3) times the straight line, which you can raise |
+| `no_route` | Nothing joins the ends: an `avoid` cut the network, the ends are on separate networks, a rail route would have to reverse at a switch, or the route would pass `max_detour_factor` (3) times the straight line, which you can raise. When the message says an end snaps to a piece of road that joins none the other's reaches, as every road route from `airport:Kobuleti` does on Caucasus, set `offroad`. With `offroad`, a `no_route` at `from` or `to` says what blocks that end's way to the road within `max_offroad` |
 | `too_far` | `trafficability`: the nearest road is past `max_distance`, 20 km at most |
 | `unknown_airdrome` | List the airdromes with `nearest` |
 | `terrain_refused`, `refused` | The terrain cannot be read: an unknown file format, or a projection that misses a beacon by over 2 m. Report the message. `--allow-crs-residual` accepts the projection, but only do that if the user agrees |
@@ -263,7 +263,8 @@ request moves them by orders of magnitude.
 | 200 to 330 ms | `exposure`, `validate_placements` |
 
 `trafficability` whose nearest road lies far off searches up to 20 km of
-cells round the point, about 150 ms.
+cells round the point, about 150 ms. A `route` or `route_alternatives` with
+`offroad` searches 5 km round each end, 30 to 100 ms.
 
 The first request on a terrain, or on a stretch of it, reads files and costs
 more. A horizon criterion (`masked_from`, `enclosure_min`) or an `enclosure` or

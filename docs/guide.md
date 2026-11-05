@@ -829,6 +829,8 @@ Then the answer says how much of each stretch of road those posts can see.
 ```text
 The route by roads: 25.82 km, 1.72 × the 15.00 km straight line.
 It climbs 69 m and descends 75 m; its steepest 100 m is 9.3 %.
+The from end is 504 m from the road, a stretch this route does not plan: --offroad plans it across
+country.
 
 Ends, each where it joins the network
 End         x       z  MGRS                Moved (m)
@@ -866,10 +868,72 @@ What it means:
 - `Ends` says where the route joins the road.
   Kutaisi's center is 504 m from the nearest road.
   The site is 125 m from it.
+- Those 504 m are not in the 25.82 km.
+  The route starts on the road, so it does not plan the way from the airfield to it.
 - `Legs` lists the stretches of road between junctions, in order.
 - `Seen` is the share of each leg the posts can see.
   The posts see all of 12 legs, 97 % of leg 3 and 79 % of leg 14.
 - The site is hidden, but the road to it is not.
+
+**Plan the way off the road too.**
+`--offroad` plans each end's way across country to a road, round water and steep slopes.
+It is not tied to the nearest road: it takes whichever road gives the least costly route.
+A meter across country costs as much as 2 m of road, so the route keeps to roads where it can.
+
+```powershell
+.\dcsterrain.exe route --terrain Caucasus --network roads --from airport:Kutaisi --to -293887,671859 --exposure-observers -297000,676000@10 -296000,668000@10 --offroad
+```
+
+```text
+The route by roads: 18.91 km, 1.26 × the 15.00 km straight line.
+It climbs 54 m and descends 61 m; its steepest 100 m is 9.3 %.
+Across country: 1.04 km of it, 5 %: 765 m from the start to the road and 270 m from the road to the
+end.
+
+Ends, each where it joins the network
+End         x       z  MGRS                Moved (m)
+From  -284319  683346  38T KM 91556 73198        765
+To    -293675  672025  38T KM 79118 65579        269
+
+Across country, every turn
+Way           #        x       z  MGRS
+From to road  1  -284887  683859  38T KM 91980 72567
+From to road  2  -284319  683346  38T KM 91556 73198
+Road to to    1  -293675  672025  38T KM 79118 65579
+Road to to    2  -293725  671975  38T KM 79061 65537
+Road to to    3  -293887  671859  38T KM 78924 65394
+
+Legs
+#  Class  Length (km)  Up (m)  Down (m)  Grade (%)  Seen (%)        x       z  MGRS
+1  road          0.20       0         0        0.1       100  -284146  683250  38T KM 91485 73381
+2  road          0.15       0         0        0.3       100  -284025  683167  38T KM 91421 73512
+3  road          0.46       0         0        0.1       100  -284199  682742  38T KM 90979 73401
+4  road          2.20       0         8        0.7       100  -285183  680772  38T KM 88904 72708
+5  road          1.76      15        14        4.8       100  -285418  679238  38T KM 87363 72691
+6  road          3.34       0         4        0.9       100  -287011  676469  38T KM 84418 71513
+7  road          2.18       0         2        0.3       100  -287253  674383  38T KM 82333 71565
+8  road          2.71       0         7        0.4       100  -288895  672245  38T KM 80001 70250
+9  road          4.87      36        24        9.3        83  -293675  672025  38T KM 79118 65579
+1 column left out to fit 100 characters: Edge. --json has it.
+
+Each leg's x, z and MGRS are where it ends. 39 waypoints are left out: --json lists them,
+--geojson-out draws the way.
+
+Every field, unrounded: add --json.
+```
+
+What it means:
+
+- The route is now 18.91 km, almost 7 km shorter.
+  765 m across country reaches a road that runs more directly to the site.
+- `Across country` lists every turn of the two ways off the road.
+  In the Mission Editor, make each turn a waypoint with the action `Off Road`, and the rest `On Road`.
+  A ground group drives straight between waypoints off the road, so give it every turn.
+- The way to the site bends to stay out of the posts' sight, so it is 270 m rather than 125 m.
+- Each end's way is searched within 5 km of it, the most `--max-offroad` allows.
+  `--max-slope-deg` sets the steepest ground, 30° by default.
+- The ways are this tool's own plan.
+  DCS was not asked, and its ground units may pick their own way between waypoints.
 
 Is there a better road?
 `route-alternatives` looks for different routes between the same two points.
@@ -1171,8 +1235,26 @@ There are four reasons this can happen:
 - The start or the end joins a short road that meets no other road.
   `route` begins on the road nearest to the start, and ends on the road nearest to the end.
   Kobuleti's nearest road is one such piece, so every route from `airport:Kobuleti` fails.
-  `nearest --kind road --n 3` lists the roads near a point.
-  Start from a point on another of them instead.
+  The error then says so:
+
+  ```text
+  error: the network joins no route between the ends within the detour allowed, past the regions avoided; the from end snaps to a piece of road that joins none the other end's road reaches: set offroad to plan its way across country to a road that leads on
+  ```
+
+  Add `--offroad`, and the route crosses country to a road that leads on:
+
+  ```powershell
+  .\dcsterrain.exe route --terrain Caucasus --network roads --from airport:Kobuleti --to airport:Batumi --offroad
+  ```
+
+  The answer starts like this:
+
+  ```text
+  The route by roads: 50.34 km, 1.20 × the 42.02 km straight line.
+  It climbs 455 m and descends 463 m; its steepest 100 m is 18.4 %.
+  Across country: 1.89 km of it, 4 %: 1.39 km from the start to the road and 507 m from the road to
+  the end.
+  ```
 - An area you asked it to avoid cuts every way through.
 - Every way is too long.
   By default, a route may be at most 3 times as long as the straight line.

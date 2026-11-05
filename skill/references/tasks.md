@@ -205,6 +205,23 @@ does not move at `exposure_weight` 1 is not proof it is the least exposed: raise
 the weight, up to 1000, to see what avoiding the observers costs. Back in DCS,
 each waypoint becomes a waypoint with the action `On Road`.
 
+An end off the road, a depot in a field or a site on a hill, is snapped to the
+nearest road, and the stretch between is neither planned nor counted. Set
+`offroad` to plan it: each end's way across country to the road, round water
+and slopes past `max_slope_deg` (30), within `max_offroad` (5 km, also the most), each meter off the road costing `offroad_weight` (2) meters of road.
+The observers price those cells too. `offroad_from` and `offroad_to` hold each
+way's `path`, `length` and climb, and the totals cover the whole way:
+
+```jsonl
+{"id": "convoy_offroad", "op": "route", "request": {"network": "roads", "from": {"x": -284887, "z": 683859}, "to": {"x": -293887, "z": 682059}, "offroad": true}}
+```
+
+In DCS the turns of `offroad_from` and `offroad_to` become waypoints with the
+action `Off Road`, the rest `On Road`. The ways are this tool's own plan: a
+ground group drives straight between waypoints off the road, so give it every
+turn. A route off the road the whole way has no legs and null `snapped_from`.
+`offroad` is roads only.
+
 ## Alternative routes for a recurring convoy
 
 *The same convoy, but not the same road every time.*
