@@ -2492,4 +2492,60 @@ pub(crate) mod install_tests {
             );
         }
     }
+
+    /// Every road route from Kobuleti fails snapped, its nearest road a piece
+    /// joined to nothing; off the road it answers. Run with `--release` and
+    /// `--nocapture` for the figures.
+    #[test]
+    fn kobuleti_to_batumi_answers_off_the_road() {
+        let Some(root) = std::env::var_os("DCSTERRAIN_INSTALL").map(PathBuf::from) else {
+            eprintln!("DCSTERRAIN_INSTALL is not set; skipped");
+            return;
+        };
+        let scratch = Scratch::new();
+        let cache = Cache::new(&scratch.0);
+        let t = Terrain::open(&root, "Caucasus", &cache, true).unwrap();
+        let tables = t.source().tables().unwrap();
+        let at = |name: &str| {
+            let a = tables
+                .airdromes
+                .iter()
+                .find(|a| {
+                    a.name_id.eq_ignore_ascii_case(name)
+                        || a.display_name
+                            .as_deref()
+                            .is_some_and(|d| d.eq_ignore_ascii_case(name))
+                })
+                .unwrap_or_else(|| panic!("no airdrome {name}"));
+            json!({"x": a.x.unwrap(), "z": a.z.unwrap()})
+        };
+        let mut req = json!({"network": "roads", "from": at("Kobuleti"), "to": at("Batumi")});
+        let e = crate::query::answer(&t, "route", &req).unwrap_err();
+        assert_eq!(e[0].code, "no_route");
+        assert!(e[0].message.contains("the from end"), "{}", e[0].message);
+        assert!(e[0].message.contains("set offroad"), "{}", e[0].message);
+        req["offroad"] = json!(true);
+        let v = crate::query::answer(&t, "route", &req).unwrap();
+        let way = |w: &serde_json::Value| w["length"].as_f64().unwrap_or(0.0);
+        let legs = v["legs"].as_array().unwrap();
+        let road: f64 = legs.iter().map(|l| l["length"].as_f64().unwrap()).sum();
+        let total = v["length"].as_f64().unwrap();
+        println!(
+            "Kobuleti to Batumi: {total:.0} m, {:.0} m across country from, {road:.0} m of \
+             road in {} legs, {:.0} m across country to; straight line {:.0} m",
+            way(&v["offroad_from"]),
+            legs.len(),
+            way(&v["offroad_to"]),
+            v["straight_line"].as_f64().unwrap()
+        );
+        assert!(
+            (way(&v["offroad_from"]) + road + way(&v["offroad_to"]) - total).abs() < 1e-6 * total
+        );
+        req["k"] = json!(3);
+        let alts = crate::query::answer(&t, "route_alternatives", &req).unwrap();
+        println!(
+            "and {} alternatives",
+            alts["routes"].as_array().unwrap().len()
+        );
+    }
 }
