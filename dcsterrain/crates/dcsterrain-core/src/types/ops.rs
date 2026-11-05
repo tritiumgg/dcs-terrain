@@ -1059,7 +1059,12 @@ pub struct Chokepoint {
 
 // trafficability
 
-/// Whether a vehicle can reach a network across country from a point.
+/// Whether a vehicle can drive across country from a point to a network.
+///
+/// The least-cost way is searched over the 50 m cells within `max_distance`,
+/// going round water and ground steeper than `max_slope_deg`, and ends at the
+/// first road it reaches. The straight line to the nearest road is judged
+/// too.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TrafficabilityRequest {
     /// Where the vehicle starts: meters north of the terrain's origin.
@@ -1070,31 +1075,70 @@ pub struct TrafficabilityRequest {
     pub max_slope_deg: f64,
     /// Roads or railroads.
     pub network: Network,
+    /// How far from the point the way is searched, in meters, at most
+    /// 20 000; a network farther than this is `too_far`.
+    #[serde(default = "default_max_distance")]
+    pub max_distance: f64,
     /// Also return the answer as GeoJSON.
     #[serde(default)]
     pub geojson: bool,
 }
 
-/// Judged along the straight line to the nearest road, sampled every 25 m
-/// for slope and water.
+fn default_max_distance() -> f64 {
+    20_000.0
+}
+
+/// The way found, if any, and the straight line beside it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TrafficabilityResponse {
     #[serde(flatten)]
     pub provenance: Provenance,
+    /// Whether a way to the network was found within `max_distance`.
     pub reachable: bool,
+    /// The point of the network nearest the start.
     pub nearest_road: Point,
+    /// The straight distance to `nearest_road`.
     pub distance: f64,
-    /// The line's length weighted by how hard its ground is to cross, in
-    /// meters of open flat ground; null when it is not reachable.
-    pub cost: Option<f64>,
-    /// The first sample that fails, when one does.
-    pub blocking: Option<Point>,
-    /// Why the line is or is not passable, for a reader.
+    /// The least-cost way to the network, null when none was found.
+    pub way: Option<OffroadWay>,
+    /// The straight line to `nearest_road`, judged over the cells it crosses.
+    pub straight: Straight,
+    /// Why the point is or is not reachable, for a reader.
     pub reason: String,
-    /// The line, its ends and the blocking point, when `geojson` was asked
-    /// for.
+    /// The way, the straight line, their ends and the blocking point, when
+    /// `geojson` was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geojson: Option<serde_json::Value>,
+}
+
+/// A way across country to the network.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct OffroadWay {
+    /// Its turns, from the start to where it meets the network.
+    pub path: Vec<Point>,
+    /// Planar length.
+    pub length: f64,
+    /// Its length weighted by how hard its ground is to cross, in meters of
+    /// open flat ground.
+    pub cost: f64,
+    pub ascent: f64,
+    pub descent: f64,
+    /// Where it meets the network: its last turn.
+    pub meets: Point,
+    /// The edge it meets, as `nearest` and `route` number edges.
+    pub edge_id: i64,
+}
+
+/// The straight line from the start to the nearest point of the network.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Straight {
+    /// Its length weighted by how hard its ground is to cross, in meters of
+    /// open flat ground; null when it is blocked.
+    pub cost: Option<f64>,
+    /// Where it enters the first cell that blocks it, when one does.
+    pub blocking: Option<Point>,
+    /// Why it is or is not passable, for a reader.
+    pub reason: String,
 }
 
 // point_info

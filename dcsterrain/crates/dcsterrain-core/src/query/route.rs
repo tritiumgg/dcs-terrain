@@ -626,7 +626,7 @@ fn seen_share(
 }
 
 /// Meters climbed and descended over a profile of distance and height.
-fn climb(profile: &[(f64, f64)]) -> (f64, f64) {
+pub(super) fn climb(profile: &[(f64, f64)]) -> (f64, f64) {
     let (mut up, mut down) = (0.0, 0.0);
     for w in profile.windows(2) {
         let dh = w[1].1 - w[0].1;
