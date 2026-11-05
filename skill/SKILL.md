@@ -262,6 +262,9 @@ request moves them by orders of magnitude.
 | 10 to 60 ms | `chokepoints`, `approach_spectrum`, `coverage`, `find_sites`, `radar_floor` |
 | 200 to 330 ms | `exposure`, `validate_placements` |
 
+`trafficability` whose nearest road lies far off searches up to 20 km of
+cells round the point, about 150 ms.
+
 The first request on a terrain, or on a stretch of it, reads files and costs
 more. A horizon criterion (`masked_from`, `enclosure_min`) or an `enclosure` or
 `horizon_*` layer computes its region's horizon once and caches it. `--threads

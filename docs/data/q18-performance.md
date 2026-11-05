@@ -63,6 +63,13 @@ a case's requests, every case on every terrain. Target 64 MiB, ADR 0008.
 | PersianGulf | 147.8 | 55.2 | `exposure_10_sites` |
 | Syria | 220.5 | 59.4 | `exposure_10_sites` |
 
+`trafficability` searching its whole reach, measured after the off-road search
+landed on DCS 2.9.31.29434 (timestamp 20261027-141234): `trafficability_20km`,
+three land points whose nearest railroad lies 15 to 20 km away, so the search
+reads every cell within 20 km, peaks at 46.8 MiB on GermanyCW in one process
+answering all three; each takes a median 141 ms held, warm. 20 km
+stays its default and its limit.
+
 Exempt and measured beside it: `dcsterrain index` from an empty cache on
 GermanyCW peaks at about 1.5 GiB, by a coarse poll of the process before the
 last changes to the code; it was not measured again.
