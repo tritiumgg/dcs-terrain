@@ -12,7 +12,9 @@
 //! it but never leaves it, so a way ends at the first road it meets; and a
 //! move may cross a road's cell only to end in it. A start in a road's cell
 //! is left, when the search goes on past its first goal, so a point beside a
-//! piece of road joined to nothing can reach another. A road's cell is crossed
+//! piece of road joined to nothing can reach another; and a search may cross
+//! a road's cell whose own ground can be crossed, reaching it as a goal and
+//! going on past it. A road's cell is crossed
 //! at the cost of its ground, or at one per meter where its ground cannot
 //! be crossed, as on a bridge.
 //!
@@ -75,11 +77,18 @@ impl RoadCells {
 /// The ground a search runs over: each cell's cost, and the network's cells,
 /// and each cell's cost multiplied by a factor of its own where `scale` is
 /// given, at least one, so a way never costs less than its length.
+///
+/// A road's cell is a wall to a way, which may only end in it, unless
+/// `cross` lets it cross the cell's own ground.
 pub struct Ground<'a> {
     pub grid: &'a Grid,
     pub field: &'a CostField,
     pub roads: &'a RoadCells,
     pub scale: Option<&'a [f32]>,
+    /// Whether a way may cross a road's cell whose own ground can be crossed,
+    /// rather than only end in it. A road's cell over water, a bridge's, is
+    /// never crossed: a way would cross the river beside the bridge.
+    pub cross: bool,
 }
 
 /// Where a way may not go: water of each class, slopes, no ground, cover,
@@ -203,6 +212,11 @@ pub enum Stop {
 }
 
 impl Ground<'_> {
+    /// Whether cell `i` is a road's that a way may end in but not cross.
+    pub fn wall(&self, i: usize) -> bool {
+        self.roads.is_road(i) && !(self.cross && self.field.values[i].is_ok())
+    }
+
     /// The cost per meter of crossing cell `i`.
     pub fn passage(&self, i: usize) -> Result<f64, Block> {
         let base = match self.field.values[i] {
@@ -222,7 +236,7 @@ impl Ground<'_> {
         for (k, x) in cells.iter().enumerate() {
             let j = self.field.index(r + x.dr, c + x.dc).ok_or(Stop::Outside)?;
             let last = k + 1 == cells.len();
-            if !last && j != i && x.meters > 0.0 && self.roads.is_road(j) {
+            if !last && j != i && x.meters > 0.0 && self.wall(j) {
                 return Err(Stop::Road);
             }
             cost += x.meters * self.passage(j).map_err(Stop::Blocked)?;
@@ -248,7 +262,7 @@ impl Ground<'_> {
                 && j != end
                 && t1 > t0
                 && t0 > 0.0
-                && self.roads.is_road(j)
+                && self.wall(j)
             {
                 stop = Some((Stop::Road, t0));
                 return false;
@@ -344,6 +358,7 @@ const START: u8 = 16;
 const UNREACHED: u8 = u8::MAX;
 
 /// What a search found.
+#[derive(Default)]
 pub struct Searched {
     /// The least cost to each cell reached, infinite elsewhere.
     pub cost: Vec<f64>,
@@ -428,7 +443,7 @@ pub fn search(
             if first {
                 break;
             }
-            if from[v] != START {
+            if from[v] != START && ground.wall(v) {
                 continue;
             }
         }

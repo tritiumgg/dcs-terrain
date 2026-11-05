@@ -19,7 +19,7 @@ use crate::types::{
 
 /// The steepest limit a request may set: past it the cost model's slope
 /// factor says nothing a vehicle could use.
-const MAX_SLOPE_LIMIT_DEG: f64 = 60.0;
+pub(super) const MAX_SLOPE_LIMIT_DEG: f64 = 60.0;
 /// The farthest a way is searched: past it the nearest road is no way out on
 /// wheels, and the cells within it are the most the engine's memory holds
 /// beside the rest of its work.
@@ -100,6 +100,7 @@ fn straight_line(
         field: &field,
         roads: &roads,
         scale: None,
+        cross: false,
     };
     let distance = (road[0] - p[0]).hypot(road[1] - p[1]);
     Ok(match ground.line(p, road, None) {
@@ -172,6 +173,7 @@ pub(super) fn search_way(
         field: &field,
         roads: &roads,
         scale: None,
+        cross: false,
     };
     let own = ground.cell_of(p).map(|i| ground.passage(i));
     if let None | Some(Err(_)) = own {
@@ -192,6 +194,7 @@ pub(super) fn search_way(
             field: &field,
             roads: &roads,
             scale: None,
+            cross: false,
         };
         let done = |outcome| Search {
             outcome,

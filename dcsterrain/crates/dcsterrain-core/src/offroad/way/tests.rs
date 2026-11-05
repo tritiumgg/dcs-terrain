@@ -130,6 +130,7 @@ fn a_diagonal_cannot_slip_between_two_cells_that_block() {
         field: &field,
         roads: &roads,
         scale: None,
+        cross: false,
     };
     let s = search(&ground, &[(0, 0.0)], &|_| true, true);
     assert!(s.goals.is_empty());
@@ -147,6 +148,7 @@ fn the_search_equals_bellman_ford_and_its_straightened_way_costs_no_more() {
             field: &field,
             roads: &roads,
             scale: None,
+            cross: false,
         };
         let start = (12 * 31 + 15, 0.0);
         // Every cell reached, every road's cell a goal.
@@ -201,6 +203,7 @@ fn many_starts_each_carry_their_cost() {
         field: &field,
         roads: &roads,
         scale: None,
+        cross: false,
     };
     let starts = [(0, 500.0), (399, 0.0), (210, 25.0)];
     let s = search(&ground, &starts, &|_| true, false);
@@ -230,6 +233,7 @@ fn a_disk_bounds_the_search_and_says_so() {
         field: &field,
         roads: &roads,
         scale: None,
+        cross: false,
     };
     let center = ground.center(220);
     let inside = |i: usize| {
@@ -262,6 +266,7 @@ fn a_meeting_point_on_a_cells_edge_is_moved_into_the_cell() {
         field: &field,
         roads: &roads,
         scale: None,
+        cross: false,
     };
     // On the edge between cells 0 and 2, and a rounding past it.
     for q in [[50.0, 30.0], [50.0 + 1e-12, 30.0], [50.0, 50.0]] {
@@ -297,6 +302,7 @@ fn a_start_in_a_roads_cell_is_left_when_the_search_goes_on() {
         field: &field,
         roads: &roads,
         scale: None,
+        cross: false,
     };
     let first = search(&ground, &[(0, 0.0)], &|_| true, true);
     assert_eq!(first.goals, vec![(0, 0.0)]);
@@ -321,6 +327,7 @@ fn a_scale_multiplies_each_cells_cost() {
         field: &field,
         roads: &roads,
         scale: None,
+        cross: false,
     };
     let scaled = Ground {
         scale: Some(&scale),
@@ -338,4 +345,48 @@ fn a_scale_multiplies_each_cells_cost() {
     for (&a, &b) in s.cost.iter().zip(&bf) {
         assert!(a == b || (a - b).abs() <= 1e-9 * b.max(1.0));
     }
+}
+
+#[test]
+fn a_road_is_a_wall_unless_its_own_ground_may_be_crossed() {
+    let g = grid();
+    // Three rows; a road down the middle column, over water in the middle
+    // row, as a bridge.
+    let mut values = vec![Ok(1.0f32); 15];
+    values[7] = Err(Block::Water(3));
+    let field = CostField {
+        cells: Cells {
+            row0: 0,
+            col0: 0,
+            rows: 3,
+            cols: 5,
+        },
+        values,
+    };
+    let mut edge = vec![NO_EDGE; 15];
+    for r in 0..3 {
+        edge[r * 5 + 2] = 0;
+    }
+    let roads = RoadCells { edge };
+    let wall = Ground {
+        grid: &g,
+        field: &field,
+        roads: &roads,
+        scale: None,
+        cross: false,
+    };
+    let s = search(&wall, &[(5, 0.0)], &|_| true, false);
+    assert!(s.cost[9].is_infinite(), "{}", s.cost[9]);
+    let open = Ground {
+        cross: true,
+        ..wall
+    };
+    let s = search(&open, &[(5, 0.0)], &|_| true, false);
+    assert!(s.cost[9].is_finite());
+    // The bridge's cell is reached but never crossed: the middle row's far
+    // side is reached round it.
+    assert_eq!(s.goals.len(), 3);
+    let way = found(&open, &s, open.center(5), 9, open.center(9)).unwrap();
+    assert!(!way.path.contains(&open.center(7)), "{:?}", way.path);
+    assert!(open.line(open.center(5), open.center(9), Some(9)).is_err());
 }
