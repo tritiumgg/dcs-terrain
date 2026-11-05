@@ -7,8 +7,13 @@
 //! than the limit, cannot be crossed. The factors are this tool's own, not
 //! measured against the game's ground units, which path by rules of their
 //! own.
+//!
+//! `way` searches the least-cost way over these cells from a point to a
+//! network.
 
-use crate::grid::Window;
+pub mod way;
+
+use crate::grid::{Grid, Window};
 use crate::layers::{Cells, Derived, derive};
 use crate::source::{Cover, Layer, Refusal, Source};
 
@@ -48,31 +53,45 @@ pub enum Block {
     /// Its water class, as the `water` layer codes it.
     Water(i32),
     /// Its slope in degrees.
-    Steep(f64),
+    Steep(f32),
     /// A cover no vehicle crosses, as the `cover` layer codes it.
     Cover(i32),
 }
 
 /// Each cell's cost per meter over a rectangle, row-major with columns
-/// fastest, or why it cannot be crossed.
+/// fastest, or why it cannot be crossed: eight bytes a cell, since a search
+/// holds one over every cell within its reach.
 pub struct CostField {
     pub cells: Cells,
-    pub values: Vec<Result<f64, Block>>,
+    pub values: Vec<Result<f32, Block>>,
 }
 
 impl CostField {
     /// The cost of the cells `at`, slopes past `max_slope_deg` blocking.
+    /// It is read a row of tiles at a time, so the layers it is made from
+    /// are never held whole beside it.
     pub fn new(
         src: &(impl Source + ?Sized),
         at: Cells,
         max_slope_deg: f64,
     ) -> Result<CostField, Refusal> {
-        let slope = derive(src, Derived::Slope, at)?;
-        let water = Window::read(src, Layer::Water, at.row0, at.col0, at.rows, at.cols)?;
-        let cover = Window::read(src, Layer::Cover, at.row0, at.col0, at.rows, at.cols)?;
-        let values = (0..slope.values.len())
-            .map(|i| {
-                let (s, w, c) = (f64::from(slope.values[i]), water.data[i], cover.data[i]);
+        let tile = i64::from(src.grid().tile_size.max(1));
+        let mut values = Vec::with_capacity(at.rows as usize * at.cols as usize);
+        let end = at.row0 + i64::from(at.rows);
+        let mut row = at.row0;
+        while row < end {
+            let next = ((row.div_euclid(tile) + 1) * tile).min(end);
+            let strip = Cells {
+                row0: row,
+                col0: at.col0,
+                rows: (next - row) as u32,
+                cols: at.cols,
+            };
+            let slope = derive(src, Derived::Slope, strip)?;
+            let water = Window::read(src, Layer::Water, row, at.col0, strip.rows, at.cols)?;
+            let cover = Window::read(src, Layer::Cover, row, at.col0, strip.rows, at.cols)?;
+            values.extend((0..slope.values.len()).map(|i| {
+                let (s, w, c) = (slope.values[i], water.data[i], cover.data[i]);
                 if w == Layer::Water.nodata() || c == Layer::Cover.nodata() || s.is_nan() {
                     Err(Block::NoGround)
                 } else if w != 0 {
@@ -80,25 +99,109 @@ impl CostField {
                 } else if cover_factor(c).is_none() {
                     Err(Block::Cover(c))
                 } else {
-                    cost(s, w, c, max_slope_deg).ok_or(Block::Steep(s))
+                    cost(f64::from(s), w, c, max_slope_deg)
+                        .map(|v| v as f32)
+                        .ok_or(Block::Steep(s))
                 }
-            })
-            .collect();
+            }));
+            row = next;
+        }
         Ok(CostField { cells: at, values })
+    }
+
+    /// The index of the cell at a grid row and column, or `None` outside
+    /// the field.
+    pub fn index(&self, row: i64, col: i64) -> Option<usize> {
+        let (r, c) = (row - self.cells.row0, col - self.cells.col0);
+        let inside = (0..i64::from(self.cells.rows)).contains(&r)
+            && (0..i64::from(self.cells.cols)).contains(&c);
+        inside.then(|| (r * i64::from(self.cells.cols) + c) as usize)
+    }
+
+    /// The grid row and column of the cell at `index`.
+    pub fn row_col(&self, index: usize) -> (i64, i64) {
+        let cols = self.cells.cols as usize;
+        (
+            self.cells.row0 + (index / cols) as i64,
+            self.cells.col0 + (index % cols) as i64,
+        )
     }
 
     /// The cell at a grid row and column, or `None` outside the field.
     pub fn get(&self, row: i64, col: i64) -> Option<Result<f64, Block>> {
-        let (r, c) = (row - self.cells.row0, col - self.cells.col0);
-        let inside = (0..i64::from(self.cells.rows)).contains(&r)
-            && (0..i64::from(self.cells.cols)).contains(&c);
-        inside.then(|| self.values[(r * i64::from(self.cells.cols) + c) as usize])
+        self.index(row, col).map(|i| self.values[i].map(f64::from))
     }
 }
 
+/// Walks the segment from `a` to `b`, each `[x, z]`, through the grid's
+/// cells in order, calling `f(row, col, t0, t1)` with the share of the way
+/// along it each cell holds, until `f` returns false; returns whether it
+/// walked to the end. Where it passes exactly through a corner, the two
+/// cells beside the corner are called too, holding none of it, so a way
+/// judged over the cells cannot slip diagonally between two that block.
+pub fn cross(
+    g: &Grid,
+    a: [f64; 2],
+    b: [f64; 2],
+    f: &mut dyn FnMut(i64, i64, f64, f64) -> bool,
+) -> bool {
+    let cs = f64::from(g.cell_size);
+    let (ua, va) = ((a[0] - g.origin_x) / cs, (a[1] - g.origin_z) / cs);
+    let (du, dv) = ((b[0] - g.origin_x) / cs - ua, (b[1] - g.origin_z) / cs - va);
+    let (mut r, mut c) = (ua.floor() as i64, va.floor() as i64);
+    let step = |d: f64| {
+        if d > 0.0 {
+            1
+        } else if d < 0.0 {
+            -1
+        } else {
+            0
+        }
+    };
+    let (sr, sc) = (step(du), step(dv));
+    // The share of the way at which the walk first leaves the cell's row or
+    // column, and the share each further row or column takes.
+    let first = |p: f64, d: f64, i: i64| {
+        if d > 0.0 {
+            ((i + 1) as f64 - p) / d
+        } else if d < 0.0 {
+            (i as f64 - p) / d
+        } else {
+            f64::INFINITY
+        }
+    };
+    let (mut tr, mut tc) = (first(ua, du, r), first(va, dv, c));
+    let (dtr, dtc) = (1.0 / du.abs(), 1.0 / dv.abs());
+    let mut t = 0.0;
+    loop {
+        let next = tr.min(tc).min(1.0);
+        if !f(r, c, t, next) {
+            return false;
+        }
+        if next >= 1.0 {
+            return true;
+        }
+        if (tr - tc).abs() < 1e-12 {
+            if !f(r + sr, c, next, next) || !f(r, c + sc, next, next) {
+                return false;
+            }
+            (r, c, tr, tc) = (r + sr, c + sc, tr + dtr, tc + dtc);
+        } else if tr < tc {
+            (r, tr) = (r + sr, tr + dtr);
+        } else {
+            (c, tc) = (c + sc, tc + dtc);
+        }
+        t = next;
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cell_of_the_field_holds_in_eight_bytes() {
+        assert_eq!(std::mem::size_of::<Result<f32, Block>>(), 8);
+    }
 
     #[test]
     fn open_flat_ground_costs_one_and_the_rest_more_or_nothing() {
