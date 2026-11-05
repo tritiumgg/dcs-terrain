@@ -91,7 +91,7 @@ endpoints also returns them as `Point` features.
 | `nearest` | a `Point` per result with its fields but `x` and `z`; for road and rail, the matched edge, whole, as a `LineString` with its `kind`, `edge_id` and `class` |
 | `scenery_in` | each object's turned box as a `Polygon` with its fields but `x` and `z`, or a `Point` where its model has no box; the region or footprint asked about as a `Polygon` marked `region` or `footprint`, unless it has no area |
 | `chokepoints` | each edge as a `LineString` with its rank, betweenness, class and `crosses_water` |
-| `trafficability` | the line to the nearest road as a `LineString`, and the blocking point when there is one |
+| `trafficability` | the way as a `LineString` with `way`, its `length`, `cost` and `edge_id`, and where it meets the road; the straight line to the nearest road as one with `straight` and its `cost`; the start, the nearest road and the blocking point when there is one |
 | `point_info` | a `Point` per request point with its fields |
 | `airfield_info` | each runway as a `LineString` between its thresholds with designator, course, length and width; each stand as a `Point` with its size, and whether it fits when `fits` is given |
 | `validate_placements` | a `Point` per placement with its issues; its shape as a `Polygon` (a circle as a 32-sided one) unless it is a point; each offending object's box |
@@ -396,31 +396,49 @@ largest terrains.
 
 ### `trafficability`
 
-Request: `x, z`, `max_slope_deg` (more than 0, at most 60), `network`.
-Response: `{reachable, nearest_road, distance, cost, blocking: Point | null,
-reason}`, judging the straight line to the nearest point of the network every
-25 m by the off-road cost of the cell under it, short of the road itself,
-which may be a bridge. Water, a cell with no ground, or a slope past
-`max_slope_deg` blocks, and `blocking` is the first sample that does. A road
-more than 20 km away is the issue `too_far`. `cost` is the line's length weighted by the cost per meter
-of the cell under each sample, null when it is blocked.
+Request: `x, z`, `max_slope_deg` (more than 0, at most 60), `network`,
+`max_distance` (default 20 km, more than 0, at most 20 km). Response:
+`{reachable, nearest_road, distance, way, straight: {cost, blocking: Point |
+null, reason}, reason}`. `nearest_road` is the point of the network nearest
+the start and `distance` the straight line to it; a road farther than
+`max_distance` is the issue `too_far`, its message naming the field.
+
+`way` is the least-cost way from the point to the network over the 50 m cells
+within `max_distance` of it: `{path, length, cost, ascent, descent, meets,
+edge_id}`, null when there is none, and `reachable` says whether there is.
+Each cell joins its 16 neighbors, the eight round it and the eight a knight's
+move away, by the straight line between their centers. A move costs, for each
+cell it crosses, the meters it runs in the cell times the cell's cost per
+meter; a move that touches a cell that blocks, even only at a corner, is not
+made. Water, a cell with no ground and a slope past `max_slope_deg` block. A
+cell a road of the network runs through is a goal: the search ends at the
+first it reaches in order of cost, so a way ends at the first road it meets,
+and a move crosses a road's cell only to end in it. A road's cell is crossed
+at the cost of its ground, or at 1 per meter where its ground blocks, as on a
+bridge. The way runs from the point through the cells' centers to where the
+road runs closest to the last cell's center, then is straightened: from each
+turn, on to the farthest later turn a straight line reaches for no more than
+the way between them costs, judged over the cells it crosses. `meets` is its
+last turn, on the edge `edge_id`; ascent and descent are summed from the mesh
+height every 25 m along it. The search reads a disk of twice the distance to
+the nearest road and 1 km more, and doubles it, up to `max_distance`, until the
+way found costs no more than its radius: every cell costs at least 1 per
+meter, so no way leaving the disk costs less, and a near road costs a small
+search. A point that cannot be driven from is unreachable at once.
+
+`straight` judges the straight line to `nearest_road` over the cells it
+crosses, a road's cells never blocking: `cost` is its length weighted by each
+cell's cost per meter, null when it is blocked; `blocking` is where it enters
+the first cell that blocks. Where it passes and costs less than the searched
+way, it is the way. `reason` says why the point is or is not reachable,
+naming what blocks every way within reach: a river, a lake, the sea, slopes
+over the limit, the edge of the terrain, or the reach itself.
 
 The cost per meter is 1 on open flat ground, divided by a factor for cover
 (plain and runway 1, field 0.8, beach 0.6, town 0.5, forest 0.25) and one for
 slope (1 − 0.75 × (slope / `max_slope_deg`)², a quarter at the limit): a
 coarse cross-country movement map of this tool's own, not measured against
-the game's ground units.
-
-**A searched way, planned (ADR 0013), not built yet.** The least-cost way from
-the point to the network over the 50 m cells within `max_distance` (default
-and most 20 km, or the most that holds the engine to 64 MiB), 16 neighbors,
-at the cost per meter above, ending at the first cell of the network it
-reaches in order of cost, straightened where a straight cut costs no more.
-`reachable` then means such a way exists; `way` gives its path, length, cost,
-ascent, descent, the point where it meets the road and that edge; the straight
-line above moves to `straight`, with its cost, blocking point and reason. A
-road farther than `max_distance` is then `too_far`, its message naming the
-field.
+the game's ground units, which path by rules of their own between waypoints.
 
 ## 4. Operations added
 

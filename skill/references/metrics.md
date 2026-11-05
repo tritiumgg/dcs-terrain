@@ -53,7 +53,7 @@ the least interesting to attack, and one the player learns to expect.
 | `exposure` per leg | `route` | The share of a leg the observers see. A convoy is ambushable on exposed legs |
 | `stretch`, `overlap_with`, `shared_edges_with_all` | `route_alternatives` | How much longer than the shortest, what it shares with each other route, and the edges all must use. Stretch is the price of variety; shared edges are where a player can wait whichever route is taken |
 | `betweenness` | `chokepoints` | How many shortest paths use an edge. Cut a high one and traffic reroutes far |
-| `reachable`, `blocking` | `trafficability` | Whether a group gets from the road to a point without too steep a slope or water, and where it fails |
+| `reachable`, `way`, `straight` | `trafficability` | Whether a group can drive between the road and a point round steep slopes and water, the way it takes (its `length`, climb and where it `meets` the road), and where the straight line fails |
 
 ## Turning metrics into difficulty
 

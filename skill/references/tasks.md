@@ -275,9 +275,15 @@ whether the group stands among them.
 {"id": "reach", "op": "trafficability", "request": {"x": -293887, "z": 682059, "max_slope_deg": 20, "network": "roads"}}
 ```
 
-`reachable`, `blocking` and `reason` are the answer. `cost` is a coarse
-cross-country weight of this tool's own, not measured against the game's ground
-units.
+`reachable`, `way` and `reason` are the answer: `way` goes round steep slopes
+and water to the first road it meets, with its turns as `path`, its `length`,
+climb, and where it `meets` the road. `straight` judges the straight line to the
+nearest road, with where it is blocked; a way that differs from it is the way
+round. The way is searched within `max_distance`, 20 km by default and at most;
+a road farther is `too_far`. `cost` is a coarse cross-country weight of this
+tool's own, not measured against the game's ground units, and DCS drives a
+group straight between off-road waypoints: give it the way's turns as
+waypoints.
 
 ## Checking and describing placements
 

@@ -691,7 +691,7 @@ These commands take `--geojson-out`:
 | `sample` | each point sampled, with its layer values |
 | `nearest` | each thing found, and the road or railway it lies on |
 | `scenery-in` | each object's outline, and the area you asked about |
-| `trafficability` | the line from a point to the nearest road |
+| `trafficability` | the way from a point to the road, and the straight line to the nearest road |
 | `point-info` | each point you asked about |
 | `airfield-info` | the runways and parking spots |
 | `validate-placements` | each placement, and anything in its way |
@@ -931,7 +931,7 @@ Each command fits a situation.
 | `route` | need the way by road or rail |
 | `route-alternatives` | want several different ways |
 | `chokepoints` | want the roads or bridges that matter most, to cut or to guard (needs Step 2) |
-| `trafficability` | want to know if a ground group can drive from the road to a point |
+| `trafficability` | want to know if a ground group can drive between the road and a point, and which way |
 | `nearest` | want the nearest road, railway, airfield, town or object |
 | `scenery-in` | want the objects standing in an area |
 | `towns` | want a real town for an objective or a briefing (needs Step 2) |
