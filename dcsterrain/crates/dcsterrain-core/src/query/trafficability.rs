@@ -208,9 +208,10 @@ pub(super) fn search_way(
             }
             Err(b) => return Ok(done(Searched::StandsOn(b))),
         };
+        // The point's own cell is always searched, however short the reach.
         let inside = |i: usize| {
             let c = ground.center(i);
-            (c[0] - p[0]).hypot(c[1] - p[1]) <= reach
+            i == start || (c[0] - p[0]).hypot(c[1] - p[1]) <= reach
         };
         let s = search(&ground, &[(start, spent)], &inside, true);
         most = most.max(s.most);

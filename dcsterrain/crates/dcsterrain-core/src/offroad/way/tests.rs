@@ -236,3 +236,35 @@ fn a_disk_bounds_the_search_and_says_so() {
     assert!(s.goals.is_empty());
     assert!(s.most <= 200.0 * 1.03);
 }
+
+#[test]
+fn a_meeting_point_on_a_cells_edge_is_moved_into_the_cell() {
+    let g = grid();
+    let field = CostField {
+        cells: Cells {
+            row0: 0,
+            col0: 0,
+            rows: 2,
+            cols: 2,
+        },
+        values: vec![Ok(1.0); 4],
+    };
+    let roads = RoadCells {
+        edge: vec![0, 0, 0, 0],
+    };
+    let ground = Ground {
+        grid: &g,
+        field: &field,
+        roads: &roads,
+    };
+    // On the edge between cells 0 and 2, and a rounding past it.
+    for q in [[50.0, 30.0], [50.0 + 1e-12, 30.0], [50.0, 50.0]] {
+        let p = ground.inward(q, 0);
+        assert_eq!(ground.cell_of(p), Some(0), "{q:?}");
+        assert!((p[0] - q[0]).hypot(p[1] - q[1]) < 1e-5, "{q:?} to {p:?}");
+        // A way judged from the cell's center to it stays in the cell.
+        assert!(ground.line(ground.center(0), p, Some(0)).is_ok());
+    }
+    // A point inside the cell is kept as it is.
+    assert_eq!(ground.inward([10.0, 20.0], 0), [10.0, 20.0]);
+}

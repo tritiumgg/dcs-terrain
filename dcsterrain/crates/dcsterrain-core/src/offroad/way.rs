@@ -310,7 +310,25 @@ impl Ground<'_> {
                 true
             });
         }
-        best.1
+        self.inward(best.1, i)
+    }
+
+    /// `q`, a point of cell `i` or of its edge, moved toward the cell's
+    /// center by a micrometer or a millimeter, until it rounds into the
+    /// cell: a road that only clips the cell's corner is closest to its
+    /// center on the cell's edge, where rounding can put the point in the
+    /// next cell, and a way judged to it would run through that one.
+    pub fn inward(&self, q: [f64; 2], i: usize) -> [f64; 2] {
+        let center = self.center(i);
+        let d = (center[0] - q[0]).hypot(center[1] - q[1]);
+        for step in [0.0, 1e-6, 1e-3] {
+            let f = if d > 0.0 { (step / d).min(1.0) } else { 0.0 };
+            let p = [q[0] + f * (center[0] - q[0]), q[1] + f * (center[1] - q[1])];
+            if self.cell_of(p) == Some(i) {
+                return p;
+            }
+        }
+        center
     }
 }
 
