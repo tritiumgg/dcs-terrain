@@ -1,0 +1,17 @@
+The route by railroads: 22.00 km, 0.91 × the 24.17 km straight line.
+It climbs 0 m and descends 0 m; its steepest 100 m is 0.0 %.
+The from end is 12025 m and the to end 2025 m from the railroad, stretches this route does not plan.
+
+Ends, each where it joins the network
+End       x       z  MGRS                Moved (m)
+From  22025  -12000  36T WR 87517 20140      12025
+To    22025   10000  36T XR 09517 20140       2025
+
+Legs
+#  Class  Edge  Length (km)  Up (m)  Down (m)  Grade (%)      x      z  MGRS
+1  rw       11        22.00       0         0        0.0  22025  10000  36T XR 09517 20140
+
+Each leg's x, z and MGRS are where it ends. 45 waypoints are left out: --json lists them,
+--geojson-out draws the way.
+
+Every field, unrounded: add --json.

@@ -324,16 +324,25 @@ fn unplanned(page: &mut Page, asked: &Asked, route: &Value) {
     .into_iter()
     .filter_map(|(end, m)| m.filter(|&m| m > UNPLANNED_M).map(|m| (end, m)))
     .collect();
+    // A train cannot leave the rail, so only roads are offered the plan.
+    let (network, it, them) = if asked.request["network"] == "railroads" {
+        ("railroad", ".", ".")
+    } else {
+        (
+            "road",
+            ": --offroad plans it across country.",
+            ": --offroad plans them across country.",
+        )
+    };
     match far.as_slice() {
         [] => {}
         [(end, m)] => page.line(&format!(
-            "The {end} end is {} m from the road, a stretch this route does not plan: \
-             --offroad plans it across country.",
+            "The {end} end is {} m from the {network}, a stretch this route does not plan{it}",
             fixed(Some(*m), 0)
         )),
         [(_, a), (_, b), ..] => page.line(&format!(
-            "The from end is {} m and the to end {} m from the road, stretches this route \
-             does not plan: --offroad plans them across country.",
+            "The from end is {} m and the to end {} m from the {network}, stretches this route \
+             does not plan{them}",
             fixed(Some(*a), 0),
             fixed(Some(*b), 0)
         )),

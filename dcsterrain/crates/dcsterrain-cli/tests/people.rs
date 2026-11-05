@@ -346,6 +346,10 @@ const TABLE_CASES: &[(&str, &str)] = &[
         "route-alternatives --network roads --from 10000,-12000 --to 20000,10000",
     ),
     (
+        "route-rail",
+        "route --network railroads --from 10000,-12000 --to 20000,10000",
+    ),
+    (
         "route-offroad",
         "route --network roads --from 10000,-12000 --to 20000,10000 --offroad",
     ),
