@@ -135,6 +135,9 @@ struct Ground {
     /// `[x, z]` of points on land, spread over the whole terrain.
     land: Vec<[f64; 2]>,
     bounds: [f64; 4],
+    /// Land points whose nearest railroad lies 15 to 20 km away, at most
+    /// three: the farthest `trafficability` searches, its whole reach read.
+    far_from_rail: Vec<[f64; 2]>,
     /// Ids of the airdromes nearest the first land point.
     airdromes: Vec<Value>,
 }
@@ -171,10 +174,24 @@ impl Ground {
         let airdromes = found["results"].as_array().expect("results").iter();
         let airdromes: Vec<Value> = airdromes.map(|a| a["id"].clone()).collect();
         assert!(!airdromes.is_empty(), "no airdromes found");
+        let far_from_rail = land
+            .iter()
+            .filter(|p| {
+                let q = json!({"kind": "rail", "x": p[0], "z": p[1]});
+                query::answer(t, "nearest", &q).is_ok_and(|v| {
+                    v["results"][0]["distance"]
+                        .as_f64()
+                        .is_some_and(|d| (15_000.0..20_000.0).contains(&d))
+                })
+            })
+            .take(3)
+            .copied()
+            .collect();
         Ground {
             land,
             bounds,
             airdromes,
+            far_from_rail,
         }
     }
 
@@ -536,6 +553,19 @@ fn cases(ground: &Ground, install: bool) -> Vec<Case> {
         json!({"x": p[0], "z": p[1], "max_slope_deg": 30, "network": "roads"})
     });
     case("trafficability", "trafficability", Mode::Held, reach);
+    let farthest: Vec<Value> = ground
+        .far_from_rail
+        .iter()
+        .map(|p| json!({"x": p[0], "z": p[1], "max_slope_deg": 30, "network": "railroads"}))
+        .collect();
+    if !farthest.is_empty() {
+        case(
+            "trafficability_20km",
+            "trafficability",
+            Mode::Held,
+            farthest,
+        );
+    }
     let info = n(20, &mut u, &mut |u| json!({"points": [xz(*u.pick(land))]}));
     case("point_info", "point_info", Mode::Held, info.clone());
     case(
