@@ -138,6 +138,9 @@ struct Ground {
     /// Land points whose nearest railroad lies 15 to 20 km away, at most
     /// three: the farthest `trafficability` searches, its whole reach read.
     far_from_rail: Vec<[f64; 2]>,
+    /// Land points moved to 1.5 km from their nearest road, toward where they
+    /// lay: ends a route's way across country reaches the road from.
+    roadside: Vec<[f64; 2]>,
     /// Ids of the airdromes nearest the first land point.
     airdromes: Vec<Value>,
 }
@@ -187,11 +190,24 @@ impl Ground {
             .take(3)
             .copied()
             .collect();
+        let roadside = land
+            .iter()
+            .take(256)
+            .filter_map(|p| {
+                let q = json!({"kind": "road", "x": p[0], "z": p[1]});
+                let v = query::answer(t, "nearest", &q).ok()?;
+                let r = &v["results"][0];
+                let (x, z, d) = (r["x"].as_f64()?, r["z"].as_f64()?, r["distance"].as_f64()?);
+                let f = if d > 1500.0 { 1500.0 / d } else { 1.0 };
+                Some([x + f * (p[0] - x), z + f * (p[1] - z)])
+            })
+            .collect();
         Ground {
             land,
             bounds,
             airdromes,
             far_from_rail,
+            roadside,
         }
     }
 
@@ -541,6 +557,40 @@ fn cases(ground: &Ground, install: bool) -> Vec<Case> {
         "route_alternatives",
         Mode::Held,
         alternatives.collect(),
+    );
+    // Routes whose ends lie off the road, each 1.5 km from it at most, so
+    // the ways across country reach it, 45 to 55 km apart, at the default
+    // reach, which is also the most a request may ask for: its memory bounds
+    // that limit.
+    let r = &ground.roadside;
+    let offroad_pairs: Vec<([f64; 2], [f64; 2])> = (0..r.len())
+        .flat_map(|i| (i + 1..r.len()).map(move |j| (r[i], r[j])))
+        .filter(|(a, b)| (45_000.0..=55_000.0).contains(&(a[0] - b[0]).hypot(a[1] - b[1])))
+        .take(10)
+        .collect();
+    let offroad = |&(a, b): &([f64; 2], [f64; 2]), reach: f64, k: Option<u32>| {
+        let mut r = json!({"network": "roads", "from": {"x": a[0], "z": a[1]},
+                           "to": {"x": b[0], "z": b[1]}, "offroad": true, "max_offroad": reach});
+        if let Some(k) = k {
+            r["k"] = json!(k);
+        }
+        r
+    };
+    case(
+        "route_offroad_50km",
+        "route",
+        Mode::Held,
+        offroad_pairs
+            .iter()
+            .map(|p| offroad(p, 5000.0, None))
+            .collect(),
+    );
+    let three = &offroad_pairs[..offroad_pairs.len().min(3)];
+    case(
+        "route_alternatives_offroad_50km",
+        "route_alternatives",
+        Mode::Held,
+        three.iter().map(|p| offroad(p, 5000.0, Some(3))).collect(),
     );
     let chokepoints = n(
         2,
