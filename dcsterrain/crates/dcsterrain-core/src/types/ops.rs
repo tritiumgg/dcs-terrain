@@ -723,9 +723,10 @@ pub struct ExposureBand {
 pub struct RouteRequest {
     /// Roads or railroads.
     pub network: Network,
-    /// Where the route starts, snapped to the nearest edge.
+    /// Where the route starts: snapped to the nearest edge, or, with
+    /// `offroad`, joined to the road by a way across country.
     pub from: Point,
-    /// Where the route ends, snapped to the nearest edge.
+    /// Where the route ends, as `from` does.
     pub to: Point,
     /// No edge crossing any of these is used.
     #[serde(default)]
@@ -741,6 +742,24 @@ pub struct RouteRequest {
     /// snapped ends, or 5 km longer when that is more, is searched for.
     #[serde(default = "default_max_detour_factor")]
     pub max_detour_factor: f64,
+    /// Plan each end's way to the road across country, over the 50 m cells
+    /// within `max_offroad` of it, rather than snapping it to the nearest
+    /// road; a way off the road the whole way is the route when it costs
+    /// least. Roads only.
+    #[serde(default)]
+    pub offroad: bool,
+    /// How far from each end its way to the road is searched, in meters, at
+    /// most 20 000.
+    #[serde(default = "default_max_offroad")]
+    pub max_offroad: f64,
+    /// Steeper ground than this blocks a way off the road; at most 60.
+    #[serde(default = "default_route_max_slope_deg")]
+    pub max_slope_deg: f64,
+    /// How much more a meter off the road costs than a meter of road on
+    /// open flat ground, at least 1 and at most 1000; above 1 a route keeps
+    /// to the road where the ground is no shorter.
+    #[serde(default = "default_offroad_weight")]
+    pub offroad_weight: f64,
     /// Also return the answer as GeoJSON.
     #[serde(default)]
     pub geojson: bool,
@@ -752,6 +771,28 @@ fn default_exposure_weight() -> f64 {
 
 fn default_max_detour_factor() -> f64 {
     3.0
+}
+
+fn default_max_offroad() -> f64 {
+    5000.0
+}
+
+fn default_route_max_slope_deg() -> f64 {
+    30.0
+}
+
+fn default_offroad_weight() -> f64 {
+    2.0
+}
+
+/// A field that is absent when the request did not ask for it, and null
+/// when it did and there is none.
+fn asked_for<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d).map(Some)
 }
 
 /// The route found, with the file that answered.
@@ -778,11 +819,49 @@ pub struct Route {
     /// The steepest 100 m window.
     pub max_grade_pct: f64,
     pub legs: Vec<Leg>,
-    pub snapped_from: Point,
-    pub snapped_to: Point,
+    /// Where the route joins the network; null only when it never does.
+    pub snapped_from: Option<Point>,
+    /// Where the route leaves the network; null only when it never joins it.
+    pub snapped_to: Option<Point>,
     /// The distance between the endpoints, so `length / straight_line` is the
     /// detour factor.
     pub straight_line: f64,
+    /// With `offroad`, the way across country from `from` to where the
+    /// route joins the network, or the whole route when it never does; null
+    /// where `from` lies on the road. Absent without `offroad`.
+    #[serde(
+        default,
+        deserialize_with = "asked_for",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub offroad_from: Option<Option<OffroadLeg>>,
+    /// With `offroad`, the way across country from where the route leaves
+    /// the network to `to`; null where `to` lies on the road or the route
+    /// never joins it. Absent without `offroad`.
+    #[serde(
+        default,
+        deserialize_with = "asked_for",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub offroad_to: Option<Option<OffroadLeg>>,
+}
+
+/// A way across country at an end of a route.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct OffroadLeg {
+    /// Its turns, in the order the route runs.
+    pub path: Vec<Point>,
+    /// Planar length.
+    pub length: f64,
+    /// Its length weighted by how hard its ground is to cross, in meters of
+    /// open flat ground, as `trafficability` counts it.
+    pub cost: f64,
+    pub ascent: f64,
+    pub descent: f64,
+    /// The steepest 100 m window.
+    pub max_grade_pct: f64,
+    /// The fraction of the way the exposure observers see.
+    pub exposure: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

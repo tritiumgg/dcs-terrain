@@ -20,6 +20,16 @@
 //! shares no more than `max_overlap` of its length with any route kept, or
 //! of theirs with it. It finds routes a player tells apart, where the k shortest paths
 //! differ by a turn; it promises nothing of the alternatives it misses.
+//!
+//! Off the road, each end is not snapped but searched across country, over
+//! the cells within `max_offroad` of it, as `trafficability` searches, each
+//! cell's cost times the off-road weight and times one plus the exposure
+//! weight where an observer sees it. Every road's cell that search reaches is
+//! a place the road search starts from, or ends at, carrying what its way
+//! cost, so the route is the least-cost one over the way off the road, the
+//! road and the way off it again, together; and a way off the road the whole
+//! way is the route when it costs less. Every way costs at least its length,
+//! so the straight line stays a consistent estimate.
 
 use std::collections::HashMap;
 
@@ -28,13 +38,18 @@ use serde_json::json;
 use super::geojson::{Features, props};
 use super::region::{Area, resolve};
 use super::sightline::{Heights, walk};
+use super::trafficability::{MAX_DISTANCE_M, MAX_SLOPE_LIMIT_DEG};
 use super::{Terrain, refused};
 use crate::decode::rn4::{KIND_RAIL, KIND_ROAD};
+use crate::grid::Grid;
+use crate::layers::Cells;
+use crate::offroad::CostField;
+use crate::offroad::way::{self, Blocks, Ground, RoadCells, Way, found, straighten};
 use crate::roads::{Edge, Graph, Pass, dist};
 use crate::search;
 use crate::source::{Refusal, Source};
 use crate::types::{
-    Alternative, Issue, Leg, Network, Point, Route, RouteAlternativesRequest,
+    Alternative, Issue, Leg, Network, OffroadLeg, Point, Route, RouteAlternativesRequest,
     RouteAlternativesResponse, RouteRequest, RouteResponse,
 };
 
@@ -59,6 +74,8 @@ const SEARCHES_PER_K: u32 = 4;
 /// float holds.
 const EXPOSURE_WEIGHT_MAX: f64 = 1000.0;
 const PENALTY_MAX: f64 = 10.0;
+/// The largest off-road weight taken, for the same reason.
+const OFFROAD_WEIGHT_MAX: f64 = 1000.0;
 
 /// The share of the straight line the search estimates is left: an end's
 /// place is rounded to centimeters, so the line itself may overstate a short
@@ -131,12 +148,261 @@ struct Found {
     pieces: Vec<Piece>,
     /// How many nodes the search settled.
     settled: usize,
+    /// The start and the goal it joined the road at, or `None` for a way
+    /// off the road the whole way.
+    joined: Option<(usize, usize)>,
+    /// Off the road, the way from each end to the road, each from its end:
+    /// the way from `from` first, then the way from `to`. A way off the road
+    /// the whole way is the first.
+    offroad: [Option<Way>; 2],
 }
 
 impl Found {
     fn length(&self, g: &Graph) -> f64 {
-        self.pieces.iter().map(|p| p.length(g)).sum()
+        let road: f64 = self.pieces.iter().map(|p| p.length(g)).sum();
+        road + self.offroad.iter().flatten().map(Way::length).sum::<f64>()
     }
+}
+
+/// A place the road search starts from or ends at: a point of an edge, and
+/// what the way across country to it cost, nothing for a snapped end.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Join {
+    snap: Snap,
+    cost: f64,
+    /// The road's cell the way across country ends in, and where in it the
+    /// way meets the road.
+    cell: usize,
+    meet: [f64; 2],
+}
+
+impl Join {
+    fn snapped(snap: Snap) -> Join {
+        Join {
+            snap,
+            cost: 0.0,
+            cell: usize::MAX,
+            meet: snap.point,
+        }
+    }
+}
+
+/// Where the road search starts and ends.
+#[derive(Debug, Default)]
+struct Joins {
+    starts: Vec<Join>,
+    goals: Vec<Join>,
+    /// Each goal's stretch, ascending, with the goal's index.
+    goal_runs: Vec<(usize, usize)>,
+    /// What the way off the road the whole way costs, when there is one.
+    direct: Option<f64>,
+}
+
+impl Joins {
+    fn new(starts: Vec<Join>, goals: Vec<Join>, direct: Option<f64>) -> Joins {
+        let mut goal_runs: Vec<(usize, usize)> = goals
+            .iter()
+            .enumerate()
+            .map(|(j, g)| (g.snap.run, j))
+            .collect();
+        goal_runs.sort_unstable();
+        Joins {
+            starts,
+            goals,
+            goal_runs,
+            direct,
+        }
+    }
+
+    /// The goals on stretch `run`, in the order they were found.
+    fn goals_on(&self, run: usize) -> impl Iterator<Item = usize> + '_ {
+        let k = self.goal_runs.partition_point(|&(r, _)| r < run);
+        self.goal_runs[k..]
+            .iter()
+            .take_while(move |&&(r, _)| r == run)
+            .map(|&(_, j)| j)
+    }
+}
+
+/// One end's search across country: the ground round it, each cell's
+/// factor, and what the search reached.
+struct EndSearch {
+    point: [f64; 2],
+    grid: Grid,
+    field: CostField,
+    roads: RoadCells,
+    scale: Vec<f32>,
+    searched: way::Searched,
+    /// The other end's cell, when the search reached it, and what the way
+    /// there cost.
+    direct: Option<(usize, f64)>,
+}
+
+impl EndSearch {
+    /// The ground as the search priced it, or with `scaled` false as the
+    /// ground alone prices it.
+    fn ground(&self, scaled: bool) -> Ground<'_> {
+        Ground {
+            grid: &self.grid,
+            field: &self.field,
+            roads: &self.roads,
+            scale: scaled.then_some(&self.scale[..]),
+            // A vehicle crosses a road it does not take.
+            cross: true,
+        }
+    }
+
+    /// The way the search found to `cell`, ending at `end`, straightened.
+    fn way(&self, cell: usize, end: [f64; 2]) -> Result<Way, Refusal> {
+        let ground = self.ground(true);
+        let w = found(&ground, &self.searched, self.point, cell, end)
+            .ok_or_else(|| Refusal("the way the search found could not be judged again".into()))?;
+        Ok(straighten(&ground, &w))
+    }
+
+    /// What `w` costs over the ground alone, as `trafficability` counts it.
+    fn ground_cost(&self, w: &Way) -> f64 {
+        let ground = self.ground(false);
+        let n = w.path.len();
+        w.path
+            .windows(2)
+            .enumerate()
+            .map(|(k, s)| {
+                let end = if k + 2 == n {
+                    w.end
+                } else {
+                    ground.cell_of(s[1]).unwrap_or(w.end)
+                };
+                ground.line(s[0], s[1], Some(end)).unwrap_or(f64::NAN)
+            })
+            .sum()
+    }
+}
+
+/// What a request asks of the ways off the road.
+struct Offroad {
+    reach: f64,
+    max_slope_deg: f64,
+    weight: f64,
+}
+
+/// Searches across country from `p`, end `path` of a route, over the cells
+/// within the reach, and returns the search, each road's cell it reached as a
+/// join, and why it reached none. `other`, the route's other end, is reached
+/// too when it lies within the reach.
+#[expect(clippy::too_many_arguments, reason = "one end of one request")]
+fn search_end(
+    src: &dyn Source,
+    g: &Graph,
+    kind: u8,
+    p: [f64; 2],
+    path: &str,
+    o: &Offroad,
+    avoid: &[Area],
+    observers: &[[f64; 3]],
+    exposure_weight: f64,
+    heights: &mut Heights,
+    other: Option<[f64; 2]>,
+) -> Result<(EndSearch, Vec<Join>, Blocks), Vec<Issue>> {
+    let grid = src.grid();
+    let r = o.reach;
+    let field = CostField::new(
+        src,
+        Cells::covering(&grid, [p[0] - r, p[1] - r, p[0] + r, p[1] + r]),
+        o.max_slope_deg,
+    )
+    .map_err(refused)?;
+    let roads = RoadCells::new(g, kind, &grid, &field);
+    let mut end = EndSearch {
+        point: p,
+        grid,
+        field,
+        roads,
+        scale: Vec::new(),
+        searched: way::Searched::default(),
+        direct: None,
+    };
+    let n = end.field.values.len();
+    end.scale = vec![o.weight as f32; n];
+    if !observers.is_empty() && exposure_weight > 0.0 {
+        // Every cell a move from within the reach can touch.
+        let near = r + 3.0 * f64::from(grid.cell_size);
+        let mut seen = Vec::new();
+        let ground = end.ground(false);
+        for i in 0..n {
+            let c = ground.center(i);
+            if ground.passage(i).is_ok()
+                && dist(c, p) <= near
+                && seen_share(heights, observers, &[c]).map_err(refused)? > 0.0
+            {
+                seen.push(i);
+            }
+        }
+        for i in seen {
+            end.scale[i] = (o.weight * (1.0 + exposure_weight)) as f32;
+        }
+    }
+    let ground = end.ground(true);
+    let Some(start) = ground.cell_of(p) else {
+        return Err(issue(
+            "off_terrain",
+            "no mesh covers this point, so it has no ground to stand on",
+            path,
+        ));
+    };
+    let spent = match ground.passage(start) {
+        Ok(c) => c * dist(ground.center(start), p),
+        Err(b) => {
+            let mut blocks = Blocks::default();
+            blocks.add(b);
+            let what = blocks.words(o.max_slope_deg, r).join(", ");
+            return Err(issue(
+                "no_route",
+                &format!("no vehicle starts here: it stands on {what}"),
+                path,
+            ));
+        }
+    };
+    let inside = |i: usize| {
+        let c = ground.center(i);
+        i == start || (dist(c, p) <= r && !avoid.iter().any(|a| a.contains(c[0], c[1])))
+    };
+    let mut s = way::search(&ground, &[(start, spent)], &inside, false);
+    let mut joins = Vec::new();
+    for &(cell, cost) in &s.goals {
+        let meet = ground.meets(g, cell);
+        let Ok(rest) = ground.line(ground.center(cell), meet, Some(cell)) else {
+            continue;
+        };
+        if avoid.iter().any(|a| a.contains(meet[0], meet[1])) {
+            continue;
+        }
+        let edge = end.roads.edge[cell] as usize;
+        let (point, at) = g.locate(&g.edges[edge], meet);
+        joins.push(Join {
+            snap: Snap {
+                edge,
+                run: run_at(g, edge, at),
+                at,
+                point,
+            },
+            cost: cost + rest,
+            cell,
+            meet,
+        });
+    }
+    let direct = other.and_then(|q| {
+        let c = ground.cell_of(q)?;
+        let rest = ground.line(ground.center(c), q, Some(c)).ok()?;
+        s.cost[c].is_finite().then(|| (c, s.cost[c] + rest))
+    });
+    let blocks = s.blocks;
+    // The way to each cell is read back from the moves alone.
+    s.cost = Vec::new();
+    s.goals = Vec::new();
+    end.searched = s;
+    end.direct = direct;
+    Ok((end, joins, blocks))
 }
 
 fn issue(code: &str, message: &str, path: &str) -> Vec<Issue> {
@@ -148,8 +414,18 @@ fn issue(code: &str, message: &str, path: &str) -> Vec<Issue> {
 struct Planner<'a> {
     src: &'a dyn Source,
     g: &'a Graph,
+    kind: u8,
+    /// The road point nearest each end.
     from: Snap,
     to: Snap,
+    /// Where the road search starts and ends: the snapped ends, or each road's
+    /// cell the ways across country reached.
+    joins: Joins,
+    /// Off the road, each end's search across country.
+    ends: Option<Box<[EndSearch; 2]>>,
+    /// The places the search measures from and to: the snapped ends, or off
+    /// the road the ends as given.
+    places: [[f64; 2]; 2],
     avoid: Vec<Area>,
     /// Edges any point of whose path lies in a region avoided.
     blocked: Vec<bool>,
@@ -165,6 +441,16 @@ struct Planner<'a> {
 
 impl<'a> Planner<'a> {
     fn new(terrain: &'a Terrain, q: &RouteRequest) -> Result<Planner<'a>, Vec<Issue>> {
+        let g = terrain.source().road_graph().map_err(refused)?;
+        Planner::over(terrain, g, q)
+    }
+
+    /// A planner over the network `g`, on the terrain's ground.
+    fn over(
+        terrain: &'a Terrain,
+        g: &'a Graph,
+        q: &RouteRequest,
+    ) -> Result<Planner<'a>, Vec<Issue>> {
         let src = terrain.source();
         for (v, path) in [
             (q.from.x, "from.x"),
@@ -188,6 +474,34 @@ impl<'a> Planner<'a> {
                 "invalid_request",
                 "must be finite and 1 or more",
                 "max_detour_factor",
+            ));
+        }
+        if !(q.max_offroad > 0.0 && q.max_offroad <= MAX_DISTANCE_M) {
+            return Err(issue(
+                "invalid_request",
+                &format!("must be more than 0 and at most {MAX_DISTANCE_M}"),
+                "max_offroad",
+            ));
+        }
+        if !(q.max_slope_deg > 0.0 && q.max_slope_deg <= MAX_SLOPE_LIMIT_DEG) {
+            return Err(issue(
+                "invalid_request",
+                &format!("must be more than 0 and at most {MAX_SLOPE_LIMIT_DEG}"),
+                "max_slope_deg",
+            ));
+        }
+        if !(1.0..=OFFROAD_WEIGHT_MAX).contains(&q.offroad_weight) {
+            return Err(issue(
+                "invalid_request",
+                &format!("must be 1 to {OFFROAD_WEIGHT_MAX}"),
+                "offroad_weight",
+            ));
+        }
+        if q.offroad && q.network == Network::Railroads {
+            return Err(issue(
+                "invalid_request",
+                "must be false on railroads: a train cannot leave the rail",
+                "offroad",
             ));
         }
         let avoid = q
@@ -219,7 +533,6 @@ impl<'a> Planner<'a> {
                 observers.push([o.x, o.z, gr.height + o.alt_agl]);
             }
         }
-        let g = src.road_graph().map_err(refused)?;
         let kind = kind_of(q.network);
         let snap = |p: &Point, path: &str| -> Result<Snap, Vec<Issue>> {
             let Some(&(edge, _)) = g.nearest(kind, [p.x, p.z], 1).first() else {
@@ -247,18 +560,74 @@ impl<'a> Planner<'a> {
                 }
             });
         }
-        let line = dist(from.point, to.point);
+        let mut heights = Heights::new(src);
+        let (joins, ends, places) = if q.offroad {
+            let o = Offroad {
+                reach: q.max_offroad,
+                max_slope_deg: q.max_slope_deg,
+                weight: q.offroad_weight,
+            };
+            let (a, b) = ([q.from.x, q.from.z], [q.to.x, q.to.z]);
+            let mut end = |p: [f64; 2], path: &str, other: Option<[f64; 2]>| {
+                let (o, avoid, observers) = (&o, &avoid, &observers);
+                search_end(
+                    src,
+                    g,
+                    kind,
+                    p,
+                    path,
+                    o,
+                    avoid,
+                    observers,
+                    q.exposure_weight,
+                    &mut heights,
+                    other,
+                )
+            };
+            let (start, starts, from_blocks) = end(a, "from", Some(b))?;
+            let (goal, goals, to_blocks) = end(b, "to", None)?;
+            let direct = start.direct.map(|(_, c)| c);
+            if direct.is_none() {
+                for (joins, blocks, path) in
+                    [(&starts, from_blocks, "from"), (&goals, to_blocks, "to")]
+                {
+                    if joins.is_empty() {
+                        return Err(issue(
+                            "no_route",
+                            &no_way_words(blocks, q.max_slope_deg, q.max_offroad),
+                            path,
+                        ));
+                    }
+                }
+            }
+            (
+                Joins::new(starts, goals, direct),
+                Some(Box::new([start, goal])),
+                [a, b],
+            )
+        } else {
+            (
+                Joins::new(vec![Join::snapped(from)], vec![Join::snapped(to)], None),
+                None,
+                [from.point, to.point],
+            )
+        };
+        let line = dist(places[0], places[1]);
         Ok(Planner {
             src,
             g,
+            kind,
             from,
             to,
+            joins,
+            ends,
+            places,
             avoid,
             blocked,
             observers,
             exposure_weight: q.exposure_weight,
             exposure: vec![f32::NAN; g.edges.len()],
-            heights: Heights::new(src),
+            heights,
             bound: (q.max_detour_factor * line).max(line + MIN_DETOUR_M),
         })
     }
@@ -304,20 +673,21 @@ impl<'a> Planner<'a> {
         let p = &g.passages;
         let n = p.ends();
         let (s, t) = (n, n + 1);
-        let (from, to, bound) = (self.from, self.to, self.bound);
+        let ([from, to], bound) = (self.places, self.bound);
         let place = move |v: usize| -> [f64; 2] {
             if v == s {
-                from.point
+                from
             } else if v == t {
-                to.point
+                to
             } else {
                 p.place(v)
             }
         };
-        let inside = move |v: usize| dist(from.point, place(v)) + dist(place(v), to.point) <= bound;
+        let inside = move |v: usize| dist(from, place(v)) + dist(place(v), to) <= bound;
         let mut failed: Option<Refusal> = None;
         // Each edge's cost per meter, once its exposure is known.
         let mut rate: HashMap<usize, f64> = HashMap::new();
+        let joins = std::mem::take(&mut self.joins);
         let found = {
             let mut rate_of = |me: &mut Planner, e: usize| -> f64 {
                 if let Some(&r) = rate.get(&e) {
@@ -332,28 +702,36 @@ impl<'a> Planner<'a> {
                 r
             };
             let me = &mut *self;
+            let js = &joins;
             let neighbors = |v: usize, f: &mut dyn FnMut(usize, f64)| {
                 if v == t {
                     return;
                 }
                 if v == s {
-                    let e = from.edge;
-                    let len = g.edges[e].length;
-                    let r = rate_of(me, e);
-                    for end in [from.run * 2, from.run * 2 + 1] {
-                        let share = p.share(end);
-                        if p.runs_between(from.run, from.at, share)
-                            && me.open(e, from.at, share)
-                            && inside(end)
-                        {
-                            f(end, len * (from.at - share).abs() * r);
+                    for start in &js.starts {
+                        let at = start.snap;
+                        let e = at.edge;
+                        let len = g.edges[e].length;
+                        let r = rate_of(me, e);
+                        for end in [at.run * 2, at.run * 2 + 1] {
+                            let share = p.share(end);
+                            if p.runs_between(at.run, at.at, share)
+                                && me.open(e, at.at, share)
+                                && inside(end)
+                            {
+                                f(end, start.cost + len * (at.at - share).abs() * r);
+                            }
+                        }
+                        for j in js.goals_on(at.run) {
+                            let goal = &js.goals[j];
+                            let to = goal.snap.at;
+                            if p.runs_between(at.run, at.at, to) && me.open(e, at.at, to) {
+                                f(t, start.cost + len * (to - at.at).abs() * r + goal.cost);
+                            }
                         }
                     }
-                    if to.run == from.run
-                        && p.runs_between(from.run, from.at, to.at)
-                        && me.open(e, from.at, to.at)
-                    {
-                        f(t, len * (to.at - from.at).abs() * r);
+                    if let Some(d) = js.direct {
+                        f(t, d);
                     }
                     return;
                 }
@@ -366,9 +744,12 @@ impl<'a> Planner<'a> {
                     let len = g.edges[e].length;
                     let r = rate_of(me, e);
                     let hop = f64::from(pass.length) * r;
-                    let reaches_end = reached / 2 == to.run && p.runs_between(to.run, share, to.at);
-                    if reaches_end && me.open(e, share, to.at) {
-                        f(t, hop + len * (share - to.at).abs() * r);
+                    for j in js.goals_on(reached / 2) {
+                        let goal = &js.goals[j];
+                        let to = goal.snap.at;
+                        if p.runs_between(goal.snap.run, share, to) && me.open(e, share, to) {
+                            f(t, hop + len * (share - to).abs() * r + goal.cost);
+                        }
                     }
                     let (next, along) = (reached ^ 1, p.share(reached ^ 1));
                     if p.runs_from(reached) && me.open(e, share, along) && inside(next) {
@@ -377,80 +758,164 @@ impl<'a> Planner<'a> {
                 }
             };
             if estimate {
-                let left = |v: usize| dist(place(v), to.point) * ESTIMATE_SHARE;
+                let left = |v: usize| dist(place(v), to) * ESTIMATE_SHARE;
                 search::astar(n + 2, s, t, neighbors, left)
             } else {
                 search::dijkstra(n + 2, s, t, neighbors)
             }
         };
+        self.joins = joins;
         if let Some(e) = failed {
             return Err(e);
         }
         let Some(path) = found else {
             return Ok(None);
         };
+        let (pieces, joined) = self.pieces(&path.nodes, &rate);
+        let offroad = self.ways(joined)?;
         Ok(Some(Found {
             cost: path.cost,
-            pieces: self.pieces(&path.nodes, &rate),
+            pieces,
             settled: path.settled,
+            joined,
+            offroad,
         }))
     }
 
+    /// Off the road, the ways from each end to where the route joins the
+    /// road, or the way the whole way; nothing for snapped ends.
+    fn ways(&self, joined: Option<(usize, usize)>) -> Result<[Option<Way>; 2], Refusal> {
+        let Some(ends) = &self.ends else {
+            return Ok([None, None]);
+        };
+        Ok(match joined {
+            Some((i, j)) => {
+                let (a, b) = (&self.joins.starts[i], &self.joins.goals[j]);
+                [
+                    Some(ends[0].way(a.cell, a.meet)?),
+                    Some(ends[1].way(b.cell, b.meet)?),
+                ]
+            }
+            None => {
+                let (cell, _) = ends[0]
+                    .direct
+                    .expect("a route with no road was the way the whole way");
+                [Some(ends[0].way(cell, self.places[1])?), None]
+            }
+        })
+    }
+
     /// The pieces a search's ends ran along, each the pass into a stretch and
-    /// the run along it, as the search took them.
-    fn pieces(&self, nodes: &[usize], rate: &HashMap<usize, f64>) -> Vec<Piece> {
+    /// the run along it, as the search took them, and the start and goal it
+    /// joined the road at, `None` for a way off the road the whole way. Of
+    /// several ways the search could have taken at the same cost, the first
+    /// it was offered.
+    fn pieces(
+        &self,
+        nodes: &[usize],
+        rate: &HashMap<usize, f64>,
+    ) -> (Vec<Piece>, Option<(usize, usize)>) {
         let g = self.g;
         let p = &g.passages;
         let n = p.ends();
         let (s, t) = (n, n + 1);
-        let (from, to) = (self.from, self.to);
+        let js = &self.joins;
         let along = |e: usize, a: f64, b: f64| {
             g.edges[e].length * (a - b).abs() * rate.get(&e).copied().unwrap_or(1.0)
         };
+        let less = |c: f64, best: &Option<(f64, usize, usize)>| best.is_none_or(|b| c < b.0);
+        let (mut start, mut goal) = (0, 0);
         let mut out: Vec<Piece> = Vec::new();
         for w in nodes.windows(2) {
             let (u, v) = (w[0], w[1]);
             if u == s {
-                let end = if v == t { to.at } else { p.share(v) };
+                // The start, and the goal on its stretch when it runs
+                // straight there, as the search offered them.
+                let mut best: Option<(f64, usize, usize)> = None;
+                for (i, st) in js.starts.iter().enumerate() {
+                    let at = st.snap;
+                    if v == t {
+                        for j in js.goals_on(at.run) {
+                            let to = js.goals[j].snap.at;
+                            if p.runs_between(at.run, at.at, to) && self.open(at.edge, at.at, to) {
+                                let c = st.cost + along(at.edge, at.at, to) + js.goals[j].cost;
+                                if less(c, &best) {
+                                    best = Some((c, i, j));
+                                }
+                            }
+                        }
+                    } else if v / 2 == at.run {
+                        let share = p.share(v);
+                        if p.runs_between(at.run, at.at, share) && self.open(at.edge, at.at, share)
+                        {
+                            let c = st.cost + along(at.edge, at.at, share);
+                            if less(c, &best) {
+                                best = Some((c, i, usize::MAX));
+                            }
+                        }
+                    }
+                }
+                if v == t
+                    && let Some(d) = js.direct
+                    && less(d, &best)
+                {
+                    return (Vec::new(), None);
+                }
+                let (_, i, j) = best.expect("the search left the start by one of its joins");
+                let at = js.starts[i].snap;
+                start = i;
+                let end = if v == t {
+                    goal = j;
+                    js.goals[j].snap.at
+                } else {
+                    p.share(v)
+                };
                 out.push(Piece {
-                    edge: from.edge,
-                    from: from.at,
+                    edge: at.edge,
+                    from: at.at,
                     to: end,
                     pass: None,
                 });
                 continue;
             }
-            let ends = |r: usize| -> (f64, usize) {
-                let e = p.edge(r);
-                if v == t {
-                    (to.at, e)
-                } else {
-                    (p.share(r ^ 1), e)
-                }
-            };
-            let cost = |pass: &Pass| {
+            // The pass, and at the last the goal, the search took.
+            let mut best: Option<(f64, &Pass, usize)> = None;
+            for pass in p.out_of(u) {
                 let r = pass.to as usize;
-                let (end, e) = ends(r);
-                f64::from(pass.length) * rate.get(&e).copied().unwrap_or(1.0)
-                    + along(e, p.share(r), end)
-            };
-            let pass = p
-                .out_of(u)
-                .iter()
-                .filter(|q| {
-                    let r = q.to as usize;
-                    let (end, e) = ends(r);
-                    let way = if v == t {
-                        r / 2 == to.run && p.runs_between(to.run, p.share(r), end)
-                    } else {
-                        r ^ 1 == v && p.runs_from(r)
+                let e = p.edge(r);
+                if self.closed(p.place(u), p.place(r)) {
+                    continue;
+                }
+                let hop = f64::from(pass.length) * rate.get(&e).copied().unwrap_or(1.0);
+                let mut offer = |c: f64, j: usize| {
+                    let better = match best {
+                        None => true,
+                        Some((b, q, k)) => c < b || (c == b && (pass.to, j) < (q.to, k)),
                     };
-                    way && self.open(e, p.share(r), end) && !self.closed(p.place(u), p.place(r))
-                })
-                .min_by(|a, b| cost(a).total_cmp(&cost(b)).then(a.to.cmp(&b.to)))
-                .expect("the search took a pass between them");
+                    if better {
+                        best = Some((c, pass, j));
+                    }
+                };
+                if v == t {
+                    for j in js.goals_on(r / 2) {
+                        let to = js.goals[j].snap.at;
+                        if p.runs_between(r / 2, p.share(r), to) && self.open(e, p.share(r), to) {
+                            offer(hop + along(e, p.share(r), to) + js.goals[j].cost, j);
+                        }
+                    }
+                } else if r ^ 1 == v && p.runs_from(r) && self.open(e, p.share(r), p.share(v)) {
+                    offer(hop + along(e, p.share(r), p.share(v)), 0);
+                }
+            }
+            let (_, pass, j) = best.expect("the search took a pass between them");
             let r = pass.to as usize;
-            let (end, e) = ends(r);
+            let e = p.edge(r);
+            let end = if v == t {
+                goal = j;
+                js.goals[j].snap.at
+            } else {
+                p.share(v)
+            };
             let share = p.share(r);
             let meters = f64::from(pass.length);
             // A pass along the line of a contracted edge, or of no length, is
@@ -477,39 +942,64 @@ impl<'a> Planner<'a> {
             });
         }
         // An end snapped onto a node leaves a piece of no length, which no
-        // leg should report.
-        if out.iter().any(|p| p.from != p.to || p.pass.is_some()) {
+        // leg should report; off the road no piece of no length is a leg.
+        let some = out.iter().any(|p| p.from != p.to || p.pass.is_some());
+        if some || self.ends.is_some() {
             out.retain(|p| p.from != p.to || p.pass.is_some());
         }
-        out
+        (out, Some((start, goal)))
     }
 
-    /// The route the pieces make, with its legs measured.
+    /// The route the pieces and the ways off the road make, each measured.
     fn describe(&mut self, found: &Found, straight_line: f64) -> Result<Route, Vec<Issue>> {
         let g = self.g;
         let lines: Vec<Vec<[f64; 2]>> = found.pieces.iter().map(|p| p.line(g)).collect();
-        // Every leg sampled from its start, its end included; the samples
-        // of the whole route are the legs' joined.
-        let per_leg: Vec<Vec<[f64; 2]>> = lines.iter().map(|l| samples_along(l)).collect();
-        let all: Vec<[f64; 2]> = per_leg.iter().flatten().copied().collect();
+        // Each way off the road in the order the route runs, with its cost
+        // over the ground alone.
+        let mut ways: [Option<(Vec<[f64; 2]>, f64)>; 2] = [None, None];
+        if let Some(ends) = &self.ends {
+            for (k, w) in found.offroad.iter().enumerate() {
+                if let Some(w) = w {
+                    let mut path = w.path.clone();
+                    if k == 1 {
+                        path.reverse();
+                    }
+                    ways[k] = Some((path, ends[k].ground_cost(w)));
+                }
+            }
+        }
+        // Every part sampled from its start, its end included; the samples
+        // of the whole route are the parts' joined.
+        let mut parts: Vec<&[[f64; 2]]> = Vec::new();
+        parts.extend(ways[0].as_ref().map(|w| &w.0[..]));
+        parts.extend(lines.iter().map(|l| &l[..]));
+        parts.extend(ways[1].as_ref().map(|w| &w.0[..]));
+        let per_part: Vec<Vec<[f64; 2]>> = parts.iter().map(|l| samples_along(l)).collect();
+        let all: Vec<[f64; 2]> = per_part.iter().flatten().copied().collect();
         let ground = self.src.points(&all).map_err(refused)?;
-        let mut legs = Vec::new();
-        let mut profile: Vec<(f64, f64)> = Vec::new();
+        // Each part's profile, and how far along it its last sample lies.
+        let mut profiles: Vec<(Vec<(f64, f64)>, f64)> = Vec::new();
         let mut at = 0;
-        let mut walked = 0.0;
-        for (k, (p, pts)) in found.pieces.iter().zip(&per_leg).enumerate() {
-            let mut leg_profile = Vec::new();
+        for pts in &per_part {
+            let mut part_profile = Vec::new();
             let mut along = 0.0;
             for (i, q) in pts.iter().enumerate() {
                 if i > 0 {
                     along += dist(pts[i - 1], *q);
                 }
                 if let Some(gr) = ground[at + i] {
-                    leg_profile.push((along, gr.height));
+                    part_profile.push((along, gr.height));
                 }
             }
             at += pts.len();
-            let (ascent, descent) = climb(&leg_profile);
+            profiles.push((part_profile, along));
+        }
+        let first = usize::from(ways[0].is_some());
+        let mut legs = Vec::new();
+        for (k, p) in found.pieces.iter().enumerate() {
+            let (leg_profile, _) = &profiles[first + k];
+            let pts = &per_part[first + k];
+            let (ascent, descent) = climb(leg_profile);
             let exposure = seen_share(&mut self.heights, &self.observers, pts).map_err(refused)?;
             let e = &g.edges[p.edge];
             let line = &lines[k];
@@ -521,24 +1011,138 @@ impl<'a> Planner<'a> {
                 length: p.length(g),
                 ascent,
                 descent,
-                max_grade_pct: steepest(&leg_profile),
+                max_grade_pct: steepest(leg_profile),
                 exposure,
             });
-            profile.extend(leg_profile.iter().map(|&(d, h)| (walked + d, h)));
+        }
+        let mut profile: Vec<(f64, f64)> = Vec::new();
+        let mut walked = 0.0;
+        for (part_profile, along) in &profiles {
+            profile.extend(part_profile.iter().map(|&(d, h)| (walked + d, h)));
             walked += along;
         }
         let (ascent, descent) = climb(&profile);
+        let mut offroad = [None, None];
+        for (k, w) in ways.iter().enumerate() {
+            let Some((path, cost)) = w else { continue };
+            let i = if k == 0 { 0 } else { parts.len() - 1 };
+            let (way_profile, _) = &profiles[i];
+            let length: f64 = path.windows(2).map(|s| dist(s[0], s[1])).sum();
+            if length == 0.0 {
+                continue;
+            }
+            let (ascent, descent) = climb(way_profile);
+            offroad[k] = Some(OffroadLeg {
+                path: path.iter().copied().map(point).collect(),
+                length,
+                cost: *cost,
+                ascent,
+                descent,
+                max_grade_pct: steepest(way_profile),
+                exposure: seen_share(&mut self.heights, &self.observers, &per_part[i])
+                    .map_err(refused)?,
+            });
+        }
+        let (snapped_from, snapped_to) = match found.joined {
+            Some((i, j)) => (
+                Some(point(self.joins.starts[i].snap.point)),
+                Some(point(self.joins.goals[j].snap.point)),
+            ),
+            None => (None, None),
+        };
+        let waypoints = if self.ends.is_none() {
+            waypoints(&lines)
+        } else {
+            let mut w: Vec<[f64; 2]> = Vec::new();
+            let mut add = |q: [f64; 2]| {
+                if w.last().is_none_or(|&l| dist(l, q) >= JOINED_M) {
+                    w.push(q);
+                }
+            };
+            ways[0]
+                .iter()
+                .flat_map(|w| w.0.iter())
+                .for_each(|&q| add(q));
+            if !lines.is_empty() {
+                road_waypoints(&lines).into_iter().for_each(&mut add);
+            }
+            ways[1]
+                .iter()
+                .flat_map(|w| w.0.iter())
+                .for_each(|&q| add(q));
+            w.into_iter().map(point).collect()
+        };
+        let [offroad_from, offroad_to] = offroad;
+        let asked = self.ends.is_some();
         Ok(Route {
-            waypoints: waypoints(&lines),
+            waypoints,
             length: found.length(g),
             ascent,
             descent,
             max_grade_pct: steepest(&profile),
             legs,
-            snapped_from: point(self.from.point),
-            snapped_to: point(self.to.point),
+            snapped_from,
+            snapped_to,
             straight_line,
+            offroad_from: asked.then_some(offroad_from),
+            offroad_to: asked.then_some(offroad_to),
         })
+    }
+
+    /// Why no route answered and, on roads without `offroad`, when an end
+    /// snapped to a piece of road that joins none the other end's reaches,
+    /// that `offroad` would plan its way to another.
+    fn no_route(&self) -> Vec<Issue> {
+        let mut message = "the network joins no route between the ends within the detour allowed, \
+                           past the regions avoided"
+            .to_string();
+        if self.ends.is_none()
+            && self.kind == KIND_ROAD
+            && let Some(end) = self.isolated()
+        {
+            message.push_str(&format!(
+                "; the {end} end snaps to a piece of road that joins none the other end's road \
+                 reaches: set offroad to plan its way across country to a road that leads on"
+            ));
+        }
+        issue("no_route", &message, "")
+    }
+
+    /// The end whose snapped stretch lies in the smaller of two pieces of the
+    /// network no passage joins, or `None` when one piece holds both.
+    fn isolated(&self) -> Option<&'static str> {
+        fn root(parent: &mut [u32], mut v: usize) -> usize {
+            while parent[v] as usize != v {
+                parent[v] = parent[parent[v] as usize];
+                v = parent[v] as usize;
+            }
+            v
+        }
+        let p = &self.g.passages;
+        let n = p.ends();
+        let mut parent: Vec<u32> = (0..n as u32).collect();
+        for v in 0..n {
+            for w in std::iter::once(v ^ 1).chain(p.out_of(v).iter().map(|q| q.to as usize)) {
+                let (a, b) = (root(&mut parent, v), root(&mut parent, w));
+                if a != b {
+                    parent[a.max(b)] = a.min(b) as u32;
+                }
+            }
+        }
+        let (a, b) = (
+            root(&mut parent, self.from.run * 2),
+            root(&mut parent, self.to.run * 2),
+        );
+        if a == b {
+            return None;
+        }
+        let (mut size_a, mut size_b) = (0usize, 0usize);
+        for v in 0..n {
+            let r = root(&mut parent, v);
+            size_a += usize::from(r == a);
+            size_b += usize::from(r == b);
+        }
+        Some(if size_a <= size_b { "from" } else { "to" })
     }
 }
 
@@ -664,6 +1268,11 @@ fn steepest(profile: &[(f64, f64)]) -> f64 {
 /// of the road's own geometry each time `WAYPOINT_SPACING_M` has passed
 /// since the last kept.
 fn waypoints(lines: &[Vec<[f64; 2]>]) -> Vec<Point> {
+    road_waypoints(lines).into_iter().map(point).collect()
+}
+
+/// The points `waypoints` keeps.
+fn road_waypoints(lines: &[Vec<[f64; 2]>]) -> Vec<[f64; 2]> {
     let mut out = vec![lines[0][0]];
     for line in lines {
         let mut since = 0.0;
@@ -678,12 +1287,19 @@ fn waypoints(lines: &[Vec<[f64; 2]>]) -> Vec<Point> {
             }
         }
     }
-    out.into_iter().map(point).collect()
+    out
 }
 
-/// Meters of `a` that `b` runs along too, edge by edge.
+/// Meters of `a` that `b` runs along too, edge by edge, and each way off
+/// the road both take the same.
 fn shared(g: &Graph, a: &Found, b: &Found) -> f64 {
-    let mut sum = 0.0;
+    let mut sum: f64 = a
+        .offroad
+        .iter()
+        .zip(&b.offroad)
+        .filter_map(|(x, y)| x.as_ref().filter(|x| Some(*x) == y.as_ref()))
+        .map(Way::length)
+        .sum();
     for p in &a.pieces {
         for q in b.pieces.iter().filter(|q| q.edge == p.edge) {
             let ((p0, p1), (q0, q1)) = (p.span(), q.span());
@@ -776,20 +1392,25 @@ fn top_decile(
         .collect())
 }
 
-fn no_route() -> Vec<Issue> {
-    issue(
-        "no_route",
-        "the network joins no route between the ends within the detour allowed, past the regions avoided",
-        "",
-    )
+/// Why no way across country from an end reaches the road: `no way across
+/// country reaches the road within 5000 m: a river and slopes over 30° block
+/// it`.
+fn no_way_words(blocks: Blocks, max_slope_deg: f64, reach: f64) -> String {
+    let words = blocks.words(max_slope_deg, reach);
+    let mut out = format!("no way across country reaches the road within {reach} m");
+    match words.as_slice() {
+        [] => {}
+        [one] => out.push_str(&format!(": {one} blocks it")),
+        [rest @ .., last] => out.push_str(&format!(": {} and {last} block it", rest.join(", "))),
+    }
+    out
 }
 
 pub fn route(terrain: &Terrain, q: RouteRequest) -> Result<RouteResponse, Vec<Issue>> {
     let mut p = Planner::new(terrain, &q)?;
-    let found = p
-        .search(&HashMap::new(), true)
-        .map_err(refused)?
-        .ok_or_else(no_route)?;
+    let Some(found) = p.search(&HashMap::new(), true).map_err(refused)? else {
+        return Err(p.no_route());
+    };
     let straight = dist([q.from.x, q.from.z], [q.to.x, q.to.z]);
     let route = p.describe(&found, straight)?;
     let geojson = if q.geojson {
@@ -817,14 +1438,28 @@ fn draw(
 ) {
     let mut line: Vec<[f64; 2]> = Vec::new();
     let mut legs = Vec::new();
-    for p in &found.pieces {
-        let l = p.line(g);
-        for &q in &l {
+    let way = |w: &Option<Option<OffroadLeg>>| -> Option<Vec<[f64; 2]>> {
+        let w = w.as_ref()?.as_ref()?;
+        Some(w.path.iter().map(|p| [p.x, p.z]).collect())
+    };
+    let (from_way, to_way) = (way(&route.offroad_from), way(&route.offroad_to));
+    let add = |line: &mut Vec<[f64; 2]>, l: &[[f64; 2]]| {
+        for &q in l {
             if line.last() != Some(&q) {
                 line.push(q);
             }
         }
+    };
+    if let Some(w) = &from_way {
+        add(&mut line, w);
+    }
+    for p in &found.pieces {
+        let l = p.line(g);
+        add(&mut line, &l);
         legs.push(l);
+    }
+    if let Some(w) = &to_way {
+        add(&mut line, w);
     }
     if line.len() == 1 {
         line.push(line[0]);
@@ -854,11 +1489,49 @@ fn draw(
             ]),
         );
     }
+    for (end, w, leg) in [
+        ("from", &from_way, &route.offroad_from),
+        ("to", &to_way, &route.offroad_to),
+    ] {
+        if let (Some(w), Some(Some(leg))) = (w, leg) {
+            f.line(
+                w,
+                props([
+                    ("offroad", json!(end)),
+                    ("length", json!(leg.length)),
+                    ("cost", json!(leg.cost)),
+                    ("ascent", json!(leg.ascent)),
+                    ("descent", json!(leg.descent)),
+                    ("max_grade_pct", json!(leg.max_grade_pct)),
+                    ("exposure", json!(leg.exposure)),
+                ]),
+            );
+        }
+    }
 }
 
+/// The route's ends: where it joins the network, or off the road the ends
+/// as given and, beside them, where it joins and leaves the network.
 fn ends(f: &mut Features, route: &Route) {
-    for (end, p) in [("from", route.snapped_from), ("to", route.snapped_to)] {
+    if route.offroad_from.is_none() {
+        for (end, p) in [("from", route.snapped_from), ("to", route.snapped_to)] {
+            if let Some(p) = p {
+                f.point([p.x, p.z], props([("end", json!(end))]));
+            }
+        }
+        return;
+    }
+    let (first, last) = (
+        &route.waypoints[0],
+        &route.waypoints[route.waypoints.len() - 1],
+    );
+    for (end, p) in [("from", first), ("to", last)] {
         f.point([p.x, p.z], props([("end", json!(end))]));
+    }
+    for (end, p) in [("from", route.snapped_from), ("to", route.snapped_to)] {
+        if let Some(p) = p {
+            f.point([p.x, p.z], props([("joins", json!(end))]));
+        }
     }
 }
 
@@ -893,10 +1566,9 @@ pub fn route_alternatives(
     let mut p = Planner::new(terrain, &q.route)?;
     let g = p.g;
     let mut penalty: HashMap<usize, f64> = HashMap::new();
-    let first = p
-        .search(&penalty, true)
-        .map_err(refused)?
-        .ok_or_else(no_route)?;
+    let Some(first) = p.search(&penalty, true).map_err(refused)? else {
+        return Err(p.no_route());
+    };
     // Stretch is against the least-cost route, which with no exposure
     // weight is the shortest.
     let reference = first.length(g);
@@ -916,7 +1588,9 @@ pub fn route_alternatives(
             break;
         };
         let len = c.length(g);
-        let new = !kept.iter().any(|k| k.pieces == c.pieces);
+        let new = !kept
+            .iter()
+            .any(|k| k.pieces == c.pieces && k.offroad == c.offroad);
         let within = reference <= 0.0 || len <= q.max_stretch * reference;
         let apart = kept.iter().all(|k| {
             let s = shared(g, &c, k);
@@ -996,6 +1670,9 @@ pub fn route_alternatives(
         geojson,
     })
 }
+
+#[cfg(test)]
+mod offroad_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1258,6 +1935,10 @@ mod tests {
                 // Wide enough, every other pair, that the bound cuts nothing
                 // the oracle uses.
                 max_detour_factor: if k % 2 == 0 { 3.0 } else { 100.0 },
+                offroad: false,
+                max_offroad: 5000.0,
+                max_slope_deg: 30.0,
+                offroad_weight: 2.0,
                 geojson: false,
             };
             let mut planner = Planner::new(&t, &q).unwrap();
@@ -1384,8 +2065,12 @@ mod tests {
         let mut p = Planner {
             src,
             g: &g,
+            kind: KIND_ROAD,
             from,
             to,
+            joins: Joins::new(vec![Join::snapped(from)], vec![Join::snapped(to)], None),
+            ends: None,
+            places: [from.point, to.point],
             avoid,
             blocked,
             observers: Vec::new(),
@@ -1418,11 +2103,16 @@ mod tests {
                 point,
             }
         };
+        let (from, to) = (snap(from), snap(to));
         Planner {
             src,
             g,
-            from: snap(from),
-            to: snap(to),
+            kind: KIND_ROAD,
+            from,
+            to,
+            joins: Joins::new(vec![Join::snapped(from)], vec![Join::snapped(to)], None),
+            ends: None,
+            places: [from.point, to.point],
             avoid: Vec::new(),
             blocked: vec![false; g.edges.len()],
             observers: Vec::new(),
@@ -1671,6 +2361,10 @@ pub(crate) mod install_tests {
             exposure_observers: Vec::new(),
             exposure_weight: 1.0,
             max_detour_factor: 3.0,
+            offroad: false,
+            max_offroad: 5000.0,
+            max_slope_deg: 30.0,
+            offroad_weight: 2.0,
             geojson: false,
         }
     }
