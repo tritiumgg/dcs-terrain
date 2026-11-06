@@ -58,10 +58,12 @@ bad line fails alone.
 dcsterrain query --terrain Caucasus < requests.jsonl > answers.jsonl
 ```
 
-PowerShell has no `<`:
+`--input <file>` and `--output <file>` read the batch from a file and write the
+answers to one in UTF-8, which PowerShell needs: it has no `<`, and Windows
+PowerShell 5.1's `>` writes UTF-16.
 
 ```powershell
-Get-Content requests.jsonl | dcsterrain query --terrain Caucasus > answers.jsonl
+dcsterrain query --terrain Caucasus --input requests.jsonl --output answers.jsonl
 ```
 
 ```jsonl

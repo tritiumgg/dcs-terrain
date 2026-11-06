@@ -56,6 +56,7 @@ Then ask a question, such as the airfield nearest to the town of Zugdidi:
 A place can be a DCS position such as `-284887,683859`, a grid reference such as `"38T KM 91980 72567"`, a latitude and longitude, `airport:Kutaisi` or `town:Zugdidi`; `.\dcsterrain.exe geo --terrain Caucasus --to-xz "38T KM 91980 72567"` turns a grid reference into DCS x and z.
 `--help` after a command lists what it takes.
 The [guide](docs/guide.md) walks through a whole siting question, step by step, and shows how software uses `query`.
+A file of JSON requests, one per line, is answered in one run: `.\dcsterrain.exe query --terrain Caucasus --input in.jsonl --output out.jsonl` writes the answers to `out.jsonl` in UTF-8, where Windows PowerShell 5.1's `>` would write UTF-16.
 [docs/queries.md](docs/queries.md) describes all 22 kinds of question.
 
 ## Use it from an AI assistant

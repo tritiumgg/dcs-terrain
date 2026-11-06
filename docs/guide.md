@@ -1388,14 +1388,20 @@ This command makes a file, `questions.jsonl`, with two questions in it:
 '@ | Set-Content questions.jsonl
 ```
 
-Then send the file's lines into the tool:
+Then give the tool the file, and the file to write its answers to:
 
 ```powershell
-Get-Content questions.jsonl | .\dcsterrain.exe query --terrain Caucasus | Set-Content answers.jsonl
+.\dcsterrain.exe query --terrain Caucasus --input questions.jsonl --output answers.jsonl
 ```
 
-`Set-Content` saves the answers as plain text.
-In Windows PowerShell 5.1, `>` would save them in a form other tools may not read.
+`--output` writes the answers in UTF-8, the encoding other tools expect.
+If `answers.jsonl` is already there, it is replaced.
+Do not save the answers with `>` instead.
+In Windows PowerShell 5.1, `>` saves them as UTF-16, which most other tools cannot read.
+
+A long batch tells you how far it has come, about once a second:
+how many lines it has answered, and how many of them failed.
+That count goes to the screen, never into `answers.jsonl`.
 
 Each line of `answers.jsonl` answers one line of your file, in the same order,
 with the same `id`.
