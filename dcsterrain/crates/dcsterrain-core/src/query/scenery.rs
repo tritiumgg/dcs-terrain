@@ -262,7 +262,7 @@ fn features(
             unreachable!("an object serializes to an object")
         };
         for k in ["x", "z"] {
-            fields.remove(k);
+            fields.shift_remove(k);
         }
         let ring = vec![b.corners().to_vec()];
         if f.fillable(&ring) {

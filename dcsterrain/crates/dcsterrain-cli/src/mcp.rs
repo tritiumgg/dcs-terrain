@@ -118,7 +118,7 @@ fn without_files(mut listing: Value) -> String {
     let terrains = listing["terrains"].as_array_mut().into_iter().flatten();
     for t in terrains {
         if let Some(t) = t.as_object_mut() {
-            t.remove("files");
+            t.shift_remove("files");
         }
     }
     listing.to_string()
@@ -270,7 +270,7 @@ impl Files {
             && let Spilled::File(path, bytes) = self.spill(geojson, op, "geojson")?
         {
             let top = value.as_object_mut().expect("an answer is an object");
-            top.remove("geojson");
+            top.shift_remove("geojson");
             top.insert("geojson_file".into(), json!(named(&path)?));
             top.insert("geojson_bytes".into(), json!(bytes));
             geojson_file = Some(path);

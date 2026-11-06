@@ -476,20 +476,20 @@ Give it the first site's position with `--at`:
 ```
 
 ```text
-cell_size: 50.0
+terrain: Caucasus
 dcs_build: 2.9.31.29434
+terrain_fingerprint: 6293651208-203468160-1140069192
+cell_size: 50.0
 elapsed_ms: 12
-hard_fail: false
 orientation_deg: 0.0
 score: 5.0
 terms: 5 items
-  {"name":"valid","pass":true,"score":1.0,"value":1.0}
-  {"name":"surface_in","pass":true,"score":1.0,"value":1.0}
-  {"name":"slope_max","pass":true,"score":1.0,"value":0.0}
-  {"name":"dist_road_band","pass":true,"score":1.0,"value":100.0}
-  {"name":"clearing_max","pass":true,"score":1.0,"value":0.0}
-terrain: Caucasus
-terrain_fingerprint: 6293651208-203468160-1140069192
+  {"name":"valid","value":1.0,"pass":true,"score":1.0}
+  {"name":"surface_in","value":1.0,"pass":true,"score":1.0}
+  {"name":"slope_max","value":0.0,"pass":true,"score":1.0}
+  {"name":"dist_road_band","value":100.0,"pass":true,"score":1.0}
+  {"name":"clearing_max","value":0.0,"pass":true,"score":1.0}
+hard_fail: false
 ```
 
 This answer is a plain list, not a table.
@@ -1347,7 +1347,7 @@ The `|` sign sends it into the tool:
 ```
 
 ```text
-{"line":1,"op":"nearest","result":{"cell_size":50.0,"dcs_build":"2.9.31.29434","elapsed_ms":1,"results":[{"class":null,"distance":60.0606545632205,"id":"25","kind":"airdrome","name":"Kutaisi","x":-284887.375,"z":683858.71875}],"terrain":"Caucasus","terrain_fingerprint":"6293651208-203468160-1140069192"}}
+{"line":1,"op":"nearest","result":{"terrain":"Caucasus","dcs_build":"2.9.31.29434","terrain_fingerprint":"6293651208-203468160-1140069192","cell_size":50.0,"elapsed_ms":1,"results":[{"kind":"airdrome","id":"25","name":"Kutaisi","class":null,"x":-284887.375,"z":683858.71875,"distance":60.0606545632205}]}}
 ```
 
 - The single quotes `' '` keep the line together.

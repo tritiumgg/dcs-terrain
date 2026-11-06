@@ -430,8 +430,8 @@ pub fn airfield_info(
             let Value::Object(mut p) = json!(s) else {
                 unreachable!("a stand serializes to an object")
             };
-            p.remove("x");
-            p.remove("z");
+            p.shift_remove("x");
+            p.shift_remove("z");
             f.point([s.x, s.z], p);
         }
         Some(f.finish())

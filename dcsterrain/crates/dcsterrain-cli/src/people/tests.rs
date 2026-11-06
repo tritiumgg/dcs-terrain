@@ -107,9 +107,9 @@ fn the_plain_list_names_every_field() {
     let text = plain(&answer, Some(std::path::Path::new("out.geojson")));
     assert_eq!(
         text,
-        "candidates: 2 items\n  {\"x\":1,\"z\":2}\n  {\"x\":3,\"z\":4}\nempty: none\n\
-         first_seen: none\ngeojson: FeatureCollection, 2 features, written to out.geojson\n\
-         stats:\n  evaluated: 10\nterrain: synth\nvisible: true\n"
+        "candidates: 2 items\n  {\"x\":1,\"z\":2}\n  {\"x\":3,\"z\":4}\nstats:\n  \
+         evaluated: 10\nempty: none\ngeojson: FeatureCollection, 2 features, written to \
+         out.geojson\nterrain: synth\nvisible: true\nfirst_seen: none\n"
     );
 }
 

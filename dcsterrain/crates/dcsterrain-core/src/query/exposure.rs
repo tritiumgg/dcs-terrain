@@ -18,7 +18,6 @@
 //! its floor's error is larger than the floor's distance from the target
 //! height.
 
-use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
@@ -105,12 +104,25 @@ impl Serialize for Text<'_> {
     }
 }
 
-/// A raster's member of the answer, written as `serde_json` would sort it.
-#[derive(Serialize)]
-#[serde(untagged)]
-enum Member<'a> {
-    Plain(&'a Value),
-    Text(Text<'a>),
+/// The raster's members in the order the response declares them, each
+/// floor written from its numbers where the value holds its place.
+struct Raster<'a>(&'a Rasters);
+
+impl Serialize for Raster<'_> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let Value::Object(raster) = &self.0.value["raster"] else {
+            panic!("a raster is an object");
+        };
+        let mut out = s.serialize_map(Some(raster.len()))?;
+        for (k, v) in raster {
+            match k.as_str() {
+                "floor_agl" => out.serialize_entry(k, &Text(&self.0.agl))?,
+                "floor_msl" => out.serialize_entry(k, &Text(&self.0.msl))?,
+                _ => out.serialize_entry(k, v)?,
+            }
+        }
+        out.end()
+    }
 }
 
 impl Serialize for Rasters {
@@ -119,19 +131,11 @@ impl Serialize for Rasters {
             panic!("an answer is an object");
         };
         for (k, v) in top {
-            if k != "raster" {
+            if k == "raster" {
+                out.serialize_entry(k, &Raster(self))?;
+            } else {
                 out.serialize_entry(k, v)?;
-                continue;
             }
-            let Value::Object(raster) = v else {
-                panic!("a raster is an object");
-            };
-            let mut all: BTreeMap<&str, Member> = (raster.iter())
-                .map(|(k, v)| (k.as_str(), Member::Plain(v)))
-                .collect();
-            all.insert("floor_agl", Member::Text(Text(&self.agl)));
-            all.insert("floor_msl", Member::Text(Text(&self.msl)));
-            out.serialize_entry(k, &all)?;
         }
         out.end()
     }
@@ -258,12 +262,8 @@ pub fn exposure(terrain: &Terrain, q: ExposureRequest) -> Result<Rasters, Vec<Is
         bands,
         geojson,
     };
-    let mut value = serde_json::to_value(response).expect("a response serializes");
-    let Value::Object(raster) = &mut value["raster"] else {
-        panic!("a raster is an object");
-    };
-    raster.remove("floor_agl");
-    raster.remove("floor_msl");
+    // The floors stay empty strings, holding their places for `Raster`.
+    let value = serde_json::to_value(response).expect("a response serializes");
     Ok(Rasters {
         value,
         agl: r.agl,

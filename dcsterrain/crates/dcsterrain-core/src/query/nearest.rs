@@ -326,7 +326,7 @@ fn features(terrain: &Terrain, kind: NearestKind, results: &[Nearby]) -> Result<
             unreachable!("a result serializes to an object")
         };
         for k in ["x", "z"] {
-            fields.remove(k);
+            fields.shift_remove(k);
         }
         f.point([r.x, r.z], fields);
         if let Some(g) = &graph {

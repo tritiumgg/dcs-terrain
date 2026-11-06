@@ -131,7 +131,7 @@ pub fn point_info(terrain: &Terrain, q: PointInfoRequest) -> Result<PointInfoRes
                 unreachable!("a point's fields serialize to an object")
             };
             for k in ["x", "z", "lat", "lon"] {
-                props.remove(k);
+                props.shift_remove(k);
             }
             f.point([info.x, info.z], props);
         }
