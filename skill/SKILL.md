@@ -241,7 +241,7 @@ and `elapsed_ms`.
 - `cell_size` is the raster's, 50 m on every terrain so far. `sample` over a region,
   the criteria other than sightlines, the horizon and a `route`'s `exposure` read
   that raster, and `viewshed` and the `radar_floor` raster read it beyond 1 km.
-  `sample` at points, `visible`, `point_info`, `unmask_profile`, `radar_floor` at
+  `sample` at points for its four ground layers, `visible`, `point_info`, `unmask_profile`, `radar_floor` at
   points and the criteria `not_visible_from` and `visible_to` read the mesh itself.
   Answers from the two can differ by a meter or more; for a final check on one
   position, use the mesh.
@@ -286,23 +286,23 @@ GermanyCW.
 | `surface` | 1 land, 3 water, 4 road, 5 runway |
 | `cover` | 1 plain, 2 field, 3 forest, 4 town, 5 beach, 6 runway, 7 water |
 | `valid` | 1 where there is ground and not sea |
-| `slope`, `aspect`, `roughness` | degrees; downslope bearing; meters of height range over 3 × 3 cells |
+| `slope`, `aspect`, `roughness` | degrees; downslope bearing, null under 0.5° of slope; meters of height range over 3 × 3 cells |
 | `tpi_300`, `tpi_2000` | meters above the mean ground within 300 m, 2 km |
-| `dist_road`, `dist_rail`, `dist_water`, `dist_builtup` | meters, searched to 5 km |
+| `dist_road`, `dist_rail`, `dist_water`, `dist_builtup` | meters, searched to 5 km, and 5000 when none is nearer |
 | `count_building`, `count_industrial` | objects within 1 km |
 | `tree_density` | single trees per hectare within 300 m, not a share |
 | `share_<cover>`, such as `share_forest` | 0 to 1, the share of cells of that cover within 300 m |
-| `enclosure`, `horizon_0` (north) to `horizon_31` (clockwise) | degrees above level, the mean and each 32nd of the compass, per 200 m cell |
+| `enclosure`, `horizon_0` (north) to `horizon_31` (clockwise) | degrees above level from 2 m up, out to 40 km: the mean of the 32 bearings, and each bearing, per 200 m cell |
 
 **`tree_density` is not forest.** It counts the terrain's single placed trees,
 and only about a tenth of them stand in forest, because DCS draws its forests
 at runtime from the ground cover. For forest, read `cover` or `share_forest`.
 
 **Points and regions differ.** At points, `height`, `water`, `surface` and
-`cover` come from the mesh triangle under each point, `height` unrounded and
-the others true to a few meters. Over a region, and for every other layer even
-at points, values come from 50 m cells: a height is bilinear between cell
-heights rounded to the meter, so contours drawn from it step, and the other
+`cover` are the mesh triangle's under each point, `height` unrounded. Over a
+region, and for every other layer even at points, values come from 50 m cells:
+a height is bilinear between cell heights rounded to the meter, so it is off
+by up to half a meter and gentle ground reads as flat terraces, and the other
 layers take the cell holding the point, so water narrower than a cell can be
 missed.
 
