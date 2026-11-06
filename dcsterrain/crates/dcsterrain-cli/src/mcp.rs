@@ -226,6 +226,15 @@ fn named(path: &Path) -> io::Result<&str> {
     })
 }
 
+/// An answer whose GeoJSON went to a file, which it names in its place.
+#[derive(Serialize)]
+struct WithFile<'a> {
+    #[serde(flatten)]
+    answer: &'a Answer,
+    geojson_file: &'a str,
+    geojson_bytes: usize,
+}
+
 /// The files of the answers too large to hand back.
 struct Files {
     dir: PathBuf,
@@ -261,21 +270,29 @@ impl Files {
     /// `INLINE_MAX` swapped for the path of a file holding it, and an answer
     /// still over it swapped for the path of a file holding the answer.
     fn written(&self, op: &str, mut answer: Answer) -> io::Result<String> {
-        let value = match &mut answer {
-            Answer::Value(v) => v,
-            Answer::Rasters(r) => &mut r.value,
-        };
         let mut geojson_file = None;
-        if let Some(geojson) = value.get("geojson").filter(|g| g.is_object())
-            && let Spilled::File(path, bytes) = self.spill(geojson, op, "geojson")?
+        if let Some(slot) = answer.geojson_mut()
+            && let Some(geojson) = slot.take()
         {
-            let top = value.as_object_mut().expect("an answer is an object");
-            top.shift_remove("geojson");
-            top.insert("geojson_file".into(), json!(named(&path)?));
-            top.insert("geojson_bytes".into(), json!(bytes));
-            geojson_file = Some(path);
+            match self.spill(&geojson, op, "geojson")? {
+                // Short enough to stay in the answer, and encoded there again.
+                Spilled::Text(_) => *slot = Some(geojson),
+                Spilled::File(path, bytes) => geojson_file = Some((path, bytes)),
+            }
         }
-        let text = match self.spill(&answer, op, "json") {
+        let spilled = match &geojson_file {
+            None => self.spill(&answer, op, "json"),
+            Some((path, bytes)) => named(path).and_then(|name| {
+                let with = WithFile {
+                    answer: &answer,
+                    geojson_file: name,
+                    geojson_bytes: *bytes,
+                };
+                self.spill(&with, op, "json")
+            }),
+        };
+        let geojson_file = geojson_file.map(|(path, _)| path);
+        let text = match spilled {
             Ok(Spilled::Text(text)) => Ok(text),
             Ok(Spilled::File(path, bytes)) => {
                 let path = named(&path)?;

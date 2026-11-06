@@ -530,12 +530,8 @@ pub fn plain(answer: &Value, geojson_out: Option<&std::path::Path>) -> String {
 
 /// The answer's `geojson`, written to `path`.
 fn write_geojson(answer: &Answer, path: &std::path::Path) -> Result<(), Vec<Issue>> {
-    let value = match answer {
-        Answer::Value(v) => v,
-        Answer::Rasters(r) => &r.value,
-    };
     let fail = |why: String| vec![Issue::new("internal_error", &why, "--geojson-out")];
-    let Some(geojson) = value.get("geojson") else {
+    let Some(geojson) = answer.geojson() else {
         return Err(fail("the answer holds no GeoJSON".into()));
     };
     let file = std::fs::File::create(path)
@@ -612,18 +608,7 @@ pub fn run(op: &str, args: &[String], init: impl FnOnce(bool, Option<u16>)) -> E
     if json {
         return query::print(&answer);
     }
-    let value = match &answer {
-        Answer::Value(v) => std::borrow::Cow::Borrowed(v),
-        Answer::Rasters(r) => match serde_json::to_value(r) {
-            Ok(v) => std::borrow::Cow::Owned(v),
-            Err(e) => {
-                return refused(
-                    false,
-                    vec![Issue::new("internal_error", &e.to_string(), "")],
-                );
-            }
-        },
-    };
+    let value = answer.to_value();
     print!(
         "{}",
         shown_answer(op, &mut opener, &request, &value, geojson_out.as_deref())

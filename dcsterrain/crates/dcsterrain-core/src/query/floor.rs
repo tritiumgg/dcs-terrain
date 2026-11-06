@@ -180,7 +180,7 @@ pub(super) fn check_bands(bands: &[f64], path: &str) -> Option<Issue> {
 
 /// Little-endian `f32`s, base64 encoded.
 /// `floats` of what is already f32, with no second copy of its bytes.
-pub(super) fn floats32(v: &[f32]) -> String {
+pub(crate) fn floats32(v: &[f32]) -> String {
     if cfg!(target_endian = "big") {
         return floats(v.iter().map(|&f| f64::from(f)));
     }

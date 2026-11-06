@@ -114,6 +114,29 @@ fn timeless(v: &Value) -> Value {
 
 const SYNTH: [&str; 5] = ["--threads", "5", "query", "--terrain", "synth"];
 
+/// An answer is encoded straight from its response as it is written, and
+/// is byte for byte the answer built whole as a tree of values and written.
+#[test]
+fn an_answer_written_as_encoded_is_its_tree_written() {
+    use dcsterrain_core::query::{Terrain, answer_to_write};
+    use dcsterrain_core::synth::{self, Synth};
+    let s = Synth::new(
+        synth::DEFAULT_SEED,
+        synth::DEFAULT_SIZE_KM,
+        synth::CELL_SIZE_M,
+    );
+    let terrain = Terrain::Synth(Box::new(s.unwrap()));
+    for (op, request) in every_operation(&synth()) {
+        let answer = answer_to_write(&terrain, op, &request).unwrap();
+        let straight = serde_json::to_string(&answer).unwrap();
+        let tree = serde_json::to_string(&answer.to_value()).unwrap();
+        assert!(
+            straight == tree,
+            "{op}: the encoded answer differs from its tree"
+        );
+    }
+}
+
 #[test]
 fn a_batch_answers_every_operation_with_the_terrain_opened_once() {
     let requests = every_operation(&synth());

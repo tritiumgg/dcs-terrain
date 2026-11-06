@@ -8,8 +8,8 @@
 use std::path::Path;
 use std::time::Instant;
 
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::{Serialize, Serializer};
 use serde_json::Value;
 
 use crate::cache::Cache;
@@ -17,7 +17,14 @@ use crate::call::Call;
 use crate::source::install::Install;
 use crate::source::{Refusal, Source};
 use crate::synth::Synth;
-use crate::types::{Issue, OPERATIONS, Provenance};
+use crate::types::{
+    AirfieldInfoResponse, ApproachSpectrumResponse, ChokepointsResponse, CoverageResponse,
+    DescribeResponse, ExposureResponse, FindSitesResponse, GeoResponse, Issue, NearestResponse,
+    OPERATIONS, PointInfoResponse, Provenance, RadarFloorResponse, RouteAlternativesResponse,
+    RouteResponse, SampleResponse, SceneryInResponse, ScoreSiteResponse, TownsResponse,
+    TrafficabilityResponse, UnmaskProfileResponse, ValidatePlacementsResponse, ViewshedResponse,
+    VisibleResponse,
+};
 
 mod airfield_info;
 mod chokepoints;
@@ -52,6 +59,7 @@ pub use chokepoints::chokepoints;
 pub use coverage::coverage;
 pub use describe::describe;
 pub use exposure::exposure;
+pub(crate) use floor::floats32;
 pub use floor::{floor_msl_reaching, radar_floor};
 pub use geo::geo;
 pub use mgrs::{MgrsSquare, mgrs, parse_mgrs, truncate_mgrs};
@@ -127,7 +135,7 @@ impl Terrain {
     }
 }
 
-type Handler = fn(&Terrain, &Value) -> Result<Value, Vec<Issue>>;
+type Handler = fn(&Terrain, &Value) -> Result<Answer, Vec<Issue>>;
 
 /// The operations, by the name `OPERATIONS` lists each under.
 const HANDLERS: &[(&str, Handler)] = &[
@@ -140,7 +148,7 @@ const HANDLERS: &[(&str, Handler)] = &[
     ("viewshed", |t, r| run(t, r, viewshed)),
     ("radar_floor", |t, r| run(t, r, radar_floor)),
     ("coverage", |t, r| run(t, r, coverage)),
-    ("exposure", run_exposure),
+    ("exposure", |t, r| run(t, r, exposure)),
     ("approach_spectrum", |t, r| run(t, r, approach_spectrum)),
     ("unmask_profile", |t, r| run(t, r, unmask_profile)),
     ("route", |t, r| run(t, r, route)),
@@ -155,18 +163,13 @@ const HANDLERS: &[(&str, Handler)] = &[
     ("towns", |t, r| run(t, r, towns)),
 ];
 
-/// Reads the request as `Q`, answers it with `f`, and writes the answer.
-fn run<Q: DeserializeOwned, A: Serialize>(
+/// Reads the request as `Q` and answers it with `f`.
+fn run<Q: DeserializeOwned, A: Into<Answer>>(
     terrain: &Terrain,
     request: &Value,
     f: fn(&Terrain, Q) -> Result<A, Vec<Issue>>,
-) -> Result<Value, Vec<Issue>> {
-    Ok(serde_json::to_value(f(terrain, read(request)?)?).expect("a response serializes"))
-}
-
-/// `exposure` as a value.
-fn run_exposure(terrain: &Terrain, request: &Value) -> Result<Value, Vec<Issue>> {
-    Ok(exposure(terrain, read(request)?)?.into_value())
+) -> Result<Answer, Vec<Issue>> {
+    Ok(f(terrain, read(request)?)?.into())
 }
 
 /// The request as `Q`.
@@ -204,31 +207,105 @@ pub(crate) fn invalid(message: &str, path: &str) -> Vec<Issue> {
     vec![Issue::new("invalid_request", message, path)]
 }
 
-/// An answer on its way out: only `exposure`'s differs from its value.
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
-pub enum Answer {
-    Value(Value),
-    Rasters(exposure::Rasters),
+/// An answer on its way out: the operation's response itself, encoded as
+/// it is written, never first built whole as a tree of values.
+macro_rules! answers {
+    (
+        with_geojson: [$($g:ident($gr:ty),)*],
+        without: [$($n:ident($nr:ty),)*]
+    ) => {
+        #[derive(Debug)]
+        pub enum Answer {
+            $($g(Box<$gr>),)*
+            $($n(Box<$nr>),)*
+        }
+
+        $(impl From<$gr> for Answer {
+            fn from(r: $gr) -> Answer {
+                Answer::$g(Box::new(r))
+            }
+        })*
+        $(impl From<$nr> for Answer {
+            fn from(r: $nr) -> Answer {
+                Answer::$n(Box::new(r))
+            }
+        })*
+
+        impl Serialize for Answer {
+            fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+                match self {
+                    $(Answer::$g(r) => r.serialize(s),)*
+                    $(Answer::$n(r) => r.serialize(s),)*
+                }
+            }
+        }
+
+        impl Answer {
+            fn provenance_mut(&mut self) -> &mut Provenance {
+                match self {
+                    $(Answer::$g(r) => &mut r.provenance,)*
+                    $(Answer::$n(r) => &mut r.provenance,)*
+                }
+            }
+
+            /// The answer's GeoJSON, when it was asked for.
+            pub fn geojson(&self) -> Option<&Value> {
+                match self {
+                    $(Answer::$g(r) => r.geojson.as_ref(),)*
+                    $(Answer::$n(_) => None,)*
+                }
+            }
+
+            /// Where the answer's GeoJSON goes, where its operation draws
+            /// one.
+            pub fn geojson_mut(&mut self) -> Option<&mut Option<Value>> {
+                match self {
+                    $(Answer::$g(r) => Some(&mut r.geojson),)*
+                    $(Answer::$n(_) => None,)*
+                }
+            }
+        }
+    };
 }
 
-/// `answer`, ready to write out with no second copy of a large answer.
-pub fn answer_to_write(terrain: &Terrain, op: &str, request: &Value) -> Result<Answer, Vec<Issue>> {
-    if op != "exposure" {
-        return answer(terrain, op, request).map(Answer::Value);
+answers! {
+    with_geojson: [
+        Sample(SampleResponse),
+        ScoreSite(ScoreSiteResponse),
+        FindSites(FindSitesResponse),
+        Visible(VisibleResponse),
+        Viewshed(ViewshedResponse),
+        RadarFloor(RadarFloorResponse),
+        Coverage(CoverageResponse),
+        ApproachSpectrum(ApproachSpectrumResponse),
+        UnmaskProfile(UnmaskProfileResponse),
+        Exposure(ExposureResponse),
+        Route(RouteResponse),
+        RouteAlternatives(RouteAlternativesResponse),
+        Nearest(NearestResponse),
+        SceneryIn(SceneryInResponse),
+        Chokepoints(ChokepointsResponse),
+        Trafficability(TrafficabilityResponse),
+        PointInfo(PointInfoResponse),
+        Towns(TownsResponse),
+        AirfieldInfo(AirfieldInfoResponse),
+        ValidatePlacements(ValidatePlacementsResponse),
+    ],
+    without: [
+        Describe(DescribeResponse),
+        Geo(GeoResponse),
+    ]
+}
+
+impl Answer {
+    /// The answer as a tree of values, for a reader that walks it.
+    pub fn to_value(&self) -> Value {
+        serde_json::to_value(self).expect("a response serializes")
     }
-    let started = Instant::now();
-    let out = exposure(terrain, read(request)?);
-    // Work cut short by a caller who gave up is never an answer, nor its
-    // failure another issue.
-    Call::current().check()?;
-    let mut out = out?;
-    out.value["elapsed_ms"] = (started.elapsed().as_millis() as u64).into();
-    Ok(Answer::Rasters(out))
 }
 
-/// Answers one request, `op` with its JSON, timing it from here.
-pub fn answer(terrain: &Terrain, op: &str, request: &Value) -> Result<Value, Vec<Issue>> {
+/// `answer`, held as its response to be encoded as it is written.
+pub fn answer_to_write(terrain: &Terrain, op: &str, request: &Value) -> Result<Answer, Vec<Issue>> {
     let started = Instant::now();
     let Some((_, handler)) = HANDLERS.iter().find(|(name, _)| *name == op) else {
         let names: Vec<_> = OPERATIONS.iter().map(|o| o.name).collect();
@@ -242,10 +319,17 @@ pub fn answer(terrain: &Terrain, op: &str, request: &Value) -> Result<Value, Vec
         )]);
     };
     let out = handler(terrain, request);
+    // Work cut short by a caller who gave up is never an answer, nor its
+    // failure another issue.
     Call::current().check()?;
     let mut out = out?;
-    out["elapsed_ms"] = (started.elapsed().as_millis() as u64).into();
+    out.provenance_mut().elapsed_ms = started.elapsed().as_millis() as u64;
     Ok(out)
+}
+
+/// Answers one request, `op` with its JSON, timing it from here.
+pub fn answer(terrain: &Terrain, op: &str, request: &Value) -> Result<Value, Vec<Issue>> {
+    answer_to_write(terrain, op, request).map(|a| a.to_value())
 }
 
 #[cfg(test)]

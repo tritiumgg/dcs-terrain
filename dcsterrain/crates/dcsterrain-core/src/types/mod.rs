@@ -9,10 +9,12 @@
 //! Positions are DCS `x` (north) and `z` (east).
 
 mod criteria;
+mod encoded;
 mod ops;
 mod schema;
 
 pub use criteria::*;
+pub use encoded::*;
 pub use ops::*;
 pub use schema::{ISSUE_CODES, OPERATIONS, Operation, UnknownOperation, request_schema, schema};
 

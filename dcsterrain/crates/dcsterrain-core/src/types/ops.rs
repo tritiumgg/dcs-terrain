@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use crate::places::{Form, SizeClass};
 
 use super::{
-    AirdromeRef, BoundingBox, CoverClass, Criterion, Footprint, LatLon, Network, Observer, Point,
-    Point3, Polygon, Provenance, Region, WaterClass,
+    AirdromeRef, BoundingBox, CoverClass, Criterion, Floats, Footprint, LatLon, Network, Observer,
+    Point, Point3, Polygon, Provenance, Region, WaterClass,
 };
 
 // describe
@@ -700,9 +700,9 @@ pub struct ExposureRaster {
     pub height: u32,
     /// The lowest height above the cell's ground at which any site sees a
     /// target: the least of the sites' floors.
-    pub floor_agl: String,
+    pub floor_agl: Floats,
     /// The same as an altitude above sea level.
-    pub floor_msl: String,
+    pub floor_msl: Floats,
     /// How many sites see a target `target_alt_agl` above the cell's
     /// ground, one byte per cell, base64.
     pub seen_count: String,
