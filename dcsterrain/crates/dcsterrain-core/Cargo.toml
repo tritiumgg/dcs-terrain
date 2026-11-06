@@ -16,7 +16,7 @@ rayon = "1.11.0"
 regex = { version = "1.13.1", default-features = false, features = ["std", "perf"] }
 schemars = "1.2.3"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = { version = "1.0.154", features = ["float_roundtrip", "preserve_order"] }
+serde_json = { version = "1.0.154", features = ["float_roundtrip", "preserve_order", "raw_value"] }
 serde_path_to_error = "0.1.20"
 toml = { version = "1.1.8", default-features = false, features = ["parse", "serde"] }
 
@@ -33,5 +33,5 @@ testing = []
 
 [dev-dependencies]
 miniz_oxide = "0.9.1"
-serde_json = { version = "1.0.154", features = ["float_roundtrip", "preserve_order"] }
+serde_json = { version = "1.0.154", features = ["float_roundtrip", "preserve_order", "raw_value"] }
 

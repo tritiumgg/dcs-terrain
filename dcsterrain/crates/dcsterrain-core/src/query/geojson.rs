@@ -6,16 +6,18 @@ use serde_json::{Map, Value, json};
 
 use super::{Terrain, refused};
 use crate::crs::Tmerc;
-use crate::types::Issue;
+use crate::types::{GeoJson, Issue};
 
 /// A ring of DCS `[x, z]` vertices, closed by its first point, which is not
 /// repeated at its end.
 pub type Ring = Vec<[f64; 2]>;
 
-/// The features of one answer, in the order they are added.
+/// The features of one answer, in the order they are added, each encoded as
+/// it is added.
 pub struct Features {
     tm: Tmerc,
-    features: Vec<Value>,
+    /// The array of features so far, as JSON, not yet closed.
+    array: Vec<u8>,
 }
 
 /// Degrees to seven places, about a centimeter: finer says nothing more.
@@ -27,7 +29,7 @@ impl Features {
     pub fn new(terrain: &Terrain) -> Result<Features, Vec<Issue>> {
         Ok(Features {
             tm: terrain.source().tables().map_err(refused)?.crs.tmerc(),
-            features: Vec::new(),
+            array: vec![b'['],
         })
     }
 
@@ -76,7 +78,10 @@ impl Features {
         f.insert("type".into(), "Feature".into());
         f.insert("geometry".into(), geometry);
         f.insert("properties".into(), Value::Object(properties));
-        self.features.push(Value::Object(f));
+        if self.array.len() > 1 {
+            self.array.push(b',');
+        }
+        serde_json::to_writer(&mut self.array, &f).expect("a feature encodes");
     }
 
     pub fn point(&mut self, p: [f64; 2], properties: Map<String, Value>) {
@@ -118,11 +123,9 @@ impl Features {
         self.push(json!({"type": "Polygon", "coordinates": c}), properties);
     }
 
-    pub fn finish(self) -> Value {
-        let mut c = Map::new();
-        c.insert("type".into(), "FeatureCollection".into());
-        c.insert("features".into(), Value::Array(self.features));
-        Value::Object(c)
+    pub fn finish(mut self) -> GeoJson {
+        self.array.push(b']');
+        GeoJson::of_features(String::from_utf8(self.array).expect("JSON is UTF-8"))
     }
 }
 
@@ -210,7 +213,7 @@ pub(crate) mod tests {
         ];
         f.polygons(&[vec![outer.clone(), hole.clone()]], Map::new());
         f.polygons(&[vec![outer.into_iter().rev().collect(), hole]], Map::new());
-        let v = f.finish();
+        let v = serde_json::to_value(f.finish()).unwrap();
         assert_valid(&v);
         assert_eq!(v["features"][0]["properties"]["name"], "a");
         let p = &v["features"][0]["geometry"]["coordinates"];

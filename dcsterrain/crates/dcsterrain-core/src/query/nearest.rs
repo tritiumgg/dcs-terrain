@@ -10,7 +10,7 @@ use crate::decode::lua::tables::TownRow;
 use crate::decode::rn4::{KIND_RAIL, KIND_ROAD};
 use crate::decode::scn5::Pool;
 use crate::source::{Source, Tables};
-use crate::types::{Issue, Nearby, NearestKind, NearestRequest, NearestResponse};
+use crate::types::{GeoJson, Issue, Nearby, NearestKind, NearestRequest, NearestResponse};
 
 /// The most results one request returns.
 const N_MAX: u32 = 50;
@@ -313,7 +313,11 @@ pub fn nearest(terrain: &Terrain, q: NearestRequest) -> Result<NearestResponse, 
 
 /// A point per result with its fields, and for road and rail the edge it
 /// lies on, whole, with its index in the graph as `edge_id` and its class.
-fn features(terrain: &Terrain, kind: NearestKind, results: &[Nearby]) -> Result<Value, Vec<Issue>> {
+fn features(
+    terrain: &Terrain,
+    kind: NearestKind,
+    results: &[Nearby],
+) -> Result<GeoJson, Vec<Issue>> {
     let mut f = Features::new(terrain)?;
     let graph = match kind {
         NearestKind::Road | NearestKind::Rail => {

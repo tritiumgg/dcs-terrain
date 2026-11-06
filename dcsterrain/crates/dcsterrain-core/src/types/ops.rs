@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use crate::places::{Form, SizeClass};
 
 use super::{
-    AirdromeRef, BoundingBox, CoverClass, Criterion, Floats, Footprint, LatLon, Network, Observer,
-    Point, Point3, Polygon, Provenance, Region, WaterClass,
+    AirdromeRef, BoundingBox, CoverClass, Criterion, Floats, Footprint, GeoJson, LatLon, Network,
+    Observer, Point, Point3, Polygon, Provenance, Region, WaterClass,
 };
 
 // describe
@@ -132,7 +132,7 @@ pub struct SampleResponse {
     /// A point per row with its layer values, when `geojson` was asked
     /// for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 /// Over a region, `height` is bilinear between cell centers and every other
@@ -210,7 +210,7 @@ pub struct ScoreSiteResponse {
     pub hard_fail: bool,
     /// The site and its footprint, when `geojson` was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 /// One criterion's contribution: the measured `value`, whether the hard test
@@ -264,7 +264,7 @@ pub struct FindSitesResponse {
     pub stats: FindSitesStats,
     /// Each candidate and its footprint, when `geojson` was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -310,7 +310,7 @@ pub struct VisibleResponse {
     /// The sightline, its ends and the blocking point, when `geojson` was
     /// asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 // viewshed
@@ -362,7 +362,7 @@ pub struct ViewshedResponse {
     /// The visible area as one `MultiPolygon`, with the observer, when
     /// `geojson` was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 // radar_floor
@@ -408,7 +408,7 @@ pub struct RadarFloorResponse {
     /// One `MultiPolygon` per band, lowest first, or a `Point` per point,
     /// with the site, when `geojson` was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 /// Laid out as `viewshed`'s mask: `height` rows running north, each
@@ -492,7 +492,7 @@ pub struct CoverageResponse {
     /// Each band's dead zones as one `MultiPolygon`, the site, and the
     /// asset's outline when given, when `geojson` was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -559,7 +559,7 @@ pub struct ApproachSpectrumResponse {
     /// A wedge per blind arc out to `radius`, with the site, when `geojson`
     /// was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -628,7 +628,7 @@ pub struct UnmaskProfileResponse {
     pub masked_segments: Vec<RouteSpan>,
     pub visible_fraction: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 /// A stretch of a route, as distances along it from its first point.
@@ -685,7 +685,7 @@ pub struct ExposureResponse {
     /// One `MultiPolygon` per band of the area unseen at it, lowest first,
     /// with the sites, when `geojson` was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 /// Laid out as `radar_floor`'s raster, over the region's box. The floors
@@ -804,7 +804,7 @@ pub struct RouteResponse {
     pub route: Route,
     /// The route, each leg and the ends, when `geojson` was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 /// A route over the network between the two snapped endpoints.
@@ -927,7 +927,7 @@ pub struct RouteAlternativesResponse {
     /// Each route, the edges they all share and the ends, when `geojson`
     /// was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 /// One alternative: a full route, and how it relates to the others.
@@ -998,7 +998,7 @@ pub struct NearestResponse {
     /// A point per result, and each road or rail result's edge, when
     /// `geojson` was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 /// For road and rail, the closest point on each of the nearest edges, `id`
@@ -1070,7 +1070,7 @@ pub struct SceneryInResponse {
     /// Each object's box, or its position when it has none, and the region
     /// or footprint asked about, when `geojson` was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 /// An object's box is `obb_w` across its local x axis, which points
@@ -1120,7 +1120,7 @@ pub struct ChokepointsResponse {
     pub edges: Vec<Chokepoint>,
     /// Each edge, when `geojson` was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1187,7 +1187,7 @@ pub struct TrafficabilityResponse {
     /// The way, the straight line, their ends and the blocking point, when
     /// `geojson` was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 /// A way across country to the network.
@@ -1244,7 +1244,7 @@ pub struct PointInfoResponse {
     /// A point per request point with its fields, when `geojson` was asked
     /// for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 /// What stands at one point. The ground fields are the mesh triangle's own
@@ -1355,7 +1355,7 @@ pub struct TownsResponse {
     /// A point at each place's center, and its outline when `outlines`
     /// was asked for, when `geojson` was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 /// A place: buildings each within 200 m of another, three or
@@ -1461,7 +1461,7 @@ pub struct AirfieldInfoResponse {
     /// Each runway as a line between its thresholds and each stand as a
     /// point, when `geojson` was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 /// A runway between its two thresholds, the ends the taxi graph names.
@@ -1645,7 +1645,7 @@ pub struct ValidatePlacementsResponse {
     /// A point per placement with its issues, its shape unless it is a
     /// point, and each object it meets, when `geojson` was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub geojson: Option<serde_json::Value>,
+    pub geojson: Option<GeoJson>,
 }
 
 /// One placement checked. The ground fields read every cell the shape

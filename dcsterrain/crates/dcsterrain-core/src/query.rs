@@ -19,11 +19,11 @@ use crate::source::{Refusal, Source};
 use crate::synth::Synth;
 use crate::types::{
     AirfieldInfoResponse, ApproachSpectrumResponse, ChokepointsResponse, CoverageResponse,
-    DescribeResponse, ExposureResponse, FindSitesResponse, GeoResponse, Issue, NearestResponse,
-    OPERATIONS, PointInfoResponse, Provenance, RadarFloorResponse, RouteAlternativesResponse,
-    RouteResponse, SampleResponse, SceneryInResponse, ScoreSiteResponse, TownsResponse,
-    TrafficabilityResponse, UnmaskProfileResponse, ValidatePlacementsResponse, ViewshedResponse,
-    VisibleResponse,
+    DescribeResponse, ExposureResponse, FindSitesResponse, GeoJson, GeoResponse, Issue,
+    NearestResponse, OPERATIONS, PointInfoResponse, Provenance, RadarFloorResponse,
+    RouteAlternativesResponse, RouteResponse, SampleResponse, SceneryInResponse, ScoreSiteResponse,
+    TownsResponse, TrafficabilityResponse, UnmaskProfileResponse, ValidatePlacementsResponse,
+    ViewshedResponse, VisibleResponse,
 };
 
 mod airfield_info;
@@ -249,7 +249,7 @@ macro_rules! answers {
             }
 
             /// The answer's GeoJSON, when it was asked for.
-            pub fn geojson(&self) -> Option<&Value> {
+            pub fn geojson(&self) -> Option<&GeoJson> {
                 match self {
                     $(Answer::$g(r) => r.geojson.as_ref(),)*
                     $(Answer::$n(_) => None,)*
@@ -258,7 +258,7 @@ macro_rules! answers {
 
             /// Where the answer's GeoJSON goes, where its operation draws
             /// one.
-            pub fn geojson_mut(&mut self) -> Option<&mut Option<Value>> {
+            pub fn geojson_mut(&mut self) -> Option<&mut Option<GeoJson>> {
                 match self {
                     $(Answer::$g(r) => Some(&mut r.geojson),)*
                     $(Answer::$n(_) => None,)*

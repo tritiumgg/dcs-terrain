@@ -10,7 +10,7 @@ use super::{Terrain, refused, resolve};
 use crate::classes::Class;
 use crate::decode::scn5::Pool;
 use crate::source::Object;
-use crate::types::{Issue, SceneryInRequest, SceneryInResponse, SceneryObject};
+use crate::types::{GeoJson, Issue, SceneryInRequest, SceneryInResponse, SceneryObject};
 
 /// A rectangle in the world: its center, its local x axis as a unit vector
 /// in DCS `(x, z)`, and its half extents along that axis and across it.
@@ -255,7 +255,7 @@ fn features(
     objects: &[SceneryObject],
     boxes: &[Rect],
     (asked, rings): (&str, Vec<Ring>),
-) -> Result<Value, Vec<Issue>> {
+) -> Result<GeoJson, Vec<Issue>> {
     let mut f = Features::new(terrain)?;
     for (o, b) in objects.iter().zip(boxes) {
         let Value::Object(mut fields) = json!(o) else {

@@ -953,7 +953,7 @@ mod tests {
             ]
         }))
         .unwrap();
-        let v = validate_placements(&t, q).unwrap().geojson.unwrap();
+        let v = serde_json::to_value(validate_placements(&t, q).unwrap().geojson).unwrap();
         assert_valid(&v);
         let f = v["features"].as_array().unwrap();
         let types: Vec<&str> = (f.iter())
