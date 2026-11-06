@@ -18,11 +18,11 @@ There are three ways to ask, and all three give the same answers:
 
 ## Get it
 
-Download release 0.2.1.
+Download release 0.3.0.
 On Windows, run these in PowerShell:
 
 ```powershell
-Invoke-WebRequest https://github.com/tritiumgg/dcs-terrain/releases/download/v0.2.1/dcsterrain-x86_64-pc-windows-msvc.zip -OutFile dcsterrain.zip
+Invoke-WebRequest https://github.com/tritiumgg/dcs-terrain/releases/download/v0.3.0/dcsterrain-x86_64-pc-windows-msvc.zip -OutFile dcsterrain.zip
 ```
 
 ```powershell
