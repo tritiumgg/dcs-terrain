@@ -359,7 +359,7 @@ const TABLE_CASES: &[(&str, &str)] = &[
     ),
     (
         "route_alternatives-offroad",
-        "route-alternatives --network roads --from 10000,-12000 --to 36TXR1451723140 \
+        "route-alternatives --network roads --from 10000,-12000 --to 25040,15000 \
          --k 2 --max-stretch 3 --max-overlap 0.9 --offroad",
     ),
     (
