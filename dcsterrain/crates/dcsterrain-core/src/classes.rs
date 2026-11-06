@@ -200,7 +200,8 @@ fn digest_rules() -> u32 {
     h
 }
 
-/// Width across the model's local x, depth across its local z, height.
+/// Width, the length along the model's local x; depth, along its local z;
+/// height.
 pub fn dims(bbox: &[f32; 6]) -> (f64, f64, f64) {
     let e = |k: usize| f64::from(bbox[k + 3] - bbox[k]);
     (e(0), e(2), e(1))
