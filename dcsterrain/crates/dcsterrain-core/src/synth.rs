@@ -230,8 +230,8 @@ pub const PRNG_MODULUS: u32 = 2147483647;
 // the houses on nothing, which is `building`. Two more objects place a model
 // whose box is all zero, which is a model with no footprint.
 //
-// A model's box is centred on its origin, OBB_W across its local x and OBB_D
-// across its local z, and rises from 0 to its HEIGHT. Model names are written
+// A model's box is centered on its origin, OBB_W long along its local x and
+// OBB_D long along its local z, and rises from 0 to its HEIGHT. Model names are written
 // in lowercase, as the scene file spells them.
 
 pub const SCENERY_COUNT: u32 = 42;

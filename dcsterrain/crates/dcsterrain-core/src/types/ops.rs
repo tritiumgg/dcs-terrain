@@ -1073,10 +1073,12 @@ pub struct SceneryInResponse {
     pub geojson: Option<GeoJson>,
 }
 
-/// An object's box is `obb_w` across its local x axis, which points
-/// `rotation_deg` from north towards east, and `obb_d` across its local z;
-/// both are null for a model with no footprint. `alt` is its base and
-/// `height` its model's top above that.
+/// An object's box is its model's bounds seen from above, for a tree too:
+/// `obb_w` is its length along the axis `rotation_deg` clockwise from
+/// north, `obb_d` its length along the axis 90° clockwise of that, and it
+/// is centered on the model's bounds, which need not be on `x, z`. Both are
+/// null for a model with no footprint. `alt` is its base and `height` its
+/// model's top above that.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SceneryObject {
     pub id: u64,
