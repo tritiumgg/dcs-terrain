@@ -279,10 +279,38 @@ GermanyCW.
 
 ## Layers for `sample`
 
-`height`, `water` (0 land, 1 lake, 2 sea, 3 river), `surface` (1 land, 3 water,
-4 road, 5 runway), `cover` (1 plain, 2 field, 3 forest, 4 town, 5 beach,
-6 runway, 7 water), `valid`, `slope`, `aspect`, `roughness`, `tpi_300`,
-`tpi_2000`, `dist_road`, `dist_rail`, `dist_water`, `dist_builtup`,
-`count_building`, `count_industrial` (within 1 km), `tree_density`,
-`share_<cover>` such as `share_forest` (within 300 m), `enclosure`, and
-`horizon_0` (north) to `horizon_31`, clockwise.
+| Layer | Value |
+|---|---|
+| `height` | meters above sea level |
+| `water` | 0 land, 1 lake, 2 sea, 3 river |
+| `surface` | 1 land, 3 water, 4 road, 5 runway |
+| `cover` | 1 plain, 2 field, 3 forest, 4 town, 5 beach, 6 runway, 7 water |
+| `valid` | 1 where there is ground and not sea |
+| `slope`, `aspect`, `roughness` | degrees; downslope bearing; meters of height range over 3 × 3 cells |
+| `tpi_300`, `tpi_2000` | meters above the mean ground within 300 m, 2 km |
+| `dist_road`, `dist_rail`, `dist_water`, `dist_builtup` | meters, searched to 5 km |
+| `count_building`, `count_industrial` | objects within 1 km |
+| `tree_density` | single trees per hectare within 300 m, not a share |
+| `share_<cover>`, such as `share_forest` | 0 to 1, the share of cells of that cover within 300 m |
+| `enclosure`, `horizon_0` (north) to `horizon_31` (clockwise) | degrees above level, the mean and each 32nd of the compass, per 200 m cell |
+
+**`tree_density` is not forest.** It counts the terrain's single placed trees,
+and only about a tenth of them stand in forest, because DCS draws its forests
+at runtime from the ground cover. For forest, read `cover` or `share_forest`.
+
+**Points and regions differ.** At points, `height`, `water`, `surface` and
+`cover` come from the mesh triangle under each point, `height` unrounded and
+the others true to a few meters. Over a region, and for every other layer even
+at points, values come from 50 m cells: a height is bilinear between cell
+heights rounded to the meter, so contours drawn from it step, and the other
+layers take the cell holding the point, so water narrower than a cell can be
+missed.
+
+## What `validate_placements` and `scenery_in` see
+
+`validate_placements` tests each shape against the objects pool's structures
+and power-line poles by their boxes, and single trees by the circle inscribed
+in theirs; it lists the 100 nearest the position and counts all. **Forest is
+never an issue**: a placement in forest can be `ok`, so read its `cover`
+list. `scenery_in` returns the objects pool alone, no trees and no power
+lines; ask `validate_placements` with the footprint for those.

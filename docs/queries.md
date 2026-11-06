@@ -116,6 +116,9 @@ The radius layers are measured within fixed radii: `count_building` and
 `count_industrial` within 1 km, a neighborhood; `tree_density` and the
 `share_<cover>` layers within 300 m, the ground about a site. A distance
 searches 5 km. A criterion that names its own radius or maximum uses it.
+`tree_density` is the trees pool's instances per hectare, not a share and not
+forest, which DCS draws at runtime from the ground cover; a `share_<cover>`
+is 0 to 1.
 
 
 ## 3. Operations from the original set
