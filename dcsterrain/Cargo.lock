@@ -229,7 +229,7 @@ checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 
 [[package]]
 name = "dcsterrain-cli"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anstyle-query",
  "clap",
@@ -245,7 +245,7 @@ dependencies = [
 
 [[package]]
 name = "dcsterrain-core"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "bytemuck",
  "libc",
@@ -264,7 +264,7 @@ dependencies = [
 
 [[package]]
 name = "dcsterrain-validate"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "clap",
  "dcsterrain-core",
