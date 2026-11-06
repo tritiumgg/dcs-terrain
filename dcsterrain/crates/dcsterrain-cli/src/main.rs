@@ -75,7 +75,8 @@ enum Command {
         op: Option<String>,
         /// The request as JSON; `{}` when omitted.
         request: Option<String>,
-        /// Read the batch from this file rather than stdin.
+        /// Read the batch from this file rather than stdin. It cannot be the
+        /// file `--output` names.
         #[arg(long, value_name = "FILE", conflicts_with = "op")]
         input: Option<PathBuf>,
         /// Write the answer, or the batch's answers, to this file rather
@@ -385,27 +386,24 @@ fn main() -> ExitCode {
                 terrain: None,
                 opens: 0,
             };
-            // The requests open before the answers' file, so an input that
-            // cannot be read leaves an existing output as it was.
-            let requests = match op {
-                Some(_) => None,
-                None => match query::source(input.as_deref()) {
-                    Ok(r) => Some(r),
+            let Some(op) = op else {
+                // The requests open before the answers' file, so an input
+                // that cannot be read leaves an existing output as it was.
+                let requests = match query::source(input.as_deref(), output.as_deref()) {
+                    Ok(r) => r,
                     Err(issues) => return refuse(issues),
-                },
+                };
+                let out = match query::sink(output.as_deref()) {
+                    Ok(out) => out,
+                    Err(issues) => return refuse(issues),
+                };
+                let shown = progress || cli.verbose || std::io::stderr().is_terminal();
+                let mut progress = query::Progress::new(shown);
+                return run_batch(opener, input.is_none(), requests, out, &mut progress);
             };
-            let out = match query::sink(output.as_deref()) {
-                Ok(out) => out,
-                Err(issues) => return refuse(issues),
-            };
-            match (op, requests) {
-                (Some(op), _) => query::one(opener, &op, request, out),
-                (None, Some(requests)) => {
-                    let shown = progress || cli.verbose || std::io::stderr().is_terminal();
-                    let mut progress = query::Progress::new(shown);
-                    run_batch(opener, input.is_none(), requests, out, &mut progress)
-                }
-                (None, None) => unreachable!("a batch opens its requests above"),
+            match query::sink(output.as_deref()) {
+                Ok(out) => query::one(opener, &op, request, out),
+                Err(issues) => refuse(issues),
             }
         }
         Command::ListTerrains {

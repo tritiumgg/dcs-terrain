@@ -16,7 +16,7 @@ use dcsterrain_core::types::{BatchOutcome, BatchRequest, BatchResponse, Issue};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{CacheDir, install_root, refuse, refuse_on};
+use crate::{CacheDir, install_root, refuse_on};
 
 /// A line of a batch's answer: a `BatchResponse` on the wire, with a result
 /// that need not be whole in memory.
@@ -186,17 +186,28 @@ pub fn sink(output: Option<&Path>) -> Result<Box<dyn Write>, Vec<Issue>> {
     }
 }
 
-/// Where a batch reads: stdin, or the file `--input` names.
-pub fn source(input: Option<&Path>) -> Result<Box<dyn BufRead>, Vec<Issue>> {
+/// Where a batch reads: stdin, or the file `--input` names. It is refused
+/// where it is a directory, or the file `--output` names, which creating the
+/// output would empty before a line was read.
+pub fn source(input: Option<&Path>, output: Option<&Path>) -> Result<Box<dyn BufRead>, Vec<Issue>> {
     let Some(path) = input else {
         return Ok(Box::new(std::io::stdin().lock()));
     };
+    let refused = |why: String| {
+        let message = format!("--input {} {why}", path.display());
+        Err(vec![Issue::new("invalid_flag", &message, "")])
+    };
+    let same = output.is_some_and(|o| {
+        let (a, b) = (std::fs::canonicalize(path), std::fs::canonicalize(o));
+        matches!((a, b), (Ok(a), Ok(b)) if a == b)
+    });
+    if same {
+        return refused("is also --output: answer to another file".into());
+    }
     match File::open(path) {
+        Ok(_) if path.is_dir() => refused("is a directory".into()),
         Ok(f) => Ok(Box::new(BufReader::new(f))),
-        Err(e) => {
-            let message = format!("--input {} cannot be read: {e}", path.display());
-            Err(vec![Issue::new("invalid_flag", &message, "")])
-        }
+        Err(e) => refused(format!("cannot be read: {e}")),
     }
 }
 
@@ -230,7 +241,12 @@ fn print_on(answer: &Answer, out: impl Write) -> ExitCode {
     match written {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) if e.kind() == ErrorKind::BrokenPipe => ExitCode::SUCCESS,
-        Err(e) => refuse(issue("internal_error", &e.to_string())),
+        // Where the answer could not be written, an issue list would not be
+        // either, and stdout is not the answer's place when it went to a file.
+        Err(e) => {
+            tracing::error!("the answer cannot be written: {e}");
+            ExitCode::FAILURE
+        }
     }
 }
 

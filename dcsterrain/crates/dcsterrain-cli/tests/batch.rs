@@ -566,12 +566,12 @@ fn a_batch_through_files_is_the_batch_through_the_pipes() {
     assert!(filed.stdout.is_empty(), "stdout: {:?}", filed.stdout);
 
     let written = std::fs::read(&output).unwrap();
-    assert!(untimed(&written) == untimed(&piped.stdout));
+    assert_eq!(untimed(&written), untimed(&piped.stdout));
 
     let args = [&SYNTH[..], &["--input", &input]].concat();
     let read = query(&args, b"");
     assert!(read.status.success(), "{}", stderr(&read));
-    assert!(untimed(&read.stdout) == untimed(&piped.stdout));
+    assert_eq!(untimed(&read.stdout), untimed(&piped.stdout));
 }
 
 #[test]
@@ -589,7 +589,7 @@ fn one_answer_through_a_file_is_the_answer_on_stdout() {
         assert_eq!(filed.status.code(), Some(code));
         assert!(filed.stdout.is_empty());
         let written = std::fs::read(&output).unwrap();
-        assert!(untimed(&written) == untimed(&piped.stdout), "{args:?}");
+        assert_eq!(untimed(&written), untimed(&piped.stdout), "{args:?}");
     }
 }
 
@@ -638,7 +638,7 @@ fn progress_is_told_on_stderr_and_never_on_stdout() {
     let args = [&SYNTH[..], &["--progress"]].concat();
     let told = query(&args, &batch);
     assert!(told.status.success(), "{}", stderr(&told));
-    assert!(untimed(&told.stdout) == untimed(&quiet.stdout));
+    assert_eq!(untimed(&told.stdout), untimed(&quiet.stdout));
 
     let answers = lines(&told);
     let failed = answers.iter().filter(|a| a.get("issues").is_some()).count();
@@ -649,4 +649,27 @@ fn progress_is_told_on_stderr_and_never_on_stdout() {
         "{}",
         stderr(&told)
     );
+}
+
+#[test]
+fn an_input_that_is_the_output_or_a_directory_is_refused_and_kept() {
+    let dir = Scratch::new("same");
+    let both = dir.path("both.jsonl");
+    std::fs::write(&both, b"{\"op\": \"describe\"}\n").unwrap();
+    let args = [&SYNTH[..], &["--input", &both, "--output", &both]].concat();
+    let out = query(&args, b"");
+    assert_eq!(out.status.code(), Some(1));
+    let refused: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(refused["issues"][0]["code"], "invalid_flag");
+    assert_eq!(std::fs::read(&both).unwrap(), b"{\"op\": \"describe\"}\n");
+
+    let output = dir.path("out.jsonl");
+    std::fs::write(&output, b"kept\n").unwrap();
+    let folder = dir.0.to_str().unwrap();
+    let args = [&SYNTH[..], &["--input", folder, "--output", &output]].concat();
+    let out = query(&args, b"");
+    assert_eq!(out.status.code(), Some(1));
+    let refused: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(refused["issues"][0]["code"], "invalid_flag");
+    assert_eq!(std::fs::read(&output).unwrap(), b"kept\n");
 }
