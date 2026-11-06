@@ -4315,7 +4315,7 @@
         "rotation_deg",
         "height"
       ],
-      "description": "An object's box is `obb_w` across its local x axis, which points\n`rotation_deg` from north towards east, and `obb_d` across its local z;\nboth are null for a model with no footprint. `alt` is its base and\n`height` its model's top above that."
+      "description": "An object's box is its model's bounds seen from above, for a tree too:\n`obb_w` is its length along the axis `rotation_deg` clockwise from\nnorth, `obb_d` its length along the axis 90° clockwise of that, and it\nis centered on the model's bounds, which need not be on `x, z`. Both are\nnull for a model with no footprint. `alt` is its base and `height` its\nmodel's top above that."
     },
     "ChokepointsRequest": {
       "type": "object",
