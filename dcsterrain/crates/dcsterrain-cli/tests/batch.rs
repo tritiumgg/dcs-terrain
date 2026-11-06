@@ -625,3 +625,28 @@ fn input_names_a_batch_and_not_one_request() {
     assert_eq!(out.status.code(), Some(2));
     assert!(out.stdout.is_empty());
 }
+
+/// Progress is told on stderr, and stdout holds the answers alone, as it
+/// does without it.
+#[test]
+fn progress_is_told_on_stderr_and_never_on_stdout() {
+    let batch = mixed_batch();
+    let quiet = query(&SYNTH, &batch);
+    assert!(quiet.status.success(), "{}", stderr(&quiet));
+    assert!(!stderr(&quiet).contains("answered"), "{}", stderr(&quiet));
+
+    let args = [&SYNTH[..], &["--progress"]].concat();
+    let told = query(&args, &batch);
+    assert!(told.status.success(), "{}", stderr(&told));
+    assert!(untimed(&told.stdout) == untimed(&quiet.stdout));
+
+    let answers = lines(&told);
+    let failed = answers.iter().filter(|a| a.get("issues").is_some()).count();
+    let last = format!("answered {} lines, {failed} with issues", answers.len());
+    assert!(failed > 0);
+    assert!(
+        stderr(&told).trim_end().ends_with(&last),
+        "{}",
+        stderr(&told)
+    );
+}

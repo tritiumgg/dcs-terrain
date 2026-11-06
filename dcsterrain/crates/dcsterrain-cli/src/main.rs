@@ -83,6 +83,11 @@ enum Command {
         /// file is overwritten.
         #[arg(long, value_name = "FILE")]
         output: Option<PathBuf>,
+        /// Report a batch's lines answered, and how many failed, on stderr
+        /// about once a second. It does anyway when stderr is a terminal or
+        /// with `--verbose`.
+        #[arg(long, conflicts_with = "op")]
+        progress: bool,
         /// Accept a projection fitted to the terrain's beacons that misses one
         /// by more than 2 m.
         #[arg(long)]
@@ -367,6 +372,7 @@ fn main() -> ExitCode {
             request,
             input,
             output,
+            progress,
             allow_crs_residual,
             cache,
         } => {
@@ -394,7 +400,11 @@ fn main() -> ExitCode {
             };
             match (op, requests) {
                 (Some(op), _) => query::one(opener, &op, request, out),
-                (None, Some(requests)) => run_batch(opener, input.is_none(), requests, out),
+                (None, Some(requests)) => {
+                    let shown = progress || cli.verbose || std::io::stderr().is_terminal();
+                    let mut progress = query::Progress::new(shown);
+                    run_batch(opener, input.is_none(), requests, out, &mut progress)
+                }
                 (None, None) => unreachable!("a batch opens its requests above"),
             }
         }
@@ -491,11 +501,13 @@ fn run_batch(
     from_stdin: bool,
     requests: Box<dyn std::io::BufRead>,
     out: Box<dyn std::io::Write>,
+    progress: &mut query::Progress,
 ) -> ExitCode {
     if from_stdin && std::io::stdin().is_terminal() {
         tracing::info!("reading one JSON request per line from stdin");
     }
-    let ended = query::batch(&mut opener, requests, out);
+    let ended = query::batch(&mut opener, requests, out, progress);
+    progress.end();
     tracing::debug!("the batch opened its terrain {} time(s)", opener.opens);
     match ended {
         query::Ended::Input | query::Ended::Closed => ExitCode::SUCCESS,

@@ -8,6 +8,7 @@ use std::io::{BufRead, BufReader, BufWriter, ErrorKind, Read, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::{Duration, Instant};
 
 use dcsterrain_core::query::{self, Answer, Terrain};
 use dcsterrain_core::synth::{self, Synth};
@@ -248,9 +249,62 @@ pub enum Ended {
     Failed(String),
 }
 
+/// How far a batch has come: the lines answered and how many of them failed,
+/// told on stderr at most once a second when asked, so a long batch shows it
+/// is moving without a line on stdout.
+pub struct Progress {
+    shown: bool,
+    answered: u64,
+    failed: u64,
+    told: Instant,
+}
+
+impl Progress {
+    const EVERY: Duration = Duration::from_secs(1);
+
+    pub fn new(shown: bool) -> Self {
+        Progress {
+            shown,
+            answered: 0,
+            failed: 0,
+            told: Instant::now(),
+        }
+    }
+
+    /// Counts one line answered; true when that told the count.
+    fn count(&mut self, failed: bool) -> bool {
+        self.answered += 1;
+        self.failed += u64::from(failed);
+        let due = self.shown && self.told.elapsed() >= Self::EVERY;
+        if due {
+            self.tell();
+        }
+        due
+    }
+
+    fn tell(&mut self) {
+        let (n, f) = (self.answered, self.failed);
+        let lines = if n == 1 { "line" } else { "lines" };
+        tracing::info!("answered {n} {lines}, {f} with issues");
+        self.told = Instant::now();
+    }
+
+    /// The count once the batch has ended.
+    pub fn end(&mut self) {
+        if self.shown {
+            self.tell();
+        }
+    }
+}
+
 /// Answers each line of `input` on `output`, flushing each answer. A blank
 /// line asks nothing and is answered with nothing.
-pub fn batch(opener: &mut Opener, input: impl BufRead, output: impl Write) -> Ended {
+pub fn batch(
+    opener: &mut Opener,
+    input: impl BufRead,
+    output: impl Write,
+    progress: &mut Progress,
+) -> Ended {
     let (mut input, mut output) = (input, output);
     let mut text = Vec::new();
     let mut line = 0;
@@ -284,12 +338,15 @@ pub fn batch(opener: &mut Opener, input: impl BufRead, output: impl Write) -> En
                 outcome: BatchOutcome::Issues(issue("too_large", &message)),
             })
         };
+        let failed = matches!(response, Reply::Refused(_));
         let written = serde_json::to_writer(&mut output, &response)
             .map_err(std::io::Error::from)
             .and_then(|()| output.write_all(b"\n"))
             .and_then(|()| output.flush());
         match written {
-            Ok(()) => {}
+            Ok(()) => {
+                progress.count(failed);
+            }
             Err(e) if e.kind() == ErrorKind::BrokenPipe => return Ended::Closed,
             Err(e) => return Ended::Failed(format!("the answers cannot be written: {e}")),
         }
@@ -333,7 +390,12 @@ mod tests {
         let mut input = vec![b'x'; MAX_LINE as usize + 9];
         input.extend_from_slice(b"\n{\"op\":\"describe\"}\n");
         let mut output = Vec::new();
-        let ended = batch(&mut opener(), &input[..], &mut output);
+        let ended = batch(
+            &mut opener(),
+            &input[..],
+            &mut output,
+            &mut Progress::new(false),
+        );
         assert_eq!(ended, Ended::Input);
         let lines: Vec<Value> = output
             .split(|b| *b == b'\n')
@@ -347,6 +409,20 @@ mod tests {
     }
 
     #[test]
+    fn progress_is_told_at_most_once_a_second_and_only_when_shown() {
+        let mut p = Progress::new(true);
+        assert!(!p.count(false), "told before a second has passed");
+        p.told -= Progress::EVERY;
+        assert!(p.count(true));
+        assert!(!p.count(false), "told twice within a second");
+        assert_eq!((p.answered, p.failed), (3, 1));
+
+        let mut hidden = Progress::new(false);
+        hidden.told -= Progress::EVERY;
+        assert!(!hidden.count(false));
+    }
+
+    #[test]
     fn a_closed_reader_ends_the_batch_quietly() {
         struct Gone;
         impl Write for Gone {
@@ -357,7 +433,12 @@ mod tests {
                 Ok(())
             }
         }
-        let ended = batch(&mut opener(), &b"{\"op\":\"nope\"}\n"[..], Gone);
+        let ended = batch(
+            &mut opener(),
+            &b"{\"op\":\"nope\"}\n"[..],
+            Gone,
+            &mut Progress::new(false),
+        );
         assert_eq!(ended, Ended::Closed);
     }
 }
