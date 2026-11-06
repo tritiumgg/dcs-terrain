@@ -1399,9 +1399,12 @@ If `answers.jsonl` is already there, it is replaced.
 Do not save the answers with `>` instead.
 In Windows PowerShell 5.1, `>` saves them as UTF-16, which most other tools cannot read.
 
-A long batch tells you how far it has come, about once a second:
+A long batch tells you how far it has come, at most once a second:
 how many lines it has answered, and how many of them failed.
-That count goes to the screen, never into `answers.jsonl`.
+It tells the count once more when it ends.
+That count goes to the PowerShell window, never into `answers.jsonl`.
+When a program runs the batch, add `--progress` to get the count too.
+Choose the output file yourself: the same file as `--input` is refused.
 
 Each line of `answers.jsonl` answers one line of your file, in the same order,
 with the same `id`.
