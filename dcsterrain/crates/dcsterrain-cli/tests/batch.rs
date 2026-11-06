@@ -502,3 +502,126 @@ fn every_operation_answers_on_every_installed_terrain() {
     }
     assert!(failed.is_empty(), "{failed:?}");
 }
+
+/// A fresh directory under the system temp for one test's files, removed
+/// when dropped.
+struct Scratch(PathBuf);
+
+impl Scratch {
+    fn new(name: &str) -> Self {
+        let dir =
+            std::env::temp_dir().join(format!("dcsterrain-files-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        Scratch(dir)
+    }
+
+    fn path(&self, file: &str) -> String {
+        self.0.join(file).to_str().unwrap().to_owned()
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Answers with every `elapsed_ms` set to 0 and every other byte kept, to
+/// compare two runs byte for byte.
+fn untimed(bytes: &[u8]) -> String {
+    let text = String::from_utf8(bytes.to_vec()).expect("answers are UTF-8");
+    let key = "\"elapsed_ms\":";
+    let mut out = String::new();
+    let mut rest = text.as_str();
+    while let Some(at) = rest.find(key) {
+        let (head, tail) = rest.split_at(at + key.len());
+        out.push_str(head);
+        out.push('0');
+        rest = tail.trim_start_matches(|c: char| c.is_ascii_digit());
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Every operation, then a batch's worth of bad lines.
+fn mixed_batch() -> Vec<u8> {
+    let mut text = input(&every_operation(&synth()));
+    text.extend_from_slice(&bad_lines());
+    text
+}
+
+#[test]
+fn a_batch_through_files_is_the_batch_through_the_pipes() {
+    let batch = mixed_batch();
+    let piped = query(&SYNTH, &batch);
+    assert!(piped.status.success(), "{}", stderr(&piped));
+
+    let dir = Scratch::new("batch");
+    let (input, output) = (dir.path("in.jsonl"), dir.path("out.jsonl"));
+    std::fs::write(&input, &batch).unwrap();
+    let args = [&SYNTH[..], &["--input", &input, "--output", &output]].concat();
+    let filed = query(&args, b"{\"op\": \"describe\"}\n");
+    assert!(filed.status.success(), "{}", stderr(&filed));
+    assert!(filed.stdout.is_empty(), "stdout: {:?}", filed.stdout);
+
+    let written = std::fs::read(&output).unwrap();
+    assert!(untimed(&written) == untimed(&piped.stdout));
+
+    let args = [&SYNTH[..], &["--input", &input]].concat();
+    let read = query(&args, b"");
+    assert!(read.status.success(), "{}", stderr(&read));
+    assert!(untimed(&read.stdout) == untimed(&piped.stdout));
+}
+
+#[test]
+fn one_answer_through_a_file_is_the_answer_on_stdout() {
+    let dir = Scratch::new("one");
+    let output = dir.path("out.json");
+    for (args, code) in [
+        (vec!["describe"], 0),
+        (vec!["sample", "{\"layers\": 3}"], 1),
+    ] {
+        let piped = query(&[&SYNTH[..], &args].concat(), b"");
+        let to_file = [&SYNTH[..], &["--output", &output], &args].concat();
+        let filed = query(&to_file, b"");
+        assert_eq!(piped.status.code(), Some(code));
+        assert_eq!(filed.status.code(), Some(code));
+        assert!(filed.stdout.is_empty());
+        let written = std::fs::read(&output).unwrap();
+        assert!(untimed(&written) == untimed(&piped.stdout), "{args:?}");
+    }
+}
+
+#[test]
+fn an_output_file_is_overwritten_and_kept_when_the_input_is_missing() {
+    let dir = Scratch::new("overwrite");
+    let output = dir.path("out.jsonl");
+    std::fs::write(
+        &output,
+        "an earlier answer that is much longer than the next\n",
+    )
+    .unwrap();
+    let args = [&SYNTH[..], &["--output", &output]].concat();
+    let out = query(&args, b"{\"op\": \"nope\"}\n");
+    assert!(out.status.success());
+    let written = std::fs::read_to_string(&output).unwrap();
+    assert_eq!(written.lines().count(), 1);
+    assert!(written.contains("\"line\":1"), "{written}");
+
+    let missing = dir.path("no-such.jsonl");
+    let args = [&SYNTH[..], &["--input", &missing, "--output", &output]].concat();
+    let out = query(&args, b"");
+    assert_eq!(out.status.code(), Some(1));
+    let refused: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(refused["issues"][0]["code"], "invalid_flag");
+    assert_eq!(std::fs::read_to_string(&output).unwrap(), written);
+}
+
+#[test]
+fn input_names_a_batch_and_not_one_request() {
+    let args = [&SYNTH[..], &["--input", "in.jsonl", "describe"]].concat();
+    let out = query(&args, b"");
+    assert_eq!(out.status.code(), Some(2));
+    assert!(out.stdout.is_empty());
+}

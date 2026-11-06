@@ -49,9 +49,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Answer one request about a terrain, as JSON on stdout; or with no
-    /// operation, a batch: one JSON request per line on stdin, one response
-    /// per line on stdout, the terrain opened once.
+    /// Answer one request about a terrain, as JSON on stdout or `--output`;
+    /// or with no operation, a batch: one JSON request per line on stdin or
+    /// `--input`, one response per line, the terrain opened once.
     Query {
         /// The DCS install root. On Windows it defaults to the one the
         /// registry names.
@@ -70,11 +70,19 @@ enum Command {
         /// The synthetic terrain's cell, in meters.
         #[arg(long, default_value_t = synth::CELL_SIZE_M)]
         cell: u32,
-        /// The operation, such as `describe`. Omitted, each line of stdin
-        /// is `{"op": .., "request": .., "id": ..}`.
+        /// The operation, such as `describe`. Omitted, each line of the
+        /// batch is `{"op": .., "request": .., "id": ..}`.
         op: Option<String>,
         /// The request as JSON; `{}` when omitted.
         request: Option<String>,
+        /// Read the batch from this file rather than stdin.
+        #[arg(long, value_name = "FILE", conflicts_with = "op")]
+        input: Option<PathBuf>,
+        /// Write the answer, or the batch's answers, to this file rather
+        /// than stdout, as UTF-8 whatever the shell's encoding. An existing
+        /// file is overwritten.
+        #[arg(long, value_name = "FILE")]
+        output: Option<PathBuf>,
         /// Accept a projection fitted to the terrain's beacons that misses one
         /// by more than 2 m.
         #[arg(long)]
@@ -357,6 +365,8 @@ fn main() -> ExitCode {
             cell,
             op,
             request,
+            input,
+            output,
             allow_crs_residual,
             cache,
         } => {
@@ -369,9 +379,23 @@ fn main() -> ExitCode {
                 terrain: None,
                 opens: 0,
             };
-            match op {
-                Some(op) => query::one(opener, &op, request),
-                None => run_batch(opener),
+            // The requests open before the answers' file, so an input that
+            // cannot be read leaves an existing output as it was.
+            let requests = match op {
+                Some(_) => None,
+                None => match query::source(input.as_deref()) {
+                    Ok(r) => Some(r),
+                    Err(issues) => return refuse(issues),
+                },
+            };
+            let out = match query::sink(output.as_deref()) {
+                Ok(out) => out,
+                Err(issues) => return refuse(issues),
+            };
+            match (op, requests) {
+                (Some(op), _) => query::one(opener, &op, request, out),
+                (None, Some(requests)) => run_batch(opener, input.is_none(), requests, out),
+                (None, None) => unreachable!("a batch opens its requests above"),
             }
         }
         Command::ListTerrains {
@@ -450,19 +474,28 @@ fn registry_install() -> Result<PathBuf, String> {
 
 /// Prints issues as the one JSON document on stdout, and fails.
 fn refuse(issues: Vec<Issue>) -> ExitCode {
+    refuse_on(issues, &mut std::io::stdout().lock())
+}
+
+/// Writes issues as the one JSON document on `out`, and fails.
+fn refuse_on(issues: Vec<Issue>, out: &mut dyn std::io::Write) -> ExitCode {
     for i in &issues {
         tracing::error!("{}: {}", i.code, i.message);
     }
-    println!("{}", json!({ "issues": issues }));
+    let _ = writeln!(out, "{}", json!({ "issues": issues })).and_then(|()| out.flush());
     ExitCode::FAILURE
 }
 
-fn run_batch(mut opener: query::Opener) -> ExitCode {
-    let stdin = std::io::stdin();
-    if stdin.is_terminal() {
+fn run_batch(
+    mut opener: query::Opener,
+    from_stdin: bool,
+    requests: Box<dyn std::io::BufRead>,
+    out: Box<dyn std::io::Write>,
+) -> ExitCode {
+    if from_stdin && std::io::stdin().is_terminal() {
         tracing::info!("reading one JSON request per line from stdin");
     }
-    let ended = query::batch(&mut opener, stdin.lock(), std::io::stdout().lock());
+    let ended = query::batch(&mut opener, requests, out);
     tracing::debug!("the batch opened its terrain {} time(s)", opener.opens);
     match ended {
         query::Ended::Input | query::Ended::Closed => ExitCode::SUCCESS,

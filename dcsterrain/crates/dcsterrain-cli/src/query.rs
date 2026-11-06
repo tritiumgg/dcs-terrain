@@ -3,9 +3,10 @@
 //! language server's stream of messages. A batch answers each line as it
 //! arrives, in order, so a caller can hold the pipe open and ask as it goes.
 
-use std::io::{BufRead, ErrorKind, Read, Write};
+use std::fs::File;
+use std::io::{BufRead, BufReader, BufWriter, ErrorKind, Read, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use dcsterrain_core::query::{self, Answer, Terrain};
@@ -14,7 +15,7 @@ use dcsterrain_core::types::{BatchOutcome, BatchRequest, BatchResponse, Issue};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{CacheDir, install_root, refuse};
+use crate::{CacheDir, install_root, refuse, refuse_on};
 
 /// A line of a batch's answer: a `BatchResponse` on the wire, with a result
 /// that need not be whole in memory.
@@ -168,25 +169,59 @@ impl Opener {
     }
 }
 
+/// Where `query` writes: stdout, or the file `--output` names, created or
+/// truncated. A file is written as bytes, so the answer is UTF-8 whatever
+/// the shell would have made of stdout.
+pub fn sink(output: Option<&Path>) -> Result<Box<dyn Write>, Vec<Issue>> {
+    let Some(path) = output else {
+        return Ok(Box::new(std::io::stdout().lock()));
+    };
+    match File::create(path) {
+        Ok(f) => Ok(Box::new(BufWriter::new(f))),
+        Err(e) => {
+            let message = format!("--output {} cannot be written: {e}", path.display());
+            Err(vec![Issue::new("invalid_flag", &message, "")])
+        }
+    }
+}
+
+/// Where a batch reads: stdin, or the file `--input` names.
+pub fn source(input: Option<&Path>) -> Result<Box<dyn BufRead>, Vec<Issue>> {
+    let Some(path) = input else {
+        return Ok(Box::new(std::io::stdin().lock()));
+    };
+    match File::open(path) {
+        Ok(f) => Ok(Box::new(BufReader::new(f))),
+        Err(e) => {
+            let message = format!("--input {} cannot be read: {e}", path.display());
+            Err(vec![Issue::new("invalid_flag", &message, "")])
+        }
+    }
+}
+
 /// Answers one request. The answer, or its issues, is the one document on
-/// stdout.
-pub fn one(mut opener: Opener, op: &str, request: Option<String>) -> ExitCode {
+/// `out`.
+pub fn one(mut opener: Opener, op: &str, request: Option<String>, mut out: impl Write) -> ExitCode {
     let request: Value = match request.as_deref().map(serde_json::from_str).transpose() {
         Ok(v) => v.unwrap_or_else(|| json!({})),
         Err(e) => {
             let message = format!("the request is not JSON: {e}");
-            return refuse(issue("invalid_request", &message));
+            return refuse_on(issue("invalid_request", &message), &mut out);
         }
     };
     match opener.answer(op, &request) {
-        Ok(v) => print(&v),
-        Err(issues) => refuse(issues),
+        Ok(v) => print_on(&v, out),
+        Err(issues) => refuse_on(issues, &mut out),
     }
 }
 
 /// Prints an answer as the one document on stdout, as `query` does.
 pub fn print(answer: &Answer) -> ExitCode {
-    let mut out = std::io::BufWriter::new(std::io::stdout().lock());
+    print_on(answer, std::io::stdout().lock())
+}
+
+fn print_on(answer: &Answer, out: impl Write) -> ExitCode {
+    let mut out = BufWriter::new(out);
     let written = serde_json::to_writer(&mut out, answer)
         .map_err(std::io::Error::from)
         .and_then(|()| out.write_all(b"\n"))
@@ -224,11 +259,11 @@ pub fn batch(opener: &mut Opener, input: impl BufRead, output: impl Write) -> En
         match input.by_ref().take(MAX_LINE).read_until(b'\n', &mut text) {
             Ok(0) => return Ended::Input,
             Ok(_) => line += 1,
-            Err(e) => return Ended::Failed(format!("stdin cannot be read: {e}")),
+            Err(e) => return Ended::Failed(format!("the requests cannot be read: {e}")),
         }
         let whole = text.len() < MAX_LINE as usize || text.ends_with(b"\n");
         if !whole && let Err(e) = input.skip_until(b'\n') {
-            return Ended::Failed(format!("stdin cannot be read: {e}"));
+            return Ended::Failed(format!("the requests cannot be read: {e}"));
         }
         // Windows tools write a byte-order mark at the top of a file.
         let body = match (line, text.strip_prefix(b"\xEF\xBB\xBF")) {
@@ -256,7 +291,7 @@ pub fn batch(opener: &mut Opener, input: impl BufRead, output: impl Write) -> En
         match written {
             Ok(()) => {}
             Err(e) if e.kind() == ErrorKind::BrokenPipe => return Ended::Closed,
-            Err(e) => return Ended::Failed(format!("stdout cannot be written: {e}")),
+            Err(e) => return Ended::Failed(format!("the answers cannot be written: {e}")),
         }
     }
 }
