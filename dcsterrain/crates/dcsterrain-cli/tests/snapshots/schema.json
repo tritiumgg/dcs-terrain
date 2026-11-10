@@ -4161,6 +4161,20 @@
           },
           "description": "Only objects of these classes; every class but `effect` when\nomitted."
         },
+        "pools": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ScenePool"
+          },
+          "description": "The pools whose objects are listed: `objects`, the buildings and\nother structures, when omitted; `lines`, power-line poles; `trees`,\nthe single placed trees. Procedural forest is in none of them."
+        },
+        "counts_only": {
+          "type": "boolean",
+          "description": "Count the objects by pool and class and list none, with no\n`max_rows`: for a census of the trees in a forest."
+        },
         "max_rows": {
           "type": "integer",
           "format": "uint32",
@@ -4206,6 +4220,15 @@
         "orientation_deg"
       ]
     },
+    "ScenePool": {
+      "type": "string",
+      "enum": [
+        "objects",
+        "lines",
+        "trees"
+      ],
+      "description": "A scenery pool, by name."
+    },
     "SceneryInResponse": {
       "type": "object",
       "properties": {
@@ -4230,8 +4253,9 @@
         "objects": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/SceneryObject"
-          }
+            "$ref": "#/$defs/SceneryRow"
+          },
+          "description": "In pool order, then id order; none with `counts_only`."
         },
         "counts_by_class": {
           "type": "object",
@@ -4239,7 +4263,39 @@
             "type": "integer",
             "format": "uint64",
             "minimum": 0
-          }
+          },
+          "description": "Over every pool asked for."
+        },
+        "counts_by_pool": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "lines": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              }
+            },
+            "objects": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              }
+            },
+            "trees": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              }
+            }
+          },
+          "description": "Each pool asked for, by class; an empty one has no classes."
         },
         "geojson": {
           "description": "Each object's box, or its position when it has none, and the region\nor footprint asked about, when `geojson` was asked for."
@@ -4252,11 +4308,12 @@
         "cell_size",
         "elapsed_ms",
         "objects",
-        "counts_by_class"
+        "counts_by_class",
+        "counts_by_pool"
       ],
       "description": "The objects in id order."
     },
-    "SceneryObject": {
+    "SceneryRow": {
       "type": "object",
       "properties": {
         "id": {
@@ -4303,6 +4360,9 @@
         "height": {
           "type": "number",
           "format": "double"
+        },
+        "pool": {
+          "$ref": "#/$defs/ScenePool"
         }
       },
       "required": [
@@ -4313,9 +4373,10 @@
         "z",
         "alt",
         "rotation_deg",
-        "height"
+        "height",
+        "pool"
       ],
-      "description": "An object's box is its model's bounds seen from above, for a tree too:\n`obb_w` is its length along the axis `rotation_deg` clockwise from\nnorth, `obb_d` its length along the axis 90° clockwise of that, and it\nis centered on the model's bounds, which need not be on `x, z`. Both are\nnull for a model with no footprint. `alt` is its base and `height` its\nmodel's top above that."
+      "description": "An object `scenery_in` lists, and the pool it is in."
     },
     "ChokepointsRequest": {
       "type": "object",
@@ -5983,14 +6044,66 @@
       ],
       "description": "One thing wrong with a placement and what it is. Where an issue names a\nplace, `x, z` is the offending cell's center, or the point's own\nposition, nearest the placement's; for `slope` the steepest cell and\nfor `shallow` the shallowest."
     },
-    "ScenePool": {
-      "type": "string",
-      "enum": [
-        "objects",
-        "lines",
-        "trees"
+    "SceneryObject": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "model": {
+          "type": "string"
+        },
+        "class": {
+          "type": "string"
+        },
+        "x": {
+          "type": "number",
+          "format": "double"
+        },
+        "z": {
+          "type": "number",
+          "format": "double"
+        },
+        "alt": {
+          "type": "number",
+          "format": "double"
+        },
+        "rotation_deg": {
+          "type": "number",
+          "format": "double"
+        },
+        "obb_w": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "obb_d": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "height": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "id",
+        "model",
+        "class",
+        "x",
+        "z",
+        "alt",
+        "rotation_deg",
+        "height"
       ],
-      "description": "A scenery pool, by name."
+      "description": "An object's box is its model's bounds seen from above, for a tree too:\n`obb_w` is its length along the axis `rotation_deg` clockwise from\nnorth, `obb_d` its length along the axis 90° clockwise of that, and it\nis centered on the model's bounds, which need not be on `x, z`. Both are\nnull for a model with no footprint. `alt` is its base and `height` its\nmodel's top above that."
     },
     "TownsRequest": {
       "type": "object",

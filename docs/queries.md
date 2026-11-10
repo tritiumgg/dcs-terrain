@@ -414,12 +414,19 @@ are built it is the issue `not_ready`.
 ### `scenery_in`
 
 Request: `region`, or `footprint_at {x, z, footprint, orientation_deg}`;
-`classes`, a filter. Response: `{objects: [{id, model, class, x, z, alt,
-rotation_deg, obb_w, obb_d, height}], counts_by_class}` in id order: in a
-region, each object whose position lies in it; for a footprint, each whose
-turned model box meets it, edges touching included, among the objects within
-500 m of its box. Capped by `max_rows` (default 5 000; over is an error).
-`effect` objects are returned only when `classes` names them.
+`classes`, a filter; `pools`, any of `objects` (the default), `lines`, the
+power-line poles, and `trees`, the single placed trees; `counts_only`.
+Response: `{objects: [{id, model, class, x, z, alt, rotation_deg, obb_w,
+obb_d, height, pool}], counts_by_class, counts_by_pool}` in pool order, then
+id order: in a region, each object whose position lies in it; for a
+footprint, each whose turned model box meets it, edges touching included,
+among the objects within 500 m of its box. Capped by `max_rows` (default
+5 000; over is an error). `counts_by_pool` counts each pool asked for by
+class, and `counts_by_class` all of them. With `counts_only` no object is
+listed and there is no cap: one area holds tens of thousands of trees, and
+Caucasus 13 M, counted in 12.5 MiB (`data/answer-memory.md`). Procedural
+forest is in no pool. `effect` objects are returned only when `classes`
+names them.
 
 ### `chokepoints`
 

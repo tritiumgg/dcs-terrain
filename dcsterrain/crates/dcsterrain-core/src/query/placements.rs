@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use super::criteria::FOOTPRINT_MAX_M;
 use super::geojson::{Features, props, signed_area};
 use super::sample::derived_values;
-use super::scenery::{OBJECT_REACH_M, Rect, footprint, row};
+use super::scenery::{OBJECT_REACH_M, Rect, footprint, row, scene_pool};
 use super::shape::{Shape, TOUCH_M};
 use super::{Terrain, invalid, refused};
 use crate::decode::scn5::Pool;
@@ -29,8 +29,8 @@ use crate::grid::Grid;
 use crate::layers::Derived;
 use crate::source::{Ground, Object, Source, Tables};
 use crate::types::{
-    CoverClass, Issue, Placement, PlacementCheck, PlacementIssue, PlacementShape, ScenePool,
-    SceneryObject, Underfoot, ValidatePlacementsRequest, ValidatePlacementsResponse, WaterClass,
+    CoverClass, Issue, Placement, PlacementCheck, PlacementIssue, PlacementShape, SceneryObject,
+    Underfoot, ValidatePlacementsRequest, ValidatePlacementsResponse, WaterClass,
 };
 
 /// The most placements one request checks.
@@ -174,14 +174,6 @@ fn object_shape(pool: Pool, o: &Object) -> Shape {
             }
         }
         _ => Shape::polygon(c.to_vec()),
-    }
-}
-
-fn scene_pool(p: Pool) -> ScenePool {
-    match p {
-        Pool::Objects => ScenePool::Objects,
-        Pool::Lines => ScenePool::Lines,
-        Pool::Trees => ScenePool::Trees,
     }
 }
 
@@ -538,6 +530,7 @@ mod tests {
     use super::*;
     use crate::roads::tests::Unit;
     use crate::synth::*;
+    use crate::types::ScenePool;
 
     fn form(t: &Terrain) -> Theatre {
         match t {
@@ -1151,6 +1144,7 @@ mod install_tests {
     use crate::roads::tests::Unit;
     use crate::scratch::Scratch;
     use crate::threads::cpu_cycles;
+    use crate::types::ScenePool;
 
     fn now() -> (Instant, u64) {
         (Instant::now(), cpu_cycles())

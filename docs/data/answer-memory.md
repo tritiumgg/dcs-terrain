@@ -65,3 +65,25 @@ with it. Its response holds each row's 57 values in a map keyed by the
 layer's name, and its GeoJSON holds them a second time as text; how much of
 the 73 MiB each part and the engine's work take was not traced. The other
 requests are under 40 MiB.
+
+## With the scenery pools
+
+Measured 2026-11-10 the same way, Caucasus of 2.9.31.29434, once
+`scenery_in` took `pools` and `counts_only` and each row gained its
+`pool`.
+
+| Request | Peak, MiB | Answer, MB |
+|---|---|---|
+| objects, the circle of 5 940 m over Batumi, 4 987 rows | 14.5 | 1.21 |
+| the same, GeoJSON | 17.9 | 3.16 |
+| `trees`, the circle of 1 690 m about the same center, 4 979 rows | 12.6 | 1.15 |
+| the same, GeoJSON | 15.9 | 3.04 |
+| every pool, the circle of 5 940 m, `counts_only` (38 788 trees) | 12.6 | 0.00 |
+| every pool, the whole terrain, `counts_only` (12 967 324 trees) | 12.5 | 0.00 |
+
+The objects answer grew 0.2 MiB with the `pool` field. A count holds no
+row: the whole terrain's 14.96 M objects, poles and trees are counted in
+the memory of opening it, in 10.5 s. The whole terrain's trees, 12 967 324,
+and lines, 1 069 315, are exactly the pools' sizes in `file-formats.md`, so
+a count meets no object twice; the objects pool counts 919 680, `effect`
+objects left out as the default classes leave them.

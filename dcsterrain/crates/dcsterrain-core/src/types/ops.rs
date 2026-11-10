@@ -1035,6 +1035,15 @@ pub struct SceneryInRequest {
     /// omitted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub classes: Option<Vec<String>>,
+    /// The pools whose objects are listed: `objects`, the buildings and
+    /// other structures, when omitted; `lines`, power-line poles; `trees`,
+    /// the single placed trees. Procedural forest is in none of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pools: Option<Vec<ScenePool>>,
+    /// Count the objects by pool and class and list none, with no
+    /// `max_rows`: for a census of the trees in a forest.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub counts_only: bool,
     /// More objects than this is an error, never a truncated answer.
     #[serde(default = "default_scenery_max_rows")]
     pub max_rows: u32,
@@ -1065,8 +1074,12 @@ pub struct FootprintAt {
 pub struct SceneryInResponse {
     #[serde(flatten)]
     pub provenance: Provenance,
-    pub objects: Vec<SceneryObject>,
+    /// In pool order, then id order; none with `counts_only`.
+    pub objects: Vec<SceneryRow>,
+    /// Over every pool asked for.
     pub counts_by_class: BTreeMap<String, u64>,
+    /// Each pool asked for, by class; an empty one has no classes.
+    pub counts_by_pool: BTreeMap<ScenePool, BTreeMap<String, u64>>,
     /// Each object's box, or its position when it has none, and the region
     /// or footprint asked about, when `geojson` was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1091,6 +1104,14 @@ pub struct SceneryObject {
     pub obb_w: Option<f64>,
     pub obb_d: Option<f64>,
     pub height: f64,
+}
+
+/// An object `scenery_in` lists, and the pool it is in.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SceneryRow {
+    #[serde(flatten)]
+    pub object: SceneryObject,
+    pub pool: ScenePool,
 }
 
 // chokepoints
@@ -1735,7 +1756,9 @@ pub enum PlacementIssue {
 }
 
 /// A scenery pool, by name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ScenePool {
     Objects,

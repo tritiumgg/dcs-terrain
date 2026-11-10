@@ -561,8 +561,10 @@ edges, and its road and rail graph has 357 k nodes.
   GeoJSON `FeatureCollection` in longitude and latitude, for drawing the
   answer in any map program (`queries.md` §1.2).
 - `sample` and `scenery_in` take a `max_rows` request field (defaults 10 000
-  and 5 000); over the cap is an error, never a truncation. Errors are a list of `{code, message, path}` issues; an
-  operation returns a full result or an error.
+  and 5 000); over the cap is an error, never a truncation. `scenery_in`'s
+  `counts_only` counts with no cap and lists nothing. Errors are a list of
+  `{code, message, path}` issues; an operation returns a full result or an
+  error.
 - `--terrain synth` answers from the synthetic terrain with no install, with
   `--seed`, `--size-km` and `--cell`.
 - `dcsterrain list-terrains [--install <dir>] [--json]` lists every installed

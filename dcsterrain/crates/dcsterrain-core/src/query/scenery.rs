@@ -10,7 +10,9 @@ use super::{Terrain, refused, resolve};
 use crate::classes::Class;
 use crate::decode::scn5::Pool;
 use crate::source::Object;
-use crate::types::{GeoJson, Issue, SceneryInRequest, SceneryInResponse, SceneryObject};
+use crate::types::{
+    GeoJson, Issue, ScenePool, SceneryInRequest, SceneryInResponse, SceneryObject, SceneryRow,
+};
 
 /// A rectangle in the world: its center, its local x axis as a unit vector
 /// in DCS `(x, z)`, and its half extents along that axis and across it.
@@ -124,8 +126,29 @@ pub(super) fn row(o: &Object) -> SceneryObject {
     }
 }
 
+pub(super) fn scene_pool(p: Pool) -> ScenePool {
+    match p {
+        Pool::Objects => ScenePool::Objects,
+        Pool::Lines => ScenePool::Lines,
+        Pool::Trees => ScenePool::Trees,
+    }
+}
+
 pub fn scenery_in(terrain: &Terrain, q: SceneryInRequest) -> Result<SceneryInResponse, Vec<Issue>> {
     let src = terrain.source();
+    let pools: Vec<Pool> = match &q.pools {
+        None => vec![Pool::Objects],
+        Some(ps) if ps.is_empty() => {
+            return Err(vec![Issue::new(
+                "invalid_request",
+                "name at least one pool, or leave pools out for the objects pool",
+                "pools",
+            )]);
+        }
+        Some(ps) => (Pool::ALL.into_iter())
+            .filter(|p| ps.contains(&scene_pool(*p)))
+            .collect(),
+    };
     let classes: Option<Vec<Class>> = match &q.classes {
         None => None,
         Some(names) => Some(
@@ -208,32 +231,47 @@ pub fn scenery_in(terrain: &Terrain, q: SceneryInRequest) -> Result<SceneryInRes
                 )]);
             }
         };
-    // Keyed by id, so an object found twice counts once against the cap.
-    let mut found: BTreeMap<u64, (SceneryObject, Rect)> = BTreeMap::new();
+    // Rows in pool and id order. A pool lists each id once, and its index
+    // finds each once, so a count needs no row: a forest's trees are
+    // counted without holding them.
+    let mut found: BTreeMap<(ScenePool, u64), (SceneryObject, Rect)> = BTreeMap::new();
+    let mut counts: BTreeMap<ScenePool, BTreeMap<&'static str, u64>> = BTreeMap::new();
     let mut over = false;
-    src.objects_in(Pool::Objects, bbox, &mut |o| {
-        if over || !wanted(o.class) || !test(o) {
-            return;
-        }
-        found.insert(o.id, (row(o), footprint(o)));
-        over = found.len() > q.max_rows as usize;
-    })
-    .map_err(refused)?;
-    let (objects, boxes): (Vec<SceneryObject>, Vec<Rect>) = found.into_values().unzip();
+    for pool in pools {
+        let p = scene_pool(pool);
+        let counted = counts.entry(p).or_default();
+        src.objects_in(pool, bbox, &mut |o| {
+            if over || !wanted(o.class) || !test(o) {
+                return;
+            }
+            *counted.entry(o.class.name()).or_insert(0) += 1;
+            if !q.counts_only {
+                found.insert((p, o.id), (row(o), footprint(o)));
+                over = found.len() > q.max_rows as usize;
+            }
+        })
+        .map_err(refused)?;
+    }
+    let (objects, boxes): (Vec<SceneryRow>, Vec<Rect>) = (found.into_iter())
+        .map(|((pool, _), (object, b))| (SceneryRow { object, pool }, b))
+        .unzip();
     if over {
         return Err(vec![Issue::new(
             "too_many_rows",
             &format!(
-                "more than {} objects; raise max_rows, name classes or shrink the region",
+                "more than {} objects; raise max_rows, name classes, shrink the region, or ask counts_only for counts alone",
                 q.max_rows
             ),
             "max_rows",
         )]);
     }
     let mut counts_by_class = BTreeMap::new();
-    for o in &objects {
-        *counts_by_class.entry(o.class.clone()).or_insert(0) += 1;
+    for (class, n) in counts.values().flatten() {
+        *counts_by_class.entry(class.to_string()).or_insert(0) += n;
     }
+    let counts_by_pool = (counts.into_iter())
+        .map(|(p, cs)| (p, cs.into_iter().map(|(c, n)| (c.to_string(), n)).collect()))
+        .collect();
     let geojson = if q.geojson {
         Some(features(terrain, &objects, &boxes, asked)?)
     } else {
@@ -243,6 +281,7 @@ pub fn scenery_in(terrain: &Terrain, q: SceneryInRequest) -> Result<SceneryInRes
         provenance: terrain.provenance(),
         objects,
         counts_by_class,
+        counts_by_pool,
         geojson,
     })
 }
@@ -252,7 +291,7 @@ pub fn scenery_in(terrain: &Terrain, q: SceneryInRequest) -> Result<SceneryInRes
 /// footprint asked about unless it has no area.
 fn features(
     terrain: &Terrain,
-    objects: &[SceneryObject],
+    objects: &[SceneryRow],
     boxes: &[Rect],
     (asked, rings): (&str, Vec<Ring>),
 ) -> Result<GeoJson, Vec<Issue>> {
@@ -268,7 +307,7 @@ fn features(
         if f.fillable(&ring) {
             f.polygon(&ring, fields);
         } else {
-            f.point([o.x, o.z], fields);
+            f.point([o.object.x, o.object.z], fields);
         }
     }
     if f.fillable(&rings) {
@@ -349,6 +388,75 @@ mod tests {
         assert_eq!(
             v["objects"].as_array().unwrap().len(),
             SCENERY_INDUSTRIAL_COUNT as usize
+        );
+    }
+
+    #[test]
+    fn pools_list_trees_and_poles_and_counts_only_counts_past_the_cap() {
+        let t = synth();
+        let f = form(&t);
+        let all = json!({"Box": {"min_x": -1e6, "min_z": -1e6, "max_x": 1e6, "max_z": 1e6}});
+        let sum = |v: &Value| -> u64 {
+            let n = v.as_object().unwrap().values();
+            n.map(|c| c.as_u64().unwrap()).sum()
+        };
+
+        // Every tree counted, none listed, a row cap of one ignored.
+        let census = json!({"region": all, "pools": ["trees"], "counts_only": true, "max_rows": 1});
+        let v = answer(&t, "scenery_in", &census).unwrap();
+        assert_eq!(v["objects"], json!([]));
+        assert_eq!(
+            sum(&v["counts_by_pool"]["trees"]),
+            u64::from(f.tree_count())
+        );
+        assert_eq!(sum(&v["counts_by_class"]), u64::from(f.tree_count()));
+        assert!(v["counts_by_pool"].get("objects").is_none(), "{v}");
+        // Drawn, a count is the region alone.
+        let drawn =
+            json!({"region": all, "pools": ["trees"], "counts_only": true, "geojson": true});
+        let v = answer(&t, "scenery_in", &drawn).unwrap();
+        assert_valid(&v["geojson"]);
+        let features = v["geojson"]["features"].as_array().unwrap();
+        assert_eq!(features.len(), 1);
+        assert_eq!(features[0]["properties"], json!({"region": true}));
+        let listed = json!({"region": all, "pools": ["trees"], "max_rows": 1});
+        let e = answer(&t, "scenery_in", &listed).unwrap_err();
+        assert_eq!(e[0].code, "too_many_rows");
+
+        // Every pole and every object, in pool order, each row naming its
+        // pool; the counts are the rows'.
+        let v = answer(
+            &t,
+            "scenery_in",
+            &json!({"region": all, "pools": ["lines", "objects"]}),
+        )
+        .unwrap();
+        let rows = v["objects"].as_array().unwrap();
+        let poles = f.pole_norths().count();
+        let pools: Vec<&str> = rows.iter().map(|o| o["pool"].as_str().unwrap()).collect();
+        assert_eq!(pools.len(), SCENERY_COUNT as usize + poles);
+        assert!(
+            pools[..SCENERY_COUNT as usize]
+                .iter()
+                .all(|p| *p == "objects")
+        );
+        assert!(
+            pools[SCENERY_COUNT as usize..]
+                .iter()
+                .all(|p| *p == "lines")
+        );
+        assert_eq!(sum(&v["counts_by_pool"]["lines"]), poles as u64);
+        assert_eq!(
+            sum(&v["counts_by_pool"]["objects"]),
+            u64::from(SCENERY_COUNT)
+        );
+        assert_eq!(sum(&v["counts_by_class"]), rows.len() as u64);
+        assert!(rows.iter().all(|o| o["model"] != json!(null)));
+
+        let none = json!({"region": all, "pools": []});
+        assert_eq!(
+            answer(&t, "scenery_in", &none).unwrap_err()[0].path,
+            "pools"
         );
     }
 
