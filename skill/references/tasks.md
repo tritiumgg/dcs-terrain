@@ -284,6 +284,10 @@ whether the group stands among them.
 {"id": "lz-chain", "op": "find_sites", "request": {"region": {"Polygon": {"points": [[-288000, 660000], [-282000, 660000], [-282000, 690000], [-288000, 690000]]}}, "footprint": {"width": 30, "depth": 30}, "criteria": [{"name": "slope_max", "params": {"deg": 5}}, {"name": "surface_in", "params": {"classes": ["land"]}}, {"name": "clearing_max", "params": {"radius": 60, "max": 0}}], "step": 100, "spacing": 5000, "limit": 12}}
 ```
 
+`clearing_max` counts single placed trees, not forest, which DCS draws at
+runtime: check the sites found with `validate_placements`, whose `forest` issue
+names a site in trees.
+
 ## Trafficability of a point
 
 *Can a ground group get to this point from the road?*
@@ -312,7 +316,9 @@ and what it needs.
 ```
 
 A clean placement has an empty `issues` list. Each issue names the kind (`water`,
-`land`, `shallow`, `slope`, `no_ground`, `scenery`, `pavement`) and what it found.
+`forest`, `land`, `shallow`, `slope`, `no_ground`, `scenery`, `pavement`) and
+what it found. A placement meant to stand in trees, such as an ambush or a
+bunker under cover, takes `allow_forest: true`.
 
 *Can a C-130 park at Kutaisi?* The caller supplies the airframe's size:
 

@@ -984,7 +984,7 @@ Each command fits a situation.
 | `describe` | want to confirm which terrain and build the tool is using |
 | `find-sites` | need the best places for something |
 | `score-site` | have a place in mind and want to test it |
-| `validate-placements` | want to check that units do not sit on water, a slope, a building or a runway |
+| `validate-placements` | want to check that units do not sit on water, a slope, in forest, on a building or a runway |
 | `visible` | want to know if one point can see another |
 | `viewshed` | want the whole area one observer can see |
 | `radar-floor` | want to know how low a plane can fly past a site unseen |
@@ -997,7 +997,7 @@ Each command fits a situation.
 | `chokepoints` | want the roads or bridges that matter most, to cut or to guard (needs Step 2) |
 | `trafficability` | want to know if a ground group can drive between the road and a point, and which way |
 | `nearest` | want the nearest road, railway, airfield, town or object |
-| `scenery-in` | want the objects standing in an area |
+| `scenery-in` | want the objects, power-line poles or single trees in an area, listed or counted |
 | `towns` | want a real town for an objective or a briefing (needs Step 2) |
 | `airfield-info` | need an airfield's runways, radios and parking |
 

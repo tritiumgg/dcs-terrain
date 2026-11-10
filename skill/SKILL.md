@@ -123,7 +123,7 @@ and `path` names the field at fault, such as `criteria.2.params.deg`.
 | The terrain's extent, build, cache state and counts | `describe` |
 | Rank positions in a region against constraints | `find_sites` |
 | Judge one position against constraints | `score_site` |
-| Does this placement sit on water, a slope, a building, a runway | `validate_placements` |
+| Does this placement sit on water, a slope, in forest, on a building, a runway | `validate_placements` |
 | Can A see B | `visible` |
 | What can one observer see at one target height | `viewshed` |
 | How low can a target fly unseen around a site | `radar_floor` |
@@ -136,7 +136,7 @@ and `path` names the field at fault, such as `criteria.2.params.deg`.
 | The roads or bridges that matter most in a region | `chokepoints` |
 | Can a ground group reach this point from the road | `trafficability` |
 | The nearest road, rail, airdrome, town, node, beacon, scenery, place | `nearest` |
-| The objects standing in a region or under a footprint | `scenery_in` |
+| The objects, power-line poles or single trees in a region or under a footprint, listed or counted | `scenery_in` |
 | Towns by size or form, with outlines | `towns` |
 | Runways, navaids, frequencies, stands, what fits where | `airfield_info` |
 
@@ -298,7 +298,8 @@ GermanyCW.
 
 **`tree_density` is not forest.** It counts the terrain's single placed trees,
 and only about a tenth of them stand in forest, because DCS draws its forests
-at runtime from the ground cover. For forest, read `cover` or `share_forest`.
+at runtime from the ground cover. For forest, read `cover`, `share_forest` or
+`validate_placements`' `forest` issue.
 
 **Points and regions differ.** At points, `height`, `water`, `surface` and
 `cover` are the mesh triangle's under each point, `height` unrounded. Over a
@@ -313,6 +314,12 @@ missed.
 `validate_placements` tests each shape against the objects pool's structures
 and power-line poles by their boxes, and single trees by the circle inscribed
 in theirs; it lists the 100 nearest the position and counts all. **Forest is
-never an issue**: a placement in forest can be `ok`, so read its `cover`
-list. `scenery_in` returns the objects pool alone, no trees and no power
-lines; ask `validate_placements` with the footprint for those.
+the `forest` issue**, on land, from the ground DCS draws forest on, which no
+scenery pool lists; it counts forest under town too, where `cover` reads
+`town`. A site meant to stand in trees takes `allow_forest: true`.
+
+`scenery_in` lists the objects pool unless `pools` names others: `lines`, the
+power-line poles, and `trees`, the single placed trees. Each row names its
+`pool`. One area can hold tens of thousands of trees, past `max_rows`: for a
+count, ask `counts_only: true`, which lists none and answers
+`counts_by_pool` with no cap.
