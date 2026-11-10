@@ -598,8 +598,8 @@ the floor's distance from the target height (`data/exposure.md`). A request
 ### `validate_placements`
 
 Request: `placements: Vec<{id, x, z, heading, shape, on, max_slope_deg?,
-min_depth?}>`. `x, z` is the placement's position and label point; `on` is
-`land` (default) or `water`; `shape` is one of:
+min_depth?, allow_forest?}>`. `x, z` is the placement's position and label
+point; `on` is `land` (default) or `water`; `shape` is one of:
 
 ```rust
 enum Shape { Point,                                // the position alone
@@ -610,7 +610,8 @@ enum Shape { Point,                                // the position alone
 
 `heading` turns only a `Rect`; a circle and a polygon ignore it. At most
 10 000 placements; a shape at most 10 km across, a polygon of 3 to 1 000
-points; `min_depth` only with `on: water`.
+points; `min_depth` only with `on: water`, `allow_forest` only with `on:
+land`.
 
 The tool knows nothing about units: the caller gives the size and what the
 placement needs.
@@ -628,6 +629,11 @@ scenery objects it meets, and a list of issues, each naming what it found:
   - `no_ground`: cells no mesh covers.
   - `water`, for `on: land`: per water class, its cell count and the cell
     nearest the position.
+  - `forest`, for `on: land` unless `allow_forest`: its cell count and the
+    cell nearest the position. A cell is forest by the ground cover's forest
+    bit, the ground DCS draws forest on at runtime, so forest the town
+    covers counts though `cover` reads `town` there. `allow_forest` is for
+    a site meant to stand in trees.
   - `land`, for `on: water`; `shallow`, water shallower than `min_depth`.
   - `slope`: the steepest cell, over `max_slope_deg`.
 
@@ -656,8 +662,8 @@ terrain removes scenery: `NotInstances.lua` lists exactly the `.scn5`
 group records, and a heliport clears the scenery around it only when a
 mission spawns it.
 
-Procedural forest is not a collision; a placement in forest is reported from
-`cover`.
+Procedural forest is not in any scenery pool: it is found from the ground
+cover, as the `forest` issue, not as `scenery`.
 
 ### `low_level_route`
 

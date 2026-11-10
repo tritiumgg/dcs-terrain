@@ -143,7 +143,11 @@ A failed check refuses the terrain the same way.
   Marianas' also carry the forest bit, so read as forest. Forest
   concealment reads bit 1024, never the trees pool: only 9.8 % of instance
   trees stand on forest ground, because DCS draws its forests at runtime from
-  the ground type. Cover reads no material subset.
+  the ground type. Cover reads no material subset. Town wins a triangle
+  carrying both its bit and forest's, so a point's ground also carries the
+  forest bit alone, on land, and `validate_placements` judges forest by it:
+  on Caucasus, 2.9.31.29434, 0.9 % of forest ground reads as town
+  (`data/forest-under-town.md`).
 - **Coverage.** A point is `nodata` only where no finest-mesh triangle covers
   it. Flat land at 5 m is land at 5 m; no fill value is tested. The sea is
   covered by sea triangles, so a sightline across a bay finds no holes.

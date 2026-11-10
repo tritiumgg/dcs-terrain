@@ -96,6 +96,9 @@ fn check_request(p: &Placement, k: usize) -> Vec<Issue> {
             issues.extend(invalid("applies to `on: water` only", &at("min_depth")));
         }
     }
+    if p.allow_forest && p.on == Underfoot::Water {
+        issues.extend(invalid("applies to `on: land` only", &at("allow_forest")));
+    }
     issues
 }
 
@@ -305,6 +308,12 @@ fn ground_check(
                         z,
                     });
                 }
+            }
+            // By the forest bit, not the cover class: town wins a triangle
+            // carrying both, and DCS may still draw trees on it.
+            let forest = |s: &Sample| s.ground.is_some_and(|g| g.forest);
+            if let Some((cells, [x, z])) = nearest(&forest).filter(|_| !p.allow_forest) {
+                issues.push(PlacementIssue::Forest { cells, x, z });
             }
         }
         Underfoot::Water => {
@@ -581,6 +590,55 @@ mod tests {
     }
 
     #[test]
+    fn forest_is_an_issue_on_land_under_town_too_unless_allowed() {
+        let t = synth();
+        let f = form(&t);
+        let (fx, fz) = f.abs(40525.0, 55525.0);
+        // The forest's hole is 1 km square about this point.
+        let (hx, hz) = f.abs(42000.0, 57000.0);
+        let (wx, wz) = f.abs(55325.0, 29325.0);
+        let (tx, tz) = f.abs(56025.0, 30025.0);
+        let circle = |r: f64| json!({"Circle": {"radius": r}});
+        let c = checked(
+            &t,
+            json!([
+                {"id": "in the forest", "x": fx, "z": fz},
+                {"id": "hidden in it", "x": fx, "z": fz, "allow_forest": true},
+                {"id": "in the clearing", "x": hx, "z": hz, "shape": circle(300.0)},
+                {"id": "past its edge", "x": hx, "z": hz, "shape": circle(600.0)},
+                {"id": "in the wooded town", "x": wx, "z": wz},
+                {"id": "in the town", "x": tx, "z": tz},
+            ]),
+        );
+        assert_eq!(
+            c[0].issues[0],
+            PlacementIssue::Forest {
+                cells: 1,
+                x: fx,
+                z: fz
+            }
+        );
+        assert_eq!(c[0].cover, [CoverClass::Forest]);
+        assert!(!kinds(&c[1]).contains(&"forest".into()), "{:?}", c[1]);
+        assert!(c[2].ok, "{:?}", c[2]);
+        let PlacementIssue::Forest { cells, x, z } = c[3].issues[0] else {
+            panic!("{:?}", c[3]);
+        };
+        // The nearest forest cell is one past the hole's edge, 525 m away.
+        assert!(cells > 0 && cells < c[3].cells, "{:?}", c[3]);
+        assert!(((x - hx).hypot(z - hz) - 525.0).abs() < 1.0, "{x} {z}");
+        assert_eq!(kinds(&c[4]), ["forest"]);
+        assert_eq!(c[4].cover, [CoverClass::Town]);
+        assert!(c[5].ok, "{:?}", c[5]);
+
+        let boat = json!({"placements": [
+            {"id": "b", "x": fx, "z": fz, "on": "water", "allow_forest": true}
+        ]});
+        let e = validate_placements(&t, serde_json::from_value(boat).unwrap()).unwrap_err();
+        assert_eq!(e[0].path, "placements.0.allow_forest");
+    }
+
+    #[test]
     fn water_land_and_depth_are_found_under_each_shape() {
         let t = synth();
         let f = form(&t);
@@ -757,11 +815,13 @@ mod tests {
         );
         let reach = 525.0f64.hypot(25.0) - TREE_OBB_W_M / 2.0;
         let (lx, lz) = f.abs(LINE_SOUTH_M + 2.0 * LINE_POLE_SPACING_M, LINE_EAST_M);
+        // Forest allowed, so the trees alone are tested.
         let c = checked(
             &t,
             json!([
-                {"id": "", "x": mid.0, "z": mid.1, "shape": {"Circle": {"radius": reach - 0.01}}},
-                {"id": "", "x": mid.0, "z": mid.1, "shape": {"Circle": {"radius": reach}}},
+                {"id": "", "x": mid.0, "z": mid.1, "shape": {"Circle": {"radius": reach - 0.01}},
+                 "allow_forest": true},
+                {"id": "", "x": mid.0, "z": mid.1, "shape": {"Circle": {"radius": reach}}, "allow_forest": true},
                 {"id": "", "x": lx, "z": lz},
                 {"id": "", "x": lx + 1.0, "z": lz},
             ]),
@@ -1112,6 +1172,7 @@ mod install_tests {
             on: Underfoot::Land,
             max_slope_deg: None,
             min_depth: None,
+            allow_forest: false,
         }
     }
 
@@ -1281,6 +1342,43 @@ mod install_tests {
             }
         }
         None
+    }
+
+    /// A helicopter pad near Bakhmaro on Caucasus, which a field report
+    /// found standing in dense forest in game: no object lies under it, and
+    /// it is the forest issue alone that says so.
+    #[test]
+    fn a_pad_in_the_caucasus_forest_is_reported() {
+        let Some(root) = std::env::var_os("DCSTERRAIN_INSTALL").map(PathBuf::from) else {
+            eprintln!("DCSTERRAIN_INSTALL is not set; skipped");
+            return;
+        };
+        let scratch = Scratch::new();
+        let cache = Cache::new(&scratch.0);
+        let t = Terrain::open(&root, "Caucasus", &cache, true).unwrap();
+        let (x, z) = (-321_588.0, 675_397.0);
+        let mut pad = placement(
+            "pad".into(),
+            x,
+            z,
+            PlacementShape::Circle { radius: 40.0 },
+            0.0,
+        );
+        let check = |p: Placement| {
+            let q = ValidatePlacementsRequest {
+                placements: vec![p],
+                geojson: false,
+            };
+            validate_placements(&t, q).unwrap().placements.remove(0)
+        };
+        let got = check(pad.clone());
+        println!("{} {got:?}", t.provenance().dcs_build);
+        let Some(PlacementIssue::Forest { cells, .. }) = got.issues.first() else {
+            panic!("{got:?}");
+        };
+        assert!(!got.ok && *cells > got.cells / 2, "{got:?}");
+        pad.allow_forest = true;
+        assert!(check(pad).ok);
     }
 
     #[test]

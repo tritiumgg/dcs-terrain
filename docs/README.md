@@ -31,6 +31,7 @@ it.
 | [data/airfield-info.md](data/airfield-info.md) | `airfield_info` on every installed terrain: runways against the tables, true courses against the geodesic, widths and elevations against a scan, and cost |
 | [data/scenery-review.md](data/scenery-review.md) | Screenshots of the Caucasus models in DCS: how to take them, the heuristics scored against them, what moved |
 | [data/caucasus-scenery-catalogue.tsv](data/caucasus-scenery-catalogue.tsv) | The Caucasus scenery model census |
+| [data/forest-under-town.md](data/forest-under-town.md) | How much of Caucasus's forest ground town covers, terrain-wide and round a pad near Bakhmaro |
 
 The project was reset on 2026-10-27. The documents before it — nine frozen
 specifications, their ledgers and 49 ADRs — were deleted; they are in git at

@@ -1857,3 +1857,83 @@ mod tests {
         assert_eq!((l.used, l.get(&4)), (2, Some('e')));
     }
 }
+
+/// Opt-in: how much of Caucasus's forest ground town covers, every fifth
+/// cell's center across the terrain and finely round a helicopter pad near
+/// Bakhmaro. Set `DCSTERRAIN_INSTALL` to the install root; without it this
+/// passes reading nothing. Run it with `--release` and `--nocapture` for the
+/// figures. The install is only read.
+#[cfg(test)]
+mod forest_under_town {
+    use super::*;
+    use crate::scratch::Scratch;
+    use crate::source::Cover;
+
+    /// Land, forest, town, and forest town covers, among `points`.
+    fn count(t: &Install, points: &[[f64; 2]]) -> [u64; 4] {
+        let mut n = [0; 4];
+        for chunk in points.chunks(1 << 20) {
+            for g in t.points(chunk).unwrap().into_iter().flatten() {
+                if g.water != 0 {
+                    continue;
+                }
+                let town = g.cover == Cover::Town;
+                n[0] += 1;
+                n[1] += u64::from(g.forest);
+                n[2] += u64::from(town);
+                n[3] += u64::from(g.forest && town);
+            }
+        }
+        n
+    }
+
+    #[test]
+    fn forest_under_town_on_caucasus() {
+        let Some(root) = std::env::var_os("DCSTERRAIN_INSTALL").map(PathBuf::from) else {
+            eprintln!("DCSTERRAIN_INSTALL is not set; skipped");
+            return;
+        };
+        let scratch = Scratch::new();
+        let t = Install::open(&root, "Caucasus", &Cache::new(&scratch.0)).unwrap();
+        let g = t.grid;
+        println!("{}", t.identity().dcs_build);
+        println!("| sample | land | forest | town | forest under town |");
+        println!("|---|---|---|---|---|");
+        let row = |name: &str, n: [u64; 4]| {
+            let pc = |k: usize| 100.0 * n[k] as f64 / n[0] as f64;
+            println!(
+                "| {name} | {} | {:.2} % | {:.2} % | {:.2} % |",
+                n[0],
+                pc(1),
+                pc(2),
+                pc(3)
+            );
+            n
+        };
+        let mut all = [0; 4];
+        for r0 in (0..g.height).step_by(1280) {
+            let pts: Vec<[f64; 2]> = (r0..(r0 + 1280).min(g.height))
+                .step_by(5)
+                .flat_map(|r| (0..g.width).step_by(5).map(move |c| g.centre(r, c)))
+                .map(|(x, z)| [x, z])
+                .collect();
+            let n = count(&t, &pts);
+            (0..4).for_each(|k| all[k] += n[k]);
+        }
+        row("every fifth cell", all);
+        let (x, z) = (-321_588.0, 675_397.0);
+        for (name, radius, step) in [("pad, 40 m", 40.0, 2.0), ("pad, 500 m", 500.0, 10.0)] {
+            let k = (radius / step) as i32;
+            let pts: Vec<[f64; 2]> = (-k..=k)
+                .flat_map(|i| (-k..=k).map(move |j| [f64::from(i) * step, f64::from(j) * step]))
+                .filter(|d| d[0].hypot(d[1]) <= radius)
+                .map(|d| [x + d[0], z + d[1]])
+                .collect();
+            let n = row(name, count(&t, &pts));
+            if radius < 100.0 {
+                assert!(n[1] * 2 > n[0], "the pad stands in forest: {n:?}");
+            }
+        }
+        assert!(all[3] > 0 && all[3] < all[1]);
+    }
+}

@@ -5509,6 +5509,10 @@
           ],
           "format": "double",
           "description": "Meters: the shallowest water allowed under the shape, for `on:\nwater` only."
+        },
+        "allow_forest": {
+          "type": "boolean",
+          "description": "Whether forest may stand under it, for a site meant to hide in\ntrees; otherwise forest is an issue on land."
         }
       },
       "required": [
@@ -5696,7 +5700,7 @@
           "items": {
             "$ref": "#/$defs/CoverClass"
           },
-          "description": "Each cover class under the shape, in the order the classes are\nlisted: a placement in forest says so here."
+          "description": "Each cover class under the shape, in the order the classes are\nlisted. Forest the town covers reads as `town` here, and is still\nthe `forest` issue."
         },
         "objects_met": {
           "type": "integer",
@@ -5784,6 +5788,35 @@
             "z"
           ],
           "description": "For `on: land`, water of this class under the shape."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "forest"
+            },
+            "cells": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "x": {
+              "type": "number",
+              "format": "double"
+            },
+            "z": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "required": [
+            "kind",
+            "cells",
+            "x",
+            "z"
+          ],
+          "description": "For `on: land` unless `allow_forest`, ground DCS draws forest on at\nruntime, whose trees no scenery pool lists: counted under town too."
         },
         {
           "type": "object",

@@ -1601,6 +1601,10 @@ pub struct Placement {
     /// water` only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_depth: Option<f64>,
+    /// Whether forest may stand under it, for a site meant to hide in
+    /// trees; otherwise forest is an issue on land.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub allow_forest: bool,
 }
 
 /// Lengths are meters, at most 10 km.
@@ -1665,7 +1669,8 @@ pub struct PlacementCheck {
     /// Meters: the shallowest water, null where none is water.
     pub min_depth: Option<f64>,
     /// Each cover class under the shape, in the order the classes are
-    /// listed: a placement in forest says so here.
+    /// listed. Forest the town covers reads as `town` here, and is still
+    /// the `forest` issue.
     pub cover: Vec<CoverClass>,
     /// The scenery objects the shape meets; the issues list the nearest
     /// 100 to the position.
@@ -1689,6 +1694,9 @@ pub enum PlacementIssue {
         x: f64,
         z: f64,
     },
+    /// For `on: land` unless `allow_forest`, ground DCS draws forest on at
+    /// runtime, whose trees no scenery pool lists: counted under town too.
+    Forest { cells: u32, x: f64, z: f64 },
     /// For `on: water`, land under the shape.
     Land { cells: u32, x: f64, z: f64 },
     /// For `on: water`, water shallower than `min_depth`; `depth` is the
