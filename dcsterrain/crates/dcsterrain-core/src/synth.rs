@@ -371,6 +371,12 @@ pub const BEACH_SOUTH_M: f64 = 30000.0;
 pub const BEACH_NORTH_M: f64 = 32000.0;
 pub const BEACH_WEST_M: f64 = 20000.0;
 pub const BEACH_EAST_M: f64 = 24000.0;
+// A wooded corner of the town: town wins its cover, as it does in a terrain
+// whose triangles carry both bits, but its ground still carries forest.
+pub const TOWN_FOREST_SOUTH_M: f64 = 55100.0;
+pub const TOWN_FOREST_NORTH_M: f64 = 55600.0;
+pub const TOWN_FOREST_WEST_M: f64 = 29100.0;
+pub const TOWN_FOREST_EAST_M: f64 = 29600.0;
 
 // Projection. Caucasus's parameters, because a fit must reproduce the published
 // Caucasus row within a metre. The samples are the beacons', one per beacon;

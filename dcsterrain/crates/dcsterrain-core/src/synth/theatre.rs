@@ -254,6 +254,14 @@ impl Theatre {
         }
     }
 
+    /// Whether the ground carries forest, whichever cover wins: the forest
+    /// patch, and the wooded corner of the town, on land.
+    pub fn forest(&self, north: f64, east: f64) -> bool {
+        let wooded_town = (TOWN_FOREST_SOUTH_M..TOWN_FOREST_NORTH_M).contains(&north)
+            && (TOWN_FOREST_WEST_M..TOWN_FOREST_EAST_M).contains(&east);
+        self.water(north, east) == WATER_LAND && (self.trees(north, east) > 0 || wooded_town)
+    }
+
     /// Trees in the cell whose centre this is.
     pub fn trees(&self, north: f64, east: f64) -> u16 {
         let in_box =
@@ -517,6 +525,16 @@ mod tests {
     fn at(north: f64, east: f64) -> Cell {
         let c = f64::from(CELL_SIZE_M);
         t().cell((north / c) as u32, (east / c) as u32)
+    }
+
+    #[test]
+    fn forest_is_carried_under_the_wooded_corner_of_the_town() {
+        let t = t();
+        let forest = |n, e| (t.cover(n, e), t.forest(n, e));
+        assert_eq!(forest(40500.0, 55500.0), (Cover::Forest, true));
+        assert_eq!(forest(42000.0, 57000.0), (Cover::Plain, false));
+        assert_eq!(forest(55300.0, 29300.0), (Cover::Town, true));
+        assert_eq!(forest(56000.0, 30000.0), (Cover::Town, false));
     }
 
     #[test]

@@ -14,6 +14,8 @@ pub const SEA: u32 = 1;
 pub const LAKE: u32 = 2;
 pub const RIVER: u32 = 4;
 pub const ROAD_STRIP: u32 = 8;
+/// The forest bit: DCS draws forest at runtime on a triangle carrying it.
+pub const FOREST: u32 = 1024;
 const WATER: u32 = SEA | LAKE | RIVER;
 
 /// How far outside a triangle, in barycentric terms, a point may lie and

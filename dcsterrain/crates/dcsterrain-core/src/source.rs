@@ -227,6 +227,9 @@ pub struct Ground {
     /// As the `surface` layer codes it.
     pub surface: u8,
     pub cover: Cover,
+    /// Whether the land carries forest, which DCS draws at runtime: true
+    /// under town too, where `cover` names town.
+    pub forest: bool,
 }
 
 /// Cells along each side of a tile.

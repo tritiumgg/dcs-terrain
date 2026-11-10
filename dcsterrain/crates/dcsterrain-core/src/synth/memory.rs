@@ -101,6 +101,7 @@ impl Source for Synth {
             water: t.water(n, e),
             surface: t.surface(n, e),
             cover: t.cover(n, e),
+            forest: t.forest(n, e),
         }))
     }
 

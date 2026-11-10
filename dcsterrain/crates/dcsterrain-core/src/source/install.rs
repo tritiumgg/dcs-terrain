@@ -26,7 +26,7 @@ use crate::classes::Class;
 use crate::decode::install::{self, Map};
 use crate::decode::scn5::Pool;
 use crate::decode::surface5::ground::{self, Prepared, Tile, cover_of, grid_units, surface_of};
-use crate::decode::surface5::{RUNWAY_MATERIAL, Surface5, grid_for, water_class};
+use crate::decode::surface5::{FOREST, RUNWAY_MATERIAL, Surface5, grid_for, water_class};
 use crate::extract::FileEntry;
 use crate::grid::Grid;
 use crate::threads::try_map;
@@ -248,6 +248,7 @@ fn ground_of(g: ground::Ground) -> Ground {
         water: water_class(g.tritype),
         surface: surface_of(g.tritype, g.runway),
         cover: cover_of(g.tritype),
+        forest: water_class(g.tritype) == 0 && g.tritype & FOREST != 0,
     }
 }
 
@@ -1190,6 +1191,19 @@ mod tests {
     }
 
     #[test]
+    fn forest_under_town_reads_as_town_and_still_carries_forest() {
+        let root = install(&file(&[square([64 | 1024, 64])], 1));
+        let c = Scratch::new();
+        let t = Install::open(&root.0, "Test", &Cache::new(&c.0)).unwrap();
+        let wooded = t.point(1200.0, 2200.0).unwrap().unwrap();
+        assert_eq!((wooded.cover, wooded.forest), (Cover::Town, true));
+        let bare = t.point(1990.0, 2990.0).unwrap().unwrap();
+        assert_eq!((bare.cover, bare.forest), (Cover::Town, false));
+        let both = t.points(&[[1200.0, 2200.0], [1990.0, 2990.0]]).unwrap();
+        assert_eq!(both, vec![Some(wooded), Some(bare)]);
+    }
+
+    #[test]
     fn a_built_block_answers_tiles_and_points_through_the_cache() {
         let root = install(&file(&[square([1024, LAKE])], 1));
         let c = Scratch::new();
@@ -1210,10 +1224,16 @@ mod tests {
         assert_eq!(at(Layer::Height), 103);
         assert_eq!(at(Layer::Cover), Cover::Forest.code());
         let p = t.point(1200.0, 2200.0).unwrap().unwrap();
-        assert_eq!((p.surface, p.cover, p.water), (5, Cover::Forest, 0));
+        assert_eq!(
+            (p.surface, p.cover, p.water, p.forest),
+            (5, Cover::Forest, 0, true)
+        );
         assert!((p.height - 120.0).abs() < 1e-9, "{}", p.height);
         let lake = t.point(1990.0, 2990.0).unwrap().unwrap();
-        assert_eq!((lake.water, lake.surface, lake.cover), (1, 3, Cover::Water));
+        assert_eq!(
+            (lake.water, lake.surface, lake.cover, lake.forest),
+            (1, 3, Cover::Water, false)
+        );
         assert_eq!(t.point(999.0, 2500.0).unwrap(), None);
         assert_eq!(t.point(f64::NAN, 2500.0).unwrap(), None);
 

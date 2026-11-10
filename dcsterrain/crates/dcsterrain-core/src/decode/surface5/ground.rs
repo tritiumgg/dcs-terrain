@@ -8,7 +8,7 @@
 
 use super::bvh::{Bvh, Line, spread, tri_box};
 use super::mesh::Block;
-use super::sample::{EDGE_TOLERANCE, ROAD_STRIP, cover, rank, round_height, water_class};
+use super::sample::{EDGE_TOLERANCE, FOREST, ROAD_STRIP, cover, rank, round_height, water_class};
 use crate::extract::Bounds;
 use crate::grid::Grid;
 use crate::source::{Cover, Layer};
@@ -50,7 +50,7 @@ pub const SURFACE_RUNWAY: u8 = 5;
 const COVER_BITS: [(u32, Cover); 5] = [
     (32, Cover::Runway),
     (64, Cover::Town),
-    (1024, Cover::Forest),
+    (FOREST, Cover::Forest),
     (128, Cover::Field),
     (256, Cover::Beach),
 ];
