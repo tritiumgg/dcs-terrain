@@ -90,7 +90,7 @@ fn with_place(t: Table) -> Table {
 fn term_value(name: &str, v: &Value) -> (&'static str, String) {
     let v = num(v);
     match name {
-        "slope_max" | "enclosure_min" | "masked_from" => ("°", fixed(v, 1)),
+        "slope_max" | "slope_band" | "enclosure_min" | "masked_from" => ("°", fixed(v, 1)),
         "span_max" => ("m", fixed(v, 1)),
         n if n.starts_with("dist_") => ("m", fixed(v, 0)),
         "surface_in" | "surface_enum_in" | "cover_in" | "cover_fraction_min"

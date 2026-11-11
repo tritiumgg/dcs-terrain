@@ -221,6 +221,21 @@ pub struct Term {
     pub value: f64,
     pub pass: bool,
     pub score: f64,
+    /// The plane `slope_band` fitted, whose slope is `value`; absent from
+    /// every other criterion's term.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane: Option<PlaneFit>,
+}
+
+/// A plane fitted to the heights under a footprint by least squares.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PlaneFit {
+    /// The way the plane falls, in degrees from north towards east, as the
+    /// `aspect` layer gives it; null under half a degree of slope.
+    pub bearing_deg: Option<f64>,
+    /// The root mean square of the heights about the plane, in meters; null
+    /// where a cell has no height.
+    pub residual_m: Option<f64>,
 }
 
 // find_sites

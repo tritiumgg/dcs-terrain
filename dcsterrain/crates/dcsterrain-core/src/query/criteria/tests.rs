@@ -464,6 +464,7 @@ fn pruning_changes_no_answer() {
     let all = criteria(json!([
         {"name": "slope_max", "params": {"deg": 2}},
         {"name": "span_max", "params": {"m": 3}},
+        {"name": "slope_band", "params": {"min": 0, "max": 2, "residual_max": 2}},
         {"name": "surface_in", "params": {"classes": ["land"]}},
         {"name": "surface_enum_in", "params": {"values": [1, 4]}},
         {"name": "cover_in", "params": {"classes": ["plain", "field", "forest"]}},
@@ -827,4 +828,145 @@ fn a_param_out_of_range_is_named_by_its_path() {
     };
     let e = evaluate(synth(), &[plain()], &big, &[], Mode::Every).unwrap_err();
     assert_eq!(e[0].path, "footprint");
+}
+
+/// Degrees between two bearings, the short way round.
+fn off(a: f64, b: f64) -> f64 {
+    let d = (a - b).rem_euclid(360.0);
+    d.min(360.0 - d)
+}
+
+#[test]
+fn slope_band_fits_the_plane_and_the_flank_and_gives_the_way_down() {
+    let band =
+        |min: f64, max: f64| json!({"name": "slope_band", "params": {"min": min, "max": max}});
+    let (y, n) = passes_and_fails(band(0.0, 3.0), 100.0, plain(), hill_flank());
+    let plane = y.plane.expect("a fitted plane");
+    // A 1 % plane rising north is 0.57°, falling south; heights rounded
+    // to the meter over a few cells add up to a tenth of a degree.
+    assert!(
+        (y.value - 0.01f64.atan().to_degrees()).abs() < 0.15,
+        "{y:?}"
+    );
+    assert!(off(plane.bearing_deg.unwrap(), 180.0) < 2.0, "{y:?}");
+    // Heights rounded to the meter scatter about a true plane by 0.3 m.
+    assert!(plane.residual_m.unwrap() < 0.5, "{y:?}");
+    // A sigma north of the top the flank is straight, so the plane is its
+    // gradient: 13.1°, falling north.
+    let flank = (0.4 / 0.5f64.exp() - 0.01).atan().to_degrees();
+    assert!((n.value - flank).abs() < 0.3, "{n:?}");
+    assert!(
+        off(n.plane.unwrap().bearing_deg.unwrap(), 0.0) < 1.0,
+        "{n:?}"
+    );
+    // The band's floor fails the plane.
+    passes_and_fails(band(10.0, 16.0), 100.0, hill_flank(), plain());
+    // A sigma west of the top the hill falls west and the plane south,
+    // which the bearing sums as the `aspect` layer does.
+    let west = at(
+        synth::HILL_A_NORTH_M,
+        synth::HILL_A_EAST_M - synth::HILL_SIGMA_M,
+    );
+    let t = term(west, 100.0, &criterion(band(0.0, 30.0)));
+    let rise_east = 0.4 / 0.5f64.exp();
+    let want = (-rise_east)
+        .atan2(-synth::PLANE_SLOPE)
+        .to_degrees()
+        .rem_euclid(360.0);
+    assert!(
+        off(t.plane.unwrap().bearing_deg.unwrap(), want) < 1.0,
+        "{t:?} not {want}"
+    );
+}
+
+#[test]
+fn slope_band_fails_rough_ground_that_averages_flat() {
+    // Over 400 m the summit's fitted plane is the 1 % plane under the
+    // hill, but the dome stands meters off it.
+    let band = |r: f64| {
+        criterion(json!({"name": "slope_band", "params": {"min": 0, "max": 3, "residual_max": r}}))
+    };
+    let t = term(hill_top(), 400.0, &band(1.0));
+    let plane = t.plane.unwrap();
+    assert!(t.value < 1.0, "{t:?}");
+    assert!(plane.residual_m.unwrap() > 1.0, "{t:?}");
+    assert!(!t.pass, "{t:?}");
+    // On the lake, level, there is no way down.
+    let lake = at(synth::LAKE_NORTH_M, synth::LAKE_EAST_M);
+    let flat = term(lake, 100.0, &band(1.0));
+    assert_eq!(flat.value, 0.0, "{flat:?}");
+    assert_eq!(flat.plane.unwrap().bearing_deg, None, "{flat:?}");
+    let loose = term(hill_top(), 400.0, &band(20.0));
+    assert!(loose.pass && loose.score > 0.0, "{loose:?}");
+    // slope_max reads the steepest cell, which the dome's shoulder makes
+    // more than the plane.
+    let max = term(
+        hill_top(),
+        400.0,
+        &criterion(json!({"name": "slope_max", "params": {"deg": 3}})),
+    );
+    assert!(max.value > t.value, "{max:?}");
+    assert_eq!(max.plane, None);
+}
+
+#[test]
+fn slope_band_params_are_angles_in_order() {
+    for (c, field) in [
+        (json!({"min": 5, "max": 2}), "min"),
+        (json!({"min": 0, "max": 91}), "max"),
+        (
+            json!({"min": 0, "max": 5, "residual_max": -1}),
+            "residual_max",
+        ),
+    ] {
+        let c = criterion(json!({"name": "slope_band", "params": c}));
+        let e = evaluate(synth(), &[plain()], &square(20.0), &[c], Mode::Every).unwrap_err();
+        assert_eq!(e[0].path, format!("criteria.0.params.{field}"));
+    }
+}
+
+#[test]
+fn slope_band_fails_where_a_cell_beside_the_footprint_has_no_height() {
+    // The mesh stops 2 km in; the ring of a cell at its edge reaches past.
+    let edge = at(synth::MESH_MARGIN_M + 25.0, 40_000.0);
+    let t = term(
+        edge,
+        20.0,
+        &criterion(json!({"name": "slope_band", "params": {"min": 0, "max": 90}})),
+    );
+    assert!(t.value.is_nan() && !t.pass && t.score == 0.0, "{t:?}");
+    assert_eq!(
+        t.plane,
+        Some(crate::types::PlaneFit {
+            bearing_deg: None,
+            residual_m: None
+        })
+    );
+}
+
+#[test]
+fn slope_band_reads_every_ring_cell_of_a_turned_footprint_at_the_corners() {
+    // A long thin footprint turned 45° at each corner of the candidates'
+    // box reaches farthest out of the window the heights are read in.
+    let (n, e) = PLAIN;
+    let cands = [
+        at(n, e),
+        at(n + 3000.0, e),
+        at(n, e + 3000.0),
+        at(n + 3000.0, e + 3000.0),
+    ];
+    let footprint = Footprint {
+        width: 40.0,
+        depth: 900.0,
+        orientations_deg: vec![45.0, 135.0],
+    };
+    let c = criterion(
+        json!({"name": "slope_band", "params": {"min": 0, "max": 90, "residual_max": 100}}),
+    );
+    let e = evaluate(synth(), &cands, &footprint, &[c], Mode::Every).unwrap();
+    assert_eq!(e.sites.len(), 8);
+    for s in &e.sites {
+        let t = &s.terms[1];
+        assert!(t.value.is_finite() && t.pass, "{s:?}");
+    }
 }

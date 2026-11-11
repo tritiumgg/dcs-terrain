@@ -17,6 +17,21 @@ pub enum Criterion {
         /// The steepest slope allowed, in degrees.
         deg: f64,
     },
+    /// The slope of the plane fitted to the heights of the footprint's cells
+    /// and the ring of cells around them, from `min` to `max`, its heights
+    /// lying within `residual_max` of the plane, root mean square, so rough
+    /// ground that only averages to the slope fails. The term's `plane`
+    /// gives the downslope bearing and the residual.
+    SlopeBand {
+        /// The least slope, in degrees.
+        min: f64,
+        /// The steepest slope, in degrees.
+        max: f64,
+        /// The largest root mean square of the heights about the plane, in
+        /// meters.
+        #[serde(default = "default_residual_max")]
+        residual_max: f64,
+    },
     /// Highest minus lowest height over the footprint's corners and center,
     /// at most `m`.
     SpanMax {
@@ -190,6 +205,12 @@ fn default_clearing_radius() -> f64 {
     150.0
 }
 
+/// A meter about the plane: heights rounded to the meter scatter by 0.3 m
+/// on ground that is truly flat, so a limit much under this fails even it.
+fn default_residual_max() -> f64 {
+    1.0
+}
+
 fn default_own_alt_agl() -> f64 {
     2.0
 }
@@ -306,6 +327,21 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&c).unwrap(),
             json!({"name": "slope_max", "params": {"deg": 8.0}})
+        );
+    }
+
+    #[test]
+    fn a_slope_band_takes_a_residual_of_a_meter_unless_given() {
+        let c: Criterion =
+            serde_json::from_value(json!({"name": "slope_band", "params": {"min": 2, "max": 8}}))
+                .unwrap();
+        assert_eq!(
+            c,
+            Criterion::SlopeBand {
+                min: 2.0,
+                max: 8.0,
+                residual_max: 1.0
+            }
         );
     }
 

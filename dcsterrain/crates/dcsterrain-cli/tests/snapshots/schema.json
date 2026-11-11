@@ -1276,6 +1276,45 @@
           "properties": {
             "name": {
               "type": "string",
+              "const": "slope_band"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "min": {
+                  "description": "The least slope, in degrees.",
+                  "type": "number",
+                  "format": "double"
+                },
+                "max": {
+                  "description": "The steepest slope, in degrees.",
+                  "type": "number",
+                  "format": "double"
+                },
+                "residual_max": {
+                  "description": "The largest root mean square of the heights about the plane, in\nmeters.",
+                  "type": "number",
+                  "format": "double",
+                  "default": 1.0
+                }
+              },
+              "required": [
+                "min",
+                "max"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "params"
+          ],
+          "description": "The slope of the plane fitted to the heights of the footprint's cells\nand the ring of cells around them, from `min` to `max`, its heights\nlying within `residual_max` of the plane, root mean square, so rough\nground that only averages to the slope fails. The term's `plane`\ngives the downslope bearing and the residual."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
               "const": "span_max"
             },
             "params": {
@@ -2070,6 +2109,17 @@
         "score": {
           "type": "number",
           "format": "double"
+        },
+        "plane": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlaneFit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The plane `slope_band` fitted, whose slope is `value`; absent from\nevery other criterion's term."
         }
       },
       "required": [
@@ -2079,6 +2129,28 @@
         "score"
       ],
       "description": "One criterion's contribution: the measured `value`, whether the hard test\npassed, and the soft score from 0 to 1."
+    },
+    "PlaneFit": {
+      "type": "object",
+      "properties": {
+        "bearing_deg": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "description": "The way the plane falls, in degrees from north towards east, as the\n`aspect` layer gives it; null under half a degree of slope."
+        },
+        "residual_m": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "description": "The root mean square of the heights about the plane, in meters; null\nwhere a cell has no height."
+        }
+      },
+      "description": "A plane fitted to the heights under a footprint by least squares."
     },
     "FindSitesRequest": {
       "type": "object",

@@ -419,6 +419,7 @@ fn the_best_orientation_passes_then_scores_most_by_the_weights() {
         value: score,
         pass: true,
         score,
+        plane: None,
     };
     let site = |deg: f64, a: f64, b: f64, pass: bool| Site {
         x: 0.0,

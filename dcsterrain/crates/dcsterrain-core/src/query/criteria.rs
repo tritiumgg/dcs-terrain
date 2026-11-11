@@ -37,10 +37,12 @@ use crate::classes::Class;
 use crate::decode::scn5::Pool;
 use crate::grid::{Grid, Window, box_distance};
 use crate::horizon;
-use crate::layers::{Cells, DISTANCE_CAP_M, Derived, Raster, TPI_300, TPI_2000, Target, derive};
+use crate::layers::{
+    Cells, DISTANCE_CAP_M, Derived, FLAT_DEG, Raster, TPI_300, TPI_2000, Target, derive,
+};
 use crate::source::{Layer, Refusal, Source};
 use crate::threads::try_map;
-use crate::types::{Criterion, Footprint, Issue, Point3, Term, TpiClass};
+use crate::types::{Criterion, Footprint, Issue, PlaneFit, Point3, Term, TpiClass};
 
 /// Sites evaluated in full before the order of the per-site tests is fixed
 /// from the share of them each test failed.
@@ -107,6 +109,13 @@ enum Kind {
     SlopeMax(f64),
     /// Over the footprint's corners and center.
     SpanMax(f64),
+    /// The plane fitted over the footprint's cells and the ring around
+    /// them.
+    SlopeBand {
+        min: f64,
+        max: f64,
+        residual_max: f64,
+    },
     /// Every footprint cell's code of `layer` among the bits of `allowed`.
     Codes {
         layer: Layer,
@@ -216,6 +225,7 @@ impl Check {
             Kind::Valid
                 | Kind::SlopeMax(_)
                 | Kind::SpanMax(_)
+                | Kind::SlopeBand { .. }
                 | Kind::Codes { .. }
                 | Kind::InFootprint { .. }
         )
@@ -238,6 +248,8 @@ impl Check {
         match &self.kind {
             Kind::Valid | Kind::SlopeMax(_) | Kind::Codes { .. } => footprint_cells,
             Kind::SpanMax(_) => 20.0,
+            // The ring about the footprint, and the arithmetic of the fit.
+            Kind::SlopeBand { .. } => 9.0 * footprint_cells + 20.0,
             Kind::Center { .. } | Kind::Tpi { .. } | Kind::Enclosure(_) => 1.0,
             Kind::Airdrome { at, .. } => at.len() as f64,
             Kind::Masked { bins, .. } => bins.len() as f64,
@@ -308,6 +320,26 @@ fn compile(
             &Criterion::SpanMax { m } => {
                 length(m, "m", &mut issues);
                 Kind::SpanMax(m)
+            }
+            &Criterion::SlopeBand {
+                min,
+                max,
+                residual_max,
+            } => {
+                for (v, field) in [(min, "min"), (max, "max")] {
+                    if !(0.0..=90.0).contains(&v) {
+                        issues.push(bad(at(field), "must be an angle from 0 to 90 degrees"));
+                    }
+                }
+                if min > max {
+                    issues.push(bad(at("min"), "min lies past max"));
+                }
+                length(residual_max, "residual_max", &mut issues);
+                Kind::SlopeBand {
+                    min,
+                    max,
+                    residual_max,
+                }
             }
             Criterion::SurfaceIn { classes } => {
                 nonempty(classes.len(), "classes", &mut issues);
@@ -769,6 +801,7 @@ impl Ctx<'_> {
             }
             cells.clone().expect("just made")
         };
+        let mut plane = None;
         let (value, pass, score) = match &k.kind {
             Kind::Valid => {
                 let cells = fp();
@@ -807,6 +840,26 @@ impl Ctx<'_> {
                     hi - lo
                 });
                 (span, span <= m, under(span, m))
+            }
+            &Kind::SlopeBand {
+                min,
+                max,
+                residual_max,
+            } => {
+                let w = self.height.as_ref().expect("read for slope_band");
+                let fit = fit_plane(w, &ring(&fp()), f64::from(self.g.cell_size));
+                plane = Some(PlaneFit {
+                    bearing_deg: fit.and_then(|f| f.bearing),
+                    residual_m: fit.map(|f| f.residual),
+                });
+                match fit {
+                    Some(f) => {
+                        let band = Test::Band { min, max }.score(f.slope);
+                        let pass = (min..=max).contains(&f.slope) && f.residual <= residual_max;
+                        (f.slope, pass, band * under(f.residual, residual_max))
+                    }
+                    None => (f64::NAN, false, 0.0),
+                }
             }
             &Kind::Codes { layer, allowed } => {
                 let w = self
@@ -901,6 +954,7 @@ impl Ctx<'_> {
             value,
             pass,
             score,
+            plane,
         }
     }
 
@@ -924,6 +978,7 @@ impl Ctx<'_> {
                 value: f64::NAN,
                 pass: false,
                 score: 0.0,
+                plane: None,
             }));
         };
         let site = [c.x, c.z, ground + own];
@@ -947,6 +1002,7 @@ impl Ctx<'_> {
                     value: seen as f64 / n,
                     pass: false,
                     score: 0.0,
+                    plane: None,
                 }));
             }
         }
@@ -962,8 +1018,73 @@ impl Ctx<'_> {
             value: share,
             pass,
             score,
+            plane: None,
         })
     }
+}
+
+/// The cells given and every cell beside one, each once: a footprint of one
+/// cell fits its 3 × 3, as the `slope` layer reads it.
+fn ring(cells: &[(i64, i64)]) -> Vec<(i64, i64)> {
+    let mut out: Vec<(i64, i64)> = cells
+        .iter()
+        .flat_map(|&(r, c)| (-1..=1).flat_map(move |dr| (-1..=1).map(move |dc| (r + dr, c + dc))))
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// A plane fitted by least squares, its slope in degrees, its downslope
+/// bearing as the `aspect` layer gives one, and the root mean square of
+/// the heights about it in meters.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Plane {
+    slope: f64,
+    bearing: Option<f64>,
+    residual: f64,
+}
+
+/// The plane through the heights of `cells`, `cs` meters apart, or `None`
+/// where any has no height or they lie on one line.
+fn fit_plane(w: &Window, cells: &[(i64, i64)], cs: f64) -> Option<Plane> {
+    let mut pts = Vec::with_capacity(cells.len());
+    for &(r, c) in cells {
+        let h = w.get(r, c).filter(|&h| h != Layer::Height.nodata())?;
+        pts.push((r as f64 * cs, c as f64 * cs, f64::from(h)));
+    }
+    let n = pts.len() as f64;
+    let mean = |f: fn(&(f64, f64, f64)) -> f64| pts.iter().map(f).sum::<f64>() / n;
+    let (mx, mz, mh) = (mean(|p| p.0), mean(|p| p.1), mean(|p| p.2));
+    let (mut sxx, mut sxz, mut szz, mut sxh, mut szh) = (0.0, 0.0, 0.0, 0.0, 0.0);
+    for &(x, z, h) in &pts {
+        let (x, z, h) = (x - mx, z - mz, h - mh);
+        sxx += x * x;
+        sxz += x * z;
+        szz += z * z;
+        sxh += x * h;
+        szh += z * h;
+    }
+    let det = sxx * szz - sxz * sxz;
+    if det <= f64::EPSILON * sxx * szz {
+        return None;
+    }
+    // The rise per meter north and per meter east.
+    let north = (szz * sxh - sxz * szh) / det;
+    let east = (sxx * szh - sxz * sxh) / det;
+    let sq: f64 = pts
+        .iter()
+        .map(|&(x, z, h)| (h - mh - north * (x - mx) - east * (z - mz)).powi(2))
+        .sum();
+    let slope = north.hypot(east).atan().to_degrees();
+    // Adding zero turns a -0 into 0.
+    let bearing =
+        (slope >= FLAT_DEG).then(|| (-east).atan2(-north).to_degrees().rem_euclid(360.0) + 0.0);
+    Some(Plane {
+        slope,
+        bearing,
+        residual: (sq / n).sqrt(),
+    })
 }
 
 /// The least bin of `sector` in degrees, and the mean margin of its bins
@@ -1199,7 +1320,7 @@ pub fn evaluate(
         None
     };
     call.check()?;
-    let height = if has(&|k| matches!(k, Kind::SpanMax(_))) {
+    let height = if has(&|k| matches!(k, Kind::SpanMax(_) | Kind::SlopeBand { .. })) {
         Some(Window::read(src, Layer::Height, fp.row0, fp.col0, fp.rows, fp.cols).map_err(r)?)
     } else {
         None
