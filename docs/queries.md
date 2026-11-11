@@ -106,7 +106,8 @@ itself.
 `water` (0 land, 1 lake, 2 sea, 3 river), `surface` (1 land, 3 water, 4 road,
 5 runway), `cover` (1 plain, 2 field, 3 forest, 4 town, 5 beach, 6 runway,
 7 water), `valid`, `slope`, `aspect`, `roughness`, `tpi_300`, `tpi_2000`,
-`dist_road`, `dist_rail`, `dist_water`, `dist_builtup`, `count_building`,
+`depth`, `dist_road`, `dist_rail`, `dist_water`, `dist_sea`, `dist_builtup`,
+`count_building`,
 `count_industrial`, `tree_density`, `share_<cover>` (the share of a cover
 class, such as `share_forest`), `enclosure`, and the horizon bins
 `horizon_0` (north) to `horizon_31`, clockwise. Definitions are in
@@ -119,6 +120,19 @@ searches 5 km. A criterion that names its own radius or maximum uses it.
 `tree_density` is the trees pool's instances per hectare, not a share and not
 forest, which DCS draws at runtime from the ground cover; a `share_<cover>`
 is 0 to 1.
+
+`dist_water` is meters to any water; `dist_sea` to sea alone, `water` 2, by
+the triangle type's sea bit, so a lake or a river is passed over. Both
+search 5 km and are 50 m cells in both modes, center to center.
+
+`depth` is meters of water over its bed, from the mesh's per-vertex depth,
+at the point itself in both modes: the 50 m cells hold no depth, so a
+region's lattice points read the mesh as scattered points do. It is null
+on land (`water` 0, a road strip over water included) and off the mesh,
+and 0 on water the mesh gives no depth. Over a region, `water` comes from
+the cell and `depth` from the point, so at a shore or a river narrower than
+a cell one can read water and the other land. On Caucasus, 2.9.31.29434,
+the sea reads at most 100 m, lakes carry depth, and rivers read 0.
 
 
 ## 3. Operations from the original set
@@ -144,7 +158,7 @@ box's minimum corner, or one row per given point in order, capped by the
 `distance_capped`, true when a distance read as its cap. Regional `height` is
 bilinear, null where a weighted corner is `nodata`; other layers are nearest.
 At points, the ground layers take point mode and the derived layers the cell
-holding the point. Points, whether scattered or close together, read the mesh
+holding the point; `depth` takes point mode in a region too. Points, whether scattered or close together, read the mesh
 block by block: each block read once, each point's results merged by rank,
 and the rows returned in request order. A region reads the raster's tiles,
 each rasterized once from the blocks under it. A derived layer over
@@ -161,7 +175,8 @@ the converted lists in order, through the terrain's fitted projection;
 ### `score_site`
 
 Request: `x, z`, `footprint`, `criteria`. Response: for the best orientation,
-`{orientation_deg, score, terms: [{name, value, pass, score}], hard_fail}`.
+`{orientation_deg, score, terms: [{name, value, pass, score, plane?}],
+hard_fail}`; `plane` is `slope_band`'s alone (§5).
 Each criterion gives one term; `pass` is its hard test, `score` a 0..1 soft
 value, 1 best. The site's `score` is the sum of its terms' scores. The best
 orientation is one that passes every hard test if any does, the highest
@@ -712,6 +727,7 @@ a soft score. `valid` is always applied.
 | Name | Params | Hard | Soft score |
 |---|---|---|---|
 | `slope_max` | `deg` | max slope over footprint ≤ deg | 1 − max/deg |
+| `slope_band` | `min, max, residual_max` (default 1) | the fitted plane's slope in band, and its residual ≤ residual_max | 1 at min, 0 at max, times 1 − residual/residual_max |
 | `span_max` | `m` | max − min height over footprint corners and center ≤ m | 1 − span/m |
 | `surface_in` | `classes: ["land"]` | every footprint cell's `water` in set | the share of cells in set |
 | `surface_enum_in` | `values` | same on `surface` | the share |
@@ -730,6 +746,19 @@ a soft score. `valid` is always applied.
 | `visible_to` | `targets, min_fraction, own_alt_agl` (default 2) | share of targets the candidate sees ≥ min | the share |
 | `tpi_class_in` | `classes, threshold_m` (default 10) | with `t = threshold_m`: `ridge` when `tpi_300 > t`; `valley` when `< −t`; else `upper` when `tpi_2000 > t`; `lower` when `< −t`; else `mid` when slope > 5°; else `flat` | 1 |
 | `valid` | none | every footprint cell's `valid == 1` | the share |
+
+`slope_band` fits a plane by least squares to the heights of the
+footprint's cells and of every cell beside one, so a footprint of one cell
+fits its 3 × 3, the cells `slope` reads. Its `value` is the plane's slope in
+degrees, and its term's `plane` is `{bearing_deg, residual_m}`: the way the
+plane falls, from north clockwise as `aspect` gives it and null under 0.5°,
+and the root mean square of the heights about the plane, which fails ground
+that only averages to the slope. Heights rounded to the meter scatter by
+0.3 m about a true plane. A cell over water reads the water's surface, so a
+site on a shore fits the slope down to it. Where any cell has no height,
+`value` and both are null and the test fails. `slope_max` stays the
+steepest single cell, a different reading: a dome fits a level plane and
+fails it on the shoulder.
 
 A criterion searches each distance past where its answer could change, so
 none reads a cap: a band one cell past its maximum, so a site with nothing
@@ -760,7 +789,9 @@ from it; `unmask_profile` first-seen distance from the hill; `route` choosing
 the bridge and avoiding a box, A* equal to Dijkstra and to Bellman–Ford, and
 `route_alternatives` finding the two roads to the bridge; `find_sites` accepting only the plane and
 rejecting the lake; `masked_from` true east of the big hill and false west;
-`chokepoints` ranking the bridge first; `scenery_in` counts against the
+`chokepoints` ranking the bridge first; `slope_band` on the plane, the
+hill's flank and its summit; `depth` and `dist_sea` against the sea's shelf,
+the lake and the river; `scenery_in` counts against the
 generator's objects; `cover_in` on each cover patch; `towns` against
 brute-force linkage; one `validate_placements` case per issue kind and per shape. Every
 request and response struct round-trips through JSON.

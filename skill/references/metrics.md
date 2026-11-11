@@ -16,7 +16,7 @@ the least interesting to attack, and one the player learns to expect.
 | Metric | Source | Reads as |
 |---|---|---|
 | span | `span_max` term | Height difference across the footprint. Under 1 m is a parking lot; 2 to 3 m is fine for a FARP; a helicopter pad tolerates 1 m |
-| slope | `slope_max` term, `slope` layer | Degrees. Vehicles park to 5°, a FARP wants 2°, infantry and MANPADS do not care to 20° |
+| slope | `slope_max` or `slope_band` term, `slope` layer | Degrees. Vehicles park to 5°, a FARP wants 2°, infantry and MANPADS do not care to 20°. `slope_band` is the whole footprint as one plane, with the way it falls and how rough it is about it: under 0.5 m is smooth ground |
 | `tpi_300`, `tpi_2000` | layers, `tpi_class_in` | Meters above or below the mean height within the radius: positive on ridges, negative in valleys, near zero on flats and mid-slopes. `tpi_2000` is the regional setting, `tpi_300` the local one. `tpi_2000 < 0` with `tpi_300 > 0` is a knoll inside a valley, the classic hide-and-see position |
 | `enclosure` | layer, `enclosure_min` | Mean horizon angle in all directions. Near 0° is an open plain, 5° a broad valley, 15° or more a gorge. High enclosure hides from the sides, but it blinds a radar and traps a helicopter |
 | `horizon_*` | layers, `masked_from` | Horizon angle per direction. A ridge in one bin masks that direction only |

@@ -160,8 +160,11 @@ Hard tests decide which positions survive; the score only sorts them.
 - `orientations_deg` defaults to `[0, 90]`. `depth` lies along the bearing, and
   the result's `orientation_deg` is the heading to place with.
 - A candidate is `{x, z, orientation_deg, score, terms}`. Each term is `{name,
-  value, pass, score}`. **The terms are the answer.** Give them, not the score,
-  which is only their sum and means nothing between two requests.
+  value, pass, score}`; a `slope_band` term adds `plane: {bearing_deg,
+  residual_m}`, the downslope bearing as `aspect` gives it (null under 0.5°)
+  and the roughness about the plane. **The terms are the answer.** Give them,
+  not the score, which is only their sum and means nothing between two
+  requests.
 - A band's soft score is 1 at its `min` and 0 at its `max`, so a band pulls
   candidates to `min`. To use one only as a fence, set its weight to 0 in
   `weights`. `valid` is always a term, and always a hard test.
@@ -171,6 +174,7 @@ Hard tests decide which positions survive; the score only sorts them.
 | Criterion | Params | Passes when |
 |---|---|---|
 | `slope_max` | `deg` | the steepest footprint cell is at most `deg` |
+| `slope_band` | `min, max`, `residual_max` (1) | a plane fitted over the footprint and the cells around it slopes from `min` to `max` degrees, its heights within `residual_max` m of it (root mean square), so a bumpy patch that averages flat fails |
 | `span_max` | `m` | the height range over the footprint's four corners and center is at most `m`; ground between them is not read, so add `slope_max` for a large footprint |
 | `surface_in` | `classes`: `land`, `lake`, `sea`, `river` | every footprint cell is in them |
 | `surface_enum_in` | `values`: 1 land, 3 water, 4 road, 5 runway | the same on `surface` |
@@ -274,7 +278,7 @@ more. A horizon criterion (`masked_from`, `enclosure_min`) or an `enclosure` or
 <n>` caps the cores; the work already runs below normal priority, so a DCS
 server beside it keeps the CPU. The engine's work stays within 64 MiB of
 commit, and the worst case measured is 61.1 MiB. A large answer adds its own:
-`sample` of all 57 layers at 10 000 rows with GeoJSON peaks near 300 MiB, so
+`sample` of 57 layers at 10 000 rows with GeoJSON peaks near 300 MiB, so
 ask for fewer rows or layers where memory is short. A process building a cache
 entry is exempt: `dcsterrain index` from empty peaks at about 1.5 GiB on
 GermanyCW.
@@ -290,7 +294,8 @@ GermanyCW.
 | `valid` | 1 where there is ground and not sea |
 | `slope`, `aspect`, `roughness` | degrees; downslope bearing, null under 0.5° of slope; meters of height range over 3 × 3 cells |
 | `tpi_300`, `tpi_2000` | meters above the mean ground within 300 m, 2 km |
-| `dist_road`, `dist_rail`, `dist_water`, `dist_builtup` | meters, searched to 5 km, and 5000 when none is nearer |
+| `dist_road`, `dist_rail`, `dist_water`, `dist_sea`, `dist_builtup` | meters, searched to 5 km, and 5000 when none is nearer; `dist_sea` counts sea alone, not lakes or rivers |
+| `depth` | meters of water over its bed; null on land and on a bridge, 0 on water the terrain gives no depth (Caucasus rivers); the terrain's own seabed, at most 100 m on Caucasus, not a survey |
 | `count_building`, `count_industrial` | objects within 1 km |
 | `tree_density` | single trees per hectare within 300 m, not a share |
 | `share_<cover>`, such as `share_forest` | 0 to 1, the share of cells of that cover within 300 m |
@@ -307,7 +312,8 @@ region, and for every other layer even at points, values come from 50 m cells:
 a height is bilinear between cell heights rounded to the meter, so it is off
 by up to half a meter and gentle ground reads as flat terraces, and the other
 layers take the cell holding the point, so water narrower than a cell can be
-missed.
+missed. `depth` is the exception: it reads the mesh at each point in a region
+too, so at a shore it can be null where the cell's `water` says water.
 
 ## What `validate_placements` and `scenery_in` see
 
