@@ -60,6 +60,7 @@ fn layers() -> Vec<(&'static str, Derived)> {
         ("dist_road", dist(Target::Road)),
         ("dist_rail", dist(Target::Rail)),
         ("dist_water", dist(Target::Water)),
+        ("dist_sea", dist(Target::Sea)),
         ("dist_builtup", dist(Target::Builtup)),
         ("dist_forest", dist(Target::Cover(Cover::Forest))),
         (

@@ -22,6 +22,8 @@ pub const FLAT_DEG: f64 = 0.5;
 /// `BUILTUP_RADIUS_M` of it.
 pub const BUILTUP_MIN: u32 = 3;
 pub const BUILTUP_RADIUS_M: f64 = 100.0;
+/// The `water` code of sea.
+const SEA: i32 = 2;
 /// The most cells a layer's padded window may hold, about 250 km square at
 /// 50 m and about 1 GB while it is derived: the window, not the radius, is
 /// what costs memory.
@@ -78,6 +80,8 @@ pub enum Target {
     Rail,
     /// Any lake, sea or river cell.
     Water,
+    /// Any sea cell, by the triangle type's sea bit: not a lake or a river.
+    Sea,
     /// Any built-up cell: `BUILTUP_MIN` buildings within `BUILTUP_RADIUS_M`.
     Builtup,
     Cover(Cover),
@@ -353,7 +357,6 @@ fn horizon_cells(
 }
 
 fn valid(src: &(impl Source + ?Sized), at: Cells) -> Result<Vec<f32>, Refusal> {
-    const SEA: i32 = 2;
     let h = at.read(src, Layer::Height)?;
     let w = at.read(src, Layer::Water)?;
     Ok(h.data
@@ -559,6 +562,10 @@ fn distance(
         Target::Water => {
             let w = win.read(src, Layer::Water)?;
             w.data.iter().map(|&v| (1..=3).contains(&v)).collect()
+        }
+        Target::Sea => {
+            let w = win.read(src, Layer::Water)?;
+            w.data.iter().map(|&v| v == SEA).collect()
         }
         Target::Cover(c) => {
             let w = win.read(src, Layer::Cover)?;
@@ -1086,6 +1093,36 @@ mod tests {
         let got = derive(&s, cap, around(LAKE_NORTH_M, LAKE_EAST_M + 5000.0, 3)).unwrap();
         assert!(got.capped);
         assert!(got.values.iter().all(|&v| v == 1000.0));
+    }
+
+    #[test]
+    fn distance_to_the_sea_passes_over_the_lake_and_the_river() {
+        let s = synth();
+        // The coast is the line north + east = COAST_M; a cell center on
+        // land lies its offset over the root of two from it, less what
+        // whole cells round away.
+        let coast = |n: f64, e: f64| ((n + e - COAST_M) / std::f64::consts::SQRT_2).max(0.0);
+        for (n, e) in [
+            (10025.0, RIVER_EAST_M - 25.0),
+            (20025.0, 33025.0),
+            (5025.0, 47525.0),
+        ] {
+            let sea = one(&s, dist(Target::Sea), n, e);
+            close(sea, coast(n, e), C, "to the sea");
+        }
+        // The river is water, not sea.
+        assert_eq!(
+            one(&s, dist(Target::Water), 10025.0, RIVER_EAST_M - 25.0),
+            0.0
+        );
+        // The lake lies 9 km in: its center reads the cap, capped.
+        let at = around(LAKE_NORTH_M, LAKE_EAST_M, 1);
+        let lake = derive(&s, dist(Target::Sea), at).unwrap();
+        assert!(lake.capped);
+        assert_eq!(lake.values, vec![DISTANCE_CAP_M as f32]);
+        assert_eq!(one(&s, dist(Target::Water), LAKE_NORTH_M, LAKE_EAST_M), 0.0);
+        // Out at sea the distance is nothing.
+        assert_eq!(one(&s, dist(Target::Sea), 5000.0, 5000.0), 0.0);
     }
 
     /// The synthetic ground with buildings of a test's own.

@@ -58,6 +58,7 @@ fn want(name: &str) -> Option<Want> {
         "dist_road" => dist(Target::Road),
         "dist_rail" => dist(Target::Rail),
         "dist_water" => dist(Target::Water),
+        "dist_sea" => dist(Target::Sea),
         "dist_builtup" => dist(Target::Builtup),
         "count_building" => d(Derived::Count {
             class: Class::Building,
@@ -372,6 +373,7 @@ mod tests {
             "dist_road",
             "dist_rail",
             "dist_water",
+            "dist_sea",
             "dist_builtup",
             "count_building",
             "count_industrial",
