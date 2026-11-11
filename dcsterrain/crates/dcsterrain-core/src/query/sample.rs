@@ -34,12 +34,18 @@ const ONE_WINDOW_CELLS: u64 = 4 << 20;
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Want {
     Ground(Layer),
+    /// The water's depth, read from the mesh in a region too: the 50 m
+    /// cells hold no depth.
+    Depth,
     Derived(Derived),
 }
 
 fn want(name: &str) -> Option<Want> {
     if let Some(l) = Layer::named(name) {
         return Some(Want::Ground(l));
+    }
+    if name == "depth" {
+        return Some(Want::Depth);
     }
     let d = |d| Some(Want::Derived(d));
     let dist = |to| {
@@ -135,6 +141,12 @@ pub fn lattice(area: &super::Area, step: f64, max_rows: u32) -> Result<Vec<[f64;
         }
     }
     Ok(out)
+}
+
+/// The water's depth over its bed at a point, null on land and where
+/// nothing covers it: a depth of 0 is water the mesh gives no depth.
+fn depth_value(g: Option<&Ground>) -> Option<f64> {
+    g.filter(|g| g.water != 0).map(|g| g.depth)
 }
 
 /// A point's ground layer value as a number, null where nothing covers it.
@@ -291,8 +303,10 @@ pub fn sample(terrain: &Terrain, q: SampleRequest) -> Result<SampleResponse, Vec
         points.iter().map(|p| [p.x, p.z]).collect()
     };
 
-    let needs_ground = wants.iter().any(|w| matches!(w, Want::Ground(_)));
-    let ground = if !regional && needs_ground {
+    let needs_mesh = wants
+        .iter()
+        .any(|w| matches!(w, Want::Ground(_) if !regional) || *w == Want::Depth);
+    let ground = if needs_mesh {
         src.points(&pts).map_err(refused)?
     } else {
         Vec::new()
@@ -308,6 +322,7 @@ pub fn sample(terrain: &Terrain, q: SampleRequest) -> Result<SampleResponse, Vec
         let col = match *w {
             Want::Ground(l) if regional => raster_values(src, l, &pts)?,
             Want::Ground(l) => ground.iter().map(|g| ground_value(g.as_ref(), l)).collect(),
+            Want::Depth => ground.iter().map(|g| depth_value(g.as_ref())).collect(),
             Want::Derived(d) => derived_values(src, d, &pts, &mut capped)?,
         };
         columns.insert(k, col);
@@ -374,6 +389,7 @@ mod tests {
             "dist_rail",
             "dist_water",
             "dist_sea",
+            "depth",
             "dist_builtup",
             "count_building",
             "count_industrial",
@@ -623,5 +639,88 @@ mod tests {
             issue(json!({"points": pt, "layers": []})),
             i("invalid_request", "layers")
         );
+    }
+}
+
+#[cfg(test)]
+mod depth_tests {
+    use super::super::answer;
+    use super::super::tests::synth;
+    use super::*;
+    use crate::synth::*;
+    use serde_json::{Value, json};
+
+    fn form(t: &Terrain) -> crate::synth::Theatre {
+        match t {
+            Terrain::Synth(s) => *s.form(),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn depth_is_the_water_over_its_bed_and_null_on_land() {
+        let t = synth();
+        let f = form(&t);
+        // Out on the shelf, 1 km off the coast square on: 10 m.
+        let off = 1000.0 / std::f64::consts::SQRT_2;
+        let pts = [
+            f.abs(COAST_M / 2.0 - off, COAST_M / 2.0 - off),
+            f.abs(LAKE_NORTH_M, LAKE_EAST_M),
+            f.abs(LAKE_NORTH_M + LAKE_RADIUS_M / 2.0, LAKE_EAST_M),
+            f.abs(30000.0, RIVER_EAST_M + 10.0),
+            f.abs(30000.0, 60000.0),
+            f.abs(ROAD_EW_NORTH_M, RIVER_EAST_M),
+            f.abs(100.0, 100.0),
+        ];
+        let v = answer(
+            &t,
+            "sample",
+            &json!({
+                "points": pts.iter().map(|&(x, z)| json!({"x": x, "z": z})).collect::<Vec<_>>(),
+                "layers": ["depth", "water"]
+            }),
+        )
+        .unwrap();
+        let depth: Vec<Value> = v["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["values"]["depth"].clone())
+            .collect();
+        let near = |v: &Value, want: f64| (v.as_f64().unwrap() - want).abs() < 1e-9;
+        assert!(near(&depth[0], 1000.0 * SEA_SHELF_SLOPE), "{}", depth[0]);
+        assert!(near(&depth[1], LAKE_DEPTH_M));
+        assert!(near(&depth[2], LAKE_DEPTH_M * 0.75));
+        assert!(near(&depth[3], RIVER_DEPTH_M));
+        // Land, the bridge over the river, and off the mesh.
+        assert_eq!(&depth[4..], &[Value::Null, Value::Null, Value::Null]);
+    }
+
+    #[test]
+    fn a_region_reads_depth_from_the_mesh_at_each_lattice_point() {
+        let t = synth();
+        let f = form(&t);
+        let (x, z) = f.abs(LAKE_NORTH_M, LAKE_EAST_M);
+        let v = answer(
+            &t,
+            "sample",
+            &json!({
+                "region": {"Circle": {"x": x, "z": z, "radius": 2500}},
+                "step": 125,
+                "layers": ["depth"]
+            }),
+        )
+        .unwrap();
+        let rows = v["rows"].as_array().unwrap();
+        let mut wet = 0;
+        for r in rows {
+            let (x, z) = (r["x"].as_f64().unwrap(), r["z"].as_f64().unwrap());
+            let g = t.source().point(x, z).unwrap().unwrap();
+            let want = (g.water != 0).then_some(g.depth);
+            assert_eq!(r["values"]["depth"].as_f64(), want, "({x}, {z})");
+            wet += usize::from(want.is_some());
+        }
+        // Some of the lattice is lake and some the shore around it.
+        assert!(wet > 0 && wet < rows.len(), "{wet} of {}", rows.len());
     }
 }
